@@ -3,3 +3,49 @@ Clone d'OS/2 en Pascal
 
 ![image](https://user-images.githubusercontent.com/11842176/146266141-ea1e72bd-4bb4-4132-93f9-2f753ed5cf58.png)
 
+<h2>Liste des fichiers</h2>
+
+Voici la liste des différents fichiers proposés dans Corail :
+
+<table>
+		<tr>
+			<th>Nom</th>
+			<th>Description</th>	
+		</tr>
+		<tr>
+			<td><b>ATTRIB.PAS</b></td>
+			<td>Cette commande permet de demander ou de changer les attributs d'un fichier.</td>
+		</tr>
+		<tr>
+			<td><b>CMD.PAS</b></td>
+			<td>Cette commande permet de lancer l'interpréteur de commande OS/2. Il s'agit d'un équivalent du CMD de OS/2.</td>
+		</tr>  
+		<tr>
+			<td><b>COMMAND.PAS</b></td>
+			<td>Logiciel clone d'un <i>COMMAND.COM</i> du système d'exploitation <a href="https://www.gladir.com/OS/DOS/intro.htm"><i>DOS</i></a>.</td>
+		</tr>
+		<tr>
+			<td><b>COMP.PAS</b></td>
+			<td>Cette commande permet de comparer deux fichiers. Cette commande est un equivalent du <a href="https://www.gladir.com/OS/PCDOS/intro.htm">PC-DOS</a> ou <a href="https://www.gladir.com/OS/MSDOS/intro.htm">MS-DOS</a>.</td>
+		</tr>
+		<tr>
+		    	<td><b>DISKCOPY.PAS</b></td>
+		    	<td>Cette commande permet de copier des disquettes ou des images.</td>
+		</tr>	
+		<tr>
+			<td><b>EXE2BIN.PAS</b></td>
+			<td>Cette commande permet de convertir un fichier EXE en binaire (COM).</td>
+		</tr>
+		<tr>
+			<td><b>FIND.PAS</b></td>
+			<td>Cette commande permet de rechercher une chaine de caractères dans des fichiers. Cette commande est un équivalent du DOS.</td>
+		</tr>
+		<tr>
+			<td><b>MORE.PAS</b></td>
+			<td>Cette commande permet de recevoir l'entrée puis l'affichage sur un périphérique un écran à la fois.</td>
+    </tr>	
+		<tr>
+			<td><b>SORT.PAS</b></td>
+			<td>Cette commande permet de trier une fichier texte ASCII et de retourner le résultat. Cette commande est un équivalent de la commande du DOS.</td>
+		</tr>	
+	</table>
