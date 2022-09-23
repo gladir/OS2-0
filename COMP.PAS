@@ -1,7 +1,7 @@
 { @author: Sylvain Maltais (support@gladir.com)
   @created: 2021
   @website(https://www.gladir.com/os2-0)
-  @abstract(Target: Free Pascal)
+  @abstract(Target: Turbo Pascal, Free Pascal)
 }
 
 Program COMP;
@@ -15,7 +15,7 @@ Var
  OutputStatus:(_Offset,_Line);
  I:Integer;
  FileName1,FileName2:String;
- FileComp1,FileComp2:File of Byte;
+ FileComp1,FileComp2:File {$IFDEF FPC}of Byte{$ENDIF};
  Buffer1,Buffer2:Array[0..255]of Byte;
  ByteReaded1,ByteReaded2:Integer;
  CurrPos,CurrLineCount:LongInt;
@@ -70,9 +70,9 @@ BEGIN
     CurrPos:=0;
     CurrLineCount:=1;
     Assign(FileComp1,FileName1);
-    Reset(FileComp1);
+    Reset(FileComp1{$IFNDEF FPC},1{$ENDIF});
     Assign(FileComp2,FileName2);
-    Reset(FileComp2);
+    Reset(FileComp2{$IFNDEF FPC},1{$ENDIF});
     While Not EOF(FileComp1)do Begin
      BlockRead(FileComp1,Buffer1,SizeOf(Buffer1),ByteReaded1);
      BlockRead(FileComp2,Buffer2,SizeOf(Buffer2),ByteReaded2);
