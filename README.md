@@ -33,6 +33,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Cette commande permet de comparer deux fichiers. Cette commande est un equivalent du <a href="https://www.gladir.com/OS/PCDOS/intro.htm">PC-DOS</a> ou <a href="https://www.gladir.com/OS/MSDOS/intro.htm">MS-DOS</a>.</td>
 		</tr>
 		<tr>
+			<td><b>DISKCOMP.PAS</b></td>
+			<td>Cette commande permet de comparer des disquettes ou des images.</td>
+		</tr>		
+		<tr>
 		    	<td><b>DISKCOPY.PAS</b></td>
 		    	<td>Cette commande permet de copier des disquettes ou des images.</td>
 		</tr>	
