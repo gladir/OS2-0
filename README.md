@@ -69,6 +69,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Cette commande permet d'effectuer le chargement en mémoire conventionnelle d'une table de police de caractères pour les modes graphiques.</td>
 		</tr>
 		<tr>
+			<td><b>LABEL.PAS</b></td>
+			<td>Cette commande permet de changer le nom d'un volume.</td>
+		</tr>
+		<tr>
 			<td><b>MORE.PAS</b></td>
 			<td>Cette commande permet de recevoir l'entrée puis l'affichage sur un périphérique un écran à la fois.</td>
     		</tr>	
