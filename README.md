@@ -77,6 +77,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Cette commande permet d'afficher les informations sur la mémoire. Cette commande est un clone de la commande MS-DOS ou PC-DOS.</td>
 		</tr>
 		<tr>
+			<td><b>MODE.PAS</b></td>
+			<td>Cette commande permet d'effectuer la gestion des paramètres d'un périphérique.</td>
+		</tr>
+		<tr>
 			<td><b>MORE.PAS</b></td>
 			<td>Cette commande permet de recevoir l'entrée puis l'affichage sur un périphérique un écran à la fois.</td>
     		</tr>	
