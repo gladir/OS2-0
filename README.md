@@ -45,6 +45,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		    	<td>Cette commande permet de copier des disquettes ou des images.</td>
 		</tr>	
 		<tr>
+			<td><b>DOSKEY.PAS</b></td>
+			<td>Cette commande permet de charger le programme DOSKEY.</td>
+		</tr>
+		<tr>
 			<td><b>EXE2BIN.PAS</b></td>
 			<td>Cette commande permet de convertir un fichier EXE en binaire (COM).</td>
 		</tr>
