@@ -21,6 +21,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Cette commande permet de demander ou de changer les attributs d'un fichier.</td>
 		</tr>
 		<tr>
+			<td><b>CHKDSK.PAS</b></td>
+			<td>Cette commande permet de vérifier le disque. Cette commande est inspiré du DOS.</td>
+		</tr>		
+		<tr>
 			<td><b>CMD.PAS</b></td>
 			<td>Cette commande permet de lancer l'interpréteur de commande OS/2. Il s'agit d'un équivalent du CMD de OS/2.</td>
 		</tr>  
