@@ -6,7 +6,7 @@
 
 Program DEBUG;
 
-Uses Crt;
+Uses Crt,DOS;
 
 Const
  CommandList:Array[0..36]of String[4]=(
@@ -585,6 +585,8 @@ Type
  TByte=Array[0..65519]of Byte;
 
 Var
+ Language:(_French,_English,_Germany,_Italian,_Spain);
+ TmpLanguage:String;
  CommandFound,Terminated:Boolean;
  CurrProgName:String;
  CmdStr:String;
@@ -1565,7 +1567,7 @@ End;
 
 Procedure LCommand;
 Var
- Source:File{$IFDEF FPC}of Byte{$ENDIF};
+ Source:File;
  ProgSize:LongInt;
  ByteReaded:Integer;
 Begin
@@ -1574,12 +1576,17 @@ Begin
  End
   Else
  Begin
-  Assign(Source,CurrProgName);
-  Reset(Source);
-  ProgSize:=FileSize(Source);
-  If(ProgSize>SizeSector)Then ProgSize:=SizeSector;
-  BlockRead(Source,Sector^,ProgSize,ByteReaded);
-  Close(Source);
+  {$I-}Assign(Source,CurrProgName);
+  Reset(Source,1);{$I+}
+  If IoResult=0 Then Begin
+   ProgSize:=FileSize(Source);
+   If(ProgSize>SizeSector-StartPointer)Then ProgSize:=SizeSector-StartPointer;
+   FillChar(Sector^,SizeSector,0);
+   BlockRead(Source,Sector^[StartPointer],ProgSize,ByteReaded);
+   Close(Source);
+  End
+   Else
+  WriteLn('Erreur de lecture du fichier binaire');
  End;
 End;
 
@@ -1680,10 +1687,33 @@ Procedure UnknownCommand;Begin
 End;
 
 BEGIN
+ {$IFDEF FPC}
+  {$IFDEF WINDOWS}
+   SetUseACP(False);
+  {$ENDIF}
+ {$ENDIF}
+ Language:=_French;
+ TmpLanguage:=GetEnv('LANGUAGE');
+ If TmpLanguage<>''Then Begin
+  If TmpLanguage[1]='"'Then TmpLanguage:=Copy(TmpLanguage,2,255);
+  If StrToUpper(Copy(TmpLanguage,1,2))='EN'Then Language:=_English Else
+  If StrToUpper(Copy(TmpLanguage,1,2))='GR'Then Language:=_Germany Else
+  If StrToUpper(Copy(TmpLanguage,1,2))='IT'Then Language:=_Italian Else
+  If StrToUpper(Copy(TmpLanguage,1,2))='SP'Then Language:=_Spain;
+ End;
  If(ParamStr(1)='/?')or(ParamStr(1)='--help')or(ParamStr(1)='-h')Then Begin
-  WriteLn('DEBUG : Cette commande permet de deboguer des programmes.');
-  WriteLn;
-  WriteLn('Syntaxe : DEBUG');
+  Case Language of
+   _Germany:Begin
+    WriteLn('Startet Debug, ein Werkzeug zum Testen und Editieren von Programmen.');
+    WriteLn;
+    WriteLn('DEBUG');
+   End;
+   Else Begin
+    WriteLn('DEBUG : Cette commande permet de deboguer des programmes.');
+    WriteLn;
+    WriteLn('Syntaxe : DEBUG');
+   End;
+  End;
  End
   Else
  Begin
