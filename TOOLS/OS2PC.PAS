@@ -115,7 +115,7 @@ Const
   OS2_DLL_BASE  = $00C00000;  { base des DLL OS/2-0 (region 12-16 Mo) }
   { Liste des API (noms Win32) utilisees par le runtime : le noyau OS/2-0
     (-COS2KRNL) exporte un point d entree pour chacune (DOSCALLS.DLL). }
-  OS2_API_COUNT = 132;
+  OS2_API_COUNT = 134;
   OS2_API_NAMES : Array[1..OS2_API_COUNT] Of String[31] = (
     'Arc', 'Beep', 'BitBlt', 'CloseHandle', 'CreateCompatibleBitmap',
     'CreateCompatibleDC', 'CreateDirectoryA', 'CreateFileA', 'CreateFontA',
@@ -152,7 +152,7 @@ Const
     'WriteConsoleA', 'WriteConsoleOutputAttribute', 'WriteFile',
     'LoadLibraryA', 'GetProcAddress', 'FreeLibrary', 'GetModuleFileNameA', 'GetVolumeInformationA',
     'GlobalMemoryStatus', 'GetCurrentProcessId', 'GetCurrentThreadId', 'KrnGetParentPid', 'KrnModuleFromAddr',
-    'FSH_DoVolIO');
+    'FSH_DoVolIO', 'KrnMouRead', 'KrnMouInfo');
 
 Type
   TString = String;

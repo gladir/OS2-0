@@ -122,7 +122,7 @@ OS2-0 possède son propre noyau OS/2 32 bits écrit en Pascal. Comme sous OS/2, 
 	<tr><th>Fichier</th><th>Source</th><th>Description</th></tr>
 	<tr><td><b>OS2BOOT</b></td><td>KERNEL/OS2BOOT.PAS</td><td>Secteur d'amorce du CD-ROM (El Torito sans émulation, mode réel 8086) : lit le système de fichiers ISO 9660 par l'INT 13h étendue et charge OS2LDR en 2000:0000.</td></tr>
 	<tr><td><b>OS2LDR</b></td><td>KERNEL/OS2LDR.PAS</td><td>Chargeur 16 bits : charge l'image PE du noyau à 1 Mo (INT 15h/87h), relève la carte mémoire (E820h), active la ligne A20, installe une GDT plate et passe en mode protégé.</td></tr>
-	<tr><td><b>OS2KRNL</b></td><td>KERNEL/OS2KRNL.PAS</td><td>Noyau 32 bits (80386, mode protégé) : console VGA, IDT, exceptions (écran TRAP), PIC, minuterie, clavier, tas, pagination, pilote ATAPI, disques durs IDE, ISO 9660 et disque virtuel en mémoire, systèmes de fichiers installables (IFS=), couche API DOSCALLS, chargeur de programmes PE et processus, lecture de CONFIG.SYS et lancement de <b>CMD.EXE</b>.</td></tr>
+	<tr><td><b>OS2KRNL</b></td><td>KERNEL/OS2KRNL.PAS</td><td>Noyau 32 bits (80386, mode protégé) : console VGA, IDT, exceptions (écran TRAP), PIC, minuterie, clavier, souris PS/2, tas, pagination, pilote ATAPI, disques durs IDE, ISO 9660 et disque virtuel en mémoire, systèmes de fichiers installables (IFS=), couche API DOSCALLS, chargeur de programmes PE et processus, lecture de CONFIG.SYS et lancement de <b>CMD.EXE</b>.</td></tr>
 </table>
 
 <img width="720" height="400" alt="OS/2-0 : CMD.EXE sous le noyau OS2KRNL" src="IMAGE/OS2-0.png" />
@@ -209,7 +209,23 @@ Le fichier <b>DLL/VIOCALLS.PAS</b> est le sous-système vidéo OS/2 <b>VIOCALLS.
 
 Le programme <b>DLL/TESTVIO.PAS</b> vérifie ces fonctions (116 vérifications, relues par VIO, directement dans la mémoire de l'écran et dans les registres du VGA) avec la DLL de remplacement <b>DLL/TESTVIOR.PAS</b>.
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque MOUCALLS.DLL</h3>
+
+Le fichier <b>DLL/MOUCALLS.PAS</b> est le sous-système souris OS/2 <b>MOUCALLS.DLL</b> (lié à 00F40000h), avec ses 29 fonctions et leurs ordinaux d'origine (1 MouGetPtrShape ... 30 MouSetThreshold). Le noyau reçoit les paquets de la souris PS/2 (IRQ 12, port auxiliaire du 8042) et les met à disposition par KrnMouRead ; MOUCALLS en fait des événements et dessine le pointeur dans l'écran texte.
+
+<table>
+	<tr><th>Fonctions</th><th>Rôle</th></tr>
+	<tr><td>MouOpen, MouClose, MouFree, MouShellInit, MouInitReal, MouSynch</td><td>Ouverture et fermeture de la souris, libération, initialisation de l'interpréteur, pilote de pointeur, accès synchronisé.</td></tr>
+	<tr><td>MouReadEventQue, MouGetNumQueEl, MouFlushQue, MouGetEventMask, MouSetEventMask</td><td>File de 64 événements (déplacements et boutons, avec ou sans attente) et masque des événements rapportés.</td></tr>
+	<tr><td>MouGetPtrPos, MouSetPtrPos, MouGetPtrShape, MouSetPtrShape, MouDrawPtr, MouRemovePtr</td><td>Position du pointeur (ligne, colonne), forme (masques ET et OU exclusif de la cellule), dessin et zone d'exclusion.</td></tr>
+	<tr><td>MouGetScaleFact, MouSetScaleFact, MouGetThreshold, MouSetThreshold, MouGetNumMickeys, MouGetNumButtons</td><td>Facteurs d'échelle (mickeys par 8 pels), seuils d'accélération, résolution et nombre de boutons.</td></tr>
+	<tr><td>MouGetDevStatus, MouSetDevStatus, MouGetHotKey, MouSetHotKey</td><td>État du périphérique (pointeur désactivé, déplacements en mickeys) et boutons de la touche de session.</td></tr>
+	<tr><td>MouRegister, MouDeRegister</td><td>Remplacement de fonctions par un sous-système souris chargé depuis une DLL.</td></tr>
+</table>
+
+Le programme <b>DLL/TESTMOU.PAS</b> vérifie ces fonctions (60 vérifications ; la seconde partie attend des événements de la souris, envoyés sous QEMU par <code>mouse_move</code> et <code>mouse_button</code>).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
