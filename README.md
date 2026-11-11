@@ -225,7 +225,43 @@ Le fichier <b>DLL/MOUCALLS.PAS</b> est le sous-système souris OS/2 <b>MOUCALLS.
 
 Le programme <b>DLL/TESTMOU.PAS</b> vérifie ces fonctions (60 vérifications ; la seconde partie attend des événements de la souris, envoyés sous QEMU par <code>mouse_move</code> et <code>mouse_button</code>).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque NLS.DLL</h3>
+
+Le fichier <b>DLL/NLS.PAS</b> est la bibliothèque OS/2 <b>NLS.DLL</b> (langues nationales, liée à 00D40000h), avec ses 8 fonctions et leurs ordinaux d'origine. Elle contient les données du fichier de pays d'OS/2 pour 29 pays et les pages de codes 437, 850, 852, 857, 860, 861, 863, 865, 866 ainsi que les pages à double octet 932, 942, 936, 949 et 950.
+
+<table>
+	<tr><th>Fonction</th><th>Ordinal</th><th>Description</th></tr>
+	<tr><td>DosCaseMap</td><td>1</td><td>Conversion en majuscules (OS/2 1.x, COUNTRYCODE de 16 bits).</td></tr>
+	<tr><td>DosGetCollate</td><td>2</td><td>Table de tri (OS/2 1.x).</td></tr>
+	<tr><td>DosGetCtryInfo</td><td>3</td><td>Informations du pays (COUNTRYINFO de 16 bits, 38 octets).</td></tr>
+	<tr><td>DosGetDBCSEv</td><td>4</td><td>Vecteur des octets de tête DBCS (OS/2 1.x).</td></tr>
+	<tr><td>DosQueryCtryInfo</td><td>5</td><td>Informations du pays (COUNTRYINFO de 32 bits, 44 octets) : date, heure, monnaie, séparateurs.</td></tr>
+	<tr><td>DosQueryDBCSEnv</td><td>6</td><td>Vecteur des octets de tête DBCS.</td></tr>
+	<tr><td>DosMapCase</td><td>7</td><td>Conversion en majuscules selon le pays et la page de codes (lettres accentuées, turc, cyrillique ; octets de queue DBCS gardés).</td></tr>
+	<tr><td>DosQueryCollate</td><td>8</td><td>Table de tri (accents ignorés, ordre scandinave des lettres Æ, Ø, Å, Ä, Ö).</td></tr>
+</table>
+
+Le programme <b>DLL/TESTNLS.PAS</b> vérifie ces fonctions (31 vérifications).
+
+<h3>Bibliothèque KBDCALLS.DLL</h3>
+
+Le fichier <b>DLL/KBDCALLS.PAS</b> est le sous-système clavier OS/2 <b>KBDCALLS.DLL</b> (lié à 00C80000h), avec ses 25 fonctions et leurs ordinaux d'origine (1 KbdSetCustXt ... 25 KbdSetHWId). Le noyau range chaque frappe (IRQ 1) avec l'état des touches de changement d'état et l'heure, et la met à disposition par KrnKbdRead et KrnKbdCtl ; KBDCALLS la traduit avec la table du clavier logique (codes étendus 00h ou E0h compatibles avec le BIOS et OS/2).
+
+<table>
+	<tr><th>Fonctions</th><th>Rôle</th></tr>
+	<tr><td>KbdCharIn, KbdPeek, KbdFlushBuffer</td><td>Lecture d'un caractère (KBDKEYINFO, avec ou sans attente), consultation sans retrait, vidage du tampon.</td></tr>
+	<tr><td>KbdStringIn</td><td>Lecture d'une chaîne : en mode ASCII avec édition (Retour arrière, Échap, gabarit F1 et F3) et écho, en mode binaire caractère par caractère.</td></tr>
+	<tr><td>KbdGetStatus, KbdSetStatus</td><td>Écho, mode ASCII ou binaire, caractère de fin (1 ou 2 octets), rapport des touches de changement d'état, verrouillages (avec les voyants).</td></tr>
+	<tr><td>KbdOpen, KbdClose, KbdGetFocus, KbdFreeFocus</td><td>Claviers logiques et attribution du clavier physique.</td></tr>
+	<tr><td>KbdGetCp, KbdSetCp, KbdSetCustXt, KbdXlate</td><td>Page de codes, table de traduction personnalisée, traduction d'un code de balayage.</td></tr>
+	<tr><td>KbdGetHWId, KbdSetHWId</td><td>Identification du clavier (AB41h, clavier étendu).</td></tr>
+	<tr><td>KbdRegister, KbdDeRegister</td><td>Remplacement de fonctions par un sous-système clavier chargé depuis une DLL.</td></tr>
+	<tr><td>KbdInit, KbdShellInit, KbdLoadInstance, KbdSwitchFgnd, KbdSetFgnd, KbdFree, KbdSynch</td><td>Initialisation de la session et de l'interpréteur, premier plan, libération des ressources d'un processus, accès synchronisé.</td></tr>
+</table>
+
+Le programme <b>DLL/TESTKBD.PAS</b> vérifie ces fonctions (97 vérifications ; la seconde partie lit des touches, envoyées sous QEMU par <code>sendkey</code>).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
