@@ -26,6 +26,8 @@ Program MAKEISO;
   {$MODE TP}
 {$ENDIF}
 
+Uses Dos;
+
 Const
   SECT       = 2048;
   MAX_FILES  = 128;
@@ -39,6 +41,8 @@ Var
   IsoNames  : Array[1..MAX_FILES] Of String;   { noms ISO (sans ;1) }
   FileSizes : Array[1..MAX_FILES] Of LongInt;
   FileLBA   : Array[1..MAX_FILES] Of LongInt;
+  FileTime  : Array[1..MAX_FILES] Of LongInt;    { date et heure DOS compactees }
+  NowTime   : LongInt;
   NFiles    : Integer;
   BootIdx   : Integer;
   RootLBA, RootSectors, TotalSectors : LongInt;
@@ -46,6 +50,8 @@ Var
   Sec : TSector;
   I, J : Integer;
   Arg, U : String;
+  Yr, Mo, Dy, Dw, Hr, Mi, Sc, S100 : Word;
+  NowDT : DateTime;
 
 Function UpStr(S : String) : String;
 Var K : Integer;
@@ -141,24 +147,38 @@ Begin
 End;
 
 { Date et heure d enregistrement de repertoire (7 octets) }
-Procedure PutDirDate(Ofs : Integer);
+Procedure PutDirDate(Ofs : Integer; T : LongInt);
+Var DT : DateTime;
 Begin
-  PutB(Ofs, 126);      { annees depuis 1900 : 2026 }
-  PutB(Ofs + 1, 1); PutB(Ofs + 2, 1);
-  PutB(Ofs + 3, 0); PutB(Ofs + 4, 0); PutB(Ofs + 5, 0);
+  UnpackTime(T, DT);
+  PutB(Ofs, DT.Year - 1900);
+  PutB(Ofs + 1, DT.Month); PutB(Ofs + 2, DT.Day);
+  PutB(Ofs + 3, DT.Hour); PutB(Ofs + 4, DT.Min); PutB(Ofs + 5, DT.Sec);
   PutB(Ofs + 6, 0);
+End;
+
+Function Two(V : Word) : String;
+Var S : String;
+Begin
+  Str(V, S);
+  If Length(S) < 2 Then S := '0' + S;
+  Two := S;
 End;
 
 { Date de volume (17 octets ASCII) }
 Procedure PutVolDate(Ofs : Integer);
+Var DT : DateTime; Y : String;
 Begin
-  PutStr(Ofs, 16, '2026010100000000');
+  UnpackTime(NowTime, DT);
+  Str(DT.Year, Y);
+  PutStr(Ofs, 16, Y + Two(DT.Month) + Two(DT.Day) + Two(DT.Hour) + Two(DT.Min) +
+                  Two(DT.Sec) + '00');
   PutB(Ofs + 16, 0);
 End;
 
 { Enregistrement de repertoire ; retourne sa longueur }
 Function PutDirRec(Ofs : Integer; LBA, Size : LongInt; Flags : Byte;
-                   Const Name : String; Special : Integer) : Integer;
+                   Const Name : String; Special : Integer; T : LongInt) : Integer;
 Var Len, NLen : Integer;
 Begin
   If Special >= 0 Then NLen := 1 Else NLen := Length(Name);
@@ -168,7 +188,7 @@ Begin
   PutB(Ofs + 1, 0);
   PutD2(Ofs + 2, LBA);
   PutD2(Ofs + 10, Size);
-  PutDirDate(Ofs + 18);
+  PutDirDate(Ofs + 18, T);
   PutB(Ofs + 25, Flags);
   PutB(Ofs + 26, 0); PutB(Ofs + 27, 0);
   PutW2(Ofs + 28, 1);
@@ -178,7 +198,7 @@ Begin
   PutDirRec := Len;
 End;
 
-Function SizeOfFile(Const N : String) : LongInt;
+Function SizeOfFile(Const N : String; Var T : LongInt) : LongInt;
 Var F : File;
 Begin
   Assign(F, N);
@@ -189,6 +209,7 @@ Begin
     Halt(1);
   End;
   SizeOfFile := FileSize(F);
+  GetFTime(F, T);
   Close(F);
 End;
 
@@ -214,8 +235,8 @@ Var Ofs, L, K : Integer; Name : String;
 Begin
   FillSec(0);
   Ofs := 0;
-  Ofs := Ofs + PutDirRec(Ofs, RootLBA, RootSectors * SECT, 2, '', 0);
-  Ofs := Ofs + PutDirRec(Ofs, RootLBA, RootSectors * SECT, 2, '', 1);
+  Ofs := Ofs + PutDirRec(Ofs, RootLBA, RootSectors * SECT, 2, '', 0, NowTime);
+  Ofs := Ofs + PutDirRec(Ofs, RootLBA, RootSectors * SECT, 2, '', 1, NowTime);
   For K := 1 To NFiles Do
   Begin
     Name := IsoNames[K] + ';1';
@@ -226,7 +247,7 @@ Begin
       { un enregistrement ne chevauche jamais deux secteurs }
       WriteSec; FillSec(0); Ofs := 0;
     End;
-    Ofs := Ofs + PutDirRec(Ofs, FileLBA[K], FileSizes[K], 0, Name, -1);
+    Ofs := Ofs + PutDirRec(Ofs, FileLBA[K], FileSizes[K], 0, Name, -1, FileTime[K]);
   End;
   WriteSec;
 End;
@@ -301,7 +322,7 @@ Begin
   PutD(144, 0);
   PutDBE(148, 20);            { table M }
   PutDBE(152, 0);
-  Dummy := PutDirRec(156, RootLBA, RootSectors * SECT, 2, '', 0);
+  Dummy := PutDirRec(156, RootLBA, RootSectors * SECT, 2, '', 0, NowTime);
   PutStr(190, 128, '');
   PutStr(318, 128, 'GLADIR.COM');
   PutStr(446, 128, 'MAKEISO');
@@ -349,6 +370,10 @@ End;
 
 BEGIN
   IsoName := ''; BootName := ''; VolLabel := 'OS2_0'; NFiles := 0;
+  GetDate(Yr, Mo, Dy, Dw); GetTime(Hr, Mi, Sc, S100);
+  NowDT.Year := Yr; NowDT.Month := Mo; NowDT.Day := Dy;
+  NowDT.Hour := Hr; NowDT.Min := Mi; NowDT.Sec := Sc;
+  PackTime(NowDT, NowTime);
   If ParamCount = 0 Then ShowHelp;
   For I := 1 To ParamCount Do
   Begin
@@ -379,7 +404,7 @@ BEGIN
   For I := 1 To NFiles Do
   Begin
     IsoNames[I] := IsoFileName(FileNames[I]);
-    FileSizes[I] := SizeOfFile(FileNames[I]);
+    FileSizes[I] := SizeOfFile(FileNames[I], FileTime[I]);
   End;
   { tri des noms (ordre exige par ISO 9660) }
   For I := 1 To NFiles - 1 Do
@@ -389,6 +414,7 @@ BEGIN
         U := IsoNames[I]; IsoNames[I] := IsoNames[J]; IsoNames[J] := U;
         U := FileNames[I]; FileNames[I] := FileNames[J]; FileNames[J] := U;
         RootLBA := FileSizes[I]; FileSizes[I] := FileSizes[J]; FileSizes[J] := RootLBA;
+        RootLBA := FileTime[I]; FileTime[I] := FileTime[J]; FileTime[J] := RootLBA;
         If BootIdx = I Then BootIdx := J Else If BootIdx = J Then BootIdx := I;
       End;
   RootLBA := 22;

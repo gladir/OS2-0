@@ -5426,7 +5426,7 @@ Begin
   EmitComment('--- Variables Strings (unite Strings emulation) ---');
   EmitRaw('STR_TMPBUF  DB 256 DUP(0)');  { buffer temporaire pour conversions     }
   EmitRaw('STR_PASBUF  DB 256 DUP(0)');  { buffer pour StrPas (PChar->Pascal)     }
-  EmitRaw('STRRING     DB 4096 DUP(0)'); { anneau : resultats de fonctions String }
+  EmitRaw('STRRING     DB 65536 DUP(0)'); { anneau : resultats de fonctions String (256 x 256) }
   EmitRaw('STRRINGIDX  DD 0');
   EmitComment('--- Variables Printer (unite Printer emulation) ---');
   EmitRaw('PRN_HANDLE  DD -1');          { handle fichier imprimante (NUL)        }
@@ -28126,7 +28126,10 @@ Begin
     (Up = 'CL') Or (Up = 'CH') Or (Up = 'DL') Or (Up = 'DH') Or
     (Up = 'EAX') Or (Up = 'EBX') Or (Up = 'ECX') Or (Up = 'EDX') Or
     (Up = 'ESI') Or (Up = 'EDI') Or (Up = 'EBP') Or (Up = 'ESP') Or
-    (Up = 'CS') Or (Up = 'DS') Or (Up = 'ES') Or (Up = 'SS');
+    (Up = 'CS') Or (Up = 'DS') Or (Up = 'ES') Or (Up = 'SS') Or
+    { noyau OS/2 : registres systeme, jamais des variables Pascal }
+    (AsmNative And ((Up = 'FS') Or (Up = 'GS') Or (Up = 'CR0') Or (Up = 'CR2') Or
+                    (Up = 'CR3') Or (Up = 'CR4')));
 End;
 
 { ------------------------------------------------------------ }
@@ -31317,7 +31320,7 @@ Begin
   EmitInstr('PUSH EDI');
   EmitInstr('MOV EAX,[STRRINGIDX]');
   EmitInstr('INC EAX');
-  EmitInstr('AND EAX,15');
+  EmitInstr('AND EAX,255');   { anneau de 256 tampons (OS2PC) }
   EmitInstr('MOV [STRRINGIDX],EAX');
   EmitInstr('SHL EAX,8');
   EmitInstr('MOV EDI,OFFSET STRRING');
@@ -31336,7 +31339,7 @@ Begin
   EmitInstr('PUSH ESI');
   EmitInstr('MOV EAX,[STRRINGIDX]');
   EmitInstr('INC EAX');
-  EmitInstr('AND EAX,15');
+  EmitInstr('AND EAX,255');   { anneau de 256 tampons (OS2PC) }
   EmitInstr('MOV [STRRINGIDX],EAX');
   EmitInstr('SHL EAX,8');
   EmitInstr('MOV EDI,OFFSET STRRING');
@@ -41712,7 +41715,7 @@ Begin
   { Variables Strings/Printer/Overlay/Objects }
   BcDefineDataLabel('STR_TMPBUF'); BcDataZeros(256);
   BcDefineDataLabel('STR_PASBUF'); BcDataZeros(256);
-  BcDefineDataLabel('STRRING'); BcDataZeros(4096);
+  BcDefineDataLabel('STRRING'); BcDataZeros(65536);
   BcDefineDataLabel('STRRINGIDX'); BcDataD(0);
   BcDefineDataLabel('PRN_HANDLE'); BcDataD(-1);
   BcDefineDataLabel('PRN_FNAME');  BcDataStr('NUL');
