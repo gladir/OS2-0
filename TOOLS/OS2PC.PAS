@@ -5055,6 +5055,10 @@ Begin
       Begin
         If Not BcAssembleSys(S) Then BcAssemble(S);
       End
+      Else If (Opts.DestTarget = DEST_OS2) And ((Copy(S, 1, 3) = 'IN ') Or (Copy(S, 1, 4) = 'OUT ')) Then
+      Begin
+        If Not BcAssembleSys(S) Then BcAssemble(S);
+      End
       Else
         BcAssemble(S);
       If (Opts.DebugMode Or AsmNative) And (BcGetCodeLen = BcLenBefore) And
@@ -28550,6 +28554,15 @@ Begin
       EmitComment('INT ' + Op1 + ' (non emule - NOP)');
       EmitInstr('NOP');
     End;
+    Exit;
+  End;
+
+  { OS/2-0 : les programmes et les DLL s'executent en anneau 0 ; IN et OUT
+    d'un bloc asm accedent directement aux ports (VIOCALLS.DLL : CRTC,
+    palette, polices du VGA) }
+  If ((Up = 'IN') Or (Up = 'OUT')) And (Opts.DestTarget = DEST_OS2) Then
+  Begin
+    EmitInstr(Up + ' ' + StrUpperCase(Op1) + ',' + StrUpperCase(Op2));
     Exit;
   End;
 
