@@ -25,8 +25,12 @@ Program OS2KRNL;
     Partie 7  - Memoire : tas du noyau et memoire physique
     Partie 8  - Pagination : fenetre des processus (00400000h-007FFFFFh)
     Partie 9  - Pilote ATAPI (CD-ROM IDE, mode PIO)
+    Partie 9b - Peripheriques bloc : disques durs IDE (PIO) et disque
+                virtuel pour les systemes de fichiers installables
     Partie 10 - Systeme de fichiers ISO 9660 et disque virtuel en memoire
     Partie 11 - Table des handles, chemins et repertoire courant
+    Partie 11b- Systemes de fichiers installables (IFS= : HPFS.IFS),
+                FSH_DOVOLIO et aiguillage des unites D: a Z:
     Partie 12 - Couche API (DOSCALLS) utilisee par le runtime de OS2PC
     Partie 13 - Chargeur de programmes PE et processus
     Partie 14 - Demarrage du systeme : CONFIG.SYS et CMD.EXE
@@ -41,6 +45,12 @@ Program OS2KRNL;
   par le chargeur de la partie 13. Les parametres de ces procedures sont
   des valeurs 32 bits (LongInt) : les pointeurs sont des adresses
   lineaires lues et ecrites avec Mem, MemW et MemL[0:adresse].
+
+  Unites : C: est le CD-ROM d'amorcage (avec un disque virtuel superpose
+  pour les fichiers crees) ; les volumes reconnus par un pilote IFS
+  (partitions de type 07h des disques durs IDE, puis disque virtuel
+  /RAMDISK:n) recoivent les lettres D: et suivantes, et leurs fichiers
+  sont confies aux points d'entree FS_* du pilote.
 
   Les programmes s'executent en anneau 0, dans une fenetre de 4 Mo
   (00400000h-007FFFFFh) propre a chaque processus (pagination) ; un
@@ -144,6 +154,10 @@ Type
     Time     : LongInt;      { date et heure DOS }
     Owner    : LongInt;      { processus proprietaire }
     Name     : String[127];
+    IsIfs    : Boolean;      { fichier d'un volume IFS (HPFS.IFS...) }
+    IfsDrv   : LongInt;      { unite (3 = D:) }
+    Sffsi    : Array[0..63] Of Byte;   { SFT : partie du noyau }
+    Sffsd    : Array[0..31] Of Byte;   { SFT : partie du pilote }
   End;
 
   { Recherche FindFirst/FindNext }
@@ -154,6 +168,10 @@ Type
     IsoIdx   : LongInt;      { position dans le repertoire ISO }
     RamIdx   : LongInt;      { position dans le disque virtuel }
     Owner    : LongInt;
+    IsIfs    : Boolean;      { recherche sur un volume IFS }
+    IfsDrv   : LongInt;
+    Fsfsi    : Array[0..7] Of Byte;
+    Fsfsd    : Array[0..31] Of Byte;
   End;
 
   { Fichier ou repertoire du disque virtuel (cree en cours d'execution) }
@@ -1283,6 +1301,334 @@ Begin
 End;
 
 { ==================================================================== }
+{ Partie 9b - Peripheriques bloc : disques durs IDE et disque virtuel  }
+{ ==================================================================== }
+{ Les volumes des systemes de fichiers installables (IFS) sont sur des
+  peripheriques bloc de secteurs de 512 octets : partitions d'un disque
+  dur IDE/ATA (mode PIO 28 bits, sans interruption) ou disque virtuel en
+  memoire (/RAMDISK:n de la ligne IFS=). Les pilotes IFS y accedent par
+  FSH_DOVOLIO (secteurs relatifs au debut du volume). }
+
+Const
+  MaxBlk  = 8;
+  BlkAta  = 1;
+  BlkRam  = 2;
+
+Type
+  TBlk = Record
+    Used   : Boolean;
+    Kind   : LongInt;
+    Base   : LongInt;       { ports ATA }
+    Ctrl   : LongInt;
+    Slave  : Boolean;
+    Start  : LongInt;       { premier secteur (LBA) du volume sur le disque }
+    Count  : LongInt;       { nombre de secteurs }
+    Mem    : LongInt;       { disque virtuel : adresse en memoire }
+    PType  : LongInt;       { type de partition (07h = HPFS/IFS) }
+  End;
+
+  { pilote IFS charge (IFS= de CONFIG.SYS) : points d'entree FS_* }
+  TIfs = Record
+    Used     : Boolean;
+    Module   : LongInt;
+    Name     : String[15];      { FS_NAME : HPFS... }
+    FInit, FMount, FOpen, FClose, FRead, FWrite, FSeek, FNewSize, FCommit : LongInt;
+    FFileInfo, FPathInfo, FFileAttr, FDelete, FMkDir, FRmDir, FMove, FChDir : LongInt;
+    FFindFirst, FFindNext, FFindClose, FFsInfo, FFlush, FFsCtl, FExit, FShutdown : LongInt;
+  End;
+
+  { volume monte par un IFS : unite D: a Z: (le hVPB est le numero
+    d'unite, 3 = D:) }
+  TIfsVol = Record
+    Mounted  : Boolean;
+    Blk      : LongInt;
+    Ifs      : LongInt;
+    Vpfsi    : Array[0..43] Of Byte;
+    Vpfsd    : Array[0..63] Of Byte;
+  End;
+
+Const
+  MaxIfs = 4;
+
+Var
+  Blks   : Array[0..MaxBlk - 1] Of TBlk;
+  NBlk   : LongInt;
+  HdBuf  : Array[0..511] Of Byte;
+  Ifss   : Array[0..MaxIfs - 1] Of TIfs;
+  NIfs   : LongInt;
+  IfsVols : Array[0..25] Of TIfsVol;
+  IfsLines : Array[0..MaxIfs - 1] Of String;   { lignes IFS= de CONFIG.SYS }
+  RamDiskKb : LongInt;                           { /RAMDISK:n de la ligne IFS= }
+  NIfsLines : LongInt;
+
+Function HdWait(Base : LongInt) : LongInt;
+Var N, St : LongInt;
+Begin
+  N := 0;
+  St := -1;
+  Repeat
+    St := Port[Base + 7];
+    Inc(N);
+  Until ((St And $80) = 0) Or (N > 1000000);
+  If (St And $80) <> 0 Then St := -1;
+  HdWait := St;
+End;
+
+{ IDENTIFY DEVICE (ECh) : vrai si un disque ATA repond ; Sectors <-
+  nombre de secteurs adressables (LBA 28 bits) }
+Function HdIdentify(Base, Ctrl : LongInt; Slave : Boolean; Var Sectors : LongInt) : Boolean;
+Var St, I, X, A : LongInt; R : Boolean;
+Begin
+  R := False;
+  Sectors := 0;
+  If Port[Base + 7] <> $FF Then
+  Begin
+    Port[Ctrl] := 2;
+    If Slave Then Port[Base + 6] := $B0 Else Port[Base + 6] := $A0;
+    For I := 1 To 4 Do X := Port[Ctrl];
+    Port[Base + 2] := 0; Port[Base + 3] := 0; Port[Base + 4] := 0; Port[Base + 5] := 0;
+    Port[Base + 7] := $EC;
+    For I := 1 To 4 Do X := Port[Ctrl];
+    St := Port[Base + 7];
+    If St <> 0 Then
+    Begin
+      St := HdWait(Base);
+      { un lecteur ATAPI repond par la signature 14h/EBh et une erreur }
+      If (St >= 0) And (Port[Base + 4] = 0) And (Port[Base + 5] = 0) Then
+      Begin
+        I := 0;
+        Repeat
+          St := Port[Base + 7];
+          Inc(I);
+        Until ((St And 9) <> 0) Or (I > 1000000);
+        If (St And 9) = 8 Then
+        Begin
+          A := LongInt(@HdBuf);
+          asm
+            push edi
+            mov edi,A
+            mov ecx,256
+            mov edx,Base
+            cld
+            rep insw
+            pop edi
+          end;
+          Sectors := MemW[0:A + 120] Or (MemW[0:A + 122] Shl 16);
+          R := Sectors > 0;
+        End;
+      End;
+    End;
+  End;
+  HdIdentify := R;
+End;
+
+{ Lire ou ecrire N secteurs (1 a 128) a partir de Lba }
+Function HdIO(B, Lba, N, Addr : LongInt; Wr : Boolean) : Boolean;
+Var St, I, X, A, Base, Tries : LongInt; Ok : Boolean;
+Begin
+  Base := Blks[B].Base;
+  Ok := False;
+  Tries := 0;
+  While (Not Ok) And (Tries < 3) Do
+  Begin
+    Inc(Tries);
+    Ok := True;
+    If Blks[B].Slave Then Port[Base + 6] := $F0 Or ((Lba Shr 24) And $0F)
+    Else Port[Base + 6] := $E0 Or ((Lba Shr 24) And $0F);
+    For I := 1 To 4 Do X := Port[Blks[B].Ctrl];
+    If HdWait(Base) < 0 Then Ok := False;
+    If Ok Then
+    Begin
+      Port[Base + 1] := 0;
+      Port[Base + 2] := N And $FF;
+      Port[Base + 3] := Lba And $FF;
+      Port[Base + 4] := (Lba Shr 8) And $FF;
+      Port[Base + 5] := (Lba Shr 16) And $FF;
+      If Wr Then Port[Base + 7] := $30 Else Port[Base + 7] := $20;
+      I := 0;
+      While Ok And (I < N) Do
+      Begin
+        For X := 1 To 4 Do St := Port[Blks[B].Ctrl];
+        St := HdWait(Base);
+        If (St < 0) Or ((St And 1) <> 0) Or ((St And 8) = 0) Then Ok := False
+        Else
+        Begin
+          A := Addr + I * 512;
+          If Wr Then
+          Begin
+            asm
+              push esi
+              mov esi,A
+              mov ecx,256
+              mov edx,Base
+              cld
+              rep outsw
+              pop esi
+            end;
+          End
+          Else
+          Begin
+            asm
+              push edi
+              mov edi,A
+              mov ecx,256
+              mov edx,Base
+              cld
+              rep insw
+              pop edi
+            end;
+          End;
+          Inc(I);
+        End;
+      End;
+      If Ok And Wr Then
+      Begin
+        St := HdWait(Base);
+        Port[Base + 7] := $E7;                    { CACHE FLUSH }
+        St := HdWait(Base);
+        If (St < 0) Or ((St And 1) <> 0) Then Ok := False;
+      End;
+    End;
+  End;
+  HdIO := Ok;
+End;
+
+Function NewBlk : LongInt;
+Var R : LongInt;
+Begin
+  R := -1;
+  If NBlk < MaxBlk Then
+  Begin
+    R := NBlk;
+    Inc(NBlk);
+    Blks[R].Used := True;
+    Blks[R].Kind := 0; Blks[R].Base := 0; Blks[R].Ctrl := 0; Blks[R].Slave := False;
+    Blks[R].Start := 0; Blks[R].Count := 0; Blks[R].Mem := 0; Blks[R].PType := 0;
+  End;
+  NewBlk := R;
+End;
+
+{ Volumes d'un disque : partitions principales de type 07h de la table
+  du secteur 0, ou disque entier s'il commence par un secteur d'amorce
+  HPFS (sans table de partitions) }
+Procedure ScanDisk(Base, Ctrl : LongInt; Slave : Boolean; Sectors : LongInt);
+Var B, I, E, T, S, N : LongInt; Found : Boolean;
+Begin
+  B := NewBlk;
+  If B < 0 Then Exit;
+  Blks[B].Kind := BlkAta; Blks[B].Base := Base; Blks[B].Ctrl := Ctrl; Blks[B].Slave := Slave;
+  Blks[B].Start := 0; Blks[B].Count := Sectors;
+  If Not HdIO(B, 0, 1, LongInt(@HdBuf), False) Then
+  Begin
+    Dec(NBlk);
+    Exit;
+  End;
+  Found := False;
+  If (HdBuf[54] = Ord('H')) And (HdBuf[55] = Ord('P')) And (HdBuf[56] = Ord('F')) And (HdBuf[57] = Ord('S')) Then
+  Begin
+    Blks[B].PType := 7;
+    Found := True;
+  End
+  Else If (HdBuf[510] = $55) And (HdBuf[511] = $AA) Then
+  Begin
+    Dec(NBlk);
+    For I := 0 To 3 Do
+    Begin
+      E := LongInt(@HdBuf) + 446 + I * 16;
+      T := Mem[0:E + 4];
+      S := MemL[0:E + 8];
+      N := MemL[0:E + 12];
+      If (T = 7) And (N > 0) And (S + N <= Sectors) Then
+      Begin
+        B := NewBlk;
+        If B >= 0 Then
+        Begin
+          Blks[B].Kind := BlkAta; Blks[B].Base := Base; Blks[B].Ctrl := Ctrl; Blks[B].Slave := Slave;
+          Blks[B].Start := S; Blks[B].Count := N; Blks[B].PType := T;
+          Found := True;
+        End;
+      End;
+    End;
+  End
+  Else
+    Dec(NBlk);
+  If Found Then
+    KLog('Disque IDE ' + HexStr(Base, 3) + 'h ' + IntStr(Ord(Slave)) + ' : ' +
+         IntStr(Sectors Div 2048) + ' Mo, volume(s) de type 07h.');
+End;
+
+{ Chercher les disques durs IDE (sauf le lecteur de CD-ROM) }
+Procedure HdInit;
+Var I, Base, Ctrl, Sectors : LongInt; Slave : Boolean;
+Begin
+  For I := 0 To 3 Do
+  Begin
+    If I < 2 Then
+    Begin
+      Base := $1F0; Ctrl := $3F6;
+    End
+    Else
+    Begin
+      Base := $170; Ctrl := $376;
+    End;
+    Slave := Odd(I);
+    If Not ((Base = AtaBase) And (Slave = AtaSlave)) Then
+      If HdIdentify(Base, Ctrl, Slave, Sectors) Then ScanDisk(Base, Ctrl, Slave, Sectors);
+  End;
+  { le lecteur de CD-ROM redevient le peripherique selectionne }
+  AtaSelect;
+End;
+
+{ Disque virtuel de Kb Ko pris en haut de la memoire physique }
+Function RamDiskNew(Kb : LongInt) : LongInt;
+Var B, Size : LongInt;
+Begin
+  RamDiskNew := -1;
+  Size := ((Kb * 1024) + 4095) And Not 4095;
+  If (Size < 512 * 1024) Or (PhysTop - Size < PhysProcBase + $00800000) Then Exit;
+  B := NewBlk;
+  If B < 0 Then Exit;
+  PhysTop := PhysTop - Size;
+  Blks[B].Kind := BlkRam;
+  Blks[B].Mem := PhysTop;
+  Blks[B].Count := Size Div 512;
+  Blks[B].PType := 7;
+  FillMem(PhysTop, Size, 0);
+  RamDiskNew := B;
+End;
+
+{ Entree/sortie de secteurs d'un peripherique bloc }
+Function BlkIO(B, Op, Sec, N, Addr : LongInt) : LongInt;
+Var R, K, Done : LongInt;
+Begin
+  R := 0;
+  If (B < 0) Or (B >= NBlk) Then R := 21
+  Else If (Sec < 0) Or (N < 0) Or (Sec + N > Blks[B].Count) Then R := 27   { secteur introuvable }
+  Else If Blks[B].Kind = BlkRam Then
+  Begin
+    If (Op And 1) <> 0 Then MoveMem(Addr, Blks[B].Mem + Sec * 512, N * 512)
+    Else MoveMem(Blks[B].Mem + Sec * 512, Addr, N * 512);
+  End
+  Else
+  Begin
+    Done := 0;
+    While (R = 0) And (Done < N) Do
+    Begin
+      K := N - Done;
+      If K > 128 Then K := 128;
+      If Not HdIO(B, Blks[B].Start + Sec + Done, K, Addr + Done * 512, (Op And 1) <> 0) Then
+      Begin
+        If (Op And 1) <> 0 Then R := 29 Else R := 30;
+      End
+      Else
+        Done := Done + K;
+    End;
+    AtaSelect;
+  End;
+  BlkIO := R;
+End;
+
+{ ==================================================================== }
 { Partie 10 - ISO 9660 et disque virtuel en memoire                    }
 { ==================================================================== }
 { Le CD-ROM d'amorcage est l'unite C:. Il est en lecture seule : les
@@ -1448,12 +1794,21 @@ Begin
   BaseName := Copy(Path, P + 1, 255);
 End;
 
-{ Existence d'un chemin (disque virtuel puis CD-ROM) }
+Function IfsDrive(Path : String) : LongInt; Forward;
+Function IfsStat(Path : String; Var Attr, Size, Time : LongInt) : LongInt; Forward;
+
+{ Existence d'un chemin (volume IFS, ou disque virtuel puis CD-ROM) }
 Function PathInfo(Path : String; Var Attr, Size, Time, Lba, RamIdx : LongInt) : Boolean;
 Var R : LongInt;
 Begin
   PathInfo := False;
   RamIdx := -1; Lba := 0;
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    RamIdx := -2;
+    PathInfo := IfsStat(Path, Attr, Size, Time) = 0;
+    Exit;
+  End;
   If Length(Path) = 3 Then
   Begin
     Attr := FileAttrDirectory; Size := 0; Time := 0; Lba := RootLba;
@@ -1566,10 +1921,15 @@ Begin
 End;
 
 { Chemin complet en majuscules : C:\REP\FICHIER (unite, ., .., / acceptes) }
-Function FullPath(Name : String) : String;
+Function FullPathX(Name : String; Up : Boolean) : String;
 Var Base, Res, Comp : String; P : LongInt;
 Begin
-  Name := UpStr(Trim(Name));
+  If Up Then Name := UpStr(Trim(Name))
+  Else
+  Begin
+    Name := Trim(Name);
+    If (Length(Name) >= 2) And (Name[2] = ':') Then Name[1] := UpCase(Name[1]);
+  End;
   For P := 1 To Length(Name) Do If Name[P] = '/' Then Name[P] := '\';
   If (Length(Name) >= 2) And (Name[2] = ':') Then
   Begin
@@ -1606,13 +1966,42 @@ Begin
     If Res[Length(Res)] <> '\' Then Res := Res + '\';
     Res := Res + Comp;
   End;
-  FullPath := Res;
+  FullPathX := Res;
 End;
 
-{ Seule l'unite C: (CD-ROM + disque virtuel) existe }
+Function FullPath(Name : String) : String;
+Begin
+  FullPath := FullPathX(Name, True);
+End;
+
+{ Unite d'un volume IFS monte (3 = D:...), ou -1 }
+Function IfsDrive(Path : String) : LongInt;
+Var D : LongInt;
+Begin
+  IfsDrive := -1;
+  If (Length(Path) >= 2) And (Path[2] = ':') Then
+  Begin
+    D := Ord(UpCase(Path[1])) - 65;
+    If (D >= 3) And (D <= 25) Then
+      If IfsVols[D].Mounted Then IfsDrive := D;
+  End;
+End;
+
+{ Chemin complet : en majuscules, sauf sur un volume IFS (HPFS conserve
+  la casse des noms) }
+Function FullPathOf(A : LongInt) : String;
+Var S, P : String;
+Begin
+  S := PStr(A);
+  P := FullPath(S);
+  If IfsDrive(P) >= 0 Then P := FullPathX(S, False);
+  FullPathOf := P;
+End;
+
+{ Unite C: (CD-ROM + disque virtuel) et volumes IFS montes }
 Function DriveOk(Path : String) : Boolean;
 Begin
-  DriveOk := (Length(Path) >= 3) And (Path[1] = 'C');
+  DriveOk := ((Length(Path) >= 3) And (Path[1] = 'C')) Or (IfsDrive(Path) >= 0);
 End;
 
 Function FileSlot(H : LongInt) : LongInt;
@@ -1635,6 +2024,7 @@ Begin
       Files[I].CanWrite := False; Files[I].Time := 0;
       Files[I].Owner := CurProc;
       Files[I].Name := '';
+      Files[I].IsIfs := False;
       NewFileSlot := I;
       Exit;
     End;
@@ -1645,6 +2035,241 @@ Var I : LongInt;
 Begin
   For I := 0 To N - 1 Do ConPutRaw(Chr(Mem[0:Buf + I]));
   UpdateCursor;
+End;
+
+{ ==================================================================== }
+{ Partie 11b - Systemes de fichiers installables (IFS)                 }
+{ ==================================================================== }
+{ Les fichiers des unites D: a Z: montees par un pilote IFS (HPFS.IFS)
+  sont confies aux points d'entree FS_* du pilote, appeles selon la
+  convention _System (parametres de droite a gauche, pile nettoyee par
+  l'appelant). Les structures passees sont decrites dans DLL\HPFS.PAS. }
+
+Var
+  IfsArg   : Array[0..15] Of LongInt;
+  IfsName  : Array[0..263] Of Byte;    { chemin ASCIIZ }
+  IfsName2 : Array[0..263] Of Byte;
+  IfsCd    : Array[0..271] Of Byte;    { CDFSI }
+  IfsCdd   : Array[0..15] Of Byte;     { CDFSD }
+  IfsInfo  : Array[0..511] Of Byte;
+  IfsCnt   : LongInt;
+  IfsAct   : LongInt;
+
+{ Appeler le point d'entree Fn avec les N parametres de IfsArg }
+Function IfsCall(Fn, N : LongInt) : LongInt;
+Var R, A : LongInt;
+Begin
+  R := 1;
+  A := LongInt(@IfsArg);
+  If Fn <> 0 Then
+  Begin
+    asm
+      push ebx
+      push esi
+      push edi
+      mov ecx,N
+      mov esi,A
+    @lp:
+      cmp ecx,0
+      je @go
+      dec ecx
+      mov eax,ecx
+      shl eax,2
+      add eax,esi
+      mov edx,[eax]
+      push edx
+      jmp @lp
+    @go:
+      mov eax,Fn
+      call eax
+      mov ecx,N
+      shl ecx,2
+      add esp,ecx
+      mov R,eax
+      pop edi
+      pop esi
+      pop ebx
+    end;
+  End;
+  IfsCall := R;
+End;
+
+Procedure IfsArgs4(A0, A1, A2, A3 : LongInt);
+Begin
+  IfsArg[0] := A0; IfsArg[1] := A1; IfsArg[2] := A2; IfsArg[3] := A3;
+End;
+
+Procedure IfsArgs8(A4, A5, A6, A7 : LongInt);
+Begin
+  IfsArg[4] := A4; IfsArg[5] := A5; IfsArg[6] := A6; IfsArg[7] := A7;
+End;
+
+{ Preparer le chemin et le CDFSI d'une operation sur l'unite D }
+Procedure IfsPrep(D : LongInt; Path : String);
+Begin
+  PutPStr(LongInt(@IfsName), Path, 260);
+  FillMem(LongInt(@IfsCd), 272, 0);
+  MemL[0:LongInt(@IfsCd)] := D;
+  MemL[0:LongInt(@IfsCd) + 4] := -1;
+  If Copy(CurDir, 1, 1) = Copy(Path, 1, 1) Then PutPStr(LongInt(@IfsCd) + 12, CurDir, 260)
+  Else PutPStr(LongInt(@IfsCd) + 12, Copy(Path, 1, 2) + '\', 260);
+  FillMem(LongInt(@IfsCdd), 16, 0);
+End;
+
+Function IfsOf(D : LongInt) : LongInt;
+Begin
+  IfsOf := IfsVols[D].Ifs;
+End;
+
+{ Attributs, taille et date (DOS) d'un chemin d'un volume IFS ; rend le
+  code d'erreur OS/2 }
+Function IfsStat(Path : String; Var Attr, Size, Time : LongInt) : LongInt;
+Var D, R, A : LongInt;
+Begin
+  D := IfsDrive(Path);
+  IfsPrep(D, Path);
+  A := LongInt(@IfsInfo);
+  IfsArgs4(0, LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName));
+  IfsArgs8(-1, 1, A, 24);
+  R := IfsCall(Ifss[IfsOf(D)].FPathInfo, 8);
+  If R = 0 Then
+  Begin
+    Attr := MemL[0:A + 20];
+    Size := MemL[0:A + 12];
+    Time := (MemW[0:A + 8] Shl 16) Or MemW[0:A + 10];
+  End;
+  IfsStat := R;
+End;
+
+{ Operation sur un chemin : FS_DELETE, FS_RMDIR (4 parametres) }
+Function IfsPathOp(Fn : LongInt; Path : String) : LongInt;
+Var D : LongInt;
+Begin
+  D := IfsDrive(Path);
+  IfsPrep(D, Path);
+  IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+  IfsPathOp := IfsCall(Fn, 4);
+End;
+
+{ Ouvrir ou creer un fichier d'un volume IFS dans l'entree H de Files }
+Function IfsOpen(H : LongInt; Path : String; Access, Share, Disp : LongInt) : LongInt;
+Var D, I, R, Mode, Flag : LongInt; Exists : Boolean;
+Begin
+  D := IfsDrive(Path);
+  I := IfsOf(D);
+  Files[H].IsIfs := True;
+  Files[H].IfsDrv := D;
+  FillMem(LongInt(@Files[H].Sffsi), 64, 0);
+  FillMem(LongInt(@Files[H].Sffsd), 32, 0);
+  MemL[0:LongInt(@Files[H].Sffsi) + 4] := D;
+  If CurProc >= 0 Then MemL[0:LongInt(@Files[H].Sffsi) + 32] := Procs[CurProc].Serial
+  Else MemL[0:LongInt(@Files[H].Sffsi) + 32] := 1;
+  { acces et partage OS/2 }
+  If ((Access And $40000000) <> 0) And ((Access And $80000000) <> 0) Then Mode := 2
+  Else If (Access And $40000000) <> 0 Then Mode := 1
+  Else Mode := 0;
+  Case Share And 3 Of
+    0 : Mode := Mode Or $10;
+    1 : Mode := Mode Or $20;
+    2 : Mode := Mode Or $30;
+  Else
+    Mode := Mode Or $40;
+  End;
+  MemL[0:LongInt(@Files[H].Sffsi)] := Mode;
+  Case Disp Of
+    1 : Flag := $10;          { CREATE_NEW }
+    2 : Flag := $12;          { CREATE_ALWAYS }
+    3 : Flag := $01;          { OPEN_EXISTING }
+    4 : Flag := $11;          { OPEN_ALWAYS }
+    5 : Flag := $02;          { TRUNCATE_EXISTING }
+  Else
+    Flag := $01;
+  End;
+  IfsPrep(D, Path);
+  IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+  IfsArgs8(LongInt(@Files[H].Sffsi), LongInt(@Files[H].Sffsd), Mode, Flag);
+  IfsArg[8] := LongInt(@IfsAct);
+  IfsArg[9] := 0;
+  IfsArg[10] := 0;
+  IfsArg[11] := LongInt(@IfsCnt);
+  R := IfsCall(Ifss[I].FOpen, 12);
+  If R = 110 Then
+  Begin
+    { ERROR_OPEN_FAILED : le fichier existe (CREATE_NEW) ou n'existe pas }
+    If Disp = 1 Then R := ErrFileExists Else R := ErrFileNotFound;
+  End;
+  If R = 0 Then
+  Begin
+    Files[H].CanWrite := (Mode And 7) <> 0;
+    Files[H].Time := MemL[0:LongInt(@Files[H].Sffsi) + 16];
+  End
+  Else
+    Files[H].IsIfs := False;
+  IfsOpen := R;
+End;
+
+Function IfsClose(F : LongInt) : LongInt;
+Var I, D, R : LongInt;
+Begin
+  D := Files[F].IfsDrv;
+  I := IfsOf(D);
+  IfsArgs4(2, 0, LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd));
+  R := IfsCall(Ifss[I].FClose, 4);
+  IfsArg[0] := D; IfsArg[1] := 0;
+  IfsCall(Ifss[I].FFlush, 2);
+  Files[F].IsIfs := False;
+  IfsClose := R;
+End;
+
+{ FS_READ / FS_WRITE : N octets ; rend le code et le nombre traite }
+Function IfsRW(F, Buf, N : LongInt; Wr : Boolean; Var Done : LongInt) : LongInt;
+Var I, R : LongInt;
+Begin
+  I := IfsOf(Files[F].IfsDrv);
+  IfsCnt := N;
+  IfsArgs4(LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd), Buf, LongInt(@IfsCnt));
+  IfsArg[4] := 0;
+  If Wr Then R := IfsCall(Ifss[I].FWrite, 5) Else R := IfsCall(Ifss[I].FRead, 5);
+  Done := IfsCnt;
+  IfsRW := R;
+End;
+
+{ Fermer les fichiers et recherches IFS d'un processus termine }
+Procedure IfsProcessExit(Pid : LongInt);
+Var I, J, Serial : LongInt;
+Begin
+  For I := 0 To MaxFiles - 1 Do
+    If Files[I].Used And (Files[I].Owner = Pid) And Files[I].IsIfs Then IfsClose(I);
+  For I := 0 To MaxFinds - 1 Do
+    If Finds[I].Used And (Finds[I].Owner = Pid) And Finds[I].IsIfs Then
+    Begin
+      IfsArg[0] := LongInt(@Finds[I].Fsfsi); IfsArg[1] := LongInt(@Finds[I].Fsfsd);
+      IfsCall(Ifss[IfsOf(Finds[I].IfsDrv)].FFindClose, 2);
+      Finds[I].IsIfs := False;
+    End;
+  If Pid >= 0 Then Serial := Procs[Pid].Serial Else Serial := 1;
+  For J := 0 To NIfs - 1 Do
+  Begin
+    IfsArg[0] := 0; IfsArg[1] := Serial; IfsArg[2] := 0;
+    IfsCall(Ifss[J].FExit, 3);
+  End;
+End;
+
+{ FSH_DOVOLIO(Op, fAllowed, hVPB, pData, pcSec, iSec) : service offert
+  aux pilotes IFS : lire (Op bit 0 = 0) ou ecrire *pcSec secteurs du
+  volume hVPB a partir du secteur iSec ; *pcSec <- secteurs traites. }
+Function FSH_DoVolIO(Op, Allowed, HVpb, PData, PcSec, ISec : LongInt) : LongInt;
+Var R, N : LongInt;
+Begin
+  If (HVpb < 0) Or (HVpb > 25) Then R := ErrInvalidDrive
+  Else If IfsVols[HVpb].Blk < 0 Then R := ErrInvalidDrive
+  Else
+  Begin
+    N := MemL[0:PcSec];
+    R := BlkIO(IfsVols[HVpb].Blk, Op, ISec, N, PData);
+    If R <> 0 Then MemL[0:PcSec] := 0;
+  End;
+  FSH_DoVolIO := R;
 End;
 
 { ==================================================================== }
@@ -2124,6 +2749,21 @@ Begin
   End;
   Path := FullPath(Nm);
   Files[H].Name := Path;
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    { volume IFS : FS_OPENCREATE }
+    Path := FullPathOf(PName);
+    Files[H].Name := Path;
+    R := IfsOpen(H, Path, Access, Share, Disp);
+    If R <> 0 Then
+    Begin
+      Files[H].Used := False;
+      LastError := R;
+      Exit;
+    End;
+    CreateFileA := HFileBase + H;
+    Exit;
+  End;
   If Not DriveOk(Path) Then
   Begin
     Files[H].Used := False;
@@ -2213,6 +2853,7 @@ Begin
   F := FileSlot(H);
   If F >= 0 Then
   Begin
+    If Files[F].IsIfs Then IfsClose(F);
     Files[F].Used := False;
     Exit;
   End;
@@ -2227,7 +2868,7 @@ Begin
 End;
 
 Function ReadFile(H, Buf, N, PRead, Ovl : LongInt) : LongInt;
-Var F, Got, A, Sect, Ofs, Chunk, Ram : LongInt; S : String;
+Var F, Got, A, Sect, Ofs, Chunk, Ram, IR : LongInt; S : String;
 Begin
   ReadFile := 1;
   Got := 0;
@@ -2258,7 +2899,16 @@ Begin
       ReadFile := 0;
       Exit;
     End;
-    If Files[F].IsNul Then
+    If Files[F].IsIfs Then
+    Begin
+      IR := IfsRW(F, Buf, N, False, Got);
+      If IR <> 0 Then
+      Begin
+        LastError := IR;
+        ReadFile := 0;
+      End;
+    End
+    Else If Files[F].IsNul Then
       Got := 0
     Else If Files[F].IsRam Then
     Begin
@@ -2295,7 +2945,7 @@ Begin
 End;
 
 Function WriteFile(H, Buf, N, PWritten, Ovl : LongInt) : LongInt;
-Var F, Ram : LongInt;
+Var F, Ram, IR, Done : LongInt;
 Begin
   WriteFile := 1;
   If (H = HStdOut) Or (H = HStdErr) Then
@@ -2311,6 +2961,16 @@ Begin
     End
     Else If Files[F].IsCon Then
       ConWrite(Buf, N)
+    Else If Files[F].IsIfs Then
+    Begin
+      IR := IfsRW(F, Buf, N, True, Done);
+      N := Done;
+      If IR <> 0 Then
+      Begin
+        LastError := IR;
+        WriteFile := 0;
+      End;
+    End
     Else If Files[F].IsNul Then
     Else If Not (Files[F].IsRam And Files[F].CanWrite) Then
     Begin
@@ -2349,18 +3009,37 @@ End;
 
 Function FileSizeOf(F : LongInt) : LongInt;
 Begin
-  If Files[F].IsRam Then FileSizeOf := RamFiles[Files[F].RamIdx].Size
+  If Files[F].IsIfs Then FileSizeOf := MemL[0:LongInt(@Files[F].Sffsi) + 20]
+  Else If Files[F].IsRam Then FileSizeOf := RamFiles[Files[F].RamIdx].Size
   Else FileSizeOf := Files[F].Size;
 End;
 
 Function SetFilePointer(H, Dist, PHigh, Method : LongInt) : LongInt;
-Var F, NP : LongInt;
+Var F, NP, R : LongInt;
 Begin
   F := FileSlot(H);
   If F < 0 Then
   Begin
     LastError := ErrInvalidHandle;
     SetFilePointer := -1;
+    Exit;
+  End;
+  If Files[F].IsIfs Then
+  Begin
+    IfsArgs4(LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd), Dist, Method);
+    IfsArg[4] := 0;
+    R := IfsCall(Ifss[IfsOf(Files[F].IfsDrv)].FSeek, 5);
+    If R <> 0 Then
+    Begin
+      LastError := R;
+      SetFilePointer := -1;
+      Exit;
+    End;
+    NP := MemL[0:LongInt(@Files[F].Sffsi) + 24];
+    Files[F].Pos := NP;
+    If PHigh <> 0 Then MemL[0:PHigh] := 0;
+    LastError := 0;
+    SetFilePointer := NP;
     Exit;
   End;
   Case Method Of
@@ -2391,10 +3070,18 @@ Begin
 End;
 
 Function SetEndOfFile(H : LongInt) : LongInt;
-Var F : LongInt;
+Var F, R : LongInt;
 Begin
   SetEndOfFile := 0;
   F := FileSlot(H);
+  If F >= 0 Then
+    If Files[F].IsIfs Then
+    Begin
+      IfsArgs4(LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd), MemL[0:LongInt(@Files[F].Sffsi) + 24], 0);
+      R := IfsCall(Ifss[IfsOf(Files[F].IfsDrv)].FNewSize, 4);
+      If R = 0 Then SetEndOfFile := 1 Else LastError := R;
+      Exit;
+    End;
   If (F < 0) Or Not Files[F].IsRam Then Exit;
   If Files[F].Pos < RamFiles[Files[F].RamIdx].Size Then
     RamFiles[Files[F].RamIdx].Size := Files[F].Pos;
@@ -2402,8 +3089,16 @@ Begin
 End;
 
 Function FlushFileBuffers(H : LongInt) : LongInt;
+Var F : LongInt;
 Begin
   FlushFileBuffers := 1;
+  F := FileSlot(H);
+  If F >= 0 Then
+    If Files[F].IsIfs Then
+    Begin
+      IfsArgs4(0, 0, LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd));
+      If IfsCall(Ifss[IfsOf(Files[F].IfsDrv)].FCommit, 4) <> 0 Then FlushFileBuffers := 0;
+    End;
 End;
 
 Function GetFileTime(H, PCreate, PAccess, PWrite : LongInt) : LongInt;
@@ -2414,6 +3109,7 @@ Begin
   If F < 0 Then Exit;
   T := Files[F].Time;
   If Files[F].IsRam Then T := RamFiles[Files[F].RamIdx].Time;
+  If Files[F].IsIfs Then T := MemL[0:LongInt(@Files[F].Sffsi) + 16];
   If PWrite <> 0 Then DosDateTimeToFileTime(T Shr 16, T, PWrite);
   If PCreate <> 0 Then DosDateTimeToFileTime(T Shr 16, T, PCreate);
   If PAccess <> 0 Then DosDateTimeToFileTime(T Shr 16, T, PAccess);
@@ -2421,10 +3117,28 @@ Begin
 End;
 
 Function SetFileTime(H, PCreate, PAccess, PWrite : LongInt) : LongInt;
-Var F : LongInt;
+Var F, T, A : LongInt;
 Begin
   SetFileTime := 0;
   F := FileSlot(H);
+  If (F >= 0) And (PWrite <> 0) Then
+    If Files[F].IsIfs Then
+    Begin
+      T := MemL[0:PWrite];
+      A := LongInt(@IfsInfo);
+      FillMem(A, 24, 0);
+      MemW[0:A + 8] := (T Shr 16) And $FFFF;
+      MemW[0:A + 10] := T And $FFFF;
+      MemL[0:A + 20] := MemL[0:LongInt(@Files[F].Sffsi) + 52];
+      IfsArgs4(1, LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd), 1);
+      IfsArgs8(A, 24, 0, 0);
+      If IfsCall(Ifss[IfsOf(Files[F].IfsDrv)].FFileInfo, 7) = 0 Then
+      Begin
+        MemL[0:LongInt(@Files[F].Sffsi) + 16] := T;
+        SetFileTime := 1;
+      End;
+      Exit;
+    End;
   If (F < 0) Or Not Files[F].IsRam Or (PWrite = 0) Then Exit;
   RamFiles[Files[F].RamIdx].Time := MemL[0:PWrite];
   SetFileTime := 1;
@@ -2444,10 +3158,22 @@ Begin
 End;
 
 Function SetFileAttributesA(PName, Attr : LongInt) : LongInt;
-Var Path : String; R : LongInt;
+Var Path : String; R, D, A : LongInt;
 Begin
   SetFileAttributesA := 0;
   Path := FullPath(PStr(PName));
+  D := IfsDrive(Path);
+  If D >= 0 Then
+  Begin
+    IfsPrep(D, FullPathOf(PName));
+    A := Attr And $27;
+    IfsArgs4(1, LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName));
+    IfsArg[4] := -1;
+    IfsArg[5] := LongInt(@A);
+    R := IfsCall(Ifss[IfsOf(D)].FFileAttr, 6);
+    If R = 0 Then SetFileAttributesA := 1 Else LastError := R;
+    Exit;
+  End;
   R := RamFind(Path);
   If (R < 0) Or RamFiles[R].Deleted Then
   Begin
@@ -2463,6 +3189,12 @@ Var Path : String; R, I : LongInt;
 Begin
   DeleteFileA := 0;
   Path := FullPath(PStr(PName));
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    R := IfsPathOp(Ifss[IfsOf(IfsDrive(Path))].FDelete, FullPathOf(PName));
+    If R = 0 Then DeleteFileA := 1 Else LastError := R;
+    Exit;
+  End;
   R := RamFind(Path);
   If (R < 0) Or RamFiles[R].Deleted Then
   Begin
@@ -2492,6 +3224,23 @@ Begin
   MoveFileA := 0;
   Src := FullPath(PStr(PSrc));
   Dst := FullPath(PStr(PDst));
+  If (IfsDrive(Src) >= 0) Or (IfsDrive(Dst) >= 0) Then
+  Begin
+    If IfsDrive(Src) <> IfsDrive(Dst) Then
+    Begin
+      LastError := 17;                       { ERROR_NOT_SAME_DEVICE }
+      Exit;
+    End;
+    Src := FullPathOf(PSrc);
+    Dst := FullPathOf(PDst);
+    IfsPrep(IfsDrive(Src), Src);
+    PutPStr(LongInt(@IfsName2), Dst, 260);
+    IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+    IfsArg[4] := LongInt(@IfsName2); IfsArg[5] := -1; IfsArg[6] := 0;
+    R := IfsCall(Ifss[IfsOf(IfsDrive(Src))].FMove, 7);
+    If R = 0 Then MoveFileA := 1 Else LastError := R;
+    Exit;
+  End;
   R := RamFind(Src);
   If (R < 0) Or RamFiles[R].Deleted Then
   Begin
@@ -2518,6 +3267,15 @@ Var Path : String; A, S, T, L, R : LongInt;
 Begin
   CreateDirectoryA := 0;
   Path := FullPath(PStr(PName));
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    IfsPrep(IfsDrive(Path), FullPathOf(PName));
+    IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+    IfsArg[4] := 0; IfsArg[5] := 0;
+    R := IfsCall(Ifss[IfsOf(IfsDrive(Path))].FMkDir, 6);
+    If R = 0 Then CreateDirectoryA := 1 Else LastError := R;
+    Exit;
+  End;
   If Not DriveOk(Path) Or (Length(Path) <= 3) Then
   Begin
     LastError := ErrPathNotFound;
@@ -2546,6 +3304,17 @@ Var Path, Pfx : String; R, I : LongInt;
 Begin
   RemoveDirectoryA := 0;
   Path := FullPath(PStr(PName));
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    If UpStr(Path) = UpStr(CurDir) Then
+    Begin
+      LastError := ErrCurrentDir;
+      Exit;
+    End;
+    R := IfsPathOp(Ifss[IfsOf(IfsDrive(Path))].FRmDir, FullPathOf(PName));
+    If R = 0 Then RemoveDirectoryA := 1 Else LastError := R;
+    Exit;
+  End;
   R := RamFind(Path);
   If (R < 0) Or ((RamFiles[R].Attr And FileAttrDirectory) = 0) Then
   Begin
@@ -2584,6 +3353,7 @@ Begin
     LastError := ErrPathNotFound;
     Exit;
   End;
+  If IfsDrive(Path) >= 0 Then Path := FullPathOf(PName);
   If CurProc >= 0 Then Procs[CurProc].CurDir := Path Else KernelDir := Path;
   SetCurrentDirectoryA := 1;
 End;
@@ -2604,7 +3374,7 @@ End;
 Function GetFullPathNameA(PName, N, Buf, PFile : LongInt) : LongInt;
 Var S : String; P : LongInt;
 Begin
-  S := FullPath(PStr(PName));
+  S := FullPathOf(PName);
   If Length(S) + 1 > N Then
   Begin
     GetFullPathNameA := Length(S) + 1;
@@ -2625,6 +3395,22 @@ Var Root : String;
 Begin
   GetDiskFreeSpaceA := 0;
   If PRoot <> 0 Then Root := UpStr(PStr(PRoot)) Else Root := CurDir;
+  If IfsDrive(Root) >= 0 Then
+  Begin
+    IfsArg[0] := 0; IfsArg[1] := IfsDrive(Root); IfsArg[2] := LongInt(@IfsInfo);
+    IfsArg[3] := 18; IfsArg[4] := 1;
+    If IfsCall(Ifss[IfsOf(IfsDrive(Root))].FFsInfo, 5) <> 0 Then
+    Begin
+      LastError := ErrNotReady;
+      Exit;
+    End;
+    MemL[0:PSpc] := MemL[0:LongInt(@IfsInfo) + 4];
+    MemL[0:PBps] := MemW[0:LongInt(@IfsInfo) + 16];
+    MemL[0:PFree] := MemL[0:LongInt(@IfsInfo) + 12];
+    MemL[0:PTotal] := MemL[0:LongInt(@IfsInfo) + 8];
+    GetDiskFreeSpaceA := 1;
+    Exit;
+  End;
   If (Root = '') Or (Root[1] <> 'C') Then
   Begin
     LastError := ErrInvalidDrive;
@@ -2700,6 +3486,39 @@ Begin
   End;
 End;
 
+{ Recherche sur un volume IFS : entree de niveau 1 (FILEFINDBUF3) dans
+  IfsInfo -> WIN32_FIND_DATAA }
+Procedure IfsFillFind(P : LongInt);
+Var A : LongInt;
+Begin
+  A := LongInt(@IfsInfo);
+  FillFindData(P, PStr(A + 29), MemL[0:A + 24], MemL[0:A + 16], (MemW[0:A + 12] Shl 16) Or MemW[0:A + 14]);
+End;
+
+Function IfsFindFirst(F : LongInt; Pattern : String; P : LongInt) : Boolean;
+Var D, R : LongInt;
+Begin
+  D := IfsDrive(Pattern);
+  Finds[F].IsIfs := True;
+  Finds[F].IfsDrv := D;
+  FillMem(LongInt(@Finds[F].Fsfsi), 8, 0);
+  FillMem(LongInt(@Finds[F].Fsfsd), 32, 0);
+  MemL[0:LongInt(@Finds[F].Fsfsi)] := D;
+  IfsPrep(D, Pattern);
+  IfsCnt := 1;
+  IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+  IfsArgs8($37, LongInt(@Finds[F].Fsfsi), LongInt(@Finds[F].Fsfsd), LongInt(@IfsInfo));
+  IfsArg[8] := 300; IfsArg[9] := LongInt(@IfsCnt); IfsArg[10] := 1; IfsArg[11] := 0;
+  R := IfsCall(Ifss[IfsOf(D)].FFindFirst, 12);
+  If R = 0 Then IfsFillFind(P)
+  Else
+  Begin
+    Finds[F].IsIfs := False;
+    If R = 18 Then LastError := ErrFileNotFound Else LastError := R;
+  End;
+  IfsFindFirst := R = 0;
+End;
+
 Function FindFirstFileA(PName, P : LongInt) : LongInt;
 Var Path, Dir, Mask : String; F, I : LongInt;
 Begin
@@ -2737,12 +3556,20 @@ Begin
     Exit;
   End;
   Finds[F].Used := True;
+  Finds[F].IsIfs := False;
   Finds[F].Dir := Dir;
   Finds[F].Mask := Mask;
   Finds[F].IsoIdx := 0;
   Finds[F].RamIdx := 0;
   Finds[F].Owner := CurProc;
-  If FindStep(F, P) Then
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    Path := FullPathOf(PName);
+    If Length(Path) = 3 Then Path := Path + '*';
+    If IfsFindFirst(F, Path, P) Then FindFirstFileA := HFindBase + F
+    Else Finds[F].Used := False;
+  End
+  Else If FindStep(F, P) Then
     FindFirstFileA := HFindBase + F
   Else
   Begin
@@ -2761,7 +3588,20 @@ Begin
     LastError := ErrInvalidHandle;
     Exit;
   End;
-  If FindStep(F, P) Then FindNextFileA := 1
+  If Finds[F].IsIfs Then
+  Begin
+    IfsCnt := 1;
+    IfsArgs4(LongInt(@Finds[F].Fsfsi), LongInt(@Finds[F].Fsfsd), LongInt(@IfsInfo), 300);
+    IfsArg[4] := LongInt(@IfsCnt); IfsArg[5] := 1; IfsArg[6] := 0;
+    If IfsCall(Ifss[IfsOf(Finds[F].IfsDrv)].FFindNext, 7) = 0 Then
+    Begin
+      IfsFillFind(P);
+      FindNextFileA := 1;
+    End
+    Else
+      LastError := ErrNoMoreFiles;
+  End
+  Else If FindStep(F, P) Then FindNextFileA := 1
   Else LastError := ErrNoMoreFiles;
 End;
 
@@ -2769,7 +3609,16 @@ Function FindClose(H : LongInt) : LongInt;
 Var F : LongInt;
 Begin
   F := H - HFindBase;
-  If (F >= 0) And (F < MaxFinds) Then Finds[F].Used := False;
+  If (F >= 0) And (F < MaxFinds) Then
+  Begin
+    If Finds[F].Used And Finds[F].IsIfs Then
+    Begin
+      IfsArg[0] := LongInt(@Finds[F].Fsfsi); IfsArg[1] := LongInt(@Finds[F].Fsfsd);
+      IfsCall(Ifss[IfsOf(Finds[F].IfsDrv)].FFindClose, 2);
+      Finds[F].IsIfs := False;
+    End;
+    Finds[F].Used := False;
+  End;
   FindClose := 1;
 End;
 
@@ -2902,9 +3751,44 @@ End;
 
 { Lire tout un fichier dans un bloc du tas ; rend l'adresse ou 0 }
 Function ReadWholeFile(Path : String; Var Size : LongInt) : LongInt;
-Var Attr, Time, Lba, Ram, Buf, Done, A, N : LongInt;
+Var Attr, Time, Lba, Ram, Buf, Done, A, N, H, Got : LongInt;
 Begin
   ReadWholeFile := 0;
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    { volume IFS : lecture par le pilote }
+    H := NewFileSlot;
+    If H < 0 Then
+    Begin
+      LastError := ErrTooManyOpen;
+      Exit;
+    End;
+    N := IfsOpen(H, Path, $80000000, 3, 3);
+    If N <> 0 Then
+    Begin
+      Files[H].Used := False;
+      LastError := N;
+      Exit;
+    End;
+    Size := MemL[0:LongInt(@Files[H].Sffsi) + 20];
+    Buf := KAlloc(Size + 1);
+    If Buf <> 0 Then
+    Begin
+      N := IfsRW(H, Buf, Size, False, Got);
+      If (N <> 0) Or (Got <> Size) Then
+      Begin
+        KFree(Buf);
+        Buf := 0;
+        LastError := ErrNotReady;
+      End;
+    End
+    Else
+      LastError := ErrNotEnoughMem;
+    IfsClose(H);
+    Files[H].Used := False;
+    ReadWholeFile := Buf;
+    Exit;
+  End;
   If Not PathInfo(Path, Attr, Size, Time, Lba, Ram) Then
   Begin
     LastError := ErrFileNotFound;
@@ -3462,6 +4346,7 @@ Begin
   If Pid < 0 Then Exit;
   Procs[Pid].ExitCode := Code;
   Procs[Pid].Running := False;
+  IfsProcessExit(Pid);
   For I := 0 To MaxFiles - 1 Do
     If Files[I].Used And (Files[I].Owner = Pid) Then Files[I].Used := False;
   For I := 0 To MaxFinds - 1 Do
@@ -3474,6 +4359,15 @@ Begin
       MemW[0:VideoBase + I * 2] := $0720;
     ConRows := ScrRows;
     ConRowsOwner := -2;
+  NBlk := 0;
+  NIfs := 0;
+  NIfsLines := 0;
+  RamDiskKb := 0;
+  For I := 0 To 25 Do
+  Begin
+    IfsVols[I].Mounted := False;
+    IfsVols[I].Blk := -1;
+  End;
   End;
   KFree(Procs[Pid].CmdBuf);
   KFree(Procs[Pid].PtAlloc);
@@ -3652,9 +4546,23 @@ End;
 
 { Etiquette du volume (descripteur primaire ISO 9660), numero de serie, CDFS }
 Function GetVolumeInformationA(PRoot, PVol, VolSize, PSerial, PMaxComp, PFlags, PFs, FsSize : LongInt) : LongInt;
-Var A, I, Sum : LongInt; S : String;
+Var A, I, Sum, D : LongInt; S : String;
 Begin
   GetVolumeInformationA := 0;
+  If PRoot <> 0 Then S := PStr(PRoot) Else S := CurDir;
+  D := IfsDrive(S);
+  If D >= 0 Then
+  Begin
+    { volume IFS : nom et numero de serie du VPB, nom du systeme de fichiers }
+    A := LongInt(@IfsVols[D].Vpfsi);
+    If PVol <> 0 Then PutPStr(PVol, PStr(A + 24), VolSize);
+    If PSerial <> 0 Then MemL[0:PSerial] := MemL[0:A];
+    If PMaxComp <> 0 Then MemL[0:PMaxComp] := 254;
+    If PFlags <> 0 Then MemL[0:PFlags] := 2;     { casse conservee }
+    If PFs <> 0 Then PutPStr(PFs, Ifss[IfsVols[D].Ifs].Name, FsSize);
+    GetVolumeInformationA := 1;
+    Exit;
+  End;
   A := CdSector(16);
   If A = 0 Then
   Begin
@@ -3714,8 +4622,8 @@ End;
 { Partie 14 - Demarrage du systeme                                     }
 { ==================================================================== }
 
-{ CONFIG.SYS : PROTSHELL=, SET NOM=VALEUR ; les autres lignes (DEVICE=,
-  LIBPATH=, IFS=...) sont acceptees sans effet }
+{ CONFIG.SYS : PROTSHELL=, LIBPATH=, IFS=, SET NOM=VALEUR ; les autres
+  lignes (DEVICE=, BUFFERS=...) sont acceptees sans effet }
 Procedure ReadConfigSys;
 Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
 
@@ -3732,6 +4640,14 @@ Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
     End
     Else If Copy(U, 1, 8) = 'LIBPATH=' Then
       LibPath := Trim(Copy(Line, 9, 255))
+    Else If Copy(U, 1, 4) = 'IFS=' Then
+    Begin
+      If NIfsLines < MaxIfs Then
+      Begin
+        IfsLines[NIfsLines] := Trim(Copy(Line, 5, 255));
+        Inc(NIfsLines);
+      End;
+    End
     Else If Copy(U, 1, 4) = 'SET ' Then
     Begin
       Line := Trim(Copy(Line, 5, 255));
@@ -3756,6 +4672,180 @@ Begin
   End;
   DoLine;
   KFree(Buf);
+End;
+
+{ Charger un pilote IFS (ligne IFS= : chemin et parametres) }
+Procedure LoadIfs(Line : String);
+Var P, M, I, A, R : LongInt; Path, Parm : String;
+Begin
+  P := Pos(' ', Line);
+  If P > 0 Then
+  Begin
+    Path := Copy(Line, 1, P - 1);
+    Parm := Trim(Copy(Line, P + 1, 255));
+  End
+  Else
+  Begin
+    Path := Line; Parm := '';
+  End;
+  If NIfs >= MaxIfs Then Exit;
+  M := LoadModule(Path);
+  If M < 0 Then
+  Begin
+    KLog('SYS1719: Le systeme de fichiers ' + Path + ' n''a pas pu etre charge (erreur ' +
+         IntStr(LastError) + ').');
+    Exit;
+  End;
+  I := NIfs;
+  Ifss[I].Used := True;
+  Ifss[I].Module := M;
+  Ifss[I].FInit := ModuleExport(M, 'FS_INIT', 0);
+  Ifss[I].FMount := ModuleExport(M, 'FS_MOUNT', 0);
+  Ifss[I].FOpen := ModuleExport(M, 'FS_OPENCREATE', 0);
+  Ifss[I].FClose := ModuleExport(M, 'FS_CLOSE', 0);
+  Ifss[I].FRead := ModuleExport(M, 'FS_READ', 0);
+  Ifss[I].FWrite := ModuleExport(M, 'FS_WRITE', 0);
+  Ifss[I].FSeek := ModuleExport(M, 'FS_CHGFILEPTR', 0);
+  Ifss[I].FNewSize := ModuleExport(M, 'FS_NEWSIZE', 0);
+  Ifss[I].FCommit := ModuleExport(M, 'FS_COMMIT', 0);
+  Ifss[I].FFileInfo := ModuleExport(M, 'FS_FILEINFO', 0);
+  Ifss[I].FPathInfo := ModuleExport(M, 'FS_PATHINFO', 0);
+  Ifss[I].FFileAttr := ModuleExport(M, 'FS_FILEATTRIBUTE', 0);
+  Ifss[I].FDelete := ModuleExport(M, 'FS_DELETE', 0);
+  Ifss[I].FMkDir := ModuleExport(M, 'FS_MKDIR', 0);
+  Ifss[I].FRmDir := ModuleExport(M, 'FS_RMDIR', 0);
+  Ifss[I].FMove := ModuleExport(M, 'FS_MOVE', 0);
+  Ifss[I].FChDir := ModuleExport(M, 'FS_CHDIR', 0);
+  Ifss[I].FFindFirst := ModuleExport(M, 'FS_FINDFIRST', 0);
+  Ifss[I].FFindNext := ModuleExport(M, 'FS_FINDNEXT', 0);
+  Ifss[I].FFindClose := ModuleExport(M, 'FS_FINDCLOSE', 0);
+  Ifss[I].FFsInfo := ModuleExport(M, 'FS_FSINFO', 0);
+  Ifss[I].FFlush := ModuleExport(M, 'FS_FLUSHBUF', 0);
+  Ifss[I].FFsCtl := ModuleExport(M, 'FS_FSCTL', 0);
+  Ifss[I].FExit := ModuleExport(M, 'FS_EXIT', 0);
+  Ifss[I].FShutdown := ModuleExport(M, 'FS_SHUTDOWN', 0);
+  A := ModuleExport(M, 'FS_NAME', 0);
+  If A <> 0 Then Ifss[I].Name := PStr(A) Else Ifss[I].Name := Mods[M].Name;
+  If (Ifss[I].FMount = 0) Or (Ifss[I].FOpen = 0) Then
+  Begin
+    KLog('SYS1719: ' + Path + ' n''est pas un pilote IFS.');
+    Exit;
+  End;
+  PutPStr(LongInt(@IfsName), Parm, 260);
+  IfsArgs4(LongInt(@IfsName), 0, 0, 0);
+  R := IfsCall(Ifss[I].FInit, 3);
+  If R <> 0 Then
+  Begin
+    KLog('SYS1719: ' + Path + ' : FS_INIT a echoue (erreur ' + IntStr(R) + ').');
+    Exit;
+  End;
+  Inc(NIfs);
+  KLog(Mods[M].Name + ' (' + Ifss[I].Name + ') charge en ' + HexStr(Mods[M].Base, 8) + 'h.');
+  { /RAMDISK:n : disque virtuel de n Ko (propre a OS/2-0) }
+  P := Pos('/RAMDISK:', UpStr(Parm));
+  If P > 0 Then
+  Begin
+    A := 0;
+    P := P + 9;
+    While (P <= Length(Parm)) And (Parm[P] >= '0') And (Parm[P] <= '9') Do
+    Begin
+      A := A * 10 + Ord(Parm[P]) - 48;
+      Inc(P);
+    End;
+    RamDiskKb := A;
+  End;
+End;
+
+{ Presenter chaque peripheriques bloc aux pilotes IFS et donner une lettre
+  d'unite (D: et suivantes) aux volumes reconnus ; un disque virtuel non
+  reconnu est formate par le premier pilote (FS_FSCTL 8000h) }
+Procedure MountIfsVolumes;
+Var B, D, I, R, V, A : LongInt; Ok : Boolean; S1 : String;
+Begin
+  D := 3;
+  For B := 0 To NBlk - 1 Do
+    If D <= 25 Then
+    Begin
+      IfsVols[D].Blk := B;
+      IfsVols[D].Mounted := False;
+      V := LongInt(@IfsVols[D].Vpfsi);
+      FillMem(V, 44, 0);
+      FillMem(LongInt(@IfsVols[D].Vpfsd), 64, 0);
+      MemL[0:V + 4] := B;
+      MemL[0:V + 8] := 512;
+      MemL[0:V + 12] := Blks[B].Count;
+      MemL[0:V + 16] := 63;
+      MemL[0:V + 20] := 16;
+      MemL[0:V + 36] := D;
+      MemL[0:V + 40] := B;
+      Ok := False;
+      If BlkIO(B, 0, 0, 1, LongInt(@HdBuf)) = 0 Then
+        For I := 0 To NIfs - 1 Do
+          If Not Ok Then
+          Begin
+            IfsArgs4(0, V, LongInt(@IfsVols[D].Vpfsd), D);
+            IfsArg[4] := LongInt(@HdBuf);
+            If IfsCall(Ifss[I].FMount, 5) = 0 Then
+            Begin
+              Ok := True;
+              IfsVols[D].Ifs := I;
+            End;
+          End;
+      If (Not Ok) And (Blks[B].Kind = BlkRam) And (NIfs > 0) And (Ifss[0].FFsCtl <> 0) Then
+      Begin
+        IfsArgs4(3, V, LongInt(@IfsVols[D].Vpfsd), D);
+        IfsArg[4] := LongInt(@HdBuf);
+        IfsCall(Ifss[0].FMount, 5);
+        PutPStr(LongInt(@IfsName2), 'RAMDISK', 12);
+        A := LongInt(@IfsInfo);
+        MemL[0:A] := D;
+        MemL[0:A + 4] := LongInt(@IfsName2);
+        IfsArgs4(0, 3, $8000, A);
+        IfsArgs8(8, LongInt(@IfsCnt), 0, 0);
+        IfsArg[8] := LongInt(@IfsCnt);
+        R := IfsCall(Ifss[0].FFsCtl, 9);
+        If R = 0 Then
+        Begin
+          Ok := True;
+          IfsVols[D].Ifs := 0;
+        End
+        Else
+          KLog('SYS1719: formatage du disque virtuel impossible (erreur ' + IntStr(R) + ').');
+      End;
+      If Ok And (Ifss[IfsVols[D].Ifs].FFsCtl <> 0) Then
+      Begin
+        { volume mal ferme et lettre citee par /AUTOCHECK : verification
+          et correction (FS_FSCTL 8002h puis 8001h) }
+        A := LongInt(@IfsInfo);
+        MemL[0:A] := D;
+        FillMem(A + 64, 40, 0);
+        IfsArgs4(0, 3, $8002, A);
+        IfsArgs8(4, 0, A + 64, 40);
+        IfsArg[8] := LongInt(@IfsCnt);
+        If (IfsCall(Ifss[IfsVols[D].Ifs].FFsCtl, 9) = 0) And (MemL[0:A + 96] <> 0) And
+           (MemL[0:A + 100] <> 0) Then
+        Begin
+          MemL[0:A + 4] := 1;
+          IfsArgs4(0, 3, $8001, A);
+          IfsArgs8(8, 0, A + 64, 36);
+          IfsArg[8] := LongInt(@IfsCnt);
+          If IfsCall(Ifss[IfsVols[D].Ifs].FFsCtl, 9) = 0 Then
+            KLog('Verification automatique de ' + Chr(65 + D) + ': (volume mal ferme) : ' +
+                 IntStr(MemL[0:A + 64]) + ' erreur(s), ' + IntStr(MemL[0:A + 68]) +
+                 ' secteur(s) perdu(s) recupere(s).');
+        End;
+      End;
+      If Ok Then
+      Begin
+        IfsVols[D].Mounted := True;
+        If Blks[B].Kind = BlkRam Then S1 := 'disque virtuel' Else S1 := 'disque IDE';
+        KLog('Unite ' + Chr(65 + D) + ': ' + Ifss[IfsVols[D].Ifs].Name + ' (' + S1 + ', ' +
+             IntStr(Blks[B].Count Div 2) + ' Ko) : ' + PStr(V + 24));
+        Inc(D);
+      End
+      Else
+        IfsVols[D].Blk := -1;
+    End;
 End;
 
 Procedure Banner;
@@ -3830,6 +4920,17 @@ BEGIN
     If I >= 0 Then
       KLog('DOSCALLS.DLL chargee en ' + HexStr(Mods[I].Base, 8) + 'h (' +
            IntStr(Mods[I].NExp) + ' fonctions).');
+  End;
+  { systemes de fichiers installables (IFS=) et leurs volumes }
+  For I := 0 To NIfsLines - 1 Do LoadIfs(IfsLines[I]);
+  If NIfs > 0 Then
+  Begin
+    { partitions des disques durs, puis disque virtuel }
+    HdInit;
+    If RamDiskKb > 0 Then
+      If RamDiskNew(RamDiskKb) < 0 Then
+        KLog('SYS1719: disque virtuel de ' + IntStr(RamDiskKb) + ' Ko impossible.');
+    MountIfsVolumes;
   End;
   PutPStr(LongInt(@KCmdLine), 'OS2KRNL', 256);
   { processeur de commandes (PROTSHELL) : relance a sa fin }

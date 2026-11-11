@@ -1201,15 +1201,43 @@ Begin
   CurDirRel := S;
 End;
 
+{ Unites : C: (CD-ROM d'amorcage et disque virtuel) et les volumes des
+  systemes de fichiers installables (HPFS.IFS : D: et suivantes) }
+Function CurDrive : LongInt;
+Var S : String;
+Begin
+  KGetCurrentDirectoryA(260, LongInt(@Scratch2));
+  S := GetStr(LongInt(@Scratch2));
+  If (Length(S) >= 2) And (S[2] = ':') Then CurDrive := Ord(UpCase(S[1])) - 64
+  Else CurDrive := 3;
+End;
+
+{ Racine "X:\" de l'unite Disk (1 = A:, 0 = unite courante) }
+Function DriveRoot(Disk : LongInt) : String;
+Begin
+  If Disk = 0 Then Disk := CurDrive;
+  DriveRoot := Chr(64 + Disk) + ':\';
+End;
+
+Function DriveExists(Disk : LongInt) : Boolean;
+Var Spc, Bps, Free, Total : LongInt;
+Begin
+  If Disk = 0 Then Disk := CurDrive;
+  If Disk = 3 Then DriveExists := True
+  Else If (Disk < 4) Or (Disk > 26) Then DriveExists := False
+  Else DriveExists := KGetDiskFreeSpaceA(Z(DriveRoot(Disk), 0), LongInt(@Spc), LongInt(@Bps),
+                                         LongInt(@Free), LongInt(@Total)) <> 0;
+End;
+
 Function DosQueryCurrentDir(Disk, PBuf, PCb : LongInt) : LongInt;
 Var S : String;
 Begin
-  If (Disk <> 0) And (Disk <> 3) Then
+  If Not DriveExists(Disk) Then
   Begin
     DosQueryCurrentDir := ERROR_INVALID_DRIVE;
     Exit;
   End;
-  S := CurDirRel;
+  If (Disk = 0) Or (Disk = CurDrive) Then S := CurDirRel Else S := '';
   If PeekL(PCb) < Length(S) + 1 Then
   Begin
     PokeL(PCb, Length(S) + 1);
@@ -1225,11 +1253,14 @@ Begin
   DosQCurDir := DosQueryCurrentDir(Drive, PBuf, PCb);
 End;
 
-{ Unites : seule C: (CD-ROM d'amorcage et disque virtuel) existe }
 Function DosQueryCurrentDisk(PDisk, PLogical : LongInt) : LongInt;
+Var I, M : LongInt;
 Begin
-  PokeL(PDisk, 3);
-  PokeL(PLogical, 1 Shl 2);
+  M := 1 Shl 2;
+  For I := 4 To 26 Do
+    If DriveExists(I) Then M := M Or (1 Shl (I - 1));
+  PokeL(PDisk, CurDrive);
+  PokeL(PLogical, M);
   DosQueryCurrentDisk := NO_ERROR;
 End;
 
@@ -1240,7 +1271,13 @@ End;
 
 Function DosSetDefaultDisk(Disk : LongInt) : LongInt;
 Begin
-  If Disk = 3 Then DosSetDefaultDisk := NO_ERROR Else DosSetDefaultDisk := ERROR_INVALID_DRIVE;
+  If (Disk < 1) Or Not DriveExists(Disk) Then DosSetDefaultDisk := ERROR_INVALID_DRIVE
+  Else If Disk = CurDrive Then DosSetDefaultDisk := NO_ERROR
+  Else
+  Begin
+    KSetCurrentDirectoryA(Z(DriveRoot(Disk), 0));
+    DosSetDefaultDisk := NO_ERROR;
+  End;
 End;
 
 Function DosSelectDisk(Drive : LongInt) : LongInt;
@@ -2143,13 +2180,14 @@ End;
 
 { Informations sur le systeme de fichiers }
 Function DosQueryFSInfo(Disk, Level, PBuf, Cb : LongInt) : LongInt;
-Var Spc, Bps, Free, Total, Serial : LongInt; Lbl : String;
+Var Spc, Bps, Free, Total, Serial : LongInt; Lbl, Root : String;
 Begin
-  If (Disk <> 0) And (Disk <> 3) Then
+  If Not DriveExists(Disk) Then
   Begin
     DosQueryFSInfo := ERROR_INVALID_DRIVE;
     Exit;
   End;
+  Root := DriveRoot(Disk);
   If Level = 1 Then
   Begin
     If Cb < 18 Then
@@ -2157,7 +2195,7 @@ Begin
       DosQueryFSInfo := ERROR_BUFFER_OVERFLOW;
       Exit;
     End;
-    KGetDiskFreeSpaceA(Z('C:\', 0), LongInt(@Spc), LongInt(@Bps), LongInt(@Free), LongInt(@Total));
+    KGetDiskFreeSpaceA(Z(Root, 0), LongInt(@Spc), LongInt(@Bps), LongInt(@Free), LongInt(@Total));
     PokeL(PBuf, 0);
     PokeL(PBuf + 4, Spc);
     PokeL(PBuf + 8, Total);
@@ -2173,7 +2211,7 @@ Begin
       Exit;
     End;
     Serial := 0;
-    KGetVolumeInformationA(Z('C:\', 0), LongInt(@Scratch2), 64, LongInt(@Serial), 0, 0, 0, 0);
+    KGetVolumeInformationA(Z(Root, 0), LongInt(@Scratch2), 64, LongInt(@Serial), 0, 0, 0, 0);
     Lbl := Copy(GetStr(LongInt(@Scratch2)), 1, 11);
     { FSINFO : date et heure de creation (numero de serie), etiquette }
     PokeW(PBuf, Serial And $FFFF);
@@ -2191,16 +2229,65 @@ Begin
   DosQFSInfo := DosQueryFSInfo(Drive, Level, PBuf, Cb);
 End;
 
-Function DosSetFSInfo(Disk, Level, PBuf, Cb : LongInt) : LongInt;
+{ Nom du systeme de fichiers de l'unite (CDFS, HPFS...) }
+Function FsNameOf(Disk : LongInt) : String;
 Begin
-  If (Disk <> 0) And (Disk <> 3) Then DosSetFSInfo := ERROR_INVALID_DRIVE
+  PutStr(LongInt(@Scratch2), '', 2);
+  KGetVolumeInformationA(Z(DriveRoot(Disk), 0), 0, 0, 0, 0, 0, LongInt(@Scratch2), 32);
+  FsNameOf := GetStr(LongInt(@Scratch2));
+End;
+
+Function CallPtr5(F, A1, A2, A3, A4, A5 : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A5
+    push eax
+    mov eax,A4
+    push eax
+    mov eax,A3
+    push eax
+    mov eax,A2
+    push eax
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,20
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallPtr5 := R;
+End;
+
+{ Nom de volume : le CD-ROM est en lecture seule ; sur un volume IFS, le
+  pilote (FS_FSINFO de NOM.IFS) change le nom }
+Function DosSetFSInfo(Disk, Level, PBuf, Cb : LongInt) : LongInt;
+Var D, M, F : LongInt;
+Begin
+  D := Disk;
+  If D = 0 Then D := CurDrive;
+  If Not DriveExists(D) Then DosSetFSInfo := ERROR_INVALID_DRIVE
   Else If Level <> 2 Then DosSetFSInfo := ERROR_INVALID_LEVEL
-  Else DosSetFSInfo := ERROR_WRITE_PROTECT;    { CD-ROM }
+  Else If D = 3 Then DosSetFSInfo := ERROR_WRITE_PROTECT    { CD-ROM }
+  Else
+  Begin
+    M := KGetModuleHandleA(Z(FsNameOf(D) + '.IFS', 0));
+    F := 0;
+    If M <> 0 Then F := KGetProcAddress(M, Z('FS_FSINFO', 1));
+    If F = 0 Then DosSetFSInfo := ERROR_NOT_SUPPORTED
+    Else DosSetFSInfo := CallPtr5(F, 1, D - 1, PBuf, Cb, 2);
+  End;
 End;
 
 { FSQBUFFER2 : iType, cbName, cbFSDName, cbFSAData, szName, szFSDName }
 Function DosQueryFSAttach(PDev, Ordinal, Level, PBuf, PCb : LongInt) : LongInt;
-Var Nm : String;
+Var Nm, Fs : String; D, N, I : LongInt;
 Begin
   If (Level <> 1) And (Level <> 2) And (Level <> 3) Then
   Begin
@@ -2208,30 +2295,48 @@ Begin
     Exit;
   End;
   If PDev <> 0 Then Nm := UpStr(GetStr(PDev)) Else Nm := '';
-  If (Level = 2) And (Ordinal <> 1) Then
+  If Level = 2 Then
   Begin
-    DosQueryFSAttach := ERROR_NO_MORE_ITEMS;
-    Exit;
+    { enumeration : ordinal n = n-ieme unite existante }
+    D := 0;
+    N := 0;
+    For I := 3 To 26 Do
+      If (D = 0) And DriveExists(I) Then
+      Begin
+        Inc(N);
+        If N = Ordinal Then D := I;
+      End;
+    If D = 0 Then
+    Begin
+      DosQueryFSAttach := ERROR_NO_MORE_ITEMS;
+      Exit;
+    End;
+  End
+  Else
+  Begin
+    D := 0;
+    If (Length(Nm) = 2) And (Nm[2] = ':') Then D := Ord(Nm[1]) - 64;
+    If (D < 1) Or Not DriveExists(D) Then
+    Begin
+      DosQueryFSAttach := ERROR_INVALID_DRIVE;
+      Exit;
+    End;
   End;
-  If (Level <> 2) And (Nm <> 'C:') Then
+  Fs := FsNameOf(D);
+  If PeekL(PCb) < 8 + 3 + Length(Fs) + 1 + 1 Then
   Begin
-    DosQueryFSAttach := ERROR_INVALID_DRIVE;
-    Exit;
-  End;
-  If PeekL(PCb) < 8 + 3 + 5 + 1 Then
-  Begin
-    PokeL(PCb, 8 + 3 + 5 + 1);
+    PokeL(PCb, 8 + 3 + Length(Fs) + 1 + 1);
     DosQueryFSAttach := ERROR_BUFFER_OVERFLOW;
     Exit;
   End;
   PokeW(PBuf, 3);                { FSAT_LOCALDRV }
   PokeW(PBuf + 2, 2);
-  PokeW(PBuf + 4, 4);
+  PokeW(PBuf + 4, Length(Fs));
   PokeW(PBuf + 6, 0);
-  PutStr(PBuf + 8, 'C:', 3);
-  PutStr(PBuf + 11, 'CDFS', 5);
-  PokeB(PBuf + 16, 0);
-  PokeL(PCb, 17);
+  PutStr(PBuf + 8, Chr(64 + D) + ':', 3);
+  PutStr(PBuf + 11, Fs, Length(Fs) + 1);
+  PokeB(PBuf + 12 + Length(Fs), 0);
+  PokeL(PCb, 13 + Length(Fs));
   DosQueryFSAttach := NO_ERROR;
 End;
 

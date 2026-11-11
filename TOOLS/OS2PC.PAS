@@ -115,7 +115,7 @@ Const
   OS2_DLL_BASE  = $00C00000;  { base des DLL OS/2-0 (region 12-16 Mo) }
   { Liste des API (noms Win32) utilisees par le runtime : le noyau OS/2-0
     (-COS2KRNL) exporte un point d entree pour chacune (DOSCALLS.DLL). }
-  OS2_API_COUNT = 131;
+  OS2_API_COUNT = 132;
   OS2_API_NAMES : Array[1..OS2_API_COUNT] Of String[31] = (
     'Arc', 'Beep', 'BitBlt', 'CloseHandle', 'CreateCompatibleBitmap',
     'CreateCompatibleDC', 'CreateDirectoryA', 'CreateFileA', 'CreateFontA',
@@ -151,7 +151,8 @@ Const
     'TranslateMessage', 'UpdateWindow', 'WaitForSingleObject',
     'WriteConsoleA', 'WriteConsoleOutputAttribute', 'WriteFile',
     'LoadLibraryA', 'GetProcAddress', 'FreeLibrary', 'GetModuleFileNameA', 'GetVolumeInformationA',
-    'GlobalMemoryStatus', 'GetCurrentProcessId', 'GetCurrentThreadId', 'KrnGetParentPid', 'KrnModuleFromAddr');
+    'GlobalMemoryStatus', 'GetCurrentProcessId', 'GetCurrentThreadId', 'KrnGetParentPid', 'KrnModuleFromAddr',
+    'FSH_DoVolIO');
 
 Type
   TString = String;
@@ -5361,6 +5362,7 @@ Begin
   EmitRaw('FILE_IOERR   DD 0');            { derniere erreur I/O (IoResult)   }
   EmitRaw('STDIN_EOF    DD 0');            { 1 si EOF stdin (Ctrl+Z)          }
   EmitRaw('DIR_NAMEBUF  DB 260 DUP(0)');  { buffer repertoire (MAX_PATH)     }
+  EmitRaw('DIR_DRVBUF   DD 0');             { "X:" pour GetDir d une autre unite }
   EmitRaw('RAND_SEED    DD 12345');          { graine Random (LCG)             }
   EmitRaw('FP_TMP       DQ 0');              { buffer temporaire FPU 8 octets  }
   EmitBlankLine;
@@ -7822,6 +7824,12 @@ Var
   ExpProcs    : Array[0..1023] Of Integer;      { procedure Pascal }
   ExpProcNm   : Array[0..1023] Of String[63];   { nom Pascal (majuscules) }
   ExpIndex    : Array[0..1023] Of LongInt;      { ordinal (Index n), 0 = automatique }
+  { exportation de donnees : constante Const NOM = 'chaine' ou entier
+    (ex. FS_NAME et FS_ATTRIBUTE d un IFS) : 0 = procedure, 1 = entier
+    (DD), 2 = chaine ASCIIZ (emise en mots DD) }
+  ExpDataKind : Array[0..1023] Of Byte;
+  ExpDataInt  : Array[0..1023] Of LongInt;
+  ExpDataStr  : Array[0..1023] Of String[63];
   { importations declarees par External 'DLL' }
   DllImpCnt   : Integer;
   DllImpApi   : Array[0..511] Of String[63];
@@ -13376,14 +13384,32 @@ Begin
           Else
           Begin
             { --- Intel 80386 (Win32) : GetCurrentDirectoryA --- }
-            ParseExpr(PI);    { drive (ignore) }
+            ParseExpr(PI);    { drive : 0 = courante, 1 = A: ... }
             EPMatch(',');
             If Not EPAtEnd Then
             Begin Lbl := TokenPool[EP].Val; Inc(EP); End;
+            LblLoop := LabelGen;
+            LblDone := LabelGen;
+            EmitInstr('AND EAX,0FFh');
+            EmitInstr('TEST EAX,EAX');
+            EmitInstr('JZ ' + LblLoop);
+            { autre unite : GetFullPathNameA("X:") = son repertoire courant }
+            EmitInstr('ADD AL,64');
+            EmitInstr('MOV BYTE PTR [DIR_DRVBUF],AL');
+            EmitInstr('MOV BYTE PTR [DIR_DRVBUF+1],'':''');
+            EmitInstr('MOV BYTE PTR [DIR_DRVBUF+2],0');
+            EmitInstr('PUSH 0');
+            EmitInstr('PUSH OFFSET DIR_NAMEBUF');
+            EmitInstr('PUSH 260');
+            EmitInstr('PUSH OFFSET DIR_DRVBUF');
+            EmitInstr('CALL GetFullPathNameA');
+            EmitInstr('JMP ' + LblDone);
+            EmitLabel(LblLoop);
             { GetCurrentDirectoryA(260, DIR_NAMEBUF) }
             EmitInstr('PUSH OFFSET DIR_NAMEBUF');
             EmitInstr('PUSH 260');
             EmitInstr('CALL GetCurrentDirectoryA');
+            EmitLabel(LblDone);
             { Copier DIR_NAMEBUF -> variable chaine Pascal }
             EmitInstr('LEA ESI,[DIR_NAMEBUF]');
             GenLoadAddr(PI, Lbl);
@@ -41830,6 +41856,7 @@ Begin
   BcDefineDataLabel('FILE_IOERR');  BcDataD(0);
   BcDefineDataLabel('STDIN_EOF');    BcDataD(0);
   BcDefineDataLabel('DIR_NAMEBUF');   For I := 1 To 260 Do BcDataB(0);
+  BcDefineDataLabel('DIR_DRVBUF');    BcDataD(0);
   BcDefineDataLabel('RAND_SEED');   BcDataD(12345);
   BcDefineDataLabel('FP_TMP');      BcDataD(0); BcDataD(0); { 8 bytes }
 
@@ -58090,12 +58117,35 @@ End;
 { Thunks d exportation d une bibliotheque : _TPE_nom (_System) ->  }
 { procedure Pascal                                                 }
 Procedure EmitOs2LibExports;
-Var E, PI, K, N : Integer;
+Var E, PI, K, N : Integer; V : LongInt;
 Begin
   EmitBlankLine;
   EmitComment('=== Exportations de la bibliotheque ' + LibName + ' (_System) ===');
   For E := 0 To ExpCount - 1 Do
   Begin
+    If ExpDataKind[E] <> 0 Then
+    Begin
+      { donnee exportee : placee dans la section de code (lecture seule) }
+      EmitLabel('_TPE_' + ExpNames[E]);
+      If ExpDataKind[E] = 1 Then EmitInstr('DD ' + IntToStr_(ExpDataInt[E]))
+      Else
+      Begin
+        { chaine ASCIIZ, par mots de 4 octets (DD : petit-boutiste) }
+        K := 1;
+        While K <= Length(ExpDataStr[E]) + 1 Do
+        Begin
+          V := 0;
+          For N := 3 DownTo 0 Do
+          Begin
+            V := V Shl 8;
+            If K + N <= Length(ExpDataStr[E]) Then V := V Or Ord(ExpDataStr[E][K + N]);
+          End;
+          EmitInstr('DD ' + IntToStr_(V));
+          K := K + 4;
+        End;
+      End;
+      Continue;
+    End;
     PI := ExpProcs[E];
     N := ProcTab[PI].ParamCount;
     For K := 0 To N - 1 Do
@@ -58150,6 +58200,7 @@ Begin
           ExpProcNm[ExpCount] := StrUpperCase(Nm);    { resolu apres ParseProcDecls }
           ExpNames[ExpCount] := Nm;                    { nom exporte (casse d origine) }
           ExpIndex[ExpCount] := 0;
+          ExpDataKind[ExpCount] := 0;
           { suffixes Name 'externe' et Index n (ordinal), dans un ordre quelconque }
           While J + 2 < TokenCount Do
           Begin
@@ -58185,6 +58236,30 @@ Begin
     End;
     Inc(I);
   End;
+  { constantes exportees comme donnees : NOM = 'chaine' ; ou NOM = entier ; }
+  For J := 0 To ExpCount - 1 Do
+    For I := 0 To TokenCount - 4 Do
+      If ((TokenPool[I].Kind = TK_IDENT) Or (TokenPool[I].Kind = TK_KEYWORD)) And
+         (StrUpperCase(TokenPool[I].Val) = ExpProcNm[J]) And
+         (TokenPool[I + 1].Kind In [TK_OP, TK_PUNCT]) And (TokenPool[I + 1].Val = '=') And
+         (TokenPool[I + 3].Kind = TK_PUNCT) And (TokenPool[I + 3].Val = ';') Then
+      Begin
+        If TokenPool[I + 2].Kind = TK_INTEGER Then
+        Begin
+          ExpDataKind[J] := 1;
+          ExpDataInt[J] := TokenPool[I + 2].IntVal;
+        End
+        Else If TokenPool[I + 2].Kind = TK_STRING Then
+        Begin
+          ExpDataKind[J] := 2;
+          ExpDataStr[J] := TokenPool[I + 2].Val;
+        End
+        Else If TokenPool[I + 2].Kind = TK_CHAR Then
+        Begin
+          ExpDataKind[J] := 2;
+          ExpDataStr[J] := Chr(TokenPool[I + 2].IntVal);
+        End;
+      End;
 End;
 
 { Apres ParseProcDecls : retrouver la procedure de chaque exportation }
@@ -58198,7 +58273,8 @@ Begin
       If (ProcTab[PI].Name = ExpProcNm[E]) And Not ProcTab[PI].IsForward And
          Not ProcTab[PI].IsExternal Then
         ExpProcs[E] := PI;
-    If ExpProcs[E] < 0 Then
+    If ExpProcs[E] >= 0 Then ExpDataKind[E] := 0;
+    If (ExpProcs[E] < 0) And (ExpDataKind[E] = 0) Then
       FatalError('exports : procedure introuvable : ' + ExpNames[E]);
   End;
 End;
