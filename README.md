@@ -328,7 +328,22 @@ Le fichier <b>DLL/QUECALLS.PAS</b> est la bibliothèque OS/2 <b>QUECALLS.DLL</b>
 
 Le programme <b>DLL/TESTQUE.PAS</b> vérifie ces fonctions (31 vérifications, avec un écrivain d'un autre processus et la file de fin d'une session).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque SPOOLCP.DLL</h3>
+
+Le fichier <b>DLL/SPOOLCP.PAS</b> est la bibliothèque OS/2 <b>SPOOLCP.DLL</b>, le commutateur de polices des imprimantes (liée à 00EA0000h), avec ses 5 fonctions et leurs ordinaux d'origine. Pour chaque imprimante (PRN, LPT1 à LPT3), elle connaît les polices résidentes et celles d'un fichier de polices, et pour chaque fichier ouvert vers l'imprimante (handle du port ou fichier de spoule) la page de codes et la police actives. Activer une police écrit sur ce handle la séquence de commande qui la choisit, précédée la première fois des données à télécharger dans l'imprimante.
+
+<table>
+	<tr><th>Fonction</th><th>Ordinal</th><th>Description</th></tr>
+	<tr><td>DosPFSCloseUser</td><td>1</td><td>Le fichier est fermé : sa page de codes et sa police actives sont oubliées.</td></tr>
+	<tr><td>DosPFSQueryAct</td><td>2</td><td>Page de codes et police actives d'un fichier.</td></tr>
+	<tr><td>DosPFSInit</td><td>3</td><td>Installer le commutateur d'une imprimante : polices résidentes (HWFONTS) et fichier de polices.</td></tr>
+	<tr><td>DosPFSActivate</td><td>4</td><td>Activer une page de codes et une police (téléchargement, puis séquence de choix).</td></tr>
+	<tr><td>DosPFSVerifyFont</td><td>5</td><td>La page de codes et la police sont-elles disponibles ?</td></tr>
+</table>
+
+Le fichier de polices est un fichier texte propre à OS/2-0 (lignes TYPE, FONT et LOAD, octets en hexadécimal), et non le format .DCP d'IBM. Le programme <b>DLL/TESTPFS.PAS</b> vérifie ces fonctions (26 vérifications ; avec QEMU, <code>-parallel file:</code> recueille les séquences envoyées à LPT1).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>

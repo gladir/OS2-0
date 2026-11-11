@@ -5,16 +5,17 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
               FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
               KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
-              SESMGR.DLL, QUECALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE,
-              TESTHPFS.EXE, TESTVIO.EXE (et TESTVIOR.DLL), TESTMOU.EXE,
-              TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE,
-              TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE et les commandes du
-              depot compilees avec OS2PC (-COS2).
+              SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, CMD.EXE, TESTDOS.EXE,
+              TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et TESTVIOR.DLL),
+              TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE,
+              TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE,
+              TESTPFS.EXE et les commandes du depot compilees avec
+              OS2PC (-COS2).
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
-              NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL et CONFIG.SYS (copies
-              faites par KERNEL\BUILD.sh).
+              NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL et
+              CONFIG.SYS (copies faites par KERNEL\BUILD.sh).
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
          (VirtualBox, Bochs ou un vrai PC : graver ou monter l'ISO ;
@@ -58,6 +59,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTSES.PAS                     -> TESTSES.EXE (essai de SESMGR.DLL)
   OS2PC DLL\QUECALLS.PAS                    -> QUECALLS.DLL (files d'attente)
   OS2PC DLL\TESTQUE.PAS                     -> TESTQUE.EXE (essai de QUECALLS.DLL)
+  OS2PC DLL\SPOOLCP.PAS                     -> SPOOLCP.DLL (polices des imprimantes)
+  OS2PC DLL\TESTPFS.PAS                     -> TESTPFS.EXE (essai de SPOOLCP.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -95,7 +98,7 @@ Carte memoire
                      00CB0000h, FKA.DLL a 00D00000h, NLS.DLL a
                      00D40000h, MSG.DLL a 00D80000h, NAMPIPES.DLL a
                      00DB0000h, HPFS.IFS a 00E00000h, QUECALLS.DLL a
-                     00E70000h, VIOCALLS.DLL a
+                     00E70000h, SPOOLCP.DLL a 00EA0000h, VIOCALLS.DLL a
                      00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
                      00F80000h, SESMGR.DLL a 00FA0000h : directive
                      {$IMAGEBASE} d'OS2PC)
@@ -253,6 +256,19 @@ pour y ecrire. Ordre FIFO, LIFO ou par priorites (0 a 15) ; DosPeekQueue
 rend un code d'element ; les donnees ne sont pas copiees (memoire
 partagee entre processus). Une lecture avec attente d'une file vide rend
 ERROR_QUE_EMPTY (un processus a la fois).
+
+SPOOLCP.DLL
+-----------
+Les 5 fonctions du commutateur de polices des imprimantes (1
+DosPFSCloseUser, 2 DosPFSQueryAct, 3 DosPFSInit, 4 DosPFSActivate, 5
+DosPFSVerifyFont). DosPFSInit installe, pour PRN ou LPT1 a LPT3, les
+polices residentes et un fichier de polices ; DosPFSActivate ecrit sur
+le handle donne (port ou fichier de spoule) les donnees a telecharger
+(la premiere fois) et la sequence qui choisit la police. Fichier de
+polices (texte, format d'OS/2-0, pas le format .DCP d'IBM) :
+  TYPE 4201                     type d'imprimante (facultatif)
+  FONT 850 0 1B 37              sequence de choix de la police 0 de 850
+  LOAD 850 1 1B 3D ...          donnees a telecharger avant le choix
 
 Imprimante
 ----------
