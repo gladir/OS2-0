@@ -3,12 +3,14 @@ IMAGE - CD-ROM amorcable de OS/2-0
 
 OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
-              FKA.DLL, HPFS.IFS, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE,
-              TESTHPFS.EXE et les commandes du depot compilees avec
-              OS2PC (-COS2).
+              FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, CMD.EXE,
+              TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
+              TESTVIOR.DLL), TESTMOU.EXE et les commandes du depot
+              compilees avec OS2PC (-COS2).
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
-              DOSCALLS.DLL, FKA.DLL, HPFS.IFS et CONFIG.SYS (copies
-              faites par KERNEL\BUILD.sh).
+              DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
+              MOUCALLS.DLL et CONFIG.SYS (copies faites par
+              KERNEL\BUILD.sh).
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
          (VirtualBox, Bochs ou un vrai PC : graver ou monter l'ISO ;
@@ -33,6 +35,11 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTFKA.PAS                     -> TESTFKA.EXE (essai de FKA.DLL)
   OS2PC DLL\HPFS.PAS HPFS.IFS               -> HPFS.IFS (systeme de fichiers HPFS)
   OS2PC DLL\TESTHPFS.PAS                    -> TESTHPFS.EXE (essai de HPFS.IFS)
+  OS2PC DLL\VIOCALLS.PAS                    -> VIOCALLS.DLL (sous-systeme video VIO)
+  OS2PC DLL\TESTVIOR.PAS                    -> TESTVIOR.DLL (remplacement VIO d'essai)
+  OS2PC DLL\TESTVIO.PAS                     -> TESTVIO.EXE (essai de VIOCALLS.DLL)
+  OS2PC DLL\MOUCALLS.PAS                    -> MOUCALLS.DLL (sous-systeme souris)
+  OS2PC DLL\TESTMOU.PAS                     -> TESTMOU.EXE (essai de MOUCALLS.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -45,7 +52,8 @@ Demarrage
    carte memoire (E820h/E801h/88h), active A20, installe une GDT plate et
    passe en mode protege 32 bits.
 4. OS2KRNL initialise la console, l'IDT, le PIC, la minuterie (100 Hz),
-   le clavier, le tas, la pagination et le pilote ATAPI, lit CONFIG.SYS,
+   le clavier, la souris PS/2 (IRQ 12), le tas, la pagination et le
+   pilote ATAPI, lit CONFIG.SYS,
    charge DOSCALLS.DLL, puis les pilotes IFS (IFS=) : il cherche les
    disques durs IDE, cree le disque virtuel (/RAMDISK) et monte les
    volumes reconnus (D:, E:...). Il lance enfin le processeur de
@@ -65,8 +73,9 @@ Carte memoire
   fin de l'image..4 Mo tas du noyau
   00400000h-007FFFFFh fenetre du processus courant (pagination)
   00C00000h-00FFFFFFh DLL partagees (DOSCALLS.DLL a 00C00000h, FKA.DLL
-                     a 00D00000h, HPFS.IFS a 00E00000h : directive
-                     {$IMAGEBASE} d'OS2PC)
+                     a 00D00000h, HPFS.IFS a 00E00000h, VIOCALLS.DLL a
+                     00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
+                     00F80000h : directive {$IMAGEBASE} d'OS2PC)
   01000000h et plus  memoire physique des processus (image + pile)
   haut de la memoire disque virtuel HPFS (/RAMDISK:n Ko)
 
@@ -108,6 +117,25 @@ d'unite, 3 = D:) ; HPFS.IFS lit et ecrit les secteurs par le service
 FSH_DOVOLIO du noyau. Les noms longs (254 caracteres) gardent leur casse
 et se comparent sans en tenir compte. TESTHPFS [unite] [GARDER] verifie
 les 43 points d'entree du pilote.
+
+VIOCALLS.DLL
+------------
+Les 76 fonctions Vio* (ordinaux d'origine ; alias VioScrollRi,
+VioSetCursorPos et VioScrollLe) ecrivent directement dans l'ecran
+(000B8000h) et programment le VGA par ses ports (les programmes et les
+DLL s'executent en anneau 0) ; le curseur et l'attribut sont ceux de la
+console du noyau. VioWrtTty interprete les sequences ANSI. Le handle
+hvio 0 designe l'ecran, un handle de VioCreatePS un espace AVIO. Seul le
+mode texte 80 x 25 est gere ; VioPrtSc imprime dans C:\PRTSC.TXT.
+
+MOUCALLS.DLL
+------------
+Les 29 fonctions Mou* (ordinaux 1 a 30, sans 28). Le noyau recoit les
+paquets de la souris PS/2 (IRQ 12) ; MOUCALLS.DLL en fait des evenements
+(file de 64, masque, echelle, seuils), tient la position en lignes et
+colonnes de l'ecran texte et dessine le pointeur (masques ET et OU
+exclusif de la cellule, apres MouDrawPtr). Avec QEMU, la souris se
+pilote aussi par le moniteur (mouse_move, mouse_button).
 
 Limites
 -------

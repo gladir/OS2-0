@@ -9,9 +9,10 @@
 #        OS2PC -COS2KRNL OS2KRNL.PAS   -> OS2KRNL  (noyau 32 bits)
 #  3. compile CMD.PAS et les commandes de la racine du depot (OS2PC -COS2) ;
 #  4. compile les bibliotheques DLL/DOSCALLS.PAS (DOSCALLS.DLL),
-#     DLL/FKA.PAS (FKA.DLL) et DLL/HPFS.PAS (HPFS.IFS, systeme de
-#     fichiers installable) et leurs programmes d'essai TESTDOS, TESTFKA
-#     et TESTHPFS ;
+#     DLL/FKA.PAS (FKA.DLL), DLL/HPFS.PAS (HPFS.IFS, systeme de
+#     fichiers installable), DLL/VIOCALLS.PAS (VIOCALLS.DLL, video) et
+#     DLL/MOUCALLS.PAS (MOUCALLS.DLL, souris) et leurs programmes d'essai
+#     TESTDOS, TESTFKA, TESTHPFS, TESTVIO et TESTMOU ;
 #  5. fabrique le CD-ROM : MAKEISO OS2CD.ISO /BOOT:OS2BOOT ...
 #
 # Variables : FPC (compilateur Free Pascal, defaut fpc), W (dossier de
@@ -43,16 +44,21 @@ for F in "$ROOT"/*.PAS; do
     rm -f "$W/cd/$B.EXE"
   fi
 done
-echo "== Bibliotheques DOSCALLS.DLL, FKA.DLL et HPFS.IFS (OS2PC, Library)"
+echo "== Bibliotheques DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL et MOUCALLS.DLL (OS2PC, Library)"
 "$W/os2pc" -Q "$ROOT/DLL/DOSCALLS.PAS" "$W/cd/DOSCALLS.DLL"
 "$W/os2pc" -Q "$ROOT/DLL/TESTDOS.PAS" "$W/cd/TESTDOS.EXE"
 "$W/os2pc" -Q "$ROOT/DLL/FKA.PAS" "$W/cd/FKA.DLL"
 "$W/os2pc" -Q "$ROOT/DLL/TESTFKA.PAS" "$W/cd/TESTFKA.EXE"
 "$W/os2pc" -Q "$ROOT/DLL/HPFS.PAS" "$W/cd/HPFS.IFS"
 "$W/os2pc" -Q "$ROOT/DLL/TESTHPFS.PAS" "$W/cd/TESTHPFS.EXE"
+"$W/os2pc" -Q "$ROOT/DLL/VIOCALLS.PAS" "$W/cd/VIOCALLS.DLL"
+"$W/os2pc" -Q "$ROOT/DLL/TESTVIOR.PAS" "$W/cd/TESTVIOR.DLL"
+"$W/os2pc" -Q "$ROOT/DLL/TESTVIO.PAS" "$W/cd/TESTVIO.EXE"
+"$W/os2pc" -Q "$ROOT/DLL/MOUCALLS.PAS" "$W/cd/MOUCALLS.DLL"
+"$W/os2pc" -Q "$ROOT/DLL/TESTMOU.PAS" "$W/cd/TESTMOU.EXE"
 cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 
 echo "== CD-ROM amorcable"
 "$W/makeiso" "$ROOT/IMAGE/OS2CD.ISO" /BOOT:"$W/cd/OS2BOOT" /LABEL:OS2_0 "$W/cd/*"
-for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE DOSCALLS.DLL FKA.DLL HPFS.IFS; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
+for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE DOSCALLS.DLL FKA.DLL HPFS.IFS VIOCALLS.DLL MOUCALLS.DLL; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
 echo "Termine : $ROOT/IMAGE/OS2CD.ISO"

@@ -22,6 +22,7 @@ Program OS2KRNL;
     Partie 4  - Processeur : GDT, IDT, exceptions (ecran TRAP), PIC
     Partie 5  - Minuterie (PIT), horloge temps reel (CMOS), haut-parleur
     Partie 6  - Clavier (IRQ 1) et editeur de ligne de commande
+    Partie 6b - Souris PS/2 (IRQ 12), lue par MOUCALLS.DLL
     Partie 7  - Memoire : tas du noyau et memoire physique
     Partie 8  - Pagination : fenetre des processus (00400000h-007FFFFFh)
     Partie 9  - Pilote ATAPI (CD-ROM IDE, mode PIO)
@@ -83,7 +84,7 @@ Const
   PhysProcBase  = $01000000;   { memoire physique des processus (>= 16 Mo) }
   DllBase       = $00C00000;   { region des DLL (12 Mo - 16 Mo), partagee }
   DllTop        = $01000000;
-  MaxMods       = 8;
+  MaxMods       = 16;
 
   { Tas du noyau }
   HeapMagicUsed = $55534544;   { 'DESU' }
@@ -995,6 +996,164 @@ Begin
     History[HistCount] := S;
     Inc(HistCount);
   End;
+End;
+
+{ ==================================================================== }
+{ Partie 6b - Souris PS/2 (port auxiliaire du 8042, IRQ 12)            }
+{ ==================================================================== }
+{ Le pilote assemble les paquets de 3 octets de la souris (boutons,
+  deplacements X et Y en mickeys) dans une file ; MOUCALLS.DLL les lit
+  par KrnMouRead et gere position, evenements et pointeur. }
+
+Const
+  MouQSize = 128;
+
+Var
+  MouOk      : Boolean;
+  MouPk      : Array[0..2] Of LongInt;
+  MouIdx     : LongInt;
+  MouQDx, MouQDy, MouQBtn, MouQTime : Array[0..MouQSize - 1] Of LongInt;
+  MouHead, MouTail, MouLost : LongInt;
+
+Procedure IrqMouse; Interrupt;
+Var B, N, Dx, Dy : LongInt;
+Begin
+  If (Port[$64] And $21) = $21 Then
+  Begin
+    B := Port[$60];
+    { premier octet : bit 3 toujours a 1 (resynchronisation) }
+    If (MouIdx = 0) And ((B And 8) = 0) Then
+    Else
+    Begin
+      MouPk[MouIdx] := B;
+      Inc(MouIdx);
+      If MouIdx = 3 Then
+      Begin
+        MouIdx := 0;
+        Dx := MouPk[1];
+        If (MouPk[0] And $10) <> 0 Then Dx := Dx - 256;
+        Dy := MouPk[2];
+        If (MouPk[0] And $20) <> 0 Then Dy := Dy - 256;
+        If (MouPk[0] And $C0) <> 0 Then
+        Begin
+          Dx := 0; Dy := 0;                 { debordement : paquet ignore }
+        End;
+        N := (MouTail + 1) Mod MouQSize;
+        If N = MouHead Then Inc(MouLost)
+        Else
+        Begin
+          MouQDx[MouTail] := Dx;
+          MouQDy[MouTail] := -Dy;           { Y vers le bas, comme l'ecran }
+          MouQBtn[MouTail] := MouPk[0] And 7;
+          MouQTime[MouTail] := Ticks * 10;
+          MouTail := N;
+        End;
+      End;
+    End;
+  End;
+  Port[$A0] := $20;
+  Port[$20] := $20;
+End;
+
+{ Attendre que le 8042 accepte une ecriture }
+Function MouWaitIn : Boolean;
+Var N : LongInt;
+Begin
+  N := 0;
+  While ((Port[$64] And 2) <> 0) And (N < 100000) Do Inc(N);
+  MouWaitIn := N < 100000;
+End;
+
+{ Attendre une donnee du 8042 ; rend -1 si rien }
+Function MouReadByte : LongInt;
+Var N, R : LongInt;
+Begin
+  N := 0;
+  R := -1;
+  While (R < 0) And (N < 200000) Do
+  Begin
+    If (Port[$64] And 1) <> 0 Then R := Port[$60];
+    Inc(N);
+  End;
+  MouReadByte := R;
+End;
+
+{ Commande a la souris (D4h puis l'octet) ; vrai si FAh (ACK) }
+Function MouCmd(B : LongInt) : Boolean;
+Begin
+  MouWaitIn;
+  Port[$64] := $D4;
+  MouWaitIn;
+  Port[$60] := B;
+  MouCmd := MouReadByte = $FA;
+End;
+
+Procedure InitMouse;
+Var Cb, X : LongInt;
+Begin
+  MouOk := False;
+  MouIdx := 0; MouHead := 0; MouTail := 0; MouLost := 0;
+  asm
+    cli
+  end;
+  MouWaitIn;
+  Port[$64] := $A8;                       { activer le port auxiliaire }
+  MouWaitIn;
+  Port[$64] := $20;                       { octet de commande }
+  Cb := MouReadByte;
+  If Cb >= 0 Then
+  Begin
+    { IRQ 12 coupee pendant la configuration }
+    MouWaitIn;
+    Port[$64] := $60;
+    MouWaitIn;
+    Port[$60] := (Cb And Not $22) And $FF;
+    If MouCmd($F6) Then                   { valeurs par defaut }
+      If MouCmd($F4) Then                 { envoi des paquets }
+        MouOk := True;
+    X := MouReadByte;
+    If MouOk Then Cb := (Cb Or 2) And Not $20 Else Cb := Cb And Not 2;
+    MouWaitIn;
+    Port[$64] := $60;
+    MouWaitIn;
+    Port[$60] := Cb And $FF;
+  End;
+  If MouOk Then
+  Begin
+    SetGate($2C, LongInt(@IrqMouse));
+    Port[$A1] := Port[$A1] And Not $10;   { IRQ 12 }
+  End;
+  asm
+    sti
+  end;
+End;
+
+{ KrnMouRead(P) : paquet suivant de la souris dans P (deplacement X,
+  deplacement Y vers le bas en mickeys, boutons : bit 0 gauche, bit 1
+  droit, bit 2 milieu, instant en ms) ; rend 1, ou 0 si la file est vide }
+Function KrnMouRead(P : LongInt) : LongInt;
+Begin
+  KrnMouRead := 0;
+  If MouHead <> MouTail Then
+  Begin
+    MemL[0:P] := MouQDx[MouHead];
+    MemL[0:P + 4] := MouQDy[MouHead];
+    MemL[0:P + 8] := MouQBtn[MouHead];
+    MemL[0:P + 12] := MouQTime[MouHead];
+    MouHead := (MouHead + 1) Mod MouQSize;
+    KrnMouRead := 1;
+  End;
+End;
+
+{ KrnMouInfo(P) : souris presente (1/0), nombre de boutons, paquets
+  perdus, resolution (mickeys par cm) ; rend 1 si la souris est presente }
+Function KrnMouInfo(P : LongInt) : LongInt;
+Begin
+  If MouOk Then MemL[0:P] := 1 Else MemL[0:P] := 0;
+  MemL[0:P + 4] := 3;
+  MemL[0:P + 8] := MouLost;
+  MemL[0:P + 12] := 40;
+  If MouOk Then KrnMouInfo := 1 Else KrnMouInfo := 0;
 End;
 
 { ==================================================================== }
@@ -4879,6 +5038,7 @@ BEGIN
   asm
     sti
   end;
+  InitMouse;
   { memoire : tas du noyau entre la fin de l'image et 4 Mo }
   KBase := MemL[0:BootInfo + $1C];
   KSize := MemL[0:BootInfo + $20];
