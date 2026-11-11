@@ -112,9 +112,10 @@ Const
   OS2_BOOT_SEG = $07C0;
   OS2_LDR_SEG  = $2000;
   OS2_KRNL_BASE = $00100000;  { base de l image PE du noyau (1 Mo) }
+  OS2_DLL_BASE  = $00C00000;  { base des DLL OS/2-0 (region 12-16 Mo) }
   { Liste des API (noms Win32) utilisees par le runtime : le noyau OS/2-0
     (-COS2KRNL) exporte un point d entree pour chacune (DOSCALLS.DLL). }
-  OS2_API_COUNT = 121;
+  OS2_API_COUNT = 131;
   OS2_API_NAMES : Array[1..OS2_API_COUNT] Of String[31] = (
     'Arc', 'Beep', 'BitBlt', 'CloseHandle', 'CreateCompatibleBitmap',
     'CreateCompatibleDC', 'CreateDirectoryA', 'CreateFileA', 'CreateFontA',
@@ -148,7 +149,9 @@ Const
     'SetTextColor', 'SetUnhandledExceptionFilter', 'ShowCursor',
     'ShowWindow', 'Sleep', 'sprintf', 'strtod', 'TextOutA',
     'TranslateMessage', 'UpdateWindow', 'WaitForSingleObject',
-    'WriteConsoleA', 'WriteConsoleOutputAttribute', 'WriteFile');
+    'WriteConsoleA', 'WriteConsoleOutputAttribute', 'WriteFile',
+    'LoadLibraryA', 'GetProcAddress', 'FreeLibrary', 'GetModuleFileNameA', 'GetVolumeInformationA',
+    'GlobalMemoryStatus', 'GetCurrentProcessId', 'GetCurrentThreadId', 'KrnGetParentPid', 'KrnModuleFromAddr');
 
 Type
   TString = String;
@@ -219,6 +222,7 @@ Var
   { OS/2 : noyau (-COS2KRNL) : assembleur natif 80386 (pas de traduction
     8086 -> 80386 ni d emulation INT/IN/OUT), base de l image PE }
   AsmNative  : Boolean;
+  BcHashReady : Boolean;      { tables de hachage des labels a initialiser }
   PEImgBase  : LongInt;
   AsmBlockSeq: LongInt;
 
@@ -7783,6 +7787,20 @@ Var
   ProcCount : Integer;
   { OS/2 noyau : procedure declaree Interrupt (PUSHAD ... POPAD/IRETD) }
   ProcIntr  : Array[0..MAX_PROC - 1] Of Boolean;
+  { OS/2 : procedure External 'DLL' [Name 'nom'] : importation d une DLL }
+  ProcExtDll  : Array[0..MAX_PROC - 1] Of String[63];
+  ProcExtName : Array[0..MAX_PROC - 1] Of String[63];
+  { OS/2 : bibliotheque (Library ... exports ...) }
+  IsLibrary   : Boolean;
+  LibName     : TString;
+  ExpCount    : Integer;
+  ExpNames    : Array[0..1023] Of String[63];   { nom exporte (casse d origine) }
+  ExpProcs    : Array[0..1023] Of Integer;      { procedure Pascal }
+  ExpProcNm   : Array[0..1023] Of String[63];   { nom Pascal (majuscules) }
+  { importations declarees par External 'DLL' }
+  DllImpCnt   : Integer;
+  DllImpApi   : Array[0..511] Of String[63];
+  DllImpDll   : Array[0..511] Of String[63];
 
   { Variables de contexte pour la compilation }
   CurFrameOffset : Integer;   { offset courant dans le cadre local    }
@@ -8773,6 +8791,34 @@ Begin
             (StrUpperCase(TokenPool[I].Val) = 'INLINE')) Then
         Begin
           ProcTab[PI].IsExternal := True;
+          { OS/2 : External 'DLL' [Name 'nom'] [Index n] }
+          ProcExtDll[PI] := ''; ProcExtName[PI] := '';
+          If (StrUpperCase(TokenPool[I].Val) = 'EXTERNAL') And (I + 1 < TokenCount) And
+             (TokenPool[I + 1].Kind In [TK_STRING, TK_CHAR, TK_IDENT]) Then
+          Begin
+            If TokenPool[I + 1].Kind = TK_CHAR Then ProcExtDll[PI] := Chr(TokenPool[I + 1].IntVal)
+            Else ProcExtDll[PI] := TokenPool[I + 1].Val;
+            ProcExtDll[PI] := StrUpperCase(ProcExtDll[PI]);
+            If Pos('.', ProcExtDll[PI]) = 0 Then ProcExtDll[PI] := ProcExtDll[PI] + '.DLL';
+            { nom d importation : Name 'x', sinon le nom declare (casse d origine) }
+            J := I;
+            While (J > 0) And Not ((TokenPool[J].Kind = TK_KEYWORD) And
+                  ((StrUpperCase(TokenPool[J].Val) = 'PROCEDURE') Or
+                   (StrUpperCase(TokenPool[J].Val) = 'FUNCTION'))) Do Dec(J);
+            ProcExtName[PI] := TokenPool[J + 1].Val;
+            If (I + 3 < TokenCount) And (StrUpperCase(TokenPool[I + 2].Val) = 'NAME') And
+               (TokenPool[I + 3].Kind In [TK_STRING, TK_CHAR]) Then
+            Begin
+              If TokenPool[I + 3].Kind = TK_CHAR Then ProcExtName[PI] := Chr(TokenPool[I + 3].IntVal)
+              Else ProcExtName[PI] := TokenPool[I + 3].Val;
+            End;
+            If DllImpCnt < 512 Then
+            Begin
+              DllImpApi[DllImpCnt] := ProcExtName[PI];
+              DllImpDll[DllImpCnt] := ProcExtDll[PI];
+              Inc(DllImpCnt);
+            End;
+          End;
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
                      (TokenPool[I].Val = ';')) Do
@@ -28711,7 +28757,9 @@ Var
   Up      : TString;
   T       : TString;
 Begin
-  If AsmNative Then
+  { OS/2 : une instruction par ligne (noyau : asm natif ; programmes et
+    DLL -COS2 : asm 8086 traduit en 80386 comme TPCW32) }
+  If AsmNative Or (Opts.DestTarget = DEST_OS2) Then
   Begin
     ParseAsmBlockNative(PI);
     Exit;
@@ -28995,6 +29043,13 @@ Begin
       { Sortie Cray-1 : ERR (Error Exit) arrete le CPU. }
       EmitComment('Cray-1 ERR (halt CPU)');
       EmitInstr('ERR');
+    End
+    Else If IsLibrary Then
+    Begin
+      { DLL OS/2-0 : initialisation terminee, retour au chargeur (EAX=1) }
+      EmitInstr('CALL ' + TP_RT_PFX + 'OFLUSH');
+      EmitInstr('MOV EAX,1');
+      EmitEpilog;
     End
     Else
     Begin
@@ -37045,12 +37100,12 @@ Const
   PE_NUM_IMPORTS_OLD  = 7;
 
 { --- Constantes du mini-assembleur binaire --- }
-  BC_MAX_CODE   = 262144;  { 256 Ko de code machine max }
+  BC_MAX_CODE   = {$IFDEF FPC}1048576{$ELSE}262144{$ENDIF};  { code machine max (1 Mo avec FPC) }
   BC_MAX_DATA   = 4194304; { 4 Mo de donnees max       }
-  BC_MAX_LABEL  = 8192;    { labels de code max          }
-  BC_MAX_DLABEL = 8192;    { labels de donnees max       }
-  BC_MAX_FIXUP  = 32768;   { fixups max                  }
-  BC_MAX_IMP    = 256;     { imports API max             }
+  BC_MAX_LABEL  = {$IFDEF FPC}32768{$ELSE}8192{$ENDIF};    { labels de code max }
+  BC_MAX_DLABEL = {$IFDEF FPC}16384{$ELSE}8192{$ENDIF};    { labels de donnees max }
+  BC_MAX_FIXUP  = {$IFDEF FPC}131072{$ELSE}32768{$ENDIF};   { fixups max }
+  BC_MAX_IMP    = 1024;    { imports API max (OS2PC : DLL OS/2) }
 
   { Types de fixup }
   BC_FIX_REL32  = 0;       { CALL/JMP rel32 vers label code    }
@@ -37144,6 +37199,12 @@ Begin
     Else PEWrB(0);
 End;
 
+Procedure PEWrStrNoZ(S: TString);
+Var I: Integer;
+Begin
+  For I := 1 To Length(S) Do PEWrB(Byte(S[I]));
+End;
+
 Procedure PEWrStr(S: TString);
 Var I: Integer;
 Begin
@@ -37164,6 +37225,7 @@ Procedure BcInit;
 Begin
   BcCodeLen := 0; BcDataLen := 0; BcDFixCnt := 0;
   BcLabelCnt := 0; BcDLabelCnt := 0;
+  BcHashReady := False;
   BcFixupCnt := 0; BcImportCnt := 0;
   BcActive := False;
   FillChar(BcCode, SizeOf(BcCode), 0);
@@ -37248,10 +37310,66 @@ Begin
 End;
 
 { --- Gestion des labels de donnees --- }
+{ Tables de hachage des labels (OS2PC) : la premiere definition d un nom
+  reste celle trouvee, comme avec la recherche lineaire d origine. }
+Const
+  BC_HASH = 16384;
+Var
+  BcLblHead  : Array[0..BC_HASH - 1] Of LongInt;
+  BcLblNext  : Array[0..BC_MAX_LABEL - 1] Of LongInt;
+  BcDLblHead : Array[0..BC_HASH - 1] Of LongInt;
+  BcDLblNext : Array[0..BC_MAX_DLABEL - 1] Of LongInt;
+
+Function BcHashName(Const Nm: TString): LongInt;
+Var I: Integer; H: LongInt;
+Begin
+  H := 0;
+  For I := 1 To Length(Nm) Do H := ((H * 31) + Ord(Nm[I])) And $FFFFFF;
+  BcHashName := H Mod BC_HASH;
+End;
+
+Procedure BcHashResetCode;
+Var I: LongInt;
+Begin
+  For I := 0 To BC_HASH - 1 Do BcLblHead[I] := -1;
+End;
+
+Procedure BcHashResetData;
+Var I: LongInt;
+Begin
+  For I := 0 To BC_HASH - 1 Do BcDLblHead[I] := -1;
+End;
+
+Procedure BcHashCheck;
+Begin
+  If Not BcHashReady Then
+  Begin
+    BcHashResetCode;
+    BcHashResetData;
+    BcHashReady := True;
+  End;
+End;
+
+Function BcFindDataIdx(Const Nm: TString): LongInt;
+Var I: LongInt;
+Begin
+  BcHashCheck;
+  I := BcDLblHead[BcHashName(Nm)];
+  While (I >= 0) And (BcDLabels[I].Name <> Nm) Do I := BcDLblNext[I];
+  BcFindDataIdx := I;
+End;
+
 Procedure BcDefineDataLabel(Const Nm: TString);
+Var H: LongInt;
 Begin
   If BcDLabelCnt < BC_MAX_DLABEL Then
   Begin
+    If BcFindDataIdx(Nm) < 0 Then
+    Begin
+      H := BcHashName(Nm);
+      BcDLblNext[BcDLabelCnt] := BcDLblHead[H];
+      BcDLblHead[H] := BcDLabelCnt;
+    End;
     BcDLabels[BcDLabelCnt].Name := Nm;
     BcDLabels[BcDLabelCnt].Offset := BcDataLen;
     Inc(BcDLabelCnt);
@@ -37259,32 +37377,46 @@ Begin
 End;
 
 Function BcFindDataLabel(Const Nm: TString): LongInt;
-Var I: Integer;
+Var I: LongInt;
 Begin
-  BcFindDataLabel := -1;
-  For I := 0 To BcDLabelCnt - 1 Do
-    If BcDLabels[I].Name = Nm Then
-    Begin BcFindDataLabel := BcDLabels[I].Offset; Exit; End;
+  I := BcFindDataIdx(Nm);
+  If I >= 0 Then BcFindDataLabel := BcDLabels[I].Offset Else BcFindDataLabel := -1;
 End;
 
 { --- Gestion des labels de code --- }
+Function BcFindCodeIdx(Const Nm: TString): LongInt;
+Var I: LongInt;
+Begin
+  BcHashCheck;
+  I := BcLblHead[BcHashName(Nm)];
+  While (I >= 0) And (BcLabels[I].Name <> Nm) Do I := BcLblNext[I];
+  BcFindCodeIdx := I;
+End;
+
 Procedure BcDefineLabel(Const Nm: TString);
+Var H: LongInt;
 Begin
   If BcLabelCnt < BC_MAX_LABEL Then
   Begin
+    If BcFindCodeIdx(Nm) < 0 Then
+    Begin
+      H := BcHashName(Nm);
+      BcLblNext[BcLabelCnt] := BcLblHead[H];
+      BcLblHead[H] := BcLabelCnt;
+    End;
     BcLabels[BcLabelCnt].Name := Nm;
     BcLabels[BcLabelCnt].Offset := BcCodeLen;
     Inc(BcLabelCnt);
-  End;
+  End
+  Else
+    FatalError('trop de labels de code');
 End;
 
 Function BcFindLabel(Const Nm: TString): LongInt;
-Var I: Integer;
+Var I: LongInt;
 Begin
-  BcFindLabel := -1;
-  For I := 0 To BcLabelCnt - 1 Do
-    If BcLabels[I].Name = Nm Then
-    Begin BcFindLabel := BcLabels[I].Offset; Exit; End;
+  I := BcFindCodeIdx(Nm);
+  If I >= 0 Then BcFindLabel := BcLabels[I].Offset Else BcFindLabel := -1;
 End;
 
 { --- Gestion des fixups --- }
@@ -37311,10 +37443,30 @@ Begin
   BcNormalizeApi := S;
 End;
 
+{ Rang (1..) d une API de la couche du noyau OS/2-0, 0 sinon }
+Function BcOs2ApiIndex(Const U: TString): Integer;
+Var K: Integer;
+Begin
+  BcOs2ApiIndex := 0;
+  For K := 1 To OS2_API_COUNT Do
+    If StrUpperCase(OS2_API_NAMES[K]) = U Then
+    Begin
+      BcOs2ApiIndex := K;
+      Exit;
+    End;
+End;
+
 Function BcApiToDll(Const Api: TString): TString;
-Var U: TString;
+Var U: TString; DI: Integer;
 Begin
   U := StrUpperCase(Api);
+  { OS/2 : fonction declaree External 'DLL' }
+  For DI := 0 To DllImpCnt - 1 Do
+    If (StrUpperCase(DllImpApi[DI]) = U) And (BcOs2ApiIndex(U) = 0) Then
+    Begin
+      BcApiToDll := DllImpDll[DI];
+      Exit;
+    End;
   { OS/2-0 : toutes les API sont fournies par le noyau (DOSCALLS.DLL) }
   If (Opts.DestTarget = DEST_OS2) Or (Opts.DestTarget = DEST_OS2KRNL) Then
   Begin
@@ -37379,9 +37531,16 @@ Begin
 End;
 
 Function BcIsImport(Const Name: TString): Boolean;
-Var U: TString;
+Var U: TString; DI: Integer;
 Begin
   U := StrUpperCase(BcNormalizeApi(Name));
+  { OS/2 : fonctions declarees External 'DLL' }
+  For DI := 0 To DllImpCnt - 1 Do
+    If StrUpperCase(DllImpApi[DI]) = U Then
+    Begin
+      BcIsImport := True;
+      Exit;
+    End;
   BcIsImport := (U = 'EXITPROCESS') Or (U = 'GETSTDHANDLE') Or
     (U = 'SPRINTF') Or (U = 'STRTOD') Or
     (U = 'SETUNHANDLEDEXCEPTIONFILTER') Or (U = 'GETLASTERROR') Or (U = 'GETVERSION') Or
@@ -37443,7 +37602,12 @@ Begin
     (U = 'LSTRCPYA') Or (U = 'LSTRCATA') Or
     (U = 'LSTRCMPA') Or (U = 'LSTRCMPIA') Or
     (U = 'GETLASTERROR') Or
-    (U = 'MESSAGEBOXA');
+    (U = 'MESSAGEBOXA') Or
+    { couche de base du noyau OS/2-0 (modules, volume, processus) }
+    (U = 'LOADLIBRARYA') Or (U = 'GETPROCADDRESS') Or (U = 'FREELIBRARY') Or
+    (U = 'GETMODULEFILENAMEA') Or (U = 'GETVOLUMEINFORMATIONA') Or
+    (U = 'GLOBALMEMORYSTATUS') Or (U = 'GETCURRENTPROCESSID') Or
+    (U = 'GETCURRENTTHREADID') Or (U = 'KRNGETPARENTPID') Or (U = 'KRNMODULEFROMADDR');
 End;
 
 { --- Parseur d operandes x86 --- }
@@ -41477,6 +41641,7 @@ Procedure BcBuildData;
 Var I, J: Integer; S: TString;
 Begin
   BcDataLen := 0; BcDLabelCnt := 0; BcDFixCnt := 0;
+  BcHashCheck; BcHashResetData;
 
   If Is68kTarget Then
   Begin
@@ -44173,7 +44338,7 @@ End;
 Procedure WritePEFile(FileName: TString);
 Const
   MAX_DLL_PE = 8;
-  MAX_IMP_PER_DLL = 128;
+  MAX_IMP_PER_DLL = 1024;
 Type
   TDllGroup = Record
     DllName: TString;
@@ -44191,7 +44356,7 @@ Var
   { Import table layout offsets (within .idata section) }
   IdtSize, IltOfs, IatOfs, HntOfs, DnmOfs: LongInt;
   IltPerDll, IatPerDll: Array[0..MAX_DLL_PE-1] Of LongInt;
-  HntPerImp: Array[0..255] Of LongInt;
+  HntPerImp: Array[0..BC_MAX_IMP-1] Of LongInt;
   DnmPerDll: Array[0..MAX_DLL_PE-1] Of LongInt;
   IatVA: LongInt;
   CurOfs: LongInt;
@@ -44200,23 +44365,52 @@ Var
   Found: Boolean;
   ImpIdx: Integer;
   IdataVirtSize: LongInt;
-  IatSlotOfs: Array[0..255] Of LongInt;
+  IatSlotOfs: Array[0..BC_MAX_IMP-1] Of LongInt;
   FxOfs, ValIat, IATTotalSize, IdataFileBase, MainOfs: LongInt;
   Slot: LongInt;
   EntryPointRVA: LongInt;
   { OS/2-0 noyau : section .edata (exportations DOSCALLS.DLL) }
-  Krnl: Boolean;
+  Krnl, HasExp: Boolean;
+  ExpN: Integer;
+  ExpDll: TString;
   HdrSize, EdataRVA, EdataSize, EdataRawSize, EdataFileBase: LongInt;
-  ExpOrder: Array[0..BC_MAX_IMP-1] Of Integer;
-  ExpNameOfs: Array[0..BC_MAX_IMP-1] Of LongInt;
+  ExpOrder: Array[0..1023] Of Integer;
+  ExpNameOfs: Array[0..1023] Of LongInt;
   EatOfs, NptOfs, OrdOfs, ExpDllOfs, TmpI, ThunkOfs: LongInt;
 
   Function AlignUp(V, A: LongInt): LongInt;
   Begin AlignUp := ((V + A - 1) Div A) * A; End;
 
+  Function HexMap(V: LongInt): TString;
+  Const HX: String[16] = '0123456789ABCDEF';
+  Var R: TString; K: Integer;
+  Begin
+    R := '';
+    For K := 1 To 8 Do Begin R := HX[(V And 15) + 1] + R; V := V Shr 4; End;
+    HexMap := R;
+  End;
+
+  Function ExpNameOf(K: Integer): TString;
+  Begin
+    If Krnl Then ExpNameOf := BcImports[K].ApiName Else ExpNameOf := ExpNames[K];
+  End;
+
 Begin
   Krnl := (Opts.DestTarget = DEST_OS2KRNL);
-  If Krnl Then HdrSize := $400 Else HdrSize := $200;
+  HasExp := Krnl Or IsLibrary;
+  If HasExp Then HdrSize := $400 Else HdrSize := $200;
+  { exportations : couche API du noyau, ou procedures d une bibliotheque }
+  If Krnl Then
+  Begin
+    ExpN := BcImportCnt;
+    ExpDll := 'DOSCALLS.DLL';
+  End
+  Else If IsLibrary Then
+  Begin
+    ExpN := ExpCount;
+    ExpDll := LibName + '.DLL';
+  End
+  Else ExpN := 0;
   { ========== Grouper les imports par DLL ========== }
   DllGrpCnt := 0;
   For I := 0 To BcImportCnt - 1 Do
@@ -44313,14 +44507,14 @@ Begin
 
   { ========== OS/2-0 noyau : table d exportation (DOSCALLS.DLL) ========== }
   EdataRVA := 0; EdataSize := 0; EdataRawSize := 0;
-  If Krnl Then
+  If HasExp Then
   Begin
     { exportations triees par nom (exige par le format PE) }
-    For I := 0 To BcImportCnt - 1 Do ExpOrder[I] := I;
-    For I := 1 To BcImportCnt - 1 Do
+    For I := 0 To ExpN - 1 Do ExpOrder[I] := I;
+    For I := 1 To ExpN - 1 Do
     Begin
       TmpI := ExpOrder[I]; J := I - 1;
-      While (J >= 0) And (BcImports[ExpOrder[J]].ApiName > BcImports[TmpI].ApiName) Do
+      While (J >= 0) And (ExpNameOf(ExpOrder[J]) > ExpNameOf(TmpI)) Do
       Begin
         ExpOrder[J + 1] := ExpOrder[J]; Dec(J);
       End;
@@ -44328,14 +44522,14 @@ Begin
     End;
     EdataRVA := ImageSize;
     EatOfs := 40;
-    NptOfs := EatOfs + BcImportCnt * 4;
-    OrdOfs := NptOfs + BcImportCnt * 4;
-    ExpDllOfs := OrdOfs + BcImportCnt * 2;
-    CurOfs := ExpDllOfs + Length('DOSCALLS.DLL') + 1;
-    For I := 0 To BcImportCnt - 1 Do
+    NptOfs := EatOfs + ExpN * 4;
+    OrdOfs := NptOfs + ExpN * 4;
+    ExpDllOfs := OrdOfs + ExpN * 2;
+    CurOfs := ExpDllOfs + Length(ExpDll) + 1;
+    For I := 0 To ExpN - 1 Do
     Begin
       ExpNameOfs[I] := CurOfs;
-      CurOfs := CurOfs + Length(BcImports[ExpOrder[I]].ApiName) + 1;
+      CurOfs := CurOfs + Length(ExpNameOf(ExpOrder[I])) + 1;
     End;
     EdataSize := CurOfs;
     EdataRawSize := AlignUp(EdataSize, PE_FILE_ALIGN_);
@@ -44444,12 +44638,13 @@ Begin
 
   { ===== COFF File Header (20 octets) ===== }
   PEWrW($014C);         { Machine = i386 }
-  If Krnl Then PEWrW(4) Else PEWrW(3);   { NumberOfSections }
+  If HasExp Then PEWrW(4) Else PEWrW(3);   { NumberOfSections }
   PEWrD(0);             { TimeDateStamp }
   PEWrD(0);             { PointerToSymbolTable }
   PEWrD(0);             { NumberOfSymbols }
   PEWrW(224);           { SizeOfOptionalHeader }
-  PEWrW($0103);         { Characteristics: EXEC|32BIT|NO_RELOCS }
+  If IsLibrary Then PEWrW($2103)   { DLL|EXEC|32BIT|NO_RELOCS }
+  Else PEWrW($0103);    { Characteristics: EXEC|32BIT|NO_RELOCS }
 
   { ===== Optional Header PE32 (224 octets) ===== }
   PEWrW($010B);         { Magic PE32 }
@@ -44484,6 +44679,12 @@ Begin
   Begin
     PEWrD(EdataRVA); PEWrD(EdataSize);  { [0] Export (DOSCALLS.DLL) }
     PEWrD(0); PEWrD(0);                 { [1] pas d import : IAT liee }
+  End
+  Else If IsLibrary Then
+  Begin
+    PEWrD(EdataRVA); PEWrD(EdataSize);  { [0] Export de la bibliotheque }
+    PEWrD(IdataRVA);       { [1] Import RVA }
+    PEWrD(IdataVirtSize);  { [1] Import Size }
   End
   Else
   Begin
@@ -44547,8 +44748,8 @@ Begin
   PEWrW(0); PEWrW(0);
   PEWrD(LongInt($C0000040)); { IDATA | MEM_READ | MEM_WRITE }
 
-  { .edata (noyau OS/2-0) }
-  If Krnl Then
+  { .edata (noyau OS/2-0 ou bibliotheque) }
+  If HasExp Then
   Begin
     PEWrName8('.edata');
     PEWrD(EdataSize);
@@ -44640,27 +44841,29 @@ Begin
   PEPadTo(IdataFileBase + IdataRawSize);
 
   { ===== Section .edata (noyau OS/2-0 : exportations DOSCALLS.DLL) ===== }
-  If Krnl Then
+  If HasExp Then
   Begin
     EdataFileBase := IdataFileBase + IdataRawSize;
     PEWrD(0); PEWrD(0);                    { caracteristiques, date }
     PEWrW(0); PEWrW(0);                    { version }
     PEWrD(EdataRVA + ExpDllOfs);           { nom de la DLL }
     PEWrD(1);                              { base des ordinaux }
-    PEWrD(BcImportCnt);                    { nombre de fonctions }
-    PEWrD(BcImportCnt);                    { nombre de noms }
+    PEWrD(ExpN);                           { nombre de fonctions }
+    PEWrD(ExpN);                           { nombre de noms }
     PEWrD(EdataRVA + EatOfs);
     PEWrD(EdataRVA + NptOfs);
     PEWrD(EdataRVA + OrdOfs);
-    For I := 0 To BcImportCnt - 1 Do
+    For I := 0 To ExpN - 1 Do
     Begin
-      ThunkOfs := BcFindLabel('_TPX_' + BcImports[ExpOrder[I]].ApiName);
+      If Krnl Then ThunkOfs := BcFindLabel('_TPX_' + ExpNameOf(ExpOrder[I]))
+      Else ThunkOfs := BcFindLabel('_TPE_' + ExpNameOf(ExpOrder[I]));
+      If ThunkOfs < 0 Then FatalError('exportation sans code : ' + ExpNameOf(ExpOrder[I]));
       PEWrD(PE_TEXT_RVA + ThunkOfs);
     End;
-    For I := 0 To BcImportCnt - 1 Do PEWrD(EdataRVA + ExpNameOfs[I]);
-    For I := 0 To BcImportCnt - 1 Do PEWrW(I);
-    PEWrStr('DOSCALLS.DLL');
-    For I := 0 To BcImportCnt - 1 Do PEWrStr(BcImports[ExpOrder[I]].ApiName);
+    For I := 0 To ExpN - 1 Do PEWrD(EdataRVA + ExpNameOfs[I]);
+    For I := 0 To ExpN - 1 Do PEWrW(I);
+    PEWrStr(ExpDll);
+    For I := 0 To ExpN - 1 Do PEWrStr(ExpNameOf(ExpOrder[I]));
     PEPadTo(EdataFileBase + EdataRawSize);
   End;
 
@@ -44670,6 +44873,22 @@ Begin
             ' data=', BcDataLen, ' imports=', BcImportCnt, ')');
 
   Close(PEBinF);
+
+  { -GD / -GP : carte des procedures (adresses virtuelles) }
+  If Opts.MapDetailed Or Opts.MapPublics Then
+  Begin
+    Assign(PEBinF, ReplaceExt(FileName, '.map'));
+    Rewrite(PEBinF, 1);
+    For I := 0 To BcLabelCnt - 1 Do
+      If (Copy(BcLabels[I].Name, 1, 5) = '_TPF_') Or (Copy(BcLabels[I].Name, 1, 5) = '_TPX_') Or
+         (Copy(BcLabels[I].Name, 1, 5) = '_TPE_') Or
+         (Opts.MapDetailed And (Copy(BcLabels[I].Name, 1, 6) = '_TPRT_')) Then
+      Begin
+        PEWrStrNoZ(HexMap(PEImgBase + PE_TEXT_RVA + BcLabels[I].Offset) + ' ' +
+                   BcLabels[I].Name + #13#10);
+      End;
+    Close(PEBinF);
+  End;
 End;
 
 { --- WriteCOFFFile : generation d un fichier objet COFF --- }
@@ -57773,6 +57992,152 @@ End;
 { D16-END }
 
 { ============================================================ }
+{ OS/2-0 : DLL (Library) et importations External 'DLL'         }
+{ ============================================================ }
+{ Convention _System d OS/2 (APIENTRY) : parametres empiles de  }
+{ droite a gauche (le premier a l adresse la plus basse), pile  }
+{ nettoyee par l appelant, resultat dans EAX, EBX/ESI/EDI/EBP    }
+{ preserves. Les procedures Pascal de OS2PC recoivent leurs      }
+{ parametres dans l ordre inverse : chaque passage d une          }
+{ convention a l autre reempile les parametres (32 bits chacun). }
+{ ============================================================ }
+
+{ Souches d appel des fonctions External 'DLL' : _TPF_nom ->     }
+{ CALL [IAT] DLL!nom. Les API de la couche du noyau (WriteFile...) }
+{ sont stdcall (depilees par l appele), les autres _System.       }
+Procedure EmitOs2DllStubs;
+Var PI, K, N : Integer; U : TString; StdCall : Boolean;
+Begin
+  For PI := 0 To ProcCount - 1 Do
+  Begin
+    If Not ProcTab[PI].IsExternal Then Continue;
+    If ProcExtDll[PI] = '' Then Continue;
+    If BcFindLabel(ProcTab[PI].MangledName) >= 0 Then Continue;
+    U := StrUpperCase(ProcExtName[PI]);
+    StdCall := (BcOs2ApiIndex(U) > 0) And (U <> 'SPRINTF') And (U <> 'STRTOD');
+    N := ProcTab[PI].ParamCount;
+    For K := 0 To N - 1 Do
+      If ProcTab[PI].Params[K].Offset <> 8 + 4 * (N - 1 - K) Then
+        FatalError('External ' + ProcExtName[PI] + ' : les parametres doivent etre des valeurs 32 bits ou VAR');
+    EmitBlankLine;
+    EmitComment('--- importation ' + ProcExtDll[PI] + '!' + ProcExtName[PI] + ' ---');
+    EmitLabel(ProcTab[PI].MangledName);
+    EmitInstr('PUSH EBP');
+    EmitInstr('MOV EBP,ESP');
+    For K := 0 To N - 1 Do
+      EmitInstr('PUSH DWORD PTR [EBP+' + IntToStr_(8 + 4 * K) + ']');
+    EmitInstr('CALL ' + ProcExtName[PI]);
+    If (Not StdCall) And (N > 0) Then EmitInstr('ADD ESP,' + IntToStr_(4 * N));
+    EmitInstr('POP EBP');
+    EmitInstr('RET');
+  End;
+End;
+
+{ Thunks d exportation d une bibliotheque : _TPE_nom (_System) ->  }
+{ procedure Pascal                                                 }
+Procedure EmitOs2LibExports;
+Var E, PI, K, N : Integer;
+Begin
+  EmitBlankLine;
+  EmitComment('=== Exportations de la bibliotheque ' + LibName + ' (_System) ===');
+  For E := 0 To ExpCount - 1 Do
+  Begin
+    PI := ExpProcs[E];
+    N := ProcTab[PI].ParamCount;
+    For K := 0 To N - 1 Do
+      If ProcTab[PI].Params[K].Offset <> 8 + 4 * (N - 1 - K) Then
+        FatalError('exports ' + ExpNames[E] + ' : les parametres doivent etre des valeurs 32 bits ou VAR');
+    EmitLabel('_TPE_' + ExpNames[E]);
+    EmitInstr('PUSH EBP');
+    EmitInstr('MOV EBP,ESP');
+    EmitInstr('PUSH EBX');
+    EmitInstr('PUSH ESI');
+    EmitInstr('PUSH EDI');
+    For K := 0 To N - 1 Do
+      EmitInstr('PUSH DWORD PTR [EBP+' + IntToStr_(8 + 4 * K) + ']');
+    EmitInstr('CALL ' + ProcTab[PI].MangledName);
+    If N > 0 Then EmitInstr('ADD ESP,' + IntToStr_(4 * N));
+    EmitInstr('POP EDI');
+    EmitInstr('POP ESI');
+    EmitInstr('POP EBX');
+    EmitInstr('POP EBP');
+    EmitInstr('RET');
+  End;
+End;
+
+{ Avant l analyse : Library nom; -> Program nom; et retrait de la    }
+{ clause exports a, b Name 'c', ...; (memorisee dans ExpNames)       }
+Procedure Os2PrepareLibrary;
+Var I, J, Start, Removed : Integer; Nm : TString;
+Begin
+  IsLibrary := False; LibName := ''; ExpCount := 0;
+  If (TokenCount > 1) And (StrUpperCase(TokenPool[0].Val) = 'LIBRARY') Then
+  Begin
+    IsLibrary := True;
+    LibName := StrUpperCase(TokenPool[1].Val);
+    TokenPool[0].Kind := TK_KEYWORD;
+    TokenPool[0].Val := 'program';
+  End;
+  If Not IsLibrary Then Exit;
+  I := 0;
+  While I < TokenCount Do
+  Begin
+    If ((TokenPool[I].Kind = TK_IDENT) Or (TokenPool[I].Kind = TK_KEYWORD)) And
+       (StrUpperCase(TokenPool[I].Val) = 'EXPORTS') Then
+    Begin
+      Start := I;
+      J := I + 1;
+      While (J < TokenCount) And Not ((TokenPool[J].Kind = TK_PUNCT) And (TokenPool[J].Val = ';')) Do
+      Begin
+        If (TokenPool[J].Kind = TK_IDENT) Or (TokenPool[J].Kind = TK_KEYWORD) Then
+        Begin
+          Nm := TokenPool[J].Val;
+          ExpProcs[ExpCount] := -1;
+          ExpProcNm[ExpCount] := StrUpperCase(Nm);    { resolu apres ParseProcDecls }
+          ExpNames[ExpCount] := Nm;                    { nom exporte (casse d origine) }
+          { nom Name 'externe' }
+          If (J + 2 < TokenCount) And (StrUpperCase(TokenPool[J + 1].Val) = 'NAME') And
+             (TokenPool[J + 2].Kind = TK_STRING) Then
+          Begin
+            ExpNames[ExpCount] := TokenPool[J + 2].Val;
+            J := J + 2;
+          End;
+          If ExpCount < 1023 Then Inc(ExpCount);
+        End;
+        Inc(J);
+      End;
+      { retirer les jetons Start..J (point-virgule compris) }
+      Removed := J - Start + 1;
+      If J >= TokenCount Then Removed := TokenCount - Start;
+      For J := Start To TokenCount - Removed - 1 Do TokenPool[J] := TokenPool[J + Removed];
+      TokenCount := TokenCount - Removed;
+      For J := 0 To IoSwitchCnt - 1 Do
+        If IoSwitchPos[J] > Start Then IoSwitchPos[J] := IoSwitchPos[J] - Removed;
+      For J := 0 To RangeSwitchCnt - 1 Do
+        If RangeSwitchPos[J] > Start Then RangeSwitchPos[J] := RangeSwitchPos[J] - Removed;
+      Continue;
+    End;
+    Inc(I);
+  End;
+End;
+
+{ Apres ParseProcDecls : retrouver la procedure de chaque exportation }
+Procedure Os2ResolveExports;
+Var E, PI : Integer;
+Begin
+  For E := 0 To ExpCount - 1 Do
+  Begin
+    ExpProcs[E] := -1;
+    For PI := 0 To ProcCount - 1 Do
+      If (ProcTab[PI].Name = ExpProcNm[E]) And Not ProcTab[PI].IsForward And
+         Not ProcTab[PI].IsExternal Then
+        ExpProcs[E] := PI;
+    If ExpProcs[E] < 0 Then
+      FatalError('exports : procedure introuvable : ' + ExpNames[E]);
+  End;
+End;
+
+{ ============================================================ }
 { OS/2-0 : couche API du noyau (-COS2KRNL)                      }
 { ============================================================ }
 { Le runtime (WriteLn, fichiers, Crt, Dos...) appelle des API    }
@@ -57931,6 +58296,12 @@ Begin
     Exit;
   End;
 
+  { OS/2 : Library et clause exports }
+  Os2PrepareLibrary;
+  If IsLibrary And (StrUpperCase(ExtractExt(Opts.OutFile)) = '.EXE') And
+     (Opts.DestTarget = DEST_OS2) Then
+    Opts.OutFile := ReplaceExt(Opts.OutFile, '.dll');
+
   { ^N en position d expression : caractere de controle }
   TokenPoolMergeCaretChars;
   { System.Move, Dos.GetDate ... : retirer le prefixe d unite }
@@ -57953,6 +58324,8 @@ Begin
     PEImgBase := OS2_KRNL_BASE;
     AsmNative := True;
   End;
+  { DLL OS/2-0 : liee dans la region des DLL du noyau (00C00000h) }
+  If IsLibrary Then PEImgBase := OS2_DLL_BASE;
 
   { Initialiser les variables de l emetteur (TODO 07) }
   HasProgram := False;
@@ -57988,6 +58361,7 @@ Begin
 
   { Analyser les declarations PROCEDURE et FUNCTION (TODO 09) }
   ParseProcDecls;
+  If IsLibrary Then Os2ResolveExports;
 
   If Opts.Verbose Then
     WriteLn('  Apres ParseProcDecls: Procedures=', ProcCount,
@@ -58065,6 +58439,10 @@ Begin
     { Noyau OS/2-0 : couche API (thunks + exportations) }
     If Opts.DestTarget = DEST_OS2KRNL Then
       EmitOs2KrnlThunks;
+    { OS/2-0 : souches des importations External 'DLL', exportations }
+    EmitOs2DllStubs;
+    If IsLibrary Then
+      EmitOs2LibExports;
 
     If Opts.AsmOutput Then
     Begin

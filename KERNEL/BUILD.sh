@@ -8,7 +8,9 @@
 #        OS2PC -COS2LDR  OS2LDR.PAS    -> OS2LDR   (chargeur 16 -> 32 bits)
 #        OS2PC -COS2KRNL OS2KRNL.PAS   -> OS2KRNL  (noyau 32 bits)
 #  3. compile CMD.PAS et les commandes de la racine du depot (OS2PC -COS2) ;
-#  4. fabrique le CD-ROM : MAKEISO OS2CD.ISO /BOOT:OS2BOOT ...
+#  4. compile la bibliotheque DLL/DOSCALLS.PAS (DOSCALLS.DLL) et son
+#     programme d'essai DLL/TESTDOS.PAS ;
+#  5. fabrique le CD-ROM : MAKEISO OS2CD.ISO /BOOT:OS2BOOT ...
 #
 # Variables : FPC (compilateur Free Pascal, defaut fpc), W (dossier de
 # travail, defaut BUILD a la racine du depot).
@@ -39,9 +41,12 @@ for F in "$ROOT"/*.PAS; do
     rm -f "$W/cd/$B.EXE"
   fi
 done
+echo "== Bibliotheque DOSCALLS.DLL (OS2PC, Library)"
+"$W/os2pc" -Q "$ROOT/DLL/DOSCALLS.PAS" "$W/cd/DOSCALLS.DLL"
+"$W/os2pc" -Q "$ROOT/DLL/TESTDOS.PAS" "$W/cd/TESTDOS.EXE"
 cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 
 echo "== CD-ROM amorcable"
 "$W/makeiso" "$ROOT/IMAGE/OS2CD.ISO" /BOOT:"$W/cd/OS2BOOT" /LABEL:OS2_0 "$W/cd/*"
-for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
+for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE DOSCALLS.DLL; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
 echo "Termine : $ROOT/IMAGE/OS2CD.ISO"

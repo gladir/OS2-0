@@ -2,10 +2,12 @@ IMAGE - CD-ROM amorcable de OS/2-0
 ==================================
 
 OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
-              OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, CMD.EXE et les
-              commandes du depot compilees avec OS2PC (-COS2).
-SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE et
-              CONFIG.SYS (copies faites par KERNEL\BUILD.sh).
+              OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
+              CMD.EXE, TESTDOS.EXE et les commandes du depot compilees
+              avec OS2PC (-COS2).
+SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
+              DOSCALLS.DLL et CONFIG.SYS (copies faites par
+              KERNEL\BUILD.sh).
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
          (VirtualBox, Bochs ou un vrai PC : graver ou monter l'ISO ;
@@ -21,6 +23,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC -COS2LDR  KERNEL\OS2LDR.PAS         -> OS2LDR
   OS2PC -COS2KRNL KERNEL\OS2KRNL.PAS        -> OS2KRNL
   OS2PC CMD.PAS                             -> CMD.EXE (et les commandes)
+  OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
+  OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -33,9 +37,9 @@ Demarrage
    carte memoire (E820h/E801h/88h), active A20, installe une GDT plate et
    passe en mode protege 32 bits.
 4. OS2KRNL initialise la console, l'IDT, le PIC, la minuterie (100 Hz),
-   le clavier, le tas, la pagination et le pilote ATAPI, lit CONFIG.SYS
-   et lance le processeur de commandes (PROTSHELL, C:\CMD.EXE par
-   defaut). A la fin de CMD (EXIT), il est relance.
+   le clavier, le tas, la pagination et le pilote ATAPI, lit CONFIG.SYS,
+   charge DOSCALLS.DLL et lance le processeur de commandes (PROTSHELL,
+   C:\CMD.EXE par defaut). A la fin de CMD (EXIT), il est relance.
 
 Carte memoire
 -------------
@@ -49,11 +53,13 @@ Carte memoire
   00100000h          OS2KRNL (image PE)
   fin de l'image..4 Mo tas du noyau
   00400000h-007FFFFFh fenetre du processus courant (pagination)
-  00800000h et plus  memoire physique des processus (image + pile)
+  00C00000h-00FFFFFFh DLL (DOSCALLS.DLL a 00C00000h), partagees
+  01000000h et plus  memoire physique des processus (image + pile)
 
 CONFIG.SYS
 ----------
   PROTSHELL=C:\CMD.EXE     processeur de commandes
+  LIBPATH=C:\;             repertoires des DLL
   SET NOM=VALEUR           variable d'environnement (PATH, LANGUAGE...)
   REM, DEVICE=, IFS=, ...  acceptees sans effet
 
@@ -64,8 +70,11 @@ Le runtime genere par OS2PC appelle des fonctions de style Win32
 CreateProcessA...). Le noyau les ecrit en Pascal ; OS2PC -COS2KRNL les
 relie au runtime du noyau et les exporte (table d'exportation PE
 DOSCALLS.DLL). Le chargeur de programmes lie les importations des
-programmes (OS2PC -COS2) a ces exportations par nom. Les fonctions
-graphiques (unite Graph), sprintf et strtod (Write d'un Real) ne sont pas
+programmes (OS2PC -COS2) a ces exportations par nom, puis aux DLL
+(LIBPATH) : la bibliotheque DOSCALLS.DLL (DLL\DOSCALLS.PAS) fournit
+les 315 fonctions Dos* d'OS/2 (convention _System), appelees par
+  Function DosBeep(Freq, Duration : LongInt) : LongInt; External 'DOSCALLS';
+Les fonctions graphiques (unite Graph), sprintf et strtod (Write d'un Real) ne sont pas
 encore disponibles : un programme qui les appelle est arrete (SYS1804).
 
 Limites
@@ -77,4 +86,12 @@ Limites
   la fin de l'enfant, comme DosExecPgm synchrone).
 - Clavier americain (QWERTY), ecran texte 80 x 25.
 - Une exception d'un programme affiche "Runtime error N" (filtre du
-  runtime) ou l'ecran SYS3175/TRAP et rend la main a CMD.
+  runtime) ou l'ecran SYS3175/TRAP et rend la main a CMD ; les
+  gestionnaires DosSetExceptionHandler sont appeles avant.
+- DOSCALLS.DLL : un seul processus leger s'execute (DosCreateThread
+  execute la fonction jusqu'a sa fin), les minuteries sont verifiees a
+  chaque attente, et une attente qui ne pourrait jamais etre satisfaite
+  rend ERROR_TIMEOUT ou ERROR_INTERRUPT. Les fonctions de rappel
+  (gestionnaires d'exceptions...) suivent la convention _System : avec
+  OS2PC, une fonction de rappel a plusieurs parametres les declare dans
+  l'ordre inverse.

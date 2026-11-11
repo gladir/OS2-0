@@ -70,7 +70,10 @@ Const
   ProcWinBase   = $00400000;
   ProcWinSize   = $00400000;
   ProcStackSize = $00040000;   { 256 Ko de pile par processus }
-  PhysProcBase  = $00800000;   { memoire physique des processus (>= 8 Mo) }
+  PhysProcBase  = $01000000;   { memoire physique des processus (>= 16 Mo) }
+  DllBase       = $00C00000;   { region des DLL (12 Mo - 16 Mo), partagee }
+  DllTop        = $01000000;
+  MaxMods       = 8;
 
   { Tas du noyau }
   HeapMagicUsed = $55534544;   { 'DESU' }
@@ -181,6 +184,8 @@ Type
     ImageSize : LongInt;
     CmdLine   : String;
     Name      : String[63];
+    Path      : String[127];
+    Serial    : LongInt;     { identificateur de processus (PID) unique }
     CurDir    : String[127];
   End;
 
@@ -247,6 +252,8 @@ Var
   ShellPath        : String[127];
   KCmdLine         : Array[0..255] Of Byte;
   ExcFilter        : LongInt;
+  LibPath          : String;        { LIBPATH= de CONFIG.SYS }
+  NextSerial       : LongInt;       { prochain PID }
 
 { ==================================================================== }
 { Partie 2 - Utilitaires                                               }
@@ -316,7 +323,7 @@ Begin
 End;
 
 { Chaine Pascal -> ASCIIZ a l'adresse A (au plus Max octets, zero compris) }
-Procedure PutPStr(A : LongInt; Const S : String; Max : LongInt);
+Procedure PutPStr(A : LongInt; S : String; Max : LongInt);
 Var I, L : LongInt;
 Begin
   L := Length(S);
@@ -446,20 +453,20 @@ Begin
   UpdateCursor;
 End;
 
-Procedure ConPutS(Const S : String);
+Procedure ConPutS(S : String);
 Var I : LongInt;
 Begin
   For I := 1 To Length(S) Do ConPutRaw(S[I]);
   UpdateCursor;
 End;
 
-Procedure ConPutLn(Const S : String);
+Procedure ConPutLn(S : String);
 Begin
   ConPutS(S + #13#10);
 End;
 
 { Journal du noyau : console et port serie }
-Procedure KLog(Const S : String);
+Procedure KLog(S : String);
 Begin
   ConPutLn(S);
 End;
@@ -1350,7 +1357,7 @@ Begin
 End;
 
 { Chercher un chemin complet (C:\A\B) sur le CD-ROM }
-Function IsoLookup(Const Path : String; Var Lba, Size, Attr, Time : LongInt) : Boolean;
+Function IsoLookup(Path : String; Var Lba, Size, Attr, Time : LongInt) : Boolean;
 Var Rest, Comp, Nm : String; P, I : LongInt; Found : Boolean;
     ELba, ESize, EAttr, ETime : LongInt;
 Begin
@@ -1389,7 +1396,7 @@ Begin
 End;
 
 { Disque virtuel : chercher une entree par chemin complet }
-Function RamFind(Const Path : String) : LongInt;
+Function RamFind(Path : String) : LongInt;
 Var I : LongInt;
 Begin
   RamFind := -1;
@@ -1401,7 +1408,7 @@ Begin
     End;
 End;
 
-Function RamNew(Const Path : String; Attr : LongInt) : LongInt;
+Function RamNew(Path : String; Attr : LongInt) : LongInt;
 Var I : LongInt;
 Begin
   RamNew := -1;
@@ -1422,7 +1429,7 @@ Begin
 End;
 
 { Repertoire parent d'un chemin complet (C:\A\B -> C:\A ; C:\A -> C:\) }
-Function ParentDir(Const Path : String) : String;
+Function ParentDir(Path : String) : String;
 Var P : LongInt;
 Begin
   P := Length(Path);
@@ -1430,7 +1437,7 @@ Begin
   If P <= 3 Then ParentDir := Copy(Path, 1, 3) Else ParentDir := Copy(Path, 1, P - 1);
 End;
 
-Function BaseName(Const Path : String) : String;
+Function BaseName(Path : String) : String;
 Var P : LongInt;
 Begin
   P := Length(Path);
@@ -1439,7 +1446,7 @@ Begin
 End;
 
 { Existence d'un chemin (disque virtuel puis CD-ROM) }
-Function PathInfo(Const Path : String; Var Attr, Size, Time, Lba, RamIdx : LongInt) : Boolean;
+Function PathInfo(Path : String; Var Attr, Size, Time, Lba, RamIdx : LongInt) : Boolean;
 Var R : LongInt;
 Begin
   PathInfo := False;
@@ -1462,17 +1469,17 @@ Begin
   PathInfo := IsoLookup(Path, Lba, Size, Attr, Time);
 End;
 
-Function IsDir(Const Path : String) : Boolean;
+Function IsDir(Path : String) : Boolean;
 Var A, S, T, L, R : LongInt;
 Begin
   IsDir := PathInfo(Path, A, S, T, L, R) And ((A And FileAttrDirectory) <> 0);
 End;
 
 { Comparaison avec un masque DOS (* et ?) }
-Function MatchMask(Const Name, Mask : String) : Boolean;
+Function MatchMask(Name, Mask : String) : Boolean;
 Var N, M : String; PN, PM : LongInt;
 
-  Function Glob(Const S, P : String) : Boolean;
+  Function Glob(S, P : String) : Boolean;
   Var I, J, StarI, StarJ : LongInt;
   Begin
     I := 1; J := 1; StarI := 0; StarJ := 0;
@@ -1600,7 +1607,7 @@ Begin
 End;
 
 { Seule l'unite C: (CD-ROM + disque virtuel) existe }
-Function DriveOk(Const Path : String) : Boolean;
+Function DriveOk(Path : String) : Boolean;
 Begin
   DriveOk := (Length(Path) >= 3) And (Path[1] = 'C');
 End;
@@ -1669,7 +1676,9 @@ Begin
   A := KAlloc(Size);
   If A <> 0 Then
   Begin
-    MemL[0:A - 8] := CurProc;              { libere a la fin du processus }
+    { tas 2 : memoire partagee (DLL, DosAllocSharedMem), jamais liberee a
+      la fin du processus ; sinon liberee a la fin du processus }
+    If Heap = 2 Then MemL[0:A - 8] := -1 Else MemL[0:A - 8] := CurProc;
     If (Flags And 8) <> 0 Then FillMem(A, Size, 0);
   End;
   HeapAlloc := A;
@@ -1711,9 +1720,14 @@ Begin
   GetVersion := 20;
 End;
 
+Function ModuleHandleByName(Name : String) : LongInt; Forward;
+
 Function GetModuleHandleA(Name : LongInt) : LongInt;
 Begin
-  If CurProc >= 0 Then GetModuleHandleA := ProcWinBase Else GetModuleHandleA := $00100000;
+  If Name <> 0 Then
+    GetModuleHandleA := ModuleHandleByName(PStr(Name))
+  Else If CurProc >= 0 Then GetModuleHandleA := ProcWinBase
+  Else GetModuleHandleA := $00100000;
 End;
 
 Function GetCommandLineA : LongInt;
@@ -1728,7 +1742,7 @@ Begin
 End;
 
 { Chercher NOM= dans l'environnement ; rend l'adresse de la valeur ou 0 }
-Function EnvFind(Const Name : String) : LongInt;
+Function EnvFind(Name : String) : LongInt;
 Var P, Q : LongInt; S : String;
 Begin
   EnvFind := 0;
@@ -1769,7 +1783,7 @@ Begin
 End;
 
 { Definir NOM=VALEUR dans l'environnement (CONFIG.SYS) }
-Procedure EnvSet(Const AName, AValue : String);
+Procedure EnvSet(AName, AValue : String);
 Var P, Q, L : LongInt; S, Item, Name, Value : String;
 Begin
   { copies locales : les parametres peuvent designer l'anneau des
@@ -2604,7 +2618,7 @@ End;
 { --- Recherche de fichiers (FindFirstFileA / FindNextFileA) --- }
 
 { Remplir WIN32_FIND_DATAA (320 octets) }
-Procedure FillFindData(P : LongInt; Const Name : String; Attr, Size, Time : LongInt);
+Procedure FillFindData(P : LongInt; Name : String; Attr, Size, Time : LongInt);
 Begin
   FillMem(P, 320, 0);
   MemL[0:P] := Attr;
@@ -2833,13 +2847,30 @@ Begin
   KExpOrds := $00100000 + MemL[0:Dir + 36];
 End;
 
-Function KernelExport(Const Name : String) : LongInt;
+{ Comparer (sans tenir compte de la casse) la chaine ASCIIZ en A avec U
+  (en majuscules), sans chaine temporaire : les resultats de fonctions
+  chaine du runtime occupent un anneau de tampons qu'une longue boucle
+  ferait deborder. }
+Function MemNameEq(A : LongInt; U : String) : Boolean;
+Var I, C : LongInt;
+Begin
+  MemNameEq := False;
+  For I := 1 To Length(U) Do
+  Begin
+    C := Mem[0:A + I - 1];
+    If (C >= 97) And (C <= 122) Then C := C - 32;
+    If C <> Ord(U[I]) Then Exit;
+  End;
+  MemNameEq := Mem[0:A + Length(U)] = 0;
+End;
+
+Function KernelExport(Name : String) : LongInt;
 Var I, O : LongInt; U : String;
 Begin
   KernelExport := 0;
   U := UpStr(Name);
   For I := 0 To KExpCount - 1 Do
-    If UpStr(PStr($00100000 + MemL[0:KExpNames + I * 4])) = U Then
+    If MemNameEq($00100000 + MemL[0:KExpNames + I * 4], U) Then
     Begin
       O := MemW[0:KExpOrds + I * 2];
       KernelExport := $00100000 + MemL[0:KExpFuncs + O * 4];
@@ -2848,7 +2879,7 @@ Begin
 End;
 
 { Lire tout un fichier dans un bloc du tas ; rend l'adresse ou 0 }
-Function ReadWholeFile(Const Path : String; Var Size : LongInt) : LongInt;
+Function ReadWholeFile(Path : String; Var Size : LongInt) : LongInt;
 Var Attr, Time, Lba, Ram, Buf, Done, A, N : LongInt;
 Begin
   ReadWholeFile := 0;
@@ -2892,7 +2923,7 @@ Begin
   ReadWholeFile := Buf;
 End;
 
-Function FileExists(Const Path : String) : Boolean;
+Function FileExists(Path : String) : Boolean;
 Var A, S, T, L, R : LongInt;
 Begin
   FileExists := PathInfo(Path, A, S, T, L, R) And ((A And FileAttrDirectory) = 0);
@@ -2960,8 +2991,263 @@ Begin
   FindProgram := Res;
 End;
 
+{ --- Modules de liens dynamiques (DLL) ---
+  Une DLL OS/2-0 (OS2PC, Library) est une image PE liee dans la region
+  00C00000h-00FFFFFFh, projetee a l'identique et partagee par tous les
+  processus. Elle est chargee a sa base (une seule fois), ses importations
+  sont liees, puis son code d'initialisation (point d'entree) est execute. }
+
+Type
+  TModule = Record
+    Used     : Boolean;
+    Name     : String[63];      { nom en majuscules, ex. DOSCALLS.DLL }
+    Path     : String[127];
+    Base     : LongInt;
+    Size     : LongInt;
+    NExp, Funcs, Names, Ords : LongInt;
+  End;
+
+Var
+  Mods      : Array[0..MaxMods - 1] Of TModule;
+  EntryTmp  : LongInt;
+
+Function ModuleExport(M : LongInt; Name : String; Ordinal : LongInt) : LongInt;
+Var I, O, Base : LongInt; U : String;
+Begin
+  ModuleExport := 0;
+  If (M < 0) Or Not Mods[M].Used Then Exit;
+  Base := Mods[M].Base;
+  If Name = '' Then
+  Begin
+    { par ordinal (base des ordinaux : 1) }
+    If (Ordinal >= 1) And (Ordinal <= Mods[M].NExp) Then
+      ModuleExport := Base + MemL[0:Mods[M].Funcs + (Ordinal - 1) * 4];
+    Exit;
+  End;
+  U := UpStr(Name);
+  For I := 0 To Mods[M].NExp - 1 Do
+    If MemNameEq(Base + MemL[0:Mods[M].Names + I * 4], U) Then
+    Begin
+      O := MemW[0:Mods[M].Ords + I * 2];
+      ModuleExport := Base + MemL[0:Mods[M].Funcs + O * 4];
+      Exit;
+    End;
+End;
+
+Function FindModule(Name : String) : LongInt;
+Var I : LongInt;
+Begin
+  FindModule := -1;
+  Name := UpStr(BaseName(Name));
+  If Pos('.', Name) = 0 Then Name := Name + '.DLL';
+  For I := 0 To MaxMods - 1 Do
+    If Mods[I].Used And (Mods[I].Name = Name) Then
+    Begin
+      FindModule := I;
+      Exit;
+    End;
+End;
+
+Procedure CallEntry(E : LongInt);
+Begin
+  EntryTmp := E;
+  asm
+    pushad
+    mov eax,EntryTmp
+    call eax
+    popad
+  end;
+End;
+
+Function LoadModule(Name : String) : LongInt; Forward;
+
+{ Adresse d'une importation : couche de base du noyau, puis DLL nommee }
+Function ResolveImport(ADll, ANm : String) : LongInt;
+Var A, M : LongInt; Dll, Nm : String;
+Begin
+  Dll := ADll; Nm := ANm;
+  A := KernelExport(Nm);
+  If A = 0 Then
+  Begin
+    M := LoadModule(Dll);
+    If M >= 0 Then A := ModuleExport(M, Nm, 0);
+  End;
+  ResolveImport := A;
+End;
+
+{ Chercher le fichier d'une DLL : nom tel quel, LIBPATH, PATH, racine }
+Function FindLibrary(Name : String) : String;
+Var Dirs, D, Path, Res : String; P : LongInt;
+Begin
+  Res := '';
+  Name := UpStr(Trim(Name));
+  If Pos('.', BaseName(Name)) = 0 Then Name := Name + '.DLL';
+  If (Pos('\', Name) > 0) Or (Pos(':', Name) > 0) Then
+  Begin
+    Path := FullPath(Name);
+    If FileExists(Path) Then Res := Path;
+  End
+  Else
+  Begin
+    Dirs := LibPath + ';C:\;C:\DLL';
+    P := EnvFind('PATH');
+    If P <> 0 Then Dirs := Dirs + ';' + PStr(P);
+    While (Dirs <> '') And (Res = '') Do
+    Begin
+      P := Pos(';', Dirs);
+      If P > 0 Then
+      Begin
+        D := Trim(Copy(Dirs, 1, P - 1));
+        Dirs := Copy(Dirs, P + 1, 255);
+      End
+      Else
+      Begin
+        D := Trim(Dirs); Dirs := '';
+      End;
+      If D <> '' Then
+      Begin
+        If D[Length(D)] <> '\' Then D := D + '\';
+        Path := FullPath(D + Name);
+        If DriveOk(Path) And FileExists(Path) Then Res := Path;
+      End;
+    End;
+  End;
+  FindLibrary := Res;
+End;
+
+Function LoadModule(Name : String) : LongInt;
+Var
+  M, I, Buf, Size, Pe, Opt, NSect, OptSize, Base, ImgSize, HdrSize, Entry : LongInt;
+  Sec, VSize, VAddr, RawSize, RawPtr, N, ImpRva, ExpRva, Desc, Thunks, Iat, J, V, Adr : LongInt;
+  Path, Nm, Dll : String;
+  SaveFilter, SaveProc : LongInt;
+Begin
+  M := FindModule(Name);
+  LoadModule := M;
+  If M >= 0 Then Exit;
+  LoadModule := -1;
+  LastError := 126;                        { ERROR_MOD_NOT_FOUND }
+  Path := FindLibrary(Name);
+  If Path = '' Then Exit;
+  M := -1;
+  For I := 0 To MaxMods - 1 Do
+    If Not Mods[I].Used Then
+    Begin
+      M := I;
+      Break;
+    End;
+  If M < 0 Then Exit;
+  Buf := ReadWholeFile(Path, Size);
+  If Buf = 0 Then Exit;
+  LastError := ErrBadFormat;
+  Pe := Buf + MemL[0:Buf + $3C];
+  If (MemW[0:Buf] <> $5A4D) Or (MemL[0:Pe] <> $00004550) Or (MemW[0:Pe + 4] <> $014C) Then
+  Begin
+    KFree(Buf);
+    Exit;
+  End;
+  NSect := MemW[0:Pe + 6];
+  OptSize := MemW[0:Pe + 20];
+  Opt := Pe + 24;
+  Entry := MemL[0:Opt + 16];
+  Base := MemL[0:Opt + 28];
+  ImgSize := (MemL[0:Opt + 56] + 4095) And Not 4095;
+  HdrSize := MemL[0:Opt + 60];
+  ExpRva := MemL[0:Opt + 96];
+  ImpRva := MemL[0:Opt + 104];
+  { la DLL doit tenir dans la region des DLL, sans chevaucher une autre }
+  If (Base < DllBase) Or (Base + ImgSize > DllTop) Or (Base + ImgSize > PhysTop) Then
+  Begin
+    ConPutLn('SYS0191: ' + Path + ' n''est pas liee dans la region des DLL (00C00000h).');
+    KFree(Buf);
+    Exit;
+  End;
+  For I := 0 To MaxMods - 1 Do
+    If Mods[I].Used And (Base < Mods[I].Base + Mods[I].Size) And (Mods[I].Base < Base + ImgSize) Then
+    Begin
+      ConPutLn('SYS0191: ' + Path + ' chevauche ' + Mods[I].Name + '.');
+      KFree(Buf);
+      Exit;
+    End;
+  FillMem(Base, ImgSize, 0);
+  MoveMem(Buf, Base, HdrSize);
+  Sec := Opt + OptSize;
+  For I := 0 To NSect - 1 Do
+  Begin
+    VSize := MemL[0:Sec + 8];
+    VAddr := MemL[0:Sec + 12];
+    RawSize := MemL[0:Sec + 16];
+    RawPtr := MemL[0:Sec + 20];
+    N := RawSize;
+    If (VSize > 0) And (N > VSize) Then N := VSize;
+    If (N > 0) And (VAddr + N <= ImgSize) And (RawPtr + N <= Size) Then
+      MoveMem(Buf + RawPtr, Base + VAddr, N);
+    Sec := Sec + 40;
+  End;
+  KFree(Buf);
+  Mods[M].Used := True;
+  Mods[M].Name := UpStr(BaseName(Path));
+  Mods[M].Path := Path;
+  Mods[M].Base := Base;
+  Mods[M].Size := ImgSize;
+  Mods[M].NExp := 0;
+  If ExpRva <> 0 Then
+  Begin
+    Mods[M].NExp := MemL[0:Base + ExpRva + 24];
+    Mods[M].Funcs := Base + MemL[0:Base + ExpRva + 28];
+    Mods[M].Names := Base + MemL[0:Base + ExpRva + 32];
+    Mods[M].Ords := Base + MemL[0:Base + ExpRva + 36];
+  End;
+  { importations }
+  If ImpRva <> 0 Then
+  Begin
+    Desc := Base + ImpRva;
+    While MemL[0:Desc + 12] <> 0 Do
+    Begin
+      Dll := PStr(Base + MemL[0:Desc + 12]);
+      Thunks := MemL[0:Desc];
+      Iat := MemL[0:Desc + 16];
+      If Thunks = 0 Then Thunks := Iat;
+      J := 0;
+      V := MemL[0:Base + Thunks];
+      While V <> 0 Do
+      Begin
+        Nm := PStr(Base + V + 2);
+        Adr := KernelExport(Nm);
+        If (Adr = 0) And (UpStr(Dll) <> Mods[M].Name) Then
+        Begin
+          I := LoadModule(Dll);
+          If I >= 0 Then Adr := ModuleExport(I, Nm, 0);
+        End;
+        If Adr = 0 Then Adr := ModuleExport(M, Nm, 0);
+        If Adr = 0 Then
+        Begin
+          ConPutLn('SYS0191: ' + Nm + ' introuvable (' + Path + ').');
+          Mods[M].Used := False;
+          LastError := 127;
+          Exit;
+        End;
+        MemL[0:Base + Iat + J * 4] := Adr;
+        Inc(J);
+        V := MemL[0:Base + Thunks + J * 4];
+      End;
+      Desc := Desc + 20;
+    End;
+  End;
+  { initialisation de la DLL (sans modifier le filtre d'exceptions) }
+  If Entry <> 0 Then
+  Begin
+    If CurProc >= 0 Then SaveFilter := Procs[CurProc].Filter Else SaveFilter := ExcFilter;
+    SaveProc := CurProc;
+    CallEntry(Base + Entry);
+    If SaveProc >= 0 Then Procs[SaveProc].Filter := SaveFilter Else ExcFilter := SaveFilter;
+  End;
+  LastError := 0;
+  LoadModule := M;
+End;
+
 { Charger un programme PE ; rend le numero de processus ou -1 }
-Function LoadProgram(Const Path, CmdLine : String) : LongInt;
+Function LoadProgram(Path, CmdLine : String) : LongInt;
 Var
   Buf, Size, Pe, Opt, NSect, OptSize, Base, ImgSize, HdrSize, Entry : LongInt;
   Total, Phys, PhysSize, Pid, I, Sec, VSize, VAddr, RawSize, RawPtr, N : LongInt;
@@ -3068,10 +3354,11 @@ Begin
           Exit;
         End;
         Nm := PStr(Phys + V + 2);
-        Adr := KernelExport(Nm);
+        Adr := ResolveImport(PStr(Phys + MemL[0:Desc + 12]), Nm);
         If Adr = 0 Then
         Begin
-          ConPutLn('SYS0191: ' + Nm + ' introuvable dans DOSCALLS.DLL (' + Path + ').');
+          ConPutLn('SYS0191: ' + Nm + ' introuvable dans ' +
+                   PStr(Phys + MemL[0:Desc + 12]) + ' (' + Path + ').');
           LastError := 127;
           Exit;
         End;
@@ -3097,6 +3384,10 @@ Begin
   Procs[Pid].CmdBuf := KAlloc(Length(CmdLine) + 1);
   PutPStr(Procs[Pid].CmdBuf, CmdLine, 256);
   Procs[Pid].Name := BaseName(Path);
+  Procs[Pid].Path := Path;
+  If NextSerial < 2 Then NextSerial := 2;      { PID 1 : le noyau }
+  Procs[Pid].Serial := NextSerial;
+  Inc(NextSerial);
   Procs[Pid].CurDir := CurDir;
   ProcEntry[Pid] := ProcWinBase + Entry;
   ProcStack[Pid] := Phys + PhysSize - 16;
@@ -3208,8 +3499,8 @@ Begin
   Begin
     MemL[0:PInfo] := HProcBase + Pid;
     MemL[0:PInfo + 4] := HProcBase + Pid;
-    MemL[0:PInfo + 8] := Pid + 1;
-    MemL[0:PInfo + 12] := Pid + 1;
+    MemL[0:PInfo + 8] := Procs[Pid].Serial;
+    MemL[0:PInfo + 12] := 1;
   End;
   { execution synchrone (comme DosExecPgm EXEC_SYNC) }
   RunProcess(Pid);
@@ -3227,6 +3518,159 @@ Begin
   If (H < HProcBase) Or (H >= HProcBase + MaxProcs) Then Exit;
   If PCode <> 0 Then MemL[0:PCode] := Procs[H - HProcBase].ExitCode;
   GetExitCodeProcess := 1;
+End;
+
+
+{ --- Couche de base : modules, volume, memoire, processus --- }
+
+Function ModuleHandleByName(Name : String) : LongInt;
+Var M : LongInt;
+Begin
+  M := FindModule(Name);
+  If M >= 0 Then ModuleHandleByName := Mods[M].Base
+  Else If UpStr(Name) = 'OS2KRNL' Then ModuleHandleByName := $00100000
+  Else ModuleHandleByName := 0;
+End;
+
+Function LoadLibraryA(PName : LongInt) : LongInt;
+Var M : LongInt;
+Begin
+  M := LoadModule(PStr(PName));
+  If M >= 0 Then LoadLibraryA := Mods[M].Base Else LoadLibraryA := 0;
+End;
+
+Function ModuleOfHandle(H : LongInt) : LongInt;
+Var I : LongInt;
+Begin
+  ModuleOfHandle := -1;
+  For I := 0 To MaxMods - 1 Do
+    If Mods[I].Used And (Mods[I].Base = H) Then ModuleOfHandle := I;
+End;
+
+{ GetProcAddress(module, nom ou ordinal < 65536) }
+Function GetProcAddress(H, PName : LongInt) : LongInt;
+Var M, A : LongInt;
+Begin
+  GetProcAddress := 0;
+  If (H = 0) Or (H = $00100000) Then
+  Begin
+    If (PName And $FFFF0000) <> 0 Then GetProcAddress := KernelExport(PStr(PName));
+    Exit;
+  End;
+  M := ModuleOfHandle(H);
+  If M < 0 Then
+  Begin
+    LastError := ErrInvalidHandle;
+    Exit;
+  End;
+  If (PName And $FFFF0000) = 0 Then A := ModuleExport(M, '', PName)
+  Else A := ModuleExport(M, PStr(PName), 0);
+  If A = 0 Then LastError := 127;
+  GetProcAddress := A;
+End;
+
+Function FreeLibrary(H : LongInt) : LongInt;
+Begin
+  { les DLL restent residentes (memoire partagee) }
+  If ModuleOfHandle(H) >= 0 Then FreeLibrary := 1 Else FreeLibrary := 0;
+End;
+
+Function GetModuleFileNameA(H, Buf, Size : LongInt) : LongInt;
+Var S : String; M : LongInt;
+Begin
+  S := '';
+  If (H = 0) Or (H = ProcWinBase) Then
+  Begin
+    If CurProc >= 0 Then S := Procs[CurProc].Path Else S := 'C:\OS2KRNL';
+  End
+  Else If H = $00100000 Then S := 'C:\OS2KRNL'
+  Else
+  Begin
+    M := ModuleOfHandle(H);
+    If M >= 0 Then S := Mods[M].Path;
+  End;
+  If S = '' Then
+  Begin
+    LastError := ErrInvalidHandle;
+    GetModuleFileNameA := 0;
+    Exit;
+  End;
+  PutPStr(Buf, S, Size);
+  If Length(S) >= Size Then GetModuleFileNameA := Size Else GetModuleFileNameA := Length(S);
+End;
+
+Function KrnModuleFromAddr(A : LongInt) : LongInt;
+Var I : LongInt;
+Begin
+  KrnModuleFromAddr := 0;
+  If (A >= ProcWinBase) And (A < ProcWinBase + ProcWinSize) And (CurProc >= 0) Then
+    KrnModuleFromAddr := ProcWinBase
+  Else If (A >= $00100000) And (A < HeapStart) Then
+    KrnModuleFromAddr := $00100000
+  Else
+    For I := 0 To MaxMods - 1 Do
+      If Mods[I].Used And (A >= Mods[I].Base) And (A < Mods[I].Base + Mods[I].Size) Then
+        KrnModuleFromAddr := Mods[I].Base;
+End;
+
+{ Etiquette du volume (descripteur primaire ISO 9660), numero de serie, CDFS }
+Function GetVolumeInformationA(PRoot, PVol, VolSize, PSerial, PMaxComp, PFlags, PFs, FsSize : LongInt) : LongInt;
+Var A, I, Sum : LongInt; S : String;
+Begin
+  GetVolumeInformationA := 0;
+  A := CdSector(16);
+  If A = 0 Then
+  Begin
+    LastError := ErrNotReady;
+    Exit;
+  End;
+  S := '';
+  For I := 0 To 31 Do S := S + Chr(Mem[0:A + 40 + I]);
+  S := Trim(S);
+  Sum := 0;
+  For I := 813 To 829 Do Sum := Sum * 31 + Mem[0:A + I];
+  If PVol <> 0 Then PutPStr(PVol, S, VolSize);
+  If PSerial <> 0 Then MemL[0:PSerial] := Sum;
+  If PMaxComp <> 0 Then MemL[0:PMaxComp] := 255;
+  If PFlags <> 0 Then MemL[0:PFlags] := $00080000;   { lecture seule }
+  If PFs <> 0 Then PutPStr(PFs, 'CDFS', FsSize);
+  GetVolumeInformationA := 1;
+End;
+
+{ MEMORYSTATUS : longueur, charge, memoire physique totale et libre... }
+Procedure GlobalMemoryStatus(P : LongInt);
+Var Free : LongInt;
+Begin
+  Free := HeapFreeBytes + (PhysTop - PhysNext);
+  MemL[0:P] := 32;
+  MemL[0:P + 4] := 100 - (Free Div 1024) * 100 Div MemTotalKb;
+  MemL[0:P + 8] := MemTotalKb * 1024;
+  MemL[0:P + 12] := Free;
+  MemL[0:P + 16] := 0;
+  MemL[0:P + 20] := 0;
+  MemL[0:P + 24] := ProcWinSize;
+  MemL[0:P + 28] := HeapFreeBytes;
+End;
+
+Function GetCurrentProcessId : LongInt;
+Begin
+  If CurProc >= 0 Then GetCurrentProcessId := Procs[CurProc].Serial
+  Else GetCurrentProcessId := 1;           { le noyau }
+End;
+
+Function GetCurrentThreadId : LongInt;
+Begin
+  GetCurrentThreadId := 1;
+End;
+
+Function KrnGetParentPid : LongInt;
+Begin
+  KrnGetParentPid := 0;
+  If CurProc >= 0 Then
+  Begin
+    If Procs[CurProc].Parent >= 0 Then KrnGetParentPid := Procs[Procs[CurProc].Parent].Serial
+    Else KrnGetParentPid := 1;
+  End;
 End;
 
 { ==================================================================== }
@@ -3249,6 +3693,8 @@ Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
       P := Pos(' ', ShellPath);
       If P > 0 Then ShellPath := Copy(ShellPath, 1, P - 1);
     End
+    Else If Copy(U, 1, 8) = 'LIBPATH=' Then
+      LibPath := Trim(Copy(Line, 9, 255))
     Else If Copy(U, 1, 4) = 'SET ' Then
     Begin
       Line := Trim(Copy(Line, 5, 255));
@@ -3338,6 +3784,14 @@ BEGIN
   EnvSet('OS2_SHELL', 'C:\CMD.EXE');
   ReadConfigSys;
   EnvSet('COMSPEC', ShellPath);
+  { bibliotheque DOSCALLS.DLL (API Dos* d'OS/2), si elle est presente }
+  If FindLibrary('DOSCALLS.DLL') <> '' Then
+  Begin
+    I := LoadModule('DOSCALLS.DLL');
+    If I >= 0 Then
+      KLog('DOSCALLS.DLL chargee en ' + HexStr(Mods[I].Base, 8) + 'h (' +
+           IntStr(Mods[I].NExp) + ' fonctions).');
+  End;
   PutPStr(LongInt(@KCmdLine), 'OS2KRNL', 256);
   { processeur de commandes (PROTSHELL) : relance a sa fin }
   Runs := 0;
