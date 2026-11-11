@@ -25,8 +25,12 @@ Program OS2KRNL;
     Partie 7  - Memoire : tas du noyau et memoire physique
     Partie 8  - Pagination : fenetre des processus (00400000h-007FFFFFh)
     Partie 9  - Pilote ATAPI (CD-ROM IDE, mode PIO)
+    Partie 9b - Peripheriques bloc : disques durs IDE (PIO) et disque
+                virtuel pour les systemes de fichiers installables
     Partie 10 - Systeme de fichiers ISO 9660 et disque virtuel en memoire
     Partie 11 - Table des handles, chemins et repertoire courant
+    Partie 11b- Systemes de fichiers installables (IFS= : HPFS.IFS),
+                FSH_DOVOLIO et aiguillage des unites D: a Z:
     Partie 12 - Couche API (DOSCALLS) utilisee par le runtime de OS2PC
     Partie 13 - Chargeur de programmes PE et processus
     Partie 14 - Demarrage du systeme : CONFIG.SYS et CMD.EXE
@@ -41,6 +45,12 @@ Program OS2KRNL;
   par le chargeur de la partie 13. Les parametres de ces procedures sont
   des valeurs 32 bits (LongInt) : les pointeurs sont des adresses
   lineaires lues et ecrites avec Mem, MemW et MemL[0:adresse].
+
+  Unites : C: est le CD-ROM d'amorcage (avec un disque virtuel superpose
+  pour les fichiers crees) ; les volumes reconnus par un pilote IFS
+  (partitions de type 07h des disques durs IDE, puis disque virtuel
+  /RAMDISK:n) recoivent les lettres D: et suivantes, et leurs fichiers
+  sont confies aux points d'entree FS_* du pilote.
 
   Les programmes s'executent en anneau 0, dans une fenetre de 4 Mo
   (00400000h-007FFFFFh) propre a chaque processus (pagination) ; un
@@ -70,7 +80,10 @@ Const
   ProcWinBase   = $00400000;
   ProcWinSize   = $00400000;
   ProcStackSize = $00040000;   { 256 Ko de pile par processus }
-  PhysProcBase  = $00800000;   { memoire physique des processus (>= 8 Mo) }
+  PhysProcBase  = $01000000;   { memoire physique des processus (>= 16 Mo) }
+  DllBase       = $00C00000;   { region des DLL (12 Mo - 16 Mo), partagee }
+  DllTop        = $01000000;
+  MaxMods       = 8;
 
   { Tas du noyau }
   HeapMagicUsed = $55534544;   { 'DESU' }
@@ -141,6 +154,10 @@ Type
     Time     : LongInt;      { date et heure DOS }
     Owner    : LongInt;      { processus proprietaire }
     Name     : String[127];
+    IsIfs    : Boolean;      { fichier d'un volume IFS (HPFS.IFS...) }
+    IfsDrv   : LongInt;      { unite (3 = D:) }
+    Sffsi    : Array[0..63] Of Byte;   { SFT : partie du noyau }
+    Sffsd    : Array[0..31] Of Byte;   { SFT : partie du pilote }
   End;
 
   { Recherche FindFirst/FindNext }
@@ -151,6 +168,10 @@ Type
     IsoIdx   : LongInt;      { position dans le repertoire ISO }
     RamIdx   : LongInt;      { position dans le disque virtuel }
     Owner    : LongInt;
+    IsIfs    : Boolean;      { recherche sur un volume IFS }
+    IfsDrv   : LongInt;
+    Fsfsi    : Array[0..7] Of Byte;
+    Fsfsd    : Array[0..31] Of Byte;
   End;
 
   { Fichier ou repertoire du disque virtuel (cree en cours d'execution) }
@@ -181,12 +202,17 @@ Type
     ImageSize : LongInt;
     CmdLine   : String;
     Name      : String[63];
+    Path      : String[127];
+    Serial    : LongInt;     { identificateur de processus (PID) unique }
     CurDir    : String[127];
   End;
 
 Var
   { Console }
   CurRow, CurCol   : LongInt;
+  ConRows          : LongInt;       { lignes de la console (les lignes du bas
+                                      peuvent etre reservees, ex. FKA.DLL) }
+  ConRowsOwner     : LongInt;       { processus qui a reduit la console }
   TextAttr         : LongInt;
   SerialOk         : Boolean;
   SerialMute       : Boolean;       { pas de copie serie (edition de ligne) }
@@ -247,6 +273,8 @@ Var
   ShellPath        : String[127];
   KCmdLine         : Array[0..255] Of Byte;
   ExcFilter        : LongInt;
+  LibPath          : String;        { LIBPATH= de CONFIG.SYS }
+  NextSerial       : LongInt;       { prochain PID }
 
 { ==================================================================== }
 { Partie 2 - Utilitaires                                               }
@@ -316,7 +344,7 @@ Begin
 End;
 
 { Chaine Pascal -> ASCIIZ a l'adresse A (au plus Max octets, zero compris) }
-Procedure PutPStr(A : LongInt; Const S : String; Max : LongInt);
+Procedure PutPStr(A : LongInt; S : String; Max : LongInt);
 Var I, L : LongInt;
 Begin
   L := Length(S);
@@ -396,15 +424,15 @@ End;
 Procedure ScrollUp;
 Var I : LongInt;
 Begin
-  MoveMem(VideoBase + ScrCols * 2, VideoBase, ScrCols * (ScrRows - 1) * 2);
+  MoveMem(VideoBase + ScrCols * 2, VideoBase, ScrCols * (ConRows - 1) * 2);
   For I := 0 To ScrCols - 1 Do
-    MemW[0:VideoBase + ((ScrRows - 1) * ScrCols + I) * 2] := (TextAttr Shl 8) Or $20;
+    MemW[0:VideoBase + ((ConRows - 1) * ScrCols + I) * 2] := (TextAttr Shl 8) Or $20;
 End;
 
 Procedure ClearScreen;
 Var I : LongInt;
 Begin
-  For I := 0 To ScrCols * ScrRows - 1 Do
+  For I := 0 To ScrCols * ConRows - 1 Do
     MemW[0:VideoBase + I * 2] := (TextAttr Shl 8) Or $20;
   CurRow := 0; CurCol := 0;
   UpdateCursor;
@@ -433,10 +461,10 @@ Begin
     CurCol := 0;
     Inc(CurRow);
   End;
-  If CurRow >= ScrRows Then
+  If CurRow >= ConRows Then
   Begin
     ScrollUp;
-    CurRow := ScrRows - 1;
+    CurRow := ConRows - 1;
   End;
 End;
 
@@ -446,20 +474,20 @@ Begin
   UpdateCursor;
 End;
 
-Procedure ConPutS(Const S : String);
+Procedure ConPutS(S : String);
 Var I : LongInt;
 Begin
   For I := 1 To Length(S) Do ConPutRaw(S[I]);
   UpdateCursor;
 End;
 
-Procedure ConPutLn(Const S : String);
+Procedure ConPutLn(S : String);
 Begin
   ConPutS(S + #13#10);
 End;
 
 { Journal du noyau : console et port serie }
-Procedure KLog(Const S : String);
+Procedure KLog(S : String);
 Begin
   ConPutLn(S);
 End;
@@ -890,11 +918,11 @@ Var
     For J := 1 To Length(S) Do ConPutRaw(S[J]);
     For J := Length(S) + 1 To OldLen Do ConPutRaw(' ');
     { la saisie a pu faire defiler l'ecran }
-    While (StartRow > 0) And ((StartRow * ScrCols + StartCol + OldLen) > ScrRows * ScrCols - 1) Do
+    While (StartRow > 0) And ((StartRow * ScrCols + StartCol + OldLen) > ConRows * ScrCols - 1) Do
       Dec(StartRow);
     CurRow := StartRow + (StartCol + Pos) Div ScrCols;
     CurCol := (StartCol + Pos) Mod ScrCols;
-    If CurRow >= ScrRows Then CurRow := ScrRows - 1;
+    If CurRow >= ConRows Then CurRow := ConRows - 1;
     UpdateCursor;
     If Length(S) > OldLen Then OldLen := Length(S);
     SerialMute := False;
@@ -1273,6 +1301,334 @@ Begin
 End;
 
 { ==================================================================== }
+{ Partie 9b - Peripheriques bloc : disques durs IDE et disque virtuel  }
+{ ==================================================================== }
+{ Les volumes des systemes de fichiers installables (IFS) sont sur des
+  peripheriques bloc de secteurs de 512 octets : partitions d'un disque
+  dur IDE/ATA (mode PIO 28 bits, sans interruption) ou disque virtuel en
+  memoire (/RAMDISK:n de la ligne IFS=). Les pilotes IFS y accedent par
+  FSH_DOVOLIO (secteurs relatifs au debut du volume). }
+
+Const
+  MaxBlk  = 8;
+  BlkAta  = 1;
+  BlkRam  = 2;
+
+Type
+  TBlk = Record
+    Used   : Boolean;
+    Kind   : LongInt;
+    Base   : LongInt;       { ports ATA }
+    Ctrl   : LongInt;
+    Slave  : Boolean;
+    Start  : LongInt;       { premier secteur (LBA) du volume sur le disque }
+    Count  : LongInt;       { nombre de secteurs }
+    Mem    : LongInt;       { disque virtuel : adresse en memoire }
+    PType  : LongInt;       { type de partition (07h = HPFS/IFS) }
+  End;
+
+  { pilote IFS charge (IFS= de CONFIG.SYS) : points d'entree FS_* }
+  TIfs = Record
+    Used     : Boolean;
+    Module   : LongInt;
+    Name     : String[15];      { FS_NAME : HPFS... }
+    FInit, FMount, FOpen, FClose, FRead, FWrite, FSeek, FNewSize, FCommit : LongInt;
+    FFileInfo, FPathInfo, FFileAttr, FDelete, FMkDir, FRmDir, FMove, FChDir : LongInt;
+    FFindFirst, FFindNext, FFindClose, FFsInfo, FFlush, FFsCtl, FExit, FShutdown : LongInt;
+  End;
+
+  { volume monte par un IFS : unite D: a Z: (le hVPB est le numero
+    d'unite, 3 = D:) }
+  TIfsVol = Record
+    Mounted  : Boolean;
+    Blk      : LongInt;
+    Ifs      : LongInt;
+    Vpfsi    : Array[0..43] Of Byte;
+    Vpfsd    : Array[0..63] Of Byte;
+  End;
+
+Const
+  MaxIfs = 4;
+
+Var
+  Blks   : Array[0..MaxBlk - 1] Of TBlk;
+  NBlk   : LongInt;
+  HdBuf  : Array[0..511] Of Byte;
+  Ifss   : Array[0..MaxIfs - 1] Of TIfs;
+  NIfs   : LongInt;
+  IfsVols : Array[0..25] Of TIfsVol;
+  IfsLines : Array[0..MaxIfs - 1] Of String;   { lignes IFS= de CONFIG.SYS }
+  RamDiskKb : LongInt;                           { /RAMDISK:n de la ligne IFS= }
+  NIfsLines : LongInt;
+
+Function HdWait(Base : LongInt) : LongInt;
+Var N, St : LongInt;
+Begin
+  N := 0;
+  St := -1;
+  Repeat
+    St := Port[Base + 7];
+    Inc(N);
+  Until ((St And $80) = 0) Or (N > 1000000);
+  If (St And $80) <> 0 Then St := -1;
+  HdWait := St;
+End;
+
+{ IDENTIFY DEVICE (ECh) : vrai si un disque ATA repond ; Sectors <-
+  nombre de secteurs adressables (LBA 28 bits) }
+Function HdIdentify(Base, Ctrl : LongInt; Slave : Boolean; Var Sectors : LongInt) : Boolean;
+Var St, I, X, A : LongInt; R : Boolean;
+Begin
+  R := False;
+  Sectors := 0;
+  If Port[Base + 7] <> $FF Then
+  Begin
+    Port[Ctrl] := 2;
+    If Slave Then Port[Base + 6] := $B0 Else Port[Base + 6] := $A0;
+    For I := 1 To 4 Do X := Port[Ctrl];
+    Port[Base + 2] := 0; Port[Base + 3] := 0; Port[Base + 4] := 0; Port[Base + 5] := 0;
+    Port[Base + 7] := $EC;
+    For I := 1 To 4 Do X := Port[Ctrl];
+    St := Port[Base + 7];
+    If St <> 0 Then
+    Begin
+      St := HdWait(Base);
+      { un lecteur ATAPI repond par la signature 14h/EBh et une erreur }
+      If (St >= 0) And (Port[Base + 4] = 0) And (Port[Base + 5] = 0) Then
+      Begin
+        I := 0;
+        Repeat
+          St := Port[Base + 7];
+          Inc(I);
+        Until ((St And 9) <> 0) Or (I > 1000000);
+        If (St And 9) = 8 Then
+        Begin
+          A := LongInt(@HdBuf);
+          asm
+            push edi
+            mov edi,A
+            mov ecx,256
+            mov edx,Base
+            cld
+            rep insw
+            pop edi
+          end;
+          Sectors := MemW[0:A + 120] Or (MemW[0:A + 122] Shl 16);
+          R := Sectors > 0;
+        End;
+      End;
+    End;
+  End;
+  HdIdentify := R;
+End;
+
+{ Lire ou ecrire N secteurs (1 a 128) a partir de Lba }
+Function HdIO(B, Lba, N, Addr : LongInt; Wr : Boolean) : Boolean;
+Var St, I, X, A, Base, Tries : LongInt; Ok : Boolean;
+Begin
+  Base := Blks[B].Base;
+  Ok := False;
+  Tries := 0;
+  While (Not Ok) And (Tries < 3) Do
+  Begin
+    Inc(Tries);
+    Ok := True;
+    If Blks[B].Slave Then Port[Base + 6] := $F0 Or ((Lba Shr 24) And $0F)
+    Else Port[Base + 6] := $E0 Or ((Lba Shr 24) And $0F);
+    For I := 1 To 4 Do X := Port[Blks[B].Ctrl];
+    If HdWait(Base) < 0 Then Ok := False;
+    If Ok Then
+    Begin
+      Port[Base + 1] := 0;
+      Port[Base + 2] := N And $FF;
+      Port[Base + 3] := Lba And $FF;
+      Port[Base + 4] := (Lba Shr 8) And $FF;
+      Port[Base + 5] := (Lba Shr 16) And $FF;
+      If Wr Then Port[Base + 7] := $30 Else Port[Base + 7] := $20;
+      I := 0;
+      While Ok And (I < N) Do
+      Begin
+        For X := 1 To 4 Do St := Port[Blks[B].Ctrl];
+        St := HdWait(Base);
+        If (St < 0) Or ((St And 1) <> 0) Or ((St And 8) = 0) Then Ok := False
+        Else
+        Begin
+          A := Addr + I * 512;
+          If Wr Then
+          Begin
+            asm
+              push esi
+              mov esi,A
+              mov ecx,256
+              mov edx,Base
+              cld
+              rep outsw
+              pop esi
+            end;
+          End
+          Else
+          Begin
+            asm
+              push edi
+              mov edi,A
+              mov ecx,256
+              mov edx,Base
+              cld
+              rep insw
+              pop edi
+            end;
+          End;
+          Inc(I);
+        End;
+      End;
+      If Ok And Wr Then
+      Begin
+        St := HdWait(Base);
+        Port[Base + 7] := $E7;                    { CACHE FLUSH }
+        St := HdWait(Base);
+        If (St < 0) Or ((St And 1) <> 0) Then Ok := False;
+      End;
+    End;
+  End;
+  HdIO := Ok;
+End;
+
+Function NewBlk : LongInt;
+Var R : LongInt;
+Begin
+  R := -1;
+  If NBlk < MaxBlk Then
+  Begin
+    R := NBlk;
+    Inc(NBlk);
+    Blks[R].Used := True;
+    Blks[R].Kind := 0; Blks[R].Base := 0; Blks[R].Ctrl := 0; Blks[R].Slave := False;
+    Blks[R].Start := 0; Blks[R].Count := 0; Blks[R].Mem := 0; Blks[R].PType := 0;
+  End;
+  NewBlk := R;
+End;
+
+{ Volumes d'un disque : partitions principales de type 07h de la table
+  du secteur 0, ou disque entier s'il commence par un secteur d'amorce
+  HPFS (sans table de partitions) }
+Procedure ScanDisk(Base, Ctrl : LongInt; Slave : Boolean; Sectors : LongInt);
+Var B, I, E, T, S, N : LongInt; Found : Boolean;
+Begin
+  B := NewBlk;
+  If B < 0 Then Exit;
+  Blks[B].Kind := BlkAta; Blks[B].Base := Base; Blks[B].Ctrl := Ctrl; Blks[B].Slave := Slave;
+  Blks[B].Start := 0; Blks[B].Count := Sectors;
+  If Not HdIO(B, 0, 1, LongInt(@HdBuf), False) Then
+  Begin
+    Dec(NBlk);
+    Exit;
+  End;
+  Found := False;
+  If (HdBuf[54] = Ord('H')) And (HdBuf[55] = Ord('P')) And (HdBuf[56] = Ord('F')) And (HdBuf[57] = Ord('S')) Then
+  Begin
+    Blks[B].PType := 7;
+    Found := True;
+  End
+  Else If (HdBuf[510] = $55) And (HdBuf[511] = $AA) Then
+  Begin
+    Dec(NBlk);
+    For I := 0 To 3 Do
+    Begin
+      E := LongInt(@HdBuf) + 446 + I * 16;
+      T := Mem[0:E + 4];
+      S := MemL[0:E + 8];
+      N := MemL[0:E + 12];
+      If (T = 7) And (N > 0) And (S + N <= Sectors) Then
+      Begin
+        B := NewBlk;
+        If B >= 0 Then
+        Begin
+          Blks[B].Kind := BlkAta; Blks[B].Base := Base; Blks[B].Ctrl := Ctrl; Blks[B].Slave := Slave;
+          Blks[B].Start := S; Blks[B].Count := N; Blks[B].PType := T;
+          Found := True;
+        End;
+      End;
+    End;
+  End
+  Else
+    Dec(NBlk);
+  If Found Then
+    KLog('Disque IDE ' + HexStr(Base, 3) + 'h ' + IntStr(Ord(Slave)) + ' : ' +
+         IntStr(Sectors Div 2048) + ' Mo, volume(s) de type 07h.');
+End;
+
+{ Chercher les disques durs IDE (sauf le lecteur de CD-ROM) }
+Procedure HdInit;
+Var I, Base, Ctrl, Sectors : LongInt; Slave : Boolean;
+Begin
+  For I := 0 To 3 Do
+  Begin
+    If I < 2 Then
+    Begin
+      Base := $1F0; Ctrl := $3F6;
+    End
+    Else
+    Begin
+      Base := $170; Ctrl := $376;
+    End;
+    Slave := Odd(I);
+    If Not ((Base = AtaBase) And (Slave = AtaSlave)) Then
+      If HdIdentify(Base, Ctrl, Slave, Sectors) Then ScanDisk(Base, Ctrl, Slave, Sectors);
+  End;
+  { le lecteur de CD-ROM redevient le peripherique selectionne }
+  AtaSelect;
+End;
+
+{ Disque virtuel de Kb Ko pris en haut de la memoire physique }
+Function RamDiskNew(Kb : LongInt) : LongInt;
+Var B, Size : LongInt;
+Begin
+  RamDiskNew := -1;
+  Size := ((Kb * 1024) + 4095) And Not 4095;
+  If (Size < 512 * 1024) Or (PhysTop - Size < PhysProcBase + $00800000) Then Exit;
+  B := NewBlk;
+  If B < 0 Then Exit;
+  PhysTop := PhysTop - Size;
+  Blks[B].Kind := BlkRam;
+  Blks[B].Mem := PhysTop;
+  Blks[B].Count := Size Div 512;
+  Blks[B].PType := 7;
+  FillMem(PhysTop, Size, 0);
+  RamDiskNew := B;
+End;
+
+{ Entree/sortie de secteurs d'un peripherique bloc }
+Function BlkIO(B, Op, Sec, N, Addr : LongInt) : LongInt;
+Var R, K, Done : LongInt;
+Begin
+  R := 0;
+  If (B < 0) Or (B >= NBlk) Then R := 21
+  Else If (Sec < 0) Or (N < 0) Or (Sec + N > Blks[B].Count) Then R := 27   { secteur introuvable }
+  Else If Blks[B].Kind = BlkRam Then
+  Begin
+    If (Op And 1) <> 0 Then MoveMem(Addr, Blks[B].Mem + Sec * 512, N * 512)
+    Else MoveMem(Blks[B].Mem + Sec * 512, Addr, N * 512);
+  End
+  Else
+  Begin
+    Done := 0;
+    While (R = 0) And (Done < N) Do
+    Begin
+      K := N - Done;
+      If K > 128 Then K := 128;
+      If Not HdIO(B, Blks[B].Start + Sec + Done, K, Addr + Done * 512, (Op And 1) <> 0) Then
+      Begin
+        If (Op And 1) <> 0 Then R := 29 Else R := 30;
+      End
+      Else
+        Done := Done + K;
+    End;
+    AtaSelect;
+  End;
+  BlkIO := R;
+End;
+
+{ ==================================================================== }
 { Partie 10 - ISO 9660 et disque virtuel en memoire                    }
 { ==================================================================== }
 { Le CD-ROM d'amorcage est l'unite C:. Il est en lecture seule : les
@@ -1350,7 +1706,7 @@ Begin
 End;
 
 { Chercher un chemin complet (C:\A\B) sur le CD-ROM }
-Function IsoLookup(Const Path : String; Var Lba, Size, Attr, Time : LongInt) : Boolean;
+Function IsoLookup(Path : String; Var Lba, Size, Attr, Time : LongInt) : Boolean;
 Var Rest, Comp, Nm : String; P, I : LongInt; Found : Boolean;
     ELba, ESize, EAttr, ETime : LongInt;
 Begin
@@ -1389,7 +1745,7 @@ Begin
 End;
 
 { Disque virtuel : chercher une entree par chemin complet }
-Function RamFind(Const Path : String) : LongInt;
+Function RamFind(Path : String) : LongInt;
 Var I : LongInt;
 Begin
   RamFind := -1;
@@ -1401,7 +1757,7 @@ Begin
     End;
 End;
 
-Function RamNew(Const Path : String; Attr : LongInt) : LongInt;
+Function RamNew(Path : String; Attr : LongInt) : LongInt;
 Var I : LongInt;
 Begin
   RamNew := -1;
@@ -1422,7 +1778,7 @@ Begin
 End;
 
 { Repertoire parent d'un chemin complet (C:\A\B -> C:\A ; C:\A -> C:\) }
-Function ParentDir(Const Path : String) : String;
+Function ParentDir(Path : String) : String;
 Var P : LongInt;
 Begin
   P := Length(Path);
@@ -1430,7 +1786,7 @@ Begin
   If P <= 3 Then ParentDir := Copy(Path, 1, 3) Else ParentDir := Copy(Path, 1, P - 1);
 End;
 
-Function BaseName(Const Path : String) : String;
+Function BaseName(Path : String) : String;
 Var P : LongInt;
 Begin
   P := Length(Path);
@@ -1438,12 +1794,21 @@ Begin
   BaseName := Copy(Path, P + 1, 255);
 End;
 
-{ Existence d'un chemin (disque virtuel puis CD-ROM) }
-Function PathInfo(Const Path : String; Var Attr, Size, Time, Lba, RamIdx : LongInt) : Boolean;
+Function IfsDrive(Path : String) : LongInt; Forward;
+Function IfsStat(Path : String; Var Attr, Size, Time : LongInt) : LongInt; Forward;
+
+{ Existence d'un chemin (volume IFS, ou disque virtuel puis CD-ROM) }
+Function PathInfo(Path : String; Var Attr, Size, Time, Lba, RamIdx : LongInt) : Boolean;
 Var R : LongInt;
 Begin
   PathInfo := False;
   RamIdx := -1; Lba := 0;
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    RamIdx := -2;
+    PathInfo := IfsStat(Path, Attr, Size, Time) = 0;
+    Exit;
+  End;
   If Length(Path) = 3 Then
   Begin
     Attr := FileAttrDirectory; Size := 0; Time := 0; Lba := RootLba;
@@ -1462,17 +1827,17 @@ Begin
   PathInfo := IsoLookup(Path, Lba, Size, Attr, Time);
 End;
 
-Function IsDir(Const Path : String) : Boolean;
+Function IsDir(Path : String) : Boolean;
 Var A, S, T, L, R : LongInt;
 Begin
   IsDir := PathInfo(Path, A, S, T, L, R) And ((A And FileAttrDirectory) <> 0);
 End;
 
 { Comparaison avec un masque DOS (* et ?) }
-Function MatchMask(Const Name, Mask : String) : Boolean;
+Function MatchMask(Name, Mask : String) : Boolean;
 Var N, M : String; PN, PM : LongInt;
 
-  Function Glob(Const S, P : String) : Boolean;
+  Function Glob(S, P : String) : Boolean;
   Var I, J, StarI, StarJ : LongInt;
   Begin
     I := 1; J := 1; StarI := 0; StarJ := 0;
@@ -1556,10 +1921,15 @@ Begin
 End;
 
 { Chemin complet en majuscules : C:\REP\FICHIER (unite, ., .., / acceptes) }
-Function FullPath(Name : String) : String;
+Function FullPathX(Name : String; Up : Boolean) : String;
 Var Base, Res, Comp : String; P : LongInt;
 Begin
-  Name := UpStr(Trim(Name));
+  If Up Then Name := UpStr(Trim(Name))
+  Else
+  Begin
+    Name := Trim(Name);
+    If (Length(Name) >= 2) And (Name[2] = ':') Then Name[1] := UpCase(Name[1]);
+  End;
   For P := 1 To Length(Name) Do If Name[P] = '/' Then Name[P] := '\';
   If (Length(Name) >= 2) And (Name[2] = ':') Then
   Begin
@@ -1596,13 +1966,42 @@ Begin
     If Res[Length(Res)] <> '\' Then Res := Res + '\';
     Res := Res + Comp;
   End;
-  FullPath := Res;
+  FullPathX := Res;
 End;
 
-{ Seule l'unite C: (CD-ROM + disque virtuel) existe }
-Function DriveOk(Const Path : String) : Boolean;
+Function FullPath(Name : String) : String;
 Begin
-  DriveOk := (Length(Path) >= 3) And (Path[1] = 'C');
+  FullPath := FullPathX(Name, True);
+End;
+
+{ Unite d'un volume IFS monte (3 = D:...), ou -1 }
+Function IfsDrive(Path : String) : LongInt;
+Var D : LongInt;
+Begin
+  IfsDrive := -1;
+  If (Length(Path) >= 2) And (Path[2] = ':') Then
+  Begin
+    D := Ord(UpCase(Path[1])) - 65;
+    If (D >= 3) And (D <= 25) Then
+      If IfsVols[D].Mounted Then IfsDrive := D;
+  End;
+End;
+
+{ Chemin complet : en majuscules, sauf sur un volume IFS (HPFS conserve
+  la casse des noms) }
+Function FullPathOf(A : LongInt) : String;
+Var S, P : String;
+Begin
+  S := PStr(A);
+  P := FullPath(S);
+  If IfsDrive(P) >= 0 Then P := FullPathX(S, False);
+  FullPathOf := P;
+End;
+
+{ Unite C: (CD-ROM + disque virtuel) et volumes IFS montes }
+Function DriveOk(Path : String) : Boolean;
+Begin
+  DriveOk := ((Length(Path) >= 3) And (Path[1] = 'C')) Or (IfsDrive(Path) >= 0);
 End;
 
 Function FileSlot(H : LongInt) : LongInt;
@@ -1625,6 +2024,7 @@ Begin
       Files[I].CanWrite := False; Files[I].Time := 0;
       Files[I].Owner := CurProc;
       Files[I].Name := '';
+      Files[I].IsIfs := False;
       NewFileSlot := I;
       Exit;
     End;
@@ -1635,6 +2035,241 @@ Var I : LongInt;
 Begin
   For I := 0 To N - 1 Do ConPutRaw(Chr(Mem[0:Buf + I]));
   UpdateCursor;
+End;
+
+{ ==================================================================== }
+{ Partie 11b - Systemes de fichiers installables (IFS)                 }
+{ ==================================================================== }
+{ Les fichiers des unites D: a Z: montees par un pilote IFS (HPFS.IFS)
+  sont confies aux points d'entree FS_* du pilote, appeles selon la
+  convention _System (parametres de droite a gauche, pile nettoyee par
+  l'appelant). Les structures passees sont decrites dans DLL\HPFS.PAS. }
+
+Var
+  IfsArg   : Array[0..15] Of LongInt;
+  IfsName  : Array[0..263] Of Byte;    { chemin ASCIIZ }
+  IfsName2 : Array[0..263] Of Byte;
+  IfsCd    : Array[0..271] Of Byte;    { CDFSI }
+  IfsCdd   : Array[0..15] Of Byte;     { CDFSD }
+  IfsInfo  : Array[0..511] Of Byte;
+  IfsCnt   : LongInt;
+  IfsAct   : LongInt;
+
+{ Appeler le point d'entree Fn avec les N parametres de IfsArg }
+Function IfsCall(Fn, N : LongInt) : LongInt;
+Var R, A : LongInt;
+Begin
+  R := 1;
+  A := LongInt(@IfsArg);
+  If Fn <> 0 Then
+  Begin
+    asm
+      push ebx
+      push esi
+      push edi
+      mov ecx,N
+      mov esi,A
+    @lp:
+      cmp ecx,0
+      je @go
+      dec ecx
+      mov eax,ecx
+      shl eax,2
+      add eax,esi
+      mov edx,[eax]
+      push edx
+      jmp @lp
+    @go:
+      mov eax,Fn
+      call eax
+      mov ecx,N
+      shl ecx,2
+      add esp,ecx
+      mov R,eax
+      pop edi
+      pop esi
+      pop ebx
+    end;
+  End;
+  IfsCall := R;
+End;
+
+Procedure IfsArgs4(A0, A1, A2, A3 : LongInt);
+Begin
+  IfsArg[0] := A0; IfsArg[1] := A1; IfsArg[2] := A2; IfsArg[3] := A3;
+End;
+
+Procedure IfsArgs8(A4, A5, A6, A7 : LongInt);
+Begin
+  IfsArg[4] := A4; IfsArg[5] := A5; IfsArg[6] := A6; IfsArg[7] := A7;
+End;
+
+{ Preparer le chemin et le CDFSI d'une operation sur l'unite D }
+Procedure IfsPrep(D : LongInt; Path : String);
+Begin
+  PutPStr(LongInt(@IfsName), Path, 260);
+  FillMem(LongInt(@IfsCd), 272, 0);
+  MemL[0:LongInt(@IfsCd)] := D;
+  MemL[0:LongInt(@IfsCd) + 4] := -1;
+  If Copy(CurDir, 1, 1) = Copy(Path, 1, 1) Then PutPStr(LongInt(@IfsCd) + 12, CurDir, 260)
+  Else PutPStr(LongInt(@IfsCd) + 12, Copy(Path, 1, 2) + '\', 260);
+  FillMem(LongInt(@IfsCdd), 16, 0);
+End;
+
+Function IfsOf(D : LongInt) : LongInt;
+Begin
+  IfsOf := IfsVols[D].Ifs;
+End;
+
+{ Attributs, taille et date (DOS) d'un chemin d'un volume IFS ; rend le
+  code d'erreur OS/2 }
+Function IfsStat(Path : String; Var Attr, Size, Time : LongInt) : LongInt;
+Var D, R, A : LongInt;
+Begin
+  D := IfsDrive(Path);
+  IfsPrep(D, Path);
+  A := LongInt(@IfsInfo);
+  IfsArgs4(0, LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName));
+  IfsArgs8(-1, 1, A, 24);
+  R := IfsCall(Ifss[IfsOf(D)].FPathInfo, 8);
+  If R = 0 Then
+  Begin
+    Attr := MemL[0:A + 20];
+    Size := MemL[0:A + 12];
+    Time := (MemW[0:A + 8] Shl 16) Or MemW[0:A + 10];
+  End;
+  IfsStat := R;
+End;
+
+{ Operation sur un chemin : FS_DELETE, FS_RMDIR (4 parametres) }
+Function IfsPathOp(Fn : LongInt; Path : String) : LongInt;
+Var D : LongInt;
+Begin
+  D := IfsDrive(Path);
+  IfsPrep(D, Path);
+  IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+  IfsPathOp := IfsCall(Fn, 4);
+End;
+
+{ Ouvrir ou creer un fichier d'un volume IFS dans l'entree H de Files }
+Function IfsOpen(H : LongInt; Path : String; Access, Share, Disp : LongInt) : LongInt;
+Var D, I, R, Mode, Flag : LongInt; Exists : Boolean;
+Begin
+  D := IfsDrive(Path);
+  I := IfsOf(D);
+  Files[H].IsIfs := True;
+  Files[H].IfsDrv := D;
+  FillMem(LongInt(@Files[H].Sffsi), 64, 0);
+  FillMem(LongInt(@Files[H].Sffsd), 32, 0);
+  MemL[0:LongInt(@Files[H].Sffsi) + 4] := D;
+  If CurProc >= 0 Then MemL[0:LongInt(@Files[H].Sffsi) + 32] := Procs[CurProc].Serial
+  Else MemL[0:LongInt(@Files[H].Sffsi) + 32] := 1;
+  { acces et partage OS/2 }
+  If ((Access And $40000000) <> 0) And ((Access And $80000000) <> 0) Then Mode := 2
+  Else If (Access And $40000000) <> 0 Then Mode := 1
+  Else Mode := 0;
+  Case Share And 3 Of
+    0 : Mode := Mode Or $10;
+    1 : Mode := Mode Or $20;
+    2 : Mode := Mode Or $30;
+  Else
+    Mode := Mode Or $40;
+  End;
+  MemL[0:LongInt(@Files[H].Sffsi)] := Mode;
+  Case Disp Of
+    1 : Flag := $10;          { CREATE_NEW }
+    2 : Flag := $12;          { CREATE_ALWAYS }
+    3 : Flag := $01;          { OPEN_EXISTING }
+    4 : Flag := $11;          { OPEN_ALWAYS }
+    5 : Flag := $02;          { TRUNCATE_EXISTING }
+  Else
+    Flag := $01;
+  End;
+  IfsPrep(D, Path);
+  IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+  IfsArgs8(LongInt(@Files[H].Sffsi), LongInt(@Files[H].Sffsd), Mode, Flag);
+  IfsArg[8] := LongInt(@IfsAct);
+  IfsArg[9] := 0;
+  IfsArg[10] := 0;
+  IfsArg[11] := LongInt(@IfsCnt);
+  R := IfsCall(Ifss[I].FOpen, 12);
+  If R = 110 Then
+  Begin
+    { ERROR_OPEN_FAILED : le fichier existe (CREATE_NEW) ou n'existe pas }
+    If Disp = 1 Then R := ErrFileExists Else R := ErrFileNotFound;
+  End;
+  If R = 0 Then
+  Begin
+    Files[H].CanWrite := (Mode And 7) <> 0;
+    Files[H].Time := MemL[0:LongInt(@Files[H].Sffsi) + 16];
+  End
+  Else
+    Files[H].IsIfs := False;
+  IfsOpen := R;
+End;
+
+Function IfsClose(F : LongInt) : LongInt;
+Var I, D, R : LongInt;
+Begin
+  D := Files[F].IfsDrv;
+  I := IfsOf(D);
+  IfsArgs4(2, 0, LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd));
+  R := IfsCall(Ifss[I].FClose, 4);
+  IfsArg[0] := D; IfsArg[1] := 0;
+  IfsCall(Ifss[I].FFlush, 2);
+  Files[F].IsIfs := False;
+  IfsClose := R;
+End;
+
+{ FS_READ / FS_WRITE : N octets ; rend le code et le nombre traite }
+Function IfsRW(F, Buf, N : LongInt; Wr : Boolean; Var Done : LongInt) : LongInt;
+Var I, R : LongInt;
+Begin
+  I := IfsOf(Files[F].IfsDrv);
+  IfsCnt := N;
+  IfsArgs4(LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd), Buf, LongInt(@IfsCnt));
+  IfsArg[4] := 0;
+  If Wr Then R := IfsCall(Ifss[I].FWrite, 5) Else R := IfsCall(Ifss[I].FRead, 5);
+  Done := IfsCnt;
+  IfsRW := R;
+End;
+
+{ Fermer les fichiers et recherches IFS d'un processus termine }
+Procedure IfsProcessExit(Pid : LongInt);
+Var I, J, Serial : LongInt;
+Begin
+  For I := 0 To MaxFiles - 1 Do
+    If Files[I].Used And (Files[I].Owner = Pid) And Files[I].IsIfs Then IfsClose(I);
+  For I := 0 To MaxFinds - 1 Do
+    If Finds[I].Used And (Finds[I].Owner = Pid) And Finds[I].IsIfs Then
+    Begin
+      IfsArg[0] := LongInt(@Finds[I].Fsfsi); IfsArg[1] := LongInt(@Finds[I].Fsfsd);
+      IfsCall(Ifss[IfsOf(Finds[I].IfsDrv)].FFindClose, 2);
+      Finds[I].IsIfs := False;
+    End;
+  If Pid >= 0 Then Serial := Procs[Pid].Serial Else Serial := 1;
+  For J := 0 To NIfs - 1 Do
+  Begin
+    IfsArg[0] := 0; IfsArg[1] := Serial; IfsArg[2] := 0;
+    IfsCall(Ifss[J].FExit, 3);
+  End;
+End;
+
+{ FSH_DOVOLIO(Op, fAllowed, hVPB, pData, pcSec, iSec) : service offert
+  aux pilotes IFS : lire (Op bit 0 = 0) ou ecrire *pcSec secteurs du
+  volume hVPB a partir du secteur iSec ; *pcSec <- secteurs traites. }
+Function FSH_DoVolIO(Op, Allowed, HVpb, PData, PcSec, ISec : LongInt) : LongInt;
+Var R, N : LongInt;
+Begin
+  If (HVpb < 0) Or (HVpb > 25) Then R := ErrInvalidDrive
+  Else If IfsVols[HVpb].Blk < 0 Then R := ErrInvalidDrive
+  Else
+  Begin
+    N := MemL[0:PcSec];
+    R := BlkIO(IfsVols[HVpb].Blk, Op, ISec, N, PData);
+    If R <> 0 Then MemL[0:PcSec] := 0;
+  End;
+  FSH_DoVolIO := R;
 End;
 
 { ==================================================================== }
@@ -1669,7 +2304,9 @@ Begin
   A := KAlloc(Size);
   If A <> 0 Then
   Begin
-    MemL[0:A - 8] := CurProc;              { libere a la fin du processus }
+    { tas 2 : memoire partagee (DLL, DosAllocSharedMem), jamais liberee a
+      la fin du processus ; sinon liberee a la fin du processus }
+    If Heap = 2 Then MemL[0:A - 8] := -1 Else MemL[0:A - 8] := CurProc;
     If (Flags And 8) <> 0 Then FillMem(A, Size, 0);
   End;
   HeapAlloc := A;
@@ -1711,9 +2348,14 @@ Begin
   GetVersion := 20;
 End;
 
+Function ModuleHandleByName(Name : String) : LongInt; Forward;
+
 Function GetModuleHandleA(Name : LongInt) : LongInt;
 Begin
-  If CurProc >= 0 Then GetModuleHandleA := ProcWinBase Else GetModuleHandleA := $00100000;
+  If Name <> 0 Then
+    GetModuleHandleA := ModuleHandleByName(PStr(Name))
+  Else If CurProc >= 0 Then GetModuleHandleA := ProcWinBase
+  Else GetModuleHandleA := $00100000;
 End;
 
 Function GetCommandLineA : LongInt;
@@ -1728,7 +2370,7 @@ Begin
 End;
 
 { Chercher NOM= dans l'environnement ; rend l'adresse de la valeur ou 0 }
-Function EnvFind(Const Name : String) : LongInt;
+Function EnvFind(Name : String) : LongInt;
 Var P, Q : LongInt; S : String;
 Begin
   EnvFind := 0;
@@ -1769,7 +2411,7 @@ Begin
 End;
 
 { Definir NOM=VALEUR dans l'environnement (CONFIG.SYS) }
-Procedure EnvSet(Const AName, AValue : String);
+Procedure EnvSet(AName, AValue : String);
 Var P, Q, L : LongInt; S, Item, Name, Value : String;
 Begin
   { copies locales : les parametres peuvent designer l'anneau des
@@ -1899,24 +2541,43 @@ Begin
   CurCol := Coord And $FFFF;
   CurRow := (Coord Shr 16) And $FFFF;
   If CurCol >= ScrCols Then CurCol := ScrCols - 1;
-  If CurRow >= ScrRows Then CurRow := ScrRows - 1;
+  If CurRow >= ConRows Then CurRow := ConRows - 1;
   UpdateCursor;
   SetConsoleCursorPosition := 1;
 End;
 
 Function GetConsoleScreenBufferInfo(H, P : LongInt) : LongInt;
 Begin
-  MemW[0:P] := ScrCols;       MemW[0:P + 2] := ScrRows;
+  MemW[0:P] := ScrCols;       MemW[0:P + 2] := ConRows;
   MemW[0:P + 4] := CurCol;    MemW[0:P + 6] := CurRow;
   MemW[0:P + 8] := TextAttr;
   MemW[0:P + 10] := 0;        MemW[0:P + 12] := 0;
-  MemW[0:P + 14] := ScrCols - 1; MemW[0:P + 16] := ScrRows - 1;
-  MemW[0:P + 18] := ScrCols;  MemW[0:P + 20] := ScrRows;
+  MemW[0:P + 14] := ScrCols - 1; MemW[0:P + 16] := ConRows - 1;
+  MemW[0:P + 18] := ScrCols;  MemW[0:P + 20] := ConRows;
   GetConsoleScreenBufferInfo := 1;
 End;
 
+{ Hauteur de la zone de defilement de la console (80 colonnes, 1 a 25
+  lignes) : les lignes du bas restent libres pour l'application (zone des
+  touches de fonction de FKA.DLL). Retablie a la fin du processus. }
 Function SetConsoleScreenBufferSize(H, Size : LongInt) : LongInt;
+Var Rows : LongInt;
 Begin
+  SetConsoleScreenBufferSize := 0;
+  Rows := (Size Shr 16) And $FFFF;
+  If (Rows < 1) Or (Rows > ScrRows) Or ((Size And $FFFF) <> ScrCols) Then
+  Begin
+    LastError := ErrInvalidParam;
+    Exit;
+  End;
+  ConRows := Rows;
+  If Rows < ScrRows Then ConRowsOwner := CurProc Else ConRowsOwner := -2;
+  While CurRow >= ConRows Do
+  Begin
+    ScrollUp;
+    Dec(CurRow);
+  End;
+  UpdateCursor;
   SetConsoleScreenBufferSize := 1;
 End;
 
@@ -2088,6 +2749,21 @@ Begin
   End;
   Path := FullPath(Nm);
   Files[H].Name := Path;
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    { volume IFS : FS_OPENCREATE }
+    Path := FullPathOf(PName);
+    Files[H].Name := Path;
+    R := IfsOpen(H, Path, Access, Share, Disp);
+    If R <> 0 Then
+    Begin
+      Files[H].Used := False;
+      LastError := R;
+      Exit;
+    End;
+    CreateFileA := HFileBase + H;
+    Exit;
+  End;
   If Not DriveOk(Path) Then
   Begin
     Files[H].Used := False;
@@ -2177,6 +2853,7 @@ Begin
   F := FileSlot(H);
   If F >= 0 Then
   Begin
+    If Files[F].IsIfs Then IfsClose(F);
     Files[F].Used := False;
     Exit;
   End;
@@ -2191,7 +2868,7 @@ Begin
 End;
 
 Function ReadFile(H, Buf, N, PRead, Ovl : LongInt) : LongInt;
-Var F, Got, A, Sect, Ofs, Chunk, Ram : LongInt; S : String;
+Var F, Got, A, Sect, Ofs, Chunk, Ram, IR : LongInt; S : String;
 Begin
   ReadFile := 1;
   Got := 0;
@@ -2222,7 +2899,16 @@ Begin
       ReadFile := 0;
       Exit;
     End;
-    If Files[F].IsNul Then
+    If Files[F].IsIfs Then
+    Begin
+      IR := IfsRW(F, Buf, N, False, Got);
+      If IR <> 0 Then
+      Begin
+        LastError := IR;
+        ReadFile := 0;
+      End;
+    End
+    Else If Files[F].IsNul Then
       Got := 0
     Else If Files[F].IsRam Then
     Begin
@@ -2259,7 +2945,7 @@ Begin
 End;
 
 Function WriteFile(H, Buf, N, PWritten, Ovl : LongInt) : LongInt;
-Var F, Ram : LongInt;
+Var F, Ram, IR, Done : LongInt;
 Begin
   WriteFile := 1;
   If (H = HStdOut) Or (H = HStdErr) Then
@@ -2275,6 +2961,16 @@ Begin
     End
     Else If Files[F].IsCon Then
       ConWrite(Buf, N)
+    Else If Files[F].IsIfs Then
+    Begin
+      IR := IfsRW(F, Buf, N, True, Done);
+      N := Done;
+      If IR <> 0 Then
+      Begin
+        LastError := IR;
+        WriteFile := 0;
+      End;
+    End
     Else If Files[F].IsNul Then
     Else If Not (Files[F].IsRam And Files[F].CanWrite) Then
     Begin
@@ -2313,18 +3009,37 @@ End;
 
 Function FileSizeOf(F : LongInt) : LongInt;
 Begin
-  If Files[F].IsRam Then FileSizeOf := RamFiles[Files[F].RamIdx].Size
+  If Files[F].IsIfs Then FileSizeOf := MemL[0:LongInt(@Files[F].Sffsi) + 20]
+  Else If Files[F].IsRam Then FileSizeOf := RamFiles[Files[F].RamIdx].Size
   Else FileSizeOf := Files[F].Size;
 End;
 
 Function SetFilePointer(H, Dist, PHigh, Method : LongInt) : LongInt;
-Var F, NP : LongInt;
+Var F, NP, R : LongInt;
 Begin
   F := FileSlot(H);
   If F < 0 Then
   Begin
     LastError := ErrInvalidHandle;
     SetFilePointer := -1;
+    Exit;
+  End;
+  If Files[F].IsIfs Then
+  Begin
+    IfsArgs4(LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd), Dist, Method);
+    IfsArg[4] := 0;
+    R := IfsCall(Ifss[IfsOf(Files[F].IfsDrv)].FSeek, 5);
+    If R <> 0 Then
+    Begin
+      LastError := R;
+      SetFilePointer := -1;
+      Exit;
+    End;
+    NP := MemL[0:LongInt(@Files[F].Sffsi) + 24];
+    Files[F].Pos := NP;
+    If PHigh <> 0 Then MemL[0:PHigh] := 0;
+    LastError := 0;
+    SetFilePointer := NP;
     Exit;
   End;
   Case Method Of
@@ -2355,10 +3070,18 @@ Begin
 End;
 
 Function SetEndOfFile(H : LongInt) : LongInt;
-Var F : LongInt;
+Var F, R : LongInt;
 Begin
   SetEndOfFile := 0;
   F := FileSlot(H);
+  If F >= 0 Then
+    If Files[F].IsIfs Then
+    Begin
+      IfsArgs4(LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd), MemL[0:LongInt(@Files[F].Sffsi) + 24], 0);
+      R := IfsCall(Ifss[IfsOf(Files[F].IfsDrv)].FNewSize, 4);
+      If R = 0 Then SetEndOfFile := 1 Else LastError := R;
+      Exit;
+    End;
   If (F < 0) Or Not Files[F].IsRam Then Exit;
   If Files[F].Pos < RamFiles[Files[F].RamIdx].Size Then
     RamFiles[Files[F].RamIdx].Size := Files[F].Pos;
@@ -2366,8 +3089,16 @@ Begin
 End;
 
 Function FlushFileBuffers(H : LongInt) : LongInt;
+Var F : LongInt;
 Begin
   FlushFileBuffers := 1;
+  F := FileSlot(H);
+  If F >= 0 Then
+    If Files[F].IsIfs Then
+    Begin
+      IfsArgs4(0, 0, LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd));
+      If IfsCall(Ifss[IfsOf(Files[F].IfsDrv)].FCommit, 4) <> 0 Then FlushFileBuffers := 0;
+    End;
 End;
 
 Function GetFileTime(H, PCreate, PAccess, PWrite : LongInt) : LongInt;
@@ -2378,6 +3109,7 @@ Begin
   If F < 0 Then Exit;
   T := Files[F].Time;
   If Files[F].IsRam Then T := RamFiles[Files[F].RamIdx].Time;
+  If Files[F].IsIfs Then T := MemL[0:LongInt(@Files[F].Sffsi) + 16];
   If PWrite <> 0 Then DosDateTimeToFileTime(T Shr 16, T, PWrite);
   If PCreate <> 0 Then DosDateTimeToFileTime(T Shr 16, T, PCreate);
   If PAccess <> 0 Then DosDateTimeToFileTime(T Shr 16, T, PAccess);
@@ -2385,10 +3117,28 @@ Begin
 End;
 
 Function SetFileTime(H, PCreate, PAccess, PWrite : LongInt) : LongInt;
-Var F : LongInt;
+Var F, T, A : LongInt;
 Begin
   SetFileTime := 0;
   F := FileSlot(H);
+  If (F >= 0) And (PWrite <> 0) Then
+    If Files[F].IsIfs Then
+    Begin
+      T := MemL[0:PWrite];
+      A := LongInt(@IfsInfo);
+      FillMem(A, 24, 0);
+      MemW[0:A + 8] := (T Shr 16) And $FFFF;
+      MemW[0:A + 10] := T And $FFFF;
+      MemL[0:A + 20] := MemL[0:LongInt(@Files[F].Sffsi) + 52];
+      IfsArgs4(1, LongInt(@Files[F].Sffsi), LongInt(@Files[F].Sffsd), 1);
+      IfsArgs8(A, 24, 0, 0);
+      If IfsCall(Ifss[IfsOf(Files[F].IfsDrv)].FFileInfo, 7) = 0 Then
+      Begin
+        MemL[0:LongInt(@Files[F].Sffsi) + 16] := T;
+        SetFileTime := 1;
+      End;
+      Exit;
+    End;
   If (F < 0) Or Not Files[F].IsRam Or (PWrite = 0) Then Exit;
   RamFiles[Files[F].RamIdx].Time := MemL[0:PWrite];
   SetFileTime := 1;
@@ -2408,10 +3158,22 @@ Begin
 End;
 
 Function SetFileAttributesA(PName, Attr : LongInt) : LongInt;
-Var Path : String; R : LongInt;
+Var Path : String; R, D, A : LongInt;
 Begin
   SetFileAttributesA := 0;
   Path := FullPath(PStr(PName));
+  D := IfsDrive(Path);
+  If D >= 0 Then
+  Begin
+    IfsPrep(D, FullPathOf(PName));
+    A := Attr And $27;
+    IfsArgs4(1, LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName));
+    IfsArg[4] := -1;
+    IfsArg[5] := LongInt(@A);
+    R := IfsCall(Ifss[IfsOf(D)].FFileAttr, 6);
+    If R = 0 Then SetFileAttributesA := 1 Else LastError := R;
+    Exit;
+  End;
   R := RamFind(Path);
   If (R < 0) Or RamFiles[R].Deleted Then
   Begin
@@ -2427,6 +3189,12 @@ Var Path : String; R, I : LongInt;
 Begin
   DeleteFileA := 0;
   Path := FullPath(PStr(PName));
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    R := IfsPathOp(Ifss[IfsOf(IfsDrive(Path))].FDelete, FullPathOf(PName));
+    If R = 0 Then DeleteFileA := 1 Else LastError := R;
+    Exit;
+  End;
   R := RamFind(Path);
   If (R < 0) Or RamFiles[R].Deleted Then
   Begin
@@ -2456,6 +3224,23 @@ Begin
   MoveFileA := 0;
   Src := FullPath(PStr(PSrc));
   Dst := FullPath(PStr(PDst));
+  If (IfsDrive(Src) >= 0) Or (IfsDrive(Dst) >= 0) Then
+  Begin
+    If IfsDrive(Src) <> IfsDrive(Dst) Then
+    Begin
+      LastError := 17;                       { ERROR_NOT_SAME_DEVICE }
+      Exit;
+    End;
+    Src := FullPathOf(PSrc);
+    Dst := FullPathOf(PDst);
+    IfsPrep(IfsDrive(Src), Src);
+    PutPStr(LongInt(@IfsName2), Dst, 260);
+    IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+    IfsArg[4] := LongInt(@IfsName2); IfsArg[5] := -1; IfsArg[6] := 0;
+    R := IfsCall(Ifss[IfsOf(IfsDrive(Src))].FMove, 7);
+    If R = 0 Then MoveFileA := 1 Else LastError := R;
+    Exit;
+  End;
   R := RamFind(Src);
   If (R < 0) Or RamFiles[R].Deleted Then
   Begin
@@ -2482,6 +3267,15 @@ Var Path : String; A, S, T, L, R : LongInt;
 Begin
   CreateDirectoryA := 0;
   Path := FullPath(PStr(PName));
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    IfsPrep(IfsDrive(Path), FullPathOf(PName));
+    IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+    IfsArg[4] := 0; IfsArg[5] := 0;
+    R := IfsCall(Ifss[IfsOf(IfsDrive(Path))].FMkDir, 6);
+    If R = 0 Then CreateDirectoryA := 1 Else LastError := R;
+    Exit;
+  End;
   If Not DriveOk(Path) Or (Length(Path) <= 3) Then
   Begin
     LastError := ErrPathNotFound;
@@ -2510,6 +3304,17 @@ Var Path, Pfx : String; R, I : LongInt;
 Begin
   RemoveDirectoryA := 0;
   Path := FullPath(PStr(PName));
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    If UpStr(Path) = UpStr(CurDir) Then
+    Begin
+      LastError := ErrCurrentDir;
+      Exit;
+    End;
+    R := IfsPathOp(Ifss[IfsOf(IfsDrive(Path))].FRmDir, FullPathOf(PName));
+    If R = 0 Then RemoveDirectoryA := 1 Else LastError := R;
+    Exit;
+  End;
   R := RamFind(Path);
   If (R < 0) Or ((RamFiles[R].Attr And FileAttrDirectory) = 0) Then
   Begin
@@ -2548,6 +3353,7 @@ Begin
     LastError := ErrPathNotFound;
     Exit;
   End;
+  If IfsDrive(Path) >= 0 Then Path := FullPathOf(PName);
   If CurProc >= 0 Then Procs[CurProc].CurDir := Path Else KernelDir := Path;
   SetCurrentDirectoryA := 1;
 End;
@@ -2568,7 +3374,7 @@ End;
 Function GetFullPathNameA(PName, N, Buf, PFile : LongInt) : LongInt;
 Var S : String; P : LongInt;
 Begin
-  S := FullPath(PStr(PName));
+  S := FullPathOf(PName);
   If Length(S) + 1 > N Then
   Begin
     GetFullPathNameA := Length(S) + 1;
@@ -2589,6 +3395,22 @@ Var Root : String;
 Begin
   GetDiskFreeSpaceA := 0;
   If PRoot <> 0 Then Root := UpStr(PStr(PRoot)) Else Root := CurDir;
+  If IfsDrive(Root) >= 0 Then
+  Begin
+    IfsArg[0] := 0; IfsArg[1] := IfsDrive(Root); IfsArg[2] := LongInt(@IfsInfo);
+    IfsArg[3] := 18; IfsArg[4] := 1;
+    If IfsCall(Ifss[IfsOf(IfsDrive(Root))].FFsInfo, 5) <> 0 Then
+    Begin
+      LastError := ErrNotReady;
+      Exit;
+    End;
+    MemL[0:PSpc] := MemL[0:LongInt(@IfsInfo) + 4];
+    MemL[0:PBps] := MemW[0:LongInt(@IfsInfo) + 16];
+    MemL[0:PFree] := MemL[0:LongInt(@IfsInfo) + 12];
+    MemL[0:PTotal] := MemL[0:LongInt(@IfsInfo) + 8];
+    GetDiskFreeSpaceA := 1;
+    Exit;
+  End;
   If (Root = '') Or (Root[1] <> 'C') Then
   Begin
     LastError := ErrInvalidDrive;
@@ -2604,7 +3426,7 @@ End;
 { --- Recherche de fichiers (FindFirstFileA / FindNextFileA) --- }
 
 { Remplir WIN32_FIND_DATAA (320 octets) }
-Procedure FillFindData(P : LongInt; Const Name : String; Attr, Size, Time : LongInt);
+Procedure FillFindData(P : LongInt; Name : String; Attr, Size, Time : LongInt);
 Begin
   FillMem(P, 320, 0);
   MemL[0:P] := Attr;
@@ -2664,6 +3486,39 @@ Begin
   End;
 End;
 
+{ Recherche sur un volume IFS : entree de niveau 1 (FILEFINDBUF3) dans
+  IfsInfo -> WIN32_FIND_DATAA }
+Procedure IfsFillFind(P : LongInt);
+Var A : LongInt;
+Begin
+  A := LongInt(@IfsInfo);
+  FillFindData(P, PStr(A + 29), MemL[0:A + 24], MemL[0:A + 16], (MemW[0:A + 12] Shl 16) Or MemW[0:A + 14]);
+End;
+
+Function IfsFindFirst(F : LongInt; Pattern : String; P : LongInt) : Boolean;
+Var D, R : LongInt;
+Begin
+  D := IfsDrive(Pattern);
+  Finds[F].IsIfs := True;
+  Finds[F].IfsDrv := D;
+  FillMem(LongInt(@Finds[F].Fsfsi), 8, 0);
+  FillMem(LongInt(@Finds[F].Fsfsd), 32, 0);
+  MemL[0:LongInt(@Finds[F].Fsfsi)] := D;
+  IfsPrep(D, Pattern);
+  IfsCnt := 1;
+  IfsArgs4(LongInt(@IfsCd), LongInt(@IfsCdd), LongInt(@IfsName), -1);
+  IfsArgs8($37, LongInt(@Finds[F].Fsfsi), LongInt(@Finds[F].Fsfsd), LongInt(@IfsInfo));
+  IfsArg[8] := 300; IfsArg[9] := LongInt(@IfsCnt); IfsArg[10] := 1; IfsArg[11] := 0;
+  R := IfsCall(Ifss[IfsOf(D)].FFindFirst, 12);
+  If R = 0 Then IfsFillFind(P)
+  Else
+  Begin
+    Finds[F].IsIfs := False;
+    If R = 18 Then LastError := ErrFileNotFound Else LastError := R;
+  End;
+  IfsFindFirst := R = 0;
+End;
+
 Function FindFirstFileA(PName, P : LongInt) : LongInt;
 Var Path, Dir, Mask : String; F, I : LongInt;
 Begin
@@ -2701,12 +3556,20 @@ Begin
     Exit;
   End;
   Finds[F].Used := True;
+  Finds[F].IsIfs := False;
   Finds[F].Dir := Dir;
   Finds[F].Mask := Mask;
   Finds[F].IsoIdx := 0;
   Finds[F].RamIdx := 0;
   Finds[F].Owner := CurProc;
-  If FindStep(F, P) Then
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    Path := FullPathOf(PName);
+    If Length(Path) = 3 Then Path := Path + '*';
+    If IfsFindFirst(F, Path, P) Then FindFirstFileA := HFindBase + F
+    Else Finds[F].Used := False;
+  End
+  Else If FindStep(F, P) Then
     FindFirstFileA := HFindBase + F
   Else
   Begin
@@ -2725,7 +3588,20 @@ Begin
     LastError := ErrInvalidHandle;
     Exit;
   End;
-  If FindStep(F, P) Then FindNextFileA := 1
+  If Finds[F].IsIfs Then
+  Begin
+    IfsCnt := 1;
+    IfsArgs4(LongInt(@Finds[F].Fsfsi), LongInt(@Finds[F].Fsfsd), LongInt(@IfsInfo), 300);
+    IfsArg[4] := LongInt(@IfsCnt); IfsArg[5] := 1; IfsArg[6] := 0;
+    If IfsCall(Ifss[IfsOf(Finds[F].IfsDrv)].FFindNext, 7) = 0 Then
+    Begin
+      IfsFillFind(P);
+      FindNextFileA := 1;
+    End
+    Else
+      LastError := ErrNoMoreFiles;
+  End
+  Else If FindStep(F, P) Then FindNextFileA := 1
   Else LastError := ErrNoMoreFiles;
 End;
 
@@ -2733,7 +3609,16 @@ Function FindClose(H : LongInt) : LongInt;
 Var F : LongInt;
 Begin
   F := H - HFindBase;
-  If (F >= 0) And (F < MaxFinds) Then Finds[F].Used := False;
+  If (F >= 0) And (F < MaxFinds) Then
+  Begin
+    If Finds[F].Used And Finds[F].IsIfs Then
+    Begin
+      IfsArg[0] := LongInt(@Finds[F].Fsfsi); IfsArg[1] := LongInt(@Finds[F].Fsfsd);
+      IfsCall(Ifss[IfsOf(Finds[F].IfsDrv)].FFindClose, 2);
+      Finds[F].IsIfs := False;
+    End;
+    Finds[F].Used := False;
+  End;
   FindClose := 1;
 End;
 
@@ -2833,13 +3718,30 @@ Begin
   KExpOrds := $00100000 + MemL[0:Dir + 36];
 End;
 
-Function KernelExport(Const Name : String) : LongInt;
+{ Comparer (sans tenir compte de la casse) la chaine ASCIIZ en A avec U
+  (en majuscules), sans chaine temporaire : les resultats de fonctions
+  chaine du runtime occupent un anneau de tampons qu'une longue boucle
+  ferait deborder. }
+Function MemNameEq(A : LongInt; U : String) : Boolean;
+Var I, C : LongInt;
+Begin
+  MemNameEq := False;
+  For I := 1 To Length(U) Do
+  Begin
+    C := Mem[0:A + I - 1];
+    If (C >= 97) And (C <= 122) Then C := C - 32;
+    If C <> Ord(U[I]) Then Exit;
+  End;
+  MemNameEq := Mem[0:A + Length(U)] = 0;
+End;
+
+Function KernelExport(Name : String) : LongInt;
 Var I, O : LongInt; U : String;
 Begin
   KernelExport := 0;
   U := UpStr(Name);
   For I := 0 To KExpCount - 1 Do
-    If UpStr(PStr($00100000 + MemL[0:KExpNames + I * 4])) = U Then
+    If MemNameEq($00100000 + MemL[0:KExpNames + I * 4], U) Then
     Begin
       O := MemW[0:KExpOrds + I * 2];
       KernelExport := $00100000 + MemL[0:KExpFuncs + O * 4];
@@ -2848,10 +3750,45 @@ Begin
 End;
 
 { Lire tout un fichier dans un bloc du tas ; rend l'adresse ou 0 }
-Function ReadWholeFile(Const Path : String; Var Size : LongInt) : LongInt;
-Var Attr, Time, Lba, Ram, Buf, Done, A, N : LongInt;
+Function ReadWholeFile(Path : String; Var Size : LongInt) : LongInt;
+Var Attr, Time, Lba, Ram, Buf, Done, A, N, H, Got : LongInt;
 Begin
   ReadWholeFile := 0;
+  If IfsDrive(Path) >= 0 Then
+  Begin
+    { volume IFS : lecture par le pilote }
+    H := NewFileSlot;
+    If H < 0 Then
+    Begin
+      LastError := ErrTooManyOpen;
+      Exit;
+    End;
+    N := IfsOpen(H, Path, $80000000, 3, 3);
+    If N <> 0 Then
+    Begin
+      Files[H].Used := False;
+      LastError := N;
+      Exit;
+    End;
+    Size := MemL[0:LongInt(@Files[H].Sffsi) + 20];
+    Buf := KAlloc(Size + 1);
+    If Buf <> 0 Then
+    Begin
+      N := IfsRW(H, Buf, Size, False, Got);
+      If (N <> 0) Or (Got <> Size) Then
+      Begin
+        KFree(Buf);
+        Buf := 0;
+        LastError := ErrNotReady;
+      End;
+    End
+    Else
+      LastError := ErrNotEnoughMem;
+    IfsClose(H);
+    Files[H].Used := False;
+    ReadWholeFile := Buf;
+    Exit;
+  End;
   If Not PathInfo(Path, Attr, Size, Time, Lba, Ram) Then
   Begin
     LastError := ErrFileNotFound;
@@ -2892,7 +3829,7 @@ Begin
   ReadWholeFile := Buf;
 End;
 
-Function FileExists(Const Path : String) : Boolean;
+Function FileExists(Path : String) : Boolean;
 Var A, S, T, L, R : LongInt;
 Begin
   FileExists := PathInfo(Path, A, S, T, L, R) And ((A And FileAttrDirectory) = 0);
@@ -2960,8 +3897,270 @@ Begin
   FindProgram := Res;
 End;
 
+{ --- Modules de liens dynamiques (DLL) ---
+  Une DLL OS/2-0 (OS2PC, Library) est une image PE liee dans la region
+  00C00000h-00FFFFFFh, projetee a l'identique et partagee par tous les
+  processus. Elle est chargee a sa base (une seule fois), ses importations
+  sont liees, puis son code d'initialisation (point d'entree) est execute. }
+
+Type
+  TModule = Record
+    Used     : Boolean;
+    Name     : String[63];      { nom en majuscules, ex. DOSCALLS.DLL }
+    Path     : String[127];
+    Base     : LongInt;
+    Size     : LongInt;
+    NExp, Funcs, Names, Ords : LongInt;
+    OrdBase, NFunc : LongInt;   { base des ordinaux, entrees de l'EAT }
+  End;
+
+Var
+  Mods      : Array[0..MaxMods - 1] Of TModule;
+  EntryTmp  : LongInt;
+
+Function ModuleExport(M : LongInt; Name : String; Ordinal : LongInt) : LongInt;
+Var I, O, Base : LongInt; U : String;
+Begin
+  ModuleExport := 0;
+  If (M < 0) Or Not Mods[M].Used Then Exit;
+  Base := Mods[M].Base;
+  If Name = '' Then
+  Begin
+    { par ordinal (base des ordinaux de la DLL, entree non nulle) }
+    I := Ordinal - Mods[M].OrdBase;
+    If (I >= 0) And (I < Mods[M].NFunc) Then
+      If MemL[0:Mods[M].Funcs + I * 4] <> 0 Then
+        ModuleExport := Base + MemL[0:Mods[M].Funcs + I * 4];
+    Exit;
+  End;
+  U := UpStr(Name);
+  For I := 0 To Mods[M].NExp - 1 Do
+    If MemNameEq(Base + MemL[0:Mods[M].Names + I * 4], U) Then
+    Begin
+      O := MemW[0:Mods[M].Ords + I * 2];
+      ModuleExport := Base + MemL[0:Mods[M].Funcs + O * 4];
+      Exit;
+    End;
+End;
+
+Function FindModule(Name : String) : LongInt;
+Var I : LongInt;
+Begin
+  FindModule := -1;
+  Name := UpStr(BaseName(Name));
+  If Pos('.', Name) = 0 Then Name := Name + '.DLL';
+  For I := 0 To MaxMods - 1 Do
+    If Mods[I].Used And (Mods[I].Name = Name) Then
+    Begin
+      FindModule := I;
+      Exit;
+    End;
+End;
+
+Procedure CallEntry(E : LongInt);
+Begin
+  EntryTmp := E;
+  asm
+    pushad
+    mov eax,EntryTmp
+    call eax
+    popad
+  end;
+End;
+
+Function LoadModule(Name : String) : LongInt; Forward;
+
+{ Adresse d'une importation : couche de base du noyau, puis DLL nommee }
+Function ResolveImport(ADll, ANm : String) : LongInt;
+Var A, M : LongInt; Dll, Nm : String;
+Begin
+  Dll := ADll; Nm := ANm;
+  A := KernelExport(Nm);
+  If A = 0 Then
+  Begin
+    M := LoadModule(Dll);
+    If M >= 0 Then A := ModuleExport(M, Nm, 0);
+  End;
+  ResolveImport := A;
+End;
+
+{ Chercher le fichier d'une DLL : nom tel quel, LIBPATH, PATH, racine }
+Function FindLibrary(Name : String) : String;
+Var Dirs, D, Path, Res : String; P : LongInt;
+Begin
+  Res := '';
+  Name := UpStr(Trim(Name));
+  If Pos('.', BaseName(Name)) = 0 Then Name := Name + '.DLL';
+  If (Pos('\', Name) > 0) Or (Pos(':', Name) > 0) Then
+  Begin
+    Path := FullPath(Name);
+    If FileExists(Path) Then Res := Path;
+  End
+  Else
+  Begin
+    Dirs := LibPath + ';C:\;C:\DLL';
+    P := EnvFind('PATH');
+    If P <> 0 Then Dirs := Dirs + ';' + PStr(P);
+    While (Dirs <> '') And (Res = '') Do
+    Begin
+      P := Pos(';', Dirs);
+      If P > 0 Then
+      Begin
+        D := Trim(Copy(Dirs, 1, P - 1));
+        Dirs := Copy(Dirs, P + 1, 255);
+      End
+      Else
+      Begin
+        D := Trim(Dirs); Dirs := '';
+      End;
+      If D <> '' Then
+      Begin
+        If D[Length(D)] <> '\' Then D := D + '\';
+        Path := FullPath(D + Name);
+        If DriveOk(Path) And FileExists(Path) Then Res := Path;
+      End;
+    End;
+  End;
+  FindLibrary := Res;
+End;
+
+Function LoadModule(Name : String) : LongInt;
+Var
+  M, I, Buf, Size, Pe, Opt, NSect, OptSize, Base, ImgSize, HdrSize, Entry : LongInt;
+  Sec, VSize, VAddr, RawSize, RawPtr, N, ImpRva, ExpRva, Desc, Thunks, Iat, J, V, Adr : LongInt;
+  Path, Nm, Dll : String;
+  SaveFilter, SaveProc : LongInt;
+Begin
+  M := FindModule(Name);
+  LoadModule := M;
+  If M >= 0 Then Exit;
+  LoadModule := -1;
+  LastError := 126;                        { ERROR_MOD_NOT_FOUND }
+  Path := FindLibrary(Name);
+  If Path = '' Then Exit;
+  M := -1;
+  For I := 0 To MaxMods - 1 Do
+    If Not Mods[I].Used Then
+    Begin
+      M := I;
+      Break;
+    End;
+  If M < 0 Then Exit;
+  Buf := ReadWholeFile(Path, Size);
+  If Buf = 0 Then Exit;
+  LastError := ErrBadFormat;
+  Pe := Buf + MemL[0:Buf + $3C];
+  If (MemW[0:Buf] <> $5A4D) Or (MemL[0:Pe] <> $00004550) Or (MemW[0:Pe + 4] <> $014C) Then
+  Begin
+    KFree(Buf);
+    Exit;
+  End;
+  NSect := MemW[0:Pe + 6];
+  OptSize := MemW[0:Pe + 20];
+  Opt := Pe + 24;
+  Entry := MemL[0:Opt + 16];
+  Base := MemL[0:Opt + 28];
+  ImgSize := (MemL[0:Opt + 56] + 4095) And Not 4095;
+  HdrSize := MemL[0:Opt + 60];
+  ExpRva := MemL[0:Opt + 96];
+  ImpRva := MemL[0:Opt + 104];
+  { la DLL doit tenir dans la region des DLL, sans chevaucher une autre }
+  If (Base < DllBase) Or (Base + ImgSize > DllTop) Or (Base + ImgSize > PhysTop) Then
+  Begin
+    ConPutLn('SYS0191: ' + Path + ' n''est pas liee dans la region des DLL (00C00000h).');
+    KFree(Buf);
+    Exit;
+  End;
+  For I := 0 To MaxMods - 1 Do
+    If Mods[I].Used And (Base < Mods[I].Base + Mods[I].Size) And (Mods[I].Base < Base + ImgSize) Then
+    Begin
+      ConPutLn('SYS0191: ' + Path + ' chevauche ' + Mods[I].Name + '.');
+      KFree(Buf);
+      Exit;
+    End;
+  FillMem(Base, ImgSize, 0);
+  MoveMem(Buf, Base, HdrSize);
+  Sec := Opt + OptSize;
+  For I := 0 To NSect - 1 Do
+  Begin
+    VSize := MemL[0:Sec + 8];
+    VAddr := MemL[0:Sec + 12];
+    RawSize := MemL[0:Sec + 16];
+    RawPtr := MemL[0:Sec + 20];
+    N := RawSize;
+    If (VSize > 0) And (N > VSize) Then N := VSize;
+    If (N > 0) And (VAddr + N <= ImgSize) And (RawPtr + N <= Size) Then
+      MoveMem(Buf + RawPtr, Base + VAddr, N);
+    Sec := Sec + 40;
+  End;
+  KFree(Buf);
+  Mods[M].Used := True;
+  Mods[M].Name := UpStr(BaseName(Path));
+  Mods[M].Path := Path;
+  Mods[M].Base := Base;
+  Mods[M].Size := ImgSize;
+  Mods[M].NExp := 0;
+  Mods[M].OrdBase := 1;
+  Mods[M].NFunc := 0;
+  If ExpRva <> 0 Then
+  Begin
+    Mods[M].NExp := MemL[0:Base + ExpRva + 24];
+    Mods[M].OrdBase := MemL[0:Base + ExpRva + 16];
+    Mods[M].NFunc := MemL[0:Base + ExpRva + 20];
+    Mods[M].Funcs := Base + MemL[0:Base + ExpRva + 28];
+    Mods[M].Names := Base + MemL[0:Base + ExpRva + 32];
+    Mods[M].Ords := Base + MemL[0:Base + ExpRva + 36];
+  End;
+  { importations }
+  If ImpRva <> 0 Then
+  Begin
+    Desc := Base + ImpRva;
+    While MemL[0:Desc + 12] <> 0 Do
+    Begin
+      Dll := PStr(Base + MemL[0:Desc + 12]);
+      Thunks := MemL[0:Desc];
+      Iat := MemL[0:Desc + 16];
+      If Thunks = 0 Then Thunks := Iat;
+      J := 0;
+      V := MemL[0:Base + Thunks];
+      While V <> 0 Do
+      Begin
+        Nm := PStr(Base + V + 2);
+        Adr := KernelExport(Nm);
+        If (Adr = 0) And (UpStr(Dll) <> Mods[M].Name) Then
+        Begin
+          I := LoadModule(Dll);
+          If I >= 0 Then Adr := ModuleExport(I, Nm, 0);
+        End;
+        If Adr = 0 Then Adr := ModuleExport(M, Nm, 0);
+        If Adr = 0 Then
+        Begin
+          ConPutLn('SYS0191: ' + Nm + ' introuvable (' + Path + ').');
+          Mods[M].Used := False;
+          LastError := 127;
+          Exit;
+        End;
+        MemL[0:Base + Iat + J * 4] := Adr;
+        Inc(J);
+        V := MemL[0:Base + Thunks + J * 4];
+      End;
+      Desc := Desc + 20;
+    End;
+  End;
+  { initialisation de la DLL (sans modifier le filtre d'exceptions) }
+  If Entry <> 0 Then
+  Begin
+    If CurProc >= 0 Then SaveFilter := Procs[CurProc].Filter Else SaveFilter := ExcFilter;
+    SaveProc := CurProc;
+    CallEntry(Base + Entry);
+    If SaveProc >= 0 Then Procs[SaveProc].Filter := SaveFilter Else ExcFilter := SaveFilter;
+  End;
+  LastError := 0;
+  LoadModule := M;
+End;
+
 { Charger un programme PE ; rend le numero de processus ou -1 }
-Function LoadProgram(Const Path, CmdLine : String) : LongInt;
+Function LoadProgram(Path, CmdLine : String) : LongInt;
 Var
   Buf, Size, Pe, Opt, NSect, OptSize, Base, ImgSize, HdrSize, Entry : LongInt;
   Total, Phys, PhysSize, Pid, I, Sec, VSize, VAddr, RawSize, RawPtr, N : LongInt;
@@ -3068,10 +4267,11 @@ Begin
           Exit;
         End;
         Nm := PStr(Phys + V + 2);
-        Adr := KernelExport(Nm);
+        Adr := ResolveImport(PStr(Phys + MemL[0:Desc + 12]), Nm);
         If Adr = 0 Then
         Begin
-          ConPutLn('SYS0191: ' + Nm + ' introuvable dans DOSCALLS.DLL (' + Path + ').');
+          ConPutLn('SYS0191: ' + Nm + ' introuvable dans ' +
+                   PStr(Phys + MemL[0:Desc + 12]) + ' (' + Path + ').');
           LastError := 127;
           Exit;
         End;
@@ -3097,6 +4297,10 @@ Begin
   Procs[Pid].CmdBuf := KAlloc(Length(CmdLine) + 1);
   PutPStr(Procs[Pid].CmdBuf, CmdLine, 256);
   Procs[Pid].Name := BaseName(Path);
+  Procs[Pid].Path := Path;
+  If NextSerial < 2 Then NextSerial := 2;      { PID 1 : le noyau }
+  Procs[Pid].Serial := NextSerial;
+  Inc(NextSerial);
   Procs[Pid].CurDir := CurDir;
   ProcEntry[Pid] := ProcWinBase + Entry;
   ProcStack[Pid] := Phys + PhysSize - 16;
@@ -3142,11 +4346,29 @@ Begin
   If Pid < 0 Then Exit;
   Procs[Pid].ExitCode := Code;
   Procs[Pid].Running := False;
+  IfsProcessExit(Pid);
   For I := 0 To MaxFiles - 1 Do
     If Files[I].Used And (Files[I].Owner = Pid) Then Files[I].Used := False;
   For I := 0 To MaxFinds - 1 Do
     If Finds[I].Used And (Finds[I].Owner = Pid) Then Finds[I].Used := False;
   KFreeOwner(Pid);
+  { console reduite par ce processus : rendre toutes les lignes }
+  If (ConRows < ScrRows) And (ConRowsOwner = Pid) Then
+  Begin
+    For I := ConRows * ScrCols To ScrRows * ScrCols - 1 Do
+      MemW[0:VideoBase + I * 2] := $0720;
+    ConRows := ScrRows;
+    ConRowsOwner := -2;
+  NBlk := 0;
+  NIfs := 0;
+  NIfsLines := 0;
+  RamDiskKb := 0;
+  For I := 0 To 25 Do
+  Begin
+    IfsVols[I].Mounted := False;
+    IfsVols[I].Blk := -1;
+  End;
+  End;
   KFree(Procs[Pid].CmdBuf);
   KFree(Procs[Pid].PtAlloc);
   PhysNext := Procs[Pid].PhysBase;
@@ -3208,8 +4430,8 @@ Begin
   Begin
     MemL[0:PInfo] := HProcBase + Pid;
     MemL[0:PInfo + 4] := HProcBase + Pid;
-    MemL[0:PInfo + 8] := Pid + 1;
-    MemL[0:PInfo + 12] := Pid + 1;
+    MemL[0:PInfo + 8] := Procs[Pid].Serial;
+    MemL[0:PInfo + 12] := 1;
   End;
   { execution synchrone (comme DosExecPgm EXEC_SYNC) }
   RunProcess(Pid);
@@ -3229,12 +4451,179 @@ Begin
   GetExitCodeProcess := 1;
 End;
 
+
+{ --- Couche de base : modules, volume, memoire, processus --- }
+
+Function ModuleHandleByName(Name : String) : LongInt;
+Var M : LongInt;
+Begin
+  M := FindModule(Name);
+  If M >= 0 Then ModuleHandleByName := Mods[M].Base
+  Else If UpStr(Name) = 'OS2KRNL' Then ModuleHandleByName := $00100000
+  Else ModuleHandleByName := 0;
+End;
+
+Function LoadLibraryA(PName : LongInt) : LongInt;
+Var M : LongInt;
+Begin
+  M := LoadModule(PStr(PName));
+  If M >= 0 Then LoadLibraryA := Mods[M].Base Else LoadLibraryA := 0;
+End;
+
+Function ModuleOfHandle(H : LongInt) : LongInt;
+Var I : LongInt;
+Begin
+  ModuleOfHandle := -1;
+  For I := 0 To MaxMods - 1 Do
+    If Mods[I].Used And (Mods[I].Base = H) Then ModuleOfHandle := I;
+End;
+
+{ GetProcAddress(module, nom ou ordinal < 65536) }
+Function GetProcAddress(H, PName : LongInt) : LongInt;
+Var M, A : LongInt;
+Begin
+  GetProcAddress := 0;
+  If (H = 0) Or (H = $00100000) Then
+  Begin
+    If (PName And $FFFF0000) <> 0 Then GetProcAddress := KernelExport(PStr(PName));
+    Exit;
+  End;
+  M := ModuleOfHandle(H);
+  If M < 0 Then
+  Begin
+    LastError := ErrInvalidHandle;
+    Exit;
+  End;
+  If (PName And $FFFF0000) = 0 Then A := ModuleExport(M, '', PName)
+  Else A := ModuleExport(M, PStr(PName), 0);
+  If A = 0 Then LastError := 127;
+  GetProcAddress := A;
+End;
+
+Function FreeLibrary(H : LongInt) : LongInt;
+Begin
+  { les DLL restent residentes (memoire partagee) }
+  If ModuleOfHandle(H) >= 0 Then FreeLibrary := 1 Else FreeLibrary := 0;
+End;
+
+Function GetModuleFileNameA(H, Buf, Size : LongInt) : LongInt;
+Var S : String; M : LongInt;
+Begin
+  S := '';
+  If (H = 0) Or (H = ProcWinBase) Then
+  Begin
+    If CurProc >= 0 Then S := Procs[CurProc].Path Else S := 'C:\OS2KRNL';
+  End
+  Else If H = $00100000 Then S := 'C:\OS2KRNL'
+  Else
+  Begin
+    M := ModuleOfHandle(H);
+    If M >= 0 Then S := Mods[M].Path;
+  End;
+  If S = '' Then
+  Begin
+    LastError := ErrInvalidHandle;
+    GetModuleFileNameA := 0;
+    Exit;
+  End;
+  PutPStr(Buf, S, Size);
+  If Length(S) >= Size Then GetModuleFileNameA := Size Else GetModuleFileNameA := Length(S);
+End;
+
+Function KrnModuleFromAddr(A : LongInt) : LongInt;
+Var I : LongInt;
+Begin
+  KrnModuleFromAddr := 0;
+  If (A >= ProcWinBase) And (A < ProcWinBase + ProcWinSize) And (CurProc >= 0) Then
+    KrnModuleFromAddr := ProcWinBase
+  Else If (A >= $00100000) And (A < HeapStart) Then
+    KrnModuleFromAddr := $00100000
+  Else
+    For I := 0 To MaxMods - 1 Do
+      If Mods[I].Used And (A >= Mods[I].Base) And (A < Mods[I].Base + Mods[I].Size) Then
+        KrnModuleFromAddr := Mods[I].Base;
+End;
+
+{ Etiquette du volume (descripteur primaire ISO 9660), numero de serie, CDFS }
+Function GetVolumeInformationA(PRoot, PVol, VolSize, PSerial, PMaxComp, PFlags, PFs, FsSize : LongInt) : LongInt;
+Var A, I, Sum, D : LongInt; S : String;
+Begin
+  GetVolumeInformationA := 0;
+  If PRoot <> 0 Then S := PStr(PRoot) Else S := CurDir;
+  D := IfsDrive(S);
+  If D >= 0 Then
+  Begin
+    { volume IFS : nom et numero de serie du VPB, nom du systeme de fichiers }
+    A := LongInt(@IfsVols[D].Vpfsi);
+    If PVol <> 0 Then PutPStr(PVol, PStr(A + 24), VolSize);
+    If PSerial <> 0 Then MemL[0:PSerial] := MemL[0:A];
+    If PMaxComp <> 0 Then MemL[0:PMaxComp] := 254;
+    If PFlags <> 0 Then MemL[0:PFlags] := 2;     { casse conservee }
+    If PFs <> 0 Then PutPStr(PFs, Ifss[IfsVols[D].Ifs].Name, FsSize);
+    GetVolumeInformationA := 1;
+    Exit;
+  End;
+  A := CdSector(16);
+  If A = 0 Then
+  Begin
+    LastError := ErrNotReady;
+    Exit;
+  End;
+  S := '';
+  For I := 0 To 31 Do S := S + Chr(Mem[0:A + 40 + I]);
+  S := Trim(S);
+  Sum := 0;
+  For I := 813 To 829 Do Sum := Sum * 31 + Mem[0:A + I];
+  If PVol <> 0 Then PutPStr(PVol, S, VolSize);
+  If PSerial <> 0 Then MemL[0:PSerial] := Sum;
+  If PMaxComp <> 0 Then MemL[0:PMaxComp] := 255;
+  If PFlags <> 0 Then MemL[0:PFlags] := $00080000;   { lecture seule }
+  If PFs <> 0 Then PutPStr(PFs, 'CDFS', FsSize);
+  GetVolumeInformationA := 1;
+End;
+
+{ MEMORYSTATUS : longueur, charge, memoire physique totale et libre... }
+Procedure GlobalMemoryStatus(P : LongInt);
+Var Free : LongInt;
+Begin
+  Free := HeapFreeBytes + (PhysTop - PhysNext);
+  MemL[0:P] := 32;
+  MemL[0:P + 4] := 100 - (Free Div 1024) * 100 Div MemTotalKb;
+  MemL[0:P + 8] := MemTotalKb * 1024;
+  MemL[0:P + 12] := Free;
+  MemL[0:P + 16] := 0;
+  MemL[0:P + 20] := 0;
+  MemL[0:P + 24] := ProcWinSize;
+  MemL[0:P + 28] := HeapFreeBytes;
+End;
+
+Function GetCurrentProcessId : LongInt;
+Begin
+  If CurProc >= 0 Then GetCurrentProcessId := Procs[CurProc].Serial
+  Else GetCurrentProcessId := 1;           { le noyau }
+End;
+
+Function GetCurrentThreadId : LongInt;
+Begin
+  GetCurrentThreadId := 1;
+End;
+
+Function KrnGetParentPid : LongInt;
+Begin
+  KrnGetParentPid := 0;
+  If CurProc >= 0 Then
+  Begin
+    If Procs[CurProc].Parent >= 0 Then KrnGetParentPid := Procs[Procs[CurProc].Parent].Serial
+    Else KrnGetParentPid := 1;
+  End;
+End;
+
 { ==================================================================== }
 { Partie 14 - Demarrage du systeme                                     }
 { ==================================================================== }
 
-{ CONFIG.SYS : PROTSHELL=, SET NOM=VALEUR ; les autres lignes (DEVICE=,
-  LIBPATH=, IFS=...) sont acceptees sans effet }
+{ CONFIG.SYS : PROTSHELL=, LIBPATH=, IFS=, SET NOM=VALEUR ; les autres
+  lignes (DEVICE=, BUFFERS=...) sont acceptees sans effet }
 Procedure ReadConfigSys;
 Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
 
@@ -3248,6 +4637,16 @@ Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
       ShellPath := Trim(Copy(Line, 11, 255));
       P := Pos(' ', ShellPath);
       If P > 0 Then ShellPath := Copy(ShellPath, 1, P - 1);
+    End
+    Else If Copy(U, 1, 8) = 'LIBPATH=' Then
+      LibPath := Trim(Copy(Line, 9, 255))
+    Else If Copy(U, 1, 4) = 'IFS=' Then
+    Begin
+      If NIfsLines < MaxIfs Then
+      Begin
+        IfsLines[NIfsLines] := Trim(Copy(Line, 5, 255));
+        Inc(NIfsLines);
+      End;
     End
     Else If Copy(U, 1, 4) = 'SET ' Then
     Begin
@@ -3275,6 +4674,180 @@ Begin
   KFree(Buf);
 End;
 
+{ Charger un pilote IFS (ligne IFS= : chemin et parametres) }
+Procedure LoadIfs(Line : String);
+Var P, M, I, A, R : LongInt; Path, Parm : String;
+Begin
+  P := Pos(' ', Line);
+  If P > 0 Then
+  Begin
+    Path := Copy(Line, 1, P - 1);
+    Parm := Trim(Copy(Line, P + 1, 255));
+  End
+  Else
+  Begin
+    Path := Line; Parm := '';
+  End;
+  If NIfs >= MaxIfs Then Exit;
+  M := LoadModule(Path);
+  If M < 0 Then
+  Begin
+    KLog('SYS1719: Le systeme de fichiers ' + Path + ' n''a pas pu etre charge (erreur ' +
+         IntStr(LastError) + ').');
+    Exit;
+  End;
+  I := NIfs;
+  Ifss[I].Used := True;
+  Ifss[I].Module := M;
+  Ifss[I].FInit := ModuleExport(M, 'FS_INIT', 0);
+  Ifss[I].FMount := ModuleExport(M, 'FS_MOUNT', 0);
+  Ifss[I].FOpen := ModuleExport(M, 'FS_OPENCREATE', 0);
+  Ifss[I].FClose := ModuleExport(M, 'FS_CLOSE', 0);
+  Ifss[I].FRead := ModuleExport(M, 'FS_READ', 0);
+  Ifss[I].FWrite := ModuleExport(M, 'FS_WRITE', 0);
+  Ifss[I].FSeek := ModuleExport(M, 'FS_CHGFILEPTR', 0);
+  Ifss[I].FNewSize := ModuleExport(M, 'FS_NEWSIZE', 0);
+  Ifss[I].FCommit := ModuleExport(M, 'FS_COMMIT', 0);
+  Ifss[I].FFileInfo := ModuleExport(M, 'FS_FILEINFO', 0);
+  Ifss[I].FPathInfo := ModuleExport(M, 'FS_PATHINFO', 0);
+  Ifss[I].FFileAttr := ModuleExport(M, 'FS_FILEATTRIBUTE', 0);
+  Ifss[I].FDelete := ModuleExport(M, 'FS_DELETE', 0);
+  Ifss[I].FMkDir := ModuleExport(M, 'FS_MKDIR', 0);
+  Ifss[I].FRmDir := ModuleExport(M, 'FS_RMDIR', 0);
+  Ifss[I].FMove := ModuleExport(M, 'FS_MOVE', 0);
+  Ifss[I].FChDir := ModuleExport(M, 'FS_CHDIR', 0);
+  Ifss[I].FFindFirst := ModuleExport(M, 'FS_FINDFIRST', 0);
+  Ifss[I].FFindNext := ModuleExport(M, 'FS_FINDNEXT', 0);
+  Ifss[I].FFindClose := ModuleExport(M, 'FS_FINDCLOSE', 0);
+  Ifss[I].FFsInfo := ModuleExport(M, 'FS_FSINFO', 0);
+  Ifss[I].FFlush := ModuleExport(M, 'FS_FLUSHBUF', 0);
+  Ifss[I].FFsCtl := ModuleExport(M, 'FS_FSCTL', 0);
+  Ifss[I].FExit := ModuleExport(M, 'FS_EXIT', 0);
+  Ifss[I].FShutdown := ModuleExport(M, 'FS_SHUTDOWN', 0);
+  A := ModuleExport(M, 'FS_NAME', 0);
+  If A <> 0 Then Ifss[I].Name := PStr(A) Else Ifss[I].Name := Mods[M].Name;
+  If (Ifss[I].FMount = 0) Or (Ifss[I].FOpen = 0) Then
+  Begin
+    KLog('SYS1719: ' + Path + ' n''est pas un pilote IFS.');
+    Exit;
+  End;
+  PutPStr(LongInt(@IfsName), Parm, 260);
+  IfsArgs4(LongInt(@IfsName), 0, 0, 0);
+  R := IfsCall(Ifss[I].FInit, 3);
+  If R <> 0 Then
+  Begin
+    KLog('SYS1719: ' + Path + ' : FS_INIT a echoue (erreur ' + IntStr(R) + ').');
+    Exit;
+  End;
+  Inc(NIfs);
+  KLog(Mods[M].Name + ' (' + Ifss[I].Name + ') charge en ' + HexStr(Mods[M].Base, 8) + 'h.');
+  { /RAMDISK:n : disque virtuel de n Ko (propre a OS/2-0) }
+  P := Pos('/RAMDISK:', UpStr(Parm));
+  If P > 0 Then
+  Begin
+    A := 0;
+    P := P + 9;
+    While (P <= Length(Parm)) And (Parm[P] >= '0') And (Parm[P] <= '9') Do
+    Begin
+      A := A * 10 + Ord(Parm[P]) - 48;
+      Inc(P);
+    End;
+    RamDiskKb := A;
+  End;
+End;
+
+{ Presenter chaque peripheriques bloc aux pilotes IFS et donner une lettre
+  d'unite (D: et suivantes) aux volumes reconnus ; un disque virtuel non
+  reconnu est formate par le premier pilote (FS_FSCTL 8000h) }
+Procedure MountIfsVolumes;
+Var B, D, I, R, V, A : LongInt; Ok : Boolean; S1 : String;
+Begin
+  D := 3;
+  For B := 0 To NBlk - 1 Do
+    If D <= 25 Then
+    Begin
+      IfsVols[D].Blk := B;
+      IfsVols[D].Mounted := False;
+      V := LongInt(@IfsVols[D].Vpfsi);
+      FillMem(V, 44, 0);
+      FillMem(LongInt(@IfsVols[D].Vpfsd), 64, 0);
+      MemL[0:V + 4] := B;
+      MemL[0:V + 8] := 512;
+      MemL[0:V + 12] := Blks[B].Count;
+      MemL[0:V + 16] := 63;
+      MemL[0:V + 20] := 16;
+      MemL[0:V + 36] := D;
+      MemL[0:V + 40] := B;
+      Ok := False;
+      If BlkIO(B, 0, 0, 1, LongInt(@HdBuf)) = 0 Then
+        For I := 0 To NIfs - 1 Do
+          If Not Ok Then
+          Begin
+            IfsArgs4(0, V, LongInt(@IfsVols[D].Vpfsd), D);
+            IfsArg[4] := LongInt(@HdBuf);
+            If IfsCall(Ifss[I].FMount, 5) = 0 Then
+            Begin
+              Ok := True;
+              IfsVols[D].Ifs := I;
+            End;
+          End;
+      If (Not Ok) And (Blks[B].Kind = BlkRam) And (NIfs > 0) And (Ifss[0].FFsCtl <> 0) Then
+      Begin
+        IfsArgs4(3, V, LongInt(@IfsVols[D].Vpfsd), D);
+        IfsArg[4] := LongInt(@HdBuf);
+        IfsCall(Ifss[0].FMount, 5);
+        PutPStr(LongInt(@IfsName2), 'RAMDISK', 12);
+        A := LongInt(@IfsInfo);
+        MemL[0:A] := D;
+        MemL[0:A + 4] := LongInt(@IfsName2);
+        IfsArgs4(0, 3, $8000, A);
+        IfsArgs8(8, LongInt(@IfsCnt), 0, 0);
+        IfsArg[8] := LongInt(@IfsCnt);
+        R := IfsCall(Ifss[0].FFsCtl, 9);
+        If R = 0 Then
+        Begin
+          Ok := True;
+          IfsVols[D].Ifs := 0;
+        End
+        Else
+          KLog('SYS1719: formatage du disque virtuel impossible (erreur ' + IntStr(R) + ').');
+      End;
+      If Ok And (Ifss[IfsVols[D].Ifs].FFsCtl <> 0) Then
+      Begin
+        { volume mal ferme et lettre citee par /AUTOCHECK : verification
+          et correction (FS_FSCTL 8002h puis 8001h) }
+        A := LongInt(@IfsInfo);
+        MemL[0:A] := D;
+        FillMem(A + 64, 40, 0);
+        IfsArgs4(0, 3, $8002, A);
+        IfsArgs8(4, 0, A + 64, 40);
+        IfsArg[8] := LongInt(@IfsCnt);
+        If (IfsCall(Ifss[IfsVols[D].Ifs].FFsCtl, 9) = 0) And (MemL[0:A + 96] <> 0) And
+           (MemL[0:A + 100] <> 0) Then
+        Begin
+          MemL[0:A + 4] := 1;
+          IfsArgs4(0, 3, $8001, A);
+          IfsArgs8(8, 0, A + 64, 36);
+          IfsArg[8] := LongInt(@IfsCnt);
+          If IfsCall(Ifss[IfsVols[D].Ifs].FFsCtl, 9) = 0 Then
+            KLog('Verification automatique de ' + Chr(65 + D) + ': (volume mal ferme) : ' +
+                 IntStr(MemL[0:A + 64]) + ' erreur(s), ' + IntStr(MemL[0:A + 68]) +
+                 ' secteur(s) perdu(s) recupere(s).');
+        End;
+      End;
+      If Ok Then
+      Begin
+        IfsVols[D].Mounted := True;
+        If Blks[B].Kind = BlkRam Then S1 := 'disque virtuel' Else S1 := 'disque IDE';
+        KLog('Unite ' + Chr(65 + D) + ': ' + Ifss[IfsVols[D].Ifs].Name + ' (' + S1 + ', ' +
+             IntStr(Blks[B].Count Div 2) + ' Ko) : ' + PStr(V + 24));
+        Inc(D);
+      End
+      Else
+        IfsVols[D].Blk := -1;
+    End;
+End;
+
 Procedure Banner;
 Begin
   TextAttr := $1F;
@@ -3291,6 +4864,8 @@ Var
 
 BEGIN
   TextAttr := $07;
+  ConRows := ScrRows;
+  ConRowsOwner := -2;
   CurRow := Mem[0:BootInfo + $28];
   CurCol := 0;
   CurProc := -1;
@@ -3338,6 +4913,25 @@ BEGIN
   EnvSet('OS2_SHELL', 'C:\CMD.EXE');
   ReadConfigSys;
   EnvSet('COMSPEC', ShellPath);
+  { bibliotheque DOSCALLS.DLL (API Dos* d'OS/2), si elle est presente }
+  If FindLibrary('DOSCALLS.DLL') <> '' Then
+  Begin
+    I := LoadModule('DOSCALLS.DLL');
+    If I >= 0 Then
+      KLog('DOSCALLS.DLL chargee en ' + HexStr(Mods[I].Base, 8) + 'h (' +
+           IntStr(Mods[I].NExp) + ' fonctions).');
+  End;
+  { systemes de fichiers installables (IFS=) et leurs volumes }
+  For I := 0 To NIfsLines - 1 Do LoadIfs(IfsLines[I]);
+  If NIfs > 0 Then
+  Begin
+    { partitions des disques durs, puis disque virtuel }
+    HdInit;
+    If RamDiskKb > 0 Then
+      If RamDiskNew(RamDiskKb) < 0 Then
+        KLog('SYS1719: disque virtuel de ' + IntStr(RamDiskKb) + ' Ko impossible.');
+    MountIfsVolumes;
+  End;
   PutPStr(LongInt(@KCmdLine), 'OS2KRNL', 256);
   { processeur de commandes (PROTSHELL) : relance a sa fin }
   Runs := 0;
