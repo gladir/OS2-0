@@ -291,7 +291,22 @@ Le fichier <b>DLL/MSG.PAS</b> est la bibliothèque OS/2 <b>MSG.DLL</b> des messa
 
 Les points d'entrée d'OS/2 1.x (Dos16*, DosInsMessage) rendent les longueurs dans un mot, ceux d'OS/2 2.x dans un double mot. Le programme <b>DLL/TESTMSG.PAS</b> vérifie ces fonctions (45 vérifications, avec des fichiers de messages qu'il fabrique sur le disque virtuel HPFS).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque NAMPIPES.DLL</h3>
+
+Le fichier <b>DLL/NAMPIPES.PAS</b> est la bibliothèque OS/2 <b>NAMPIPES.DLL</b> des tuyaux nommés (liée à 00DB0000h), avec ses 14 fonctions et leurs ordinaux d'origine. Elle gère les instances multiples d'un même nom (\PIPE\nom), les tuyaux d'octets et de messages (chaque message précédé d'un en-tête de 2 octets), l'accès entrant, sortant ou bidirectionnel, le mode bloquant et le mode de lecture propres à chaque bout, et les sémaphores attachées (système ou d'événement). Les handles des tuyaux sont ceux de DOSCALLS.DLL : DosOpen (client), DosRead, DosWrite et DosClose s'y appliquent, et les fonctions DosXxxNPipe d'OS/2 2.x de DOSCALLS.DLL lui sont transmises.
+
+<table>
+	<tr><th>Fonctions</th><th>Rôle</th></tr>
+	<tr><td>DosMakeNmPipe, DosConnectNmPipe, DosDisConnectNmPipe, DosWaitNmPipe</td><td>Création d'une instance (créée à l'écoute), attente d'un client, déconnexion, attente d'une instance libre.</td></tr>
+	<tr><td>DosQNmPipeInfo, DosQNmPHandState, DosSetNmPHandState</td><td>Informations (PIPEINFO), état du handle, mode bloquant et mode de lecture (octets ou messages).</td></tr>
+	<tr><td>DosPeekNmPipe, DosRawReadNmPipe, DosRawWriteNmPipe</td><td>Lecture sans retrait (AVAILDATA, état), lecture et écriture brutes (avec les en-têtes des messages).</td></tr>
+	<tr><td>DosTransactNmPipe, DosCallNmPipe</td><td>Transaction sur un tuyau de messages bidirectionnel, appel (ouverture, transaction, fermeture).</td></tr>
+	<tr><td>DosSetNmPipeSem, DosQNmPipeSemState</td><td>Sémaphore libérée quand des données arrivent, que de la place se libère ou que l'autre bout ferme ; état (PIPESEMSTATE).</td></tr>
+</table>
+
+Les processus s'exécutant un à la fois, une opération qui devrait attendre l'autre bout rend aussitôt une erreur (ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED ou ERROR_SEM_TIMEOUT). Le programme <b>DLL/TESTNMP.PAS</b> vérifie ces fonctions (58 vérifications).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
