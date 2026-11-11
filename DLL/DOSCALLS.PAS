@@ -4989,8 +4989,8 @@ Begin
     Exit;
   End;
   Code := 0;
-  KGetExitCodeProcess(ProcInfo[0], LongInt(@Code));
-  KCloseHandle(ProcInfo[0]);
+  A := KGetExitCodeProcess(ProcInfo[0], LongInt(@Code));
+  A := KCloseHandle(ProcInfo[0]);
   If Code = -1 Then Term := TC_TRAP Else Term := TC_EXIT;
   If Flags = EXEC_SYNC Then
   Begin
@@ -5141,14 +5141,16 @@ Begin
   KExitProcess(Code);
 End;
 
-Function DosExit(Action, Result : LongInt) : LongInt;
+{ (le parametre ne s'appelle pas Result : OS2PC y verrait la valeur de
+  retour de la fonction) }
+Function DosExit(Action, Code : LongInt) : LongInt;
 Begin
   If (Action = EXIT_THREAD) And (ThrDepth > 0) Then
   Begin
-    ThrRet := Result;
+    ThrRet := Code;
     ThreadLongJmp;
   End;
-  ExitProcessNow(Result);
+  ExitProcessNow(Code);
   DosExit := NO_ERROR;
 End;
 
