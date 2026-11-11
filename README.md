@@ -276,7 +276,22 @@ Le fichier <b>DLL/MONCALLS.PAS</b> est la bibliothèque OS/2 <b>MONCALLS.DLL</b>
 
 Le programme <b>DLL/TESTMON.PAS</b> vérifie ces fonctions (52 vérifications : chaîne de trois moniteurs de l'imprimante, touches modifiées, supprimées ou ajoutées, déplacement de la souris doublé).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque MSG.DLL</h3>
+
+Le fichier <b>DLL/MSG.PAS</b> est la bibliothèque OS/2 <b>MSG.DLL</b> des messages (liée à 00D80000h), avec ses 9 points d'entrée et leurs ordinaux d'origine. Elle lit les fichiers de messages d'OS/2 au format MKMSGF (index de mots ou de doubles mots, types E, W, I, H, P), cherche le fichier dans le chemin indiqué, le répertoire courant, DPATH, C:\ et C:\OS2\SYSTEM, garde les fichiers ouverts jusqu'à DosCloseMessageFile et consulte d'abord un segment de messages en mémoire s'il est fourni. Les principaux messages système (OSO001.MSG) y sont intégrés. Les fonctions de messages de DOSCALLS.DLL (DosGetMessage, DosInsertMessage, DosPutMessage, DosQueryMessageCP...) lui sont transmises.
+
+<table>
+	<tr><th>Fonction</th><th>Ordinal</th><th>Description</th></tr>
+	<tr><td>Dos16PutMessage, DosPutMessage (Dos32PutMessage)</td><td>1, 5</td><td>Écrire un message dans un fichier ou à l'écran (lignes coupées entre les mots à 80 colonnes).</td></tr>
+	<tr><td>Dos16TrueGetMessage, DosTrueGetMessage (Dos32TrueGetMessage)</td><td>2, 6</td><td>Lire un message (préfixe « SYS0002: » des erreurs et avertissements, %0 sans fin de ligne) et y insérer les variables %1 à %9 ; message d'erreur SYS0317, SYS0318 ou SYS0319 si le message ou le fichier est introuvable.</td></tr>
+	<tr><td>DosInsMessage, DosInsertMessage (Dos32InsertMessage)</td><td>3, 4</td><td>Insérer les variables %1 à %9 dans un message en mémoire.</td></tr>
+	<tr><td>Dos16IQueryMessageCP, DosIQueryMessageCP (Dos32IQueryMessageCP)</td><td>7, 8</td><td>Pages de codes et langue d'un fichier de messages.</td></tr>
+	<tr><td>DosCloseMessageFile (Dos32CloseMessageFile)</td><td>9</td><td>Fermer un fichier de messages gardé ouvert.</td></tr>
+</table>
+
+Les points d'entrée d'OS/2 1.x (Dos16*, DosInsMessage) rendent les longueurs dans un mot, ceux d'OS/2 2.x dans un double mot. Le programme <b>DLL/TESTMSG.PAS</b> vérifie ces fonctions (45 vérifications, avec des fichiers de messages qu'il fabrique sur le disque virtuel HPFS).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>

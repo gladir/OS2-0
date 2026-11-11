@@ -6537,139 +6537,117 @@ End;
 
 { --- Messages --- }
 
-{ Remplacer %1..%9 par les chaines de la table (adresses ASCIIZ) }
-Function InsertVars(PTable, CTable, PMsg, CbMsg, PBuf, CbBuf, PcbOut : LongInt) : LongInt;
-Var I, O, C, N, K, A : LongInt;
+{ --- Messages ---
+  DosGetMessage, DosTrueGetMessage, DosInsertMessage, DosInsMessage,
+  DosPutMessage, DosQueryMessageCP et DosIQueryMessageCP sont servies par
+  MSG.DLL (chargee au premier appel) ; voir MSG.PAS }
+Var
+  MsgMod  : LongInt;
+  MsgFn   : Array[1..9] Of LongInt;      { ordinaux de MSG.DLL }
+  MsgNm   : Array[0..15] Of Byte;
+  MsgFail : Array[0..31] Of Byte;
+
+Function CallPtr8(F, A1, A2, A3, A4, A5, A6, A7, A8 : LongInt) : LongInt;
+Var R : LongInt;
 Begin
-  If (CTable < 0) Or (CTable > 9) Then
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A8
+    push eax
+    mov eax,A7
+    push eax
+    mov eax,A6
+    push eax
+    mov eax,A5
+    push eax
+    mov eax,A4
+    push eax
+    mov eax,A3
+    push eax
+    mov eax,A2
+    push eax
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,32
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallPtr8 := R;
+End;
+
+{ Fonction Ordinal de MSG.DLL (0 : indisponible) }
+Function MsgProc(Ordinal : LongInt) : LongInt;
+Var I, A : LongInt; S : String;
+Begin
+  If MsgMod = 0 Then
   Begin
-    InsertVars := ERROR_MR_INV_IVCOUNT;
-    Exit;
+    S := 'MSG';
+    For I := 1 To Length(S) Do MsgNm[I - 1] := Ord(S[I]);
+    MsgNm[Length(S)] := 0;
+    If DosLoadModule(LongInt(@MsgFail), 32, LongInt(@MsgNm), LongInt(@MsgMod)) <> NO_ERROR Then MsgMod := 0;
+    For I := 1 To 9 Do MsgFn[I] := 0;
   End;
-  O := 0; I := 0;
-  While I < CbMsg Do
+  A := 0;
+  If MsgMod <> 0 Then
   Begin
-    C := PeekB(PMsg + I);
-    If (C = Ord('%')) And (I + 1 < CbMsg) And (PeekB(PMsg + I + 1) >= Ord('1')) And
-       (PeekB(PMsg + I + 1) <= Ord('9')) Then
-    Begin
-      N := PeekB(PMsg + I + 1) - Ord('0');
-      If N <= CTable Then
-      Begin
-        A := PeekL(PTable + (N - 1) * 4);
-        K := 0;
-        While (A <> 0) And (PeekB(A + K) <> 0) Do
-        Begin
-          If O >= CbBuf Then
-          Begin
-            InsertVars := ERROR_MR_MSG_TOO_LONG;
-            Exit;
-          End;
-          PokeB(PBuf + O, PeekB(A + K));
-          Inc(O); Inc(K);
-        End;
-      End;
-      I := I + 2;
-    End
-    Else
-    Begin
-      If O >= CbBuf Then
-      Begin
-        InsertVars := ERROR_MR_MSG_TOO_LONG;
-        Exit;
-      End;
-      PokeB(PBuf + O, C);
-      Inc(O); Inc(I);
-    End;
+    If MsgFn[Ordinal] = 0 Then
+      If DosQueryProcAddr(MsgMod, Ordinal, 0, LongInt(@A)) = NO_ERROR Then MsgFn[Ordinal] := A;
+    A := MsgFn[Ordinal];
   End;
-  PokeL(PcbOut, O);
-  InsertVars := NO_ERROR;
+  MsgProc := A;
+End;
+
+Function MsgCall(Ordinal, A1, A2, A3, A4, A5, A6, A7, A8 : LongInt) : LongInt;
+Var F : LongInt;
+Begin
+  F := MsgProc(Ordinal);
+  If F = 0 Then MsgCall := ERROR_MR_UN_PERFORM
+  Else MsgCall := CallPtr8(F, A1, A2, A3, A4, A5, A6, A7, A8);
 End;
 
 Function DosInsertMessage(PTable, CTable, PMsg, CbMsg, PBuf, CbBuf, PcbMsg : LongInt) : LongInt;
 Begin
-  DosInsertMessage := InsertVars(PTable, CTable, PMsg, CbMsg, PBuf, CbBuf, PcbMsg);
+  DosInsertMessage := MsgCall(4, PTable, CTable, PMsg, CbMsg, PBuf, CbBuf, PcbMsg, 0);
 End;
 
 Function DosInsMessage(PTable, CTable, PMsg, CbMsg, PBuf, CbBuf, PcbMsg : LongInt) : LongInt;
 Begin
-  DosInsMessage := InsertVars(PTable, CTable, PMsg, CbMsg, PBuf, CbBuf, PcbMsg);
+  DosInsMessage := MsgCall(4, PTable, CTable, PMsg, CbMsg, PBuf, CbBuf, PcbMsg, 0);
 End;
 
 Function DosPutMessage(H, CbMsg, PBuf : LongInt) : LongInt;
-Var W : LongInt;
 Begin
-  DosPutMessage := DosWrite(H, PBuf, CbMsg, LongInt(@W));
-End;
-
-{ Messages systeme integres (fichier OSO001.MSG absent) }
-Function SysMessage(N : LongInt) : String;
-Begin
-  Case N Of
-    1   : SysMessage := 'Fonction incorrecte.';
-    2   : SysMessage := 'Le systeme ne trouve pas le fichier %1.';
-    3   : SysMessage := 'Le systeme ne trouve pas le chemin d''acces %1.';
-    4   : SysMessage := 'Le systeme ne peut ouvrir le fichier %1.';
-    5   : SysMessage := 'Acces refuse.';
-    6   : SysMessage := 'Handle incorrect.';
-    8   : SysMessage := 'Memoire insuffisante.';
-    15  : SysMessage := 'L''unite %1 est introuvable.';
-    16  : SysMessage := 'Le repertoire courant ne peut etre supprime.';
-    18  : SysMessage := 'Il n''y a plus de fichiers.';
-    19  : SysMessage := 'Le disque est protege en ecriture.';
-    21  : SysMessage := 'L''unite n''est pas prete.';
-    32  : SysMessage := 'Le fichier est utilise par un autre processus.';
-    80  : SysMessage := 'Le fichier %1 existe deja.';
-    87  : SysMessage := 'Parametre incorrect : %1.';
-    109 : SysMessage := 'Le tuyau est ferme.';
-    112 : SysMessage := 'Le disque est plein.';
-    123 : SysMessage := 'Le nom de fichier %1 est incorrect.';
-    1041 : SysMessage := 'Le nom indique n''est pas reconnu comme une commande interne ou externe.';
-    3175 : SysMessage := 'Une exception s''est produite dans le processus %1.';
-  Else
-    SysMessage := '';
-  End;
+  DosPutMessage := MsgCall(5, H, CbMsg, PBuf, 0, 0, 0, 0, 0);
 End;
 
 { DosTrueGetMessage(table, nb, tampon, taille, numero, fichier, pcbMsg,
-  segment de messages) : "SYSnnnn: texte" (nnnn = numero) }
+  segment de messages) }
 Function DosTrueGetMessage(PTable, CTable, PBuf, CbBuf, MsgNum, PFile, PcbMsg, MsgSeg : LongInt) : LongInt;
-Var S, Pre : String; L : LongInt;
 Begin
-  S := SysMessage(MsgNum);
-  If S = '' Then
-  Begin
-    S := IStr(MsgNum);
-    While Length(S) < 4 Do S := '0' + S;
-    S := 'SYS' + S + ': Le message ' + S + ' est introuvable dans le fichier ' + GetStr(PFile) + '.';
-    PutStr(LongInt(@Scratch), S, 512);
-    L := Length(S);
-    If L > CbBuf Then L := CbBuf;
-    MoveB(LongInt(@Scratch), PBuf, L);
-    PokeL(PcbMsg, L);
-    DosTrueGetMessage := ERROR_MR_MID_NOT_FOUND;
-    Exit;
-  End;
-  Pre := IStr(MsgNum);
-  While Length(Pre) < 4 Do Pre := '0' + Pre;
-  S := 'SYS' + Pre + ': ' + S + CrLf;
-  PutStr(LongInt(@Scratch), S, 512);
-  DosTrueGetMessage := InsertVars(PTable, CTable, LongInt(@Scratch), Length(S), PBuf, CbBuf, PcbMsg);
+  DosTrueGetMessage := MsgCall(6, PTable, CTable, PBuf, CbBuf, MsgNum, PFile, PcbMsg, MsgSeg);
 End;
 
-{ Pages de codes d'un fichier de messages : nombre, puis les pages }
+{ DosGetMessage : DosTrueGetMessage sans segment de messages lie }
+Function DosGetMessage(PTable, CTable, PBuf, CbBuf, MsgNum, PFile, PcbMsg : LongInt) : LongInt;
+Begin
+  DosGetMessage := MsgCall(6, PTable, CTable, PBuf, CbBuf, MsgNum, PFile, PcbMsg, 0);
+End;
+
 Function DosIQueryMessageCP(PBuf, CbBuf, PFile, PcbBuf, MsgSeg : LongInt) : LongInt;
 Begin
-  If CbBuf < 6 Then
-  Begin
-    DosIQueryMessageCP := ERROR_BUFFER_OVERFLOW;
-    Exit;
-  End;
-  PokeW(PBuf, 1);
-  PokeW(PBuf + 2, 850);
-  PokeW(PBuf + 4, 1);           { langue }
-  PokeL(PcbBuf, 6);
-  DosIQueryMessageCP := NO_ERROR;
+  DosIQueryMessageCP := MsgCall(8, PBuf, CbBuf, PFile, PcbBuf, MsgSeg, 0, 0, 0);
+End;
+
+{ DosQueryMessageCP : DosIQueryMessageCP sans segment de messages lie }
+Function DosQueryMessageCP(PBuf, CbBuf, PFile, PcbBuf : LongInt) : LongInt;
+Begin
+  DosQueryMessageCP := MsgCall(8, PBuf, CbBuf, PFile, PcbBuf, 0, 0, 0, 0);
 End;
 
 { Classe, action et lieu d'une erreur }
@@ -7495,6 +7473,7 @@ exports
   DosGetResource2, DosGetSeg, DosGetSharedMem, DosGetShrSeg, DosGetVersion,
   DosGiveSeg, DosGiveSharedMem, DosHoldSignal, DosICreateThread,
   DosIExecPgm, DosInsertMessage, DosInsMessage, DosIQueryMessageCP,
+  DosGetMessage, DosQueryMessageCP,
   DosIRead, DosISemRequest, DosISemWait, DosISysSemClear, DosISysSemSet,
   DosIWrite, DosKillProcess, DosKillThread, DosListIO, DosListIOL,
   DosLoadModule, DosLockSeg, DosMakeNmPipe, DosMakePipe, DosMapCase,
