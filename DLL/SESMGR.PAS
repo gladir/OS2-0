@@ -29,8 +29,9 @@ Library SESMGR;
   Une session terminee garde son code de fin (DosSMGetStatus) jusqu'a
   DosSMTerminate. A la fin d'une session, ses sessions enfants en attente
   sont arretees et, si elle a une file de fin (TermQ) et que QUECALLS.DLL
-  est presente, l'element (identificateur de la session, code de fin)
-  y est ecrit.
+  est presente, l'element (code de requete 0 ; donnees en memoire
+  partagee : identificateur de la session et code de fin, 2 mots) y est
+  ecrit.
 
   Interpreteur proprietaire : le premier processus qui appelle
   DosSMInitialize. Tant qu'il existe, les DosStartSession,
@@ -497,16 +498,16 @@ Begin
   End;
   If QueMod <= 0 Then Exit;
   F := 0;
-  PutZ(LongInt(@NameZ), 'DosOpenQueue');
+  PutZ(LongInt(@NameZ), 'Dos32OpenQueue');
   If DcQueryProcAddr(QueMod, 0, LongInt(@NameZ), LongInt(@F)) <> NO_ERROR Then Exit;
   PutZ(LongInt(@NameZ), STermQ[S]);
   Q := 0; Pid := 0;
   If CallPtr3(F, LongInt(@Pid), LongInt(@Q), LongInt(@NameZ)) <> NO_ERROR Then Exit;
   P := 0;
-  If DcAllocSharedMem(LongInt(@P), 0, 4, $113) <> NO_ERROR Then Exit;
+  If DcAllocSharedMem(LongInt(@P), 0, 4, $213) <> NO_ERROR Then Exit;   { PAG_COMMIT, lecture, ecriture, OBJ_GIVEABLE }
   WrW(P, S);
   WrW(P + 2, SResult[S]);
-  PutZ(LongInt(@NameZ), 'DosWriteQueue');
+  PutZ(LongInt(@NameZ), 'Dos32WriteQueue');
   If DcQueryProcAddr(QueMod, 0, LongInt(@NameZ), LongInt(@F)) = NO_ERROR Then
     D := CallPtr5(F, Q, 0, 4, P, 0);
 End;
