@@ -51,6 +51,8 @@ Var
   I, J : Integer;
   Arg, U : String;
   Yr, Mo, Dy, Dw, Hr, Mi, Sc, S100 : Word;
+  SR : SearchRec;
+  Dir : String;
   NowDT : DateTime;
 
 Function UpStr(S : String) : String;
@@ -383,6 +385,20 @@ BEGIN
     Else If Copy(U, 1, 6) = '/BOOT:' Then BootName := Copy(Arg, 7, 255)
     Else If Copy(U, 1, 7) = '/LABEL:' Then VolLabel := UpStr(Copy(Arg, 8, 255))
     Else If IsoName = '' Then IsoName := Arg
+    Else If (Pos('*', Arg) > 0) Or (Pos('?', Arg) > 0) Then
+    Begin
+      { jokers developpes ici (DOS et Windows ne le font pas) }
+      Dir := Arg;
+      While (Length(Dir) > 0) And Not (Dir[Length(Dir)] In ['\', '/', ':']) Do
+        Delete(Dir, Length(Dir), 1);
+      FindFirst(Arg, ReadOnly Or Archive Or Hidden Or SysFile, SR);
+      While (DosError = 0) And (NFiles < MAX_FILES) Do
+      Begin
+        Inc(NFiles);
+        FileNames[NFiles] := Dir + SR.Name;
+        FindNext(SR);
+      End;
+    End
     Else If NFiles < MAX_FILES Then
     Begin
       Inc(NFiles);

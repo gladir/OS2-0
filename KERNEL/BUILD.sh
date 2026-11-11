@@ -42,6 +42,6 @@ done
 cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 
 echo "== CD-ROM amorcable"
-"$W/makeiso" "$ROOT/IMAGE/OS2CD.ISO" /BOOT:"$W/cd/OS2BOOT" /LABEL:OS2_0 "$W"/cd/*
+"$W/makeiso" "$ROOT/IMAGE/OS2CD.ISO" /BOOT:"$W/cd/OS2BOOT" /LABEL:OS2_0 "$W/cd/*"
 for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
 echo "Termine : $ROOT/IMAGE/OS2CD.ISO"
