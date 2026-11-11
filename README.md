@@ -306,7 +306,29 @@ Le fichier <b>DLL/NAMPIPES.PAS</b> est la bibliothèque OS/2 <b>NAMPIPES.DLL</b>
 
 Les processus s'exécutant un à la fois, une opération qui devrait attendre l'autre bout rend aussitôt une erreur (ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED ou ERROR_SEM_TIMEOUT). Le programme <b>DLL/TESTNMP.PAS</b> vérifie ces fonctions (58 vérifications).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque SESMGR.DLL</h3>
+
+Le fichier <b>DLL/SESMGR.PAS</b> est le gestionnaire de sessions OS/2 <b>SESMGR.DLL</b> (lié à 00FA0000h), avec ses 41 points d'entrée et leurs ordinaux d'origine (1 DosSMSGDoPopup ... 41 DosRegisterNotification ; QhKeybdHandle et QhMouseHandle sont des données). La session 1 est celle de CMD.EXE. Une session démarrée au premier plan exécute aussitôt son programme sur un écran propre ; à sa fin, l'écran, le curseur et le clavier de la session d'origine sont rendus. Une session démarrée en arrière-plan attend d'être choisie pour s'exécuter.
+
+<table>
+	<tr><th>Fonctions</th><th>Rôle</th></tr>
+	<tr><td>DOSSTARTSESSION, DOSSELECTSESSION, DOSSETSESSION, DOSSTOPSESSION, Dos32StartSession, Dos32SelectSession, Dos32SetSession, Dos32StopSession</td><td>Démarrage (STARTDATA : session enfant ou indépendante, premier plan ou arrière-plan, type, PgmControl dont SSF_CONTROL_NOAUTOCLOSE, ObjectBuffer), choix, réglage (sélectionnable, liée) et arrêt des sessions enfants.</td></tr>
+	<tr><td>DosSMInitialize, DosSMStart, DosSMSwitch, DosSMTerminate, DosSMGetStatus, DosSMSetSessionType, DosSMParentSwitch, DosSetMNLockTime, DosGetTimes</td><td>Interpréteur propriétaire du gestionnaire : sessions de premier niveau, bascule, fin, état des sessions, type, retour au parent, durée minimale au premier plan.</td></tr>
+	<tr><td>DosSMGetAppReq, DosSMServeAppReq, DosSMDoAppReq</td><td>Demandes des applications : tant qu'un interpréteur est propriétaire, les DosStartSession, DosSelectSession, DosSetSession et DosStopSession des autres processus lui sont confiés.</td></tr>
+	<tr><td>DosSMSetTitle, DosSMPause, DosSMRealPrtSc, DosSMPMPresent</td><td>Titre de la session, pause (Ctrl+Verr num), impression de l'écran, présence de Presentation Manager (absent).</td></tr>
+	<tr><td>DosSMSGDoPopup, DosSMSGEndPopup, DosScrLock, DosScrUnlock, DosSavRedrawWait, DosSavRedrawUndo, DosModeWait, DosModeUndo</td><td>Fenêtres surgissantes, verrou de l'écran et processus légers de sauvegarde et de retraçage (VIOCALLS.DLL).</td></tr>
+	<tr><td>DOSSMREGISTERDD, DosSMOpenDD, DosSMNotifyDD, DosSMNotifyDD2, DosSMHDEInit, DosSMSysInit, DosRegisterNotification</td><td>Pilotes avertis des changements de session (KBD$ : KbdSwitchFgnd), HARDERR, DLL appelées à chaque démarrage, fin, passage au premier plan ou changement de titre.</td></tr>
+</table>
+
+Le programme <b>DLL/TESTSES.PAS</b> vérifie ces fonctions (59 vérifications ; ses sessions enfants exécutent TESTSES lui-même).
+
+<h3>Bibliothèque QUECALLS.DLL</h3>
+
+Le fichier <b>DLL/QUECALLS.PAS</b> est la bibliothèque OS/2 <b>QUECALLS.DLL</b> des files d'attente (liée à 00E70000h), avec ses 16 fonctions et leurs ordinaux d'origine : les 8 points d'entrée d'OS/2 1.x (1 DosReadQueue ... 8 DosCreateQueue) et leurs équivalents 32 bits (9 Dos32ReadQueue ... 16 Dos32CreateQueue). Le processus qui crée une file (\QUEUES\nom) en est le propriétaire et le seul à la lire ; les autres l'ouvrent pour y écrire. Les éléments (code de requête, longueur, adresse des données, priorité) sont lus selon l'ordre de la file : FIFO, LIFO ou par priorités (15 la plus haute). DosPeekQueue rend un code d'élément que DosReadQueue peut lire ensuite ; une sémaphore (1.x : DosSemClear, 2.x : DosPostEventSem) est signalée à chaque élément ajouté. Les points d'entrée 1.x rendent QUEUERESULT (deux mots), ceux de 2.x REQUESTDATA (deux doubles mots). SESMGR.DLL y écrit la fin des sessions enfants (TermQ).
+
+Le programme <b>DLL/TESTQUE.PAS</b> vérifie ces fonctions (31 vérifications, avec un écrivain d'un autre processus et la file de fin d'une session).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>

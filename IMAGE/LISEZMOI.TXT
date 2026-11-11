@@ -4,16 +4,17 @@ IMAGE - CD-ROM amorcable de OS/2-0
 OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
               FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
-              KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, CMD.EXE,
-              TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
-              TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
-              TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE et les commandes du
+              KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
+              SESMGR.DLL, QUECALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE,
+              TESTHPFS.EXE, TESTVIO.EXE (et TESTVIOR.DLL), TESTMOU.EXE,
+              TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE,
+              TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE et les commandes du
               depot compilees avec OS2PC (-COS2).
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
-              NAMPIPES.DLL et CONFIG.SYS (copies faites par
-              KERNEL\BUILD.sh).
+              NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL et CONFIG.SYS (copies
+              faites par KERNEL\BUILD.sh).
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
          (VirtualBox, Bochs ou un vrai PC : graver ou monter l'ISO ;
@@ -53,6 +54,10 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTMSG.PAS                     -> TESTMSG.EXE (essai de MSG.DLL)
   OS2PC DLL\NAMPIPES.PAS                    -> NAMPIPES.DLL (tuyaux nommes)
   OS2PC DLL\TESTNMP.PAS                     -> TESTNMP.EXE (essai de NAMPIPES.DLL)
+  OS2PC DLL\SESMGR.PAS                      -> SESMGR.DLL (gestionnaire de sessions)
+  OS2PC DLL\TESTSES.PAS                     -> TESTSES.EXE (essai de SESMGR.DLL)
+  OS2PC DLL\QUECALLS.PAS                    -> QUECALLS.DLL (files d'attente)
+  OS2PC DLL\TESTQUE.PAS                     -> TESTQUE.EXE (essai de QUECALLS.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -89,9 +94,11 @@ Carte memoire
                      KBDCALLS.DLL a 00C80000h, MONCALLS.DLL a
                      00CB0000h, FKA.DLL a 00D00000h, NLS.DLL a
                      00D40000h, MSG.DLL a 00D80000h, NAMPIPES.DLL a
-                     00DB0000h, HPFS.IFS a 00E00000h, VIOCALLS.DLL a
+                     00DB0000h, HPFS.IFS a 00E00000h, QUECALLS.DLL a
+                     00E70000h, VIOCALLS.DLL a
                      00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
-                     00F80000h : directive {$IMAGEBASE} d'OS2PC)
+                     00F80000h, SESMGR.DLL a 00FA0000h : directive
+                     {$IMAGEBASE} d'OS2PC)
   01000000h et plus  memoire physique des processus (image + pile)
   haut de la memoire disque virtuel HPFS (/RAMDISK:n Ko)
 
@@ -220,6 +227,32 @@ DosClose) ; ses fonctions DosXxxNPipe sont transmises a NAMPIPES.DLL.
 Une operation qui devrait attendre l'autre bout rend aussitot une
 erreur (ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED, ERROR_SEM_TIMEOUT) ;
 une instance est creee a l'ecoute.
+
+SESMGR.DLL
+----------
+Les 41 points d'entree du gestionnaire de sessions (1 DosSMSGDoPopup ...
+41 DosRegisterNotification). La session 1 est celle de CMD.EXE. Les
+processus s'executant un a la fois, une session demarree au premier
+plan (DosStartSession) execute aussitot son programme sur un ecran
+propre ; a sa fin l'ecran, le curseur et le clavier de la session
+d'origine sont rendus. Une session demarree en arriere-plan attend
+d'etre choisie (DosSelectSession, DosSMSwitch). Le premier processus
+qui appelle DosSMInitialize devient l'interpreteur proprietaire : les
+demandes des autres processus lui sont confiees (DosSMGetAppReq,
+DosSMServeAppReq). La fin d'une session enfant est ecrite dans sa file
+de fin (TermQ, QUECALLS.DLL) ;
+Presentation Manager est absent (DosSMPMPresent rend 0).
+
+QUECALLS.DLL
+------------
+Les 16 fonctions des files d'attente (1 a 8 : OS/2 1.x, QUEUERESULT de
+deux mots, semaphore 1.x ; 9 a 16 : Dos32*, REQUESTDATA de deux doubles
+mots, semaphore d'evenement). Le createur d'une file (\QUEUES\nom) en
+est le proprietaire et le seul lecteur ; les autres processus l'ouvrent
+pour y ecrire. Ordre FIFO, LIFO ou par priorites (0 a 15) ; DosPeekQueue
+rend un code d'element ; les donnees ne sont pas copiees (memoire
+partagee entre processus). Une lecture avec attente d'une file vide rend
+ERROR_QUE_EMPTY (un processus a la fois).
 
 Imprimante
 ----------
