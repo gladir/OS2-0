@@ -4,15 +4,16 @@ IMAGE - CD-ROM amorcable de OS/2-0
 OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
               FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
-              KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, CMD.EXE, TESTDOS.EXE,
-              TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et TESTVIOR.DLL),
-              TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE,
-              TESTMSG.EXE et les commandes du depot compilees avec
-              OS2PC (-COS2).
+              KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, CMD.EXE,
+              TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
+              TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
+              TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE et les commandes du
+              depot compilees avec OS2PC (-COS2).
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
-              MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL
-              et CONFIG.SYS (copies faites par KERNEL\BUILD.sh).
+              MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
+              NAMPIPES.DLL et CONFIG.SYS (copies faites par
+              KERNEL\BUILD.sh).
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
          (VirtualBox, Bochs ou un vrai PC : graver ou monter l'ISO ;
@@ -50,6 +51,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTMON.PAS                     -> TESTMON.EXE (essai de MONCALLS.DLL)
   OS2PC DLL\MSG.PAS                         -> MSG.DLL (messages)
   OS2PC DLL\TESTMSG.PAS                     -> TESTMSG.EXE (essai de MSG.DLL)
+  OS2PC DLL\NAMPIPES.PAS                    -> NAMPIPES.DLL (tuyaux nommes)
+  OS2PC DLL\TESTNMP.PAS                     -> TESTNMP.EXE (essai de NAMPIPES.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -85,8 +88,8 @@ Carte memoire
   00C00000h-00FFFFFFh DLL partagees (DOSCALLS.DLL a 00C00000h,
                      KBDCALLS.DLL a 00C80000h, MONCALLS.DLL a
                      00CB0000h, FKA.DLL a 00D00000h, NLS.DLL a
-                     00D40000h, MSG.DLL a 00D80000h, HPFS.IFS a
-                     00E00000h, VIOCALLS.DLL a
+                     00D40000h, MSG.DLL a 00D80000h, NAMPIPES.DLL a
+                     00DB0000h, HPFS.IFS a 00E00000h, VIOCALLS.DLL a
                      00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
                      00F80000h : directive {$IMAGEBASE} d'OS2PC)
   01000000h et plus  memoire physique des processus (image + pile)
@@ -203,6 +206,20 @@ jusqu'a DosCloseMessageFile ; segment de messages en memoire ; messages
 systeme d'OSO001.MSG integres. DOSCALLS.DLL lui transmet DosGetMessage,
 DosTrueGetMessage, DosInsertMessage, DosInsMessage, DosPutMessage,
 DosQueryMessageCP et DosIQueryMessageCP.
+
+NAMPIPES.DLL
+------------
+Les 14 fonctions des tuyaux nommes (1 DosMakeNmPipe ... 14
+DosQNmPipeSemState). Instances multiples d'un meme nom (\PIPE\nom),
+tuyaux d'octets ou de messages (en-tete de 2 octets par message, lu et
+ecrit tel quel par DosRawReadNmPipe et DosRawWriteNmPipe), acces
+entrant, sortant ou bidirectionnel, mode bloquant et mode de lecture
+propres a chaque bout, semaphores systeme ou d'evenement attachees. Les
+handles sont ceux de DOSCALLS.DLL (DosOpen du client, DosRead, DosWrite,
+DosClose) ; ses fonctions DosXxxNPipe sont transmises a NAMPIPES.DLL.
+Une operation qui devrait attendre l'autre bout rend aussitot une
+erreur (ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED, ERROR_SEM_TIMEOUT) ;
+une instance est creee a l'ecoute.
 
 Imprimante
 ----------

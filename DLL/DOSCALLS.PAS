@@ -733,6 +733,8 @@ Function PipeRead(H, Buf, N : LongInt) : LongInt; Forward;
 Function PipeWrite(H, Buf, N : LongInt; Var Written : LongInt) : LongInt; Forward;
 Procedure PipeCloseEnd(H : LongInt); Forward;
 Function NpClientOpen(Name : String; Var H : LongInt) : LongInt; Forward;
+Function NpIo(H, Buf, N : LongInt; Wr : Boolean; Var Done : LongInt) : LongInt; Forward;
+Function NpCall(Ordinal, A1, A2, A3, A4, A5, A6, A7 : LongInt) : LongInt; Forward;
 
 Function IsDevName(S : String) : Boolean;
 Begin
@@ -921,7 +923,14 @@ Begin
     Exit;
   End;
   K := HKind(H);
-  If (K = HK_PIPER) Or (K = HK_NPSRV) Or (K = HK_NPCLI) Then
+  If (K = HK_NPSRV) Or (K = HK_NPCLI) Then
+  Begin
+    Got := 0;
+    DosRead := NpIo(H, Buf, Cb, False, Got);
+    PokeL(PActual, Got);
+    Exit;
+  End;
+  If K = HK_PIPER Then
   Begin
     Got := PipeRead(H, Buf, Cb);
     If Got < 0 Then
@@ -2269,6 +2278,40 @@ Begin
   CallPtr5 := R;
 End;
 
+Function CallPtr8(F, A1, A2, A3, A4, A5, A6, A7, A8 : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A8
+    push eax
+    mov eax,A7
+    push eax
+    mov eax,A6
+    push eax
+    mov eax,A5
+    push eax
+    mov eax,A4
+    push eax
+    mov eax,A3
+    push eax
+    mov eax,A2
+    push eax
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,32
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallPtr8 := R;
+End;
+
 { Nom de volume : le CD-ROM est en lecture seule ; sur un volume IFS, le
   pilote (FS_FSINFO de NOM.IFS) change le nom }
 Function DosSetFSInfo(Disk, Level, PBuf, Cb : LongInt) : LongInt;
@@ -2539,445 +2582,287 @@ End;
 
 { Lecture : rend le nombre d'octets lus, ou -code d'erreur }
 Function PipeRead(H, Buf, N : LongInt) : LongInt;
-Var P : LongInt;
+Var P, Got, R : LongInt;
 Begin
+  If (Hd[H].Kind = HK_NPSRV) Or (Hd[H].Kind = HK_NPCLI) Then
+  Begin
+    R := NpIo(H, Buf, N, False, Got);
+    If (R <> NO_ERROR) And (R <> ERROR_MORE_DATA) Then PipeRead := -R Else PipeRead := Got;
+    Exit;
+  End;
   P := Hd[H].Pipe;
   If (P < 0) Or Not Pipes[P].Used Then
   Begin
     PipeRead := -ERROR_BROKEN_PIPE;
     Exit;
   End;
-  If Hd[H].Kind = HK_PIPER Then
-    PipeRead := RingRead(Pipes[P].A, Buf, N, False)
-  Else If Hd[H].Kind = HK_NPCLI Then
-    PipeRead := RingRead(Pipes[P].A, Buf, N, False)
-  Else
-  Begin
-    { serveur }
-    If Pipes[P].State <> NP_STATE_CONNECTED Then
-    Begin
-      If Pipes[P].State = NP_STATE_CLOSING Then PipeRead := 0
-      Else PipeRead := -ERROR_PIPE_NOT_CONNECTED;
-      Exit;
-    End;
-    PipeRead := RingRead(Pipes[P].B, Buf, N, False);
-  End;
+  PipeRead := RingRead(Pipes[P].A, Buf, N, False);
 End;
 
 Function PipeWrite(H, Buf, N : LongInt; Var Written : LongInt) : LongInt;
 Var P : LongInt;
 Begin
   Written := 0;
+  If (Hd[H].Kind = HK_NPSRV) Or (Hd[H].Kind = HK_NPCLI) Then
+  Begin
+    PipeWrite := NpIo(H, Buf, N, True, Written);
+    Exit;
+  End;
   P := Hd[H].Pipe;
   If (P < 0) Or Not Pipes[P].Used Then
   Begin
     PipeWrite := ERROR_BROKEN_PIPE;
     Exit;
   End;
-  If Hd[H].Kind = HK_PIPEW Then
+  If Not Pipes[P].ReadOpen Then
   Begin
-    If Not Pipes[P].ReadOpen Then
-    Begin
-      PipeWrite := ERROR_BROKEN_PIPE;
-      Exit;
-    End;
-    Written := RingWrite(Pipes[P].A, Buf, N);
-  End
-  Else If Hd[H].Kind = HK_NPCLI Then
-  Begin
-    If Not Pipes[P].ReadOpen Then
-    Begin
-      PipeWrite := ERROR_BROKEN_PIPE;
-      Exit;
-    End;
-    Written := RingWrite(Pipes[P].B, Buf, N);
-  End
-  Else
-  Begin
-    If Pipes[P].State <> NP_STATE_CONNECTED Then
-    Begin
-      PipeWrite := ERROR_PIPE_NOT_CONNECTED;
-      Exit;
-    End;
-    Written := RingWrite(Pipes[P].A, Buf, N);
+    PipeWrite := ERROR_BROKEN_PIPE;
+    Exit;
   End;
+  Written := RingWrite(Pipes[P].A, Buf, N);
   PipeWrite := NO_ERROR;
 End;
 
 Procedure PipeCloseEnd(H : LongInt);
-Var P : LongInt;
+Var P, D : LongInt;
 Begin
+  If (Hd[H].Kind = HK_NPSRV) Or (Hd[H].Kind = HK_NPCLI) Then
+  Begin
+    If Hd[H].Kind = HK_NPSRV Then D := NpCall(104, Hd[H].Pipe, 1, 0, 0, 0, 0, 0)
+    Else D := NpCall(104, Hd[H].Pipe, 0, 0, 0, 0, 0, 0);
+    Exit;
+  End;
   P := Hd[H].Pipe;
   If (P < 0) Or Not Pipes[P].Used Then Exit;
   Case Hd[H].Kind Of
-    HK_PIPER, HK_NPSRV : Pipes[P].ReadOpen := False;
-    HK_PIPEW, HK_NPCLI : Pipes[P].WriteOpen := False;
-  End;
-  If Hd[H].Kind = HK_NPCLI Then
-  Begin
-    If Pipes[P].State = NP_STATE_CONNECTED Then Pipes[P].State := NP_STATE_CLOSING;
+    HK_PIPER : Pipes[P].ReadOpen := False;
+    HK_PIPEW : Pipes[P].WriteOpen := False;
   End;
   If Not Pipes[P].ReadOpen And Not Pipes[P].WriteOpen Then FreePipe(P);
 End;
 
-{ --- Tuyaux nommes (\PIPE\nom) --- }
+{ --- Tuyaux nommes (\PIPE\nom) ---
+  Ils sont geres par NAMPIPES.DLL (chargee au premier appel) : les
+  handles HK_NPSRV et HK_NPCLI gardent le jeton du bout (Hd[].Pipe) et
+  DosRead, DosWrite et DosClose sont transmis a NpRead, NpWrite et
+  NpCloseEnd ; les fonctions DosXxxNPipe et DosXxxNmPipe aux ordinaux de
+  NAMPIPES.DLL (voir NAMPIPES.PAS). }
+Var
+  NpMod  : LongInt;
+  NpFn   : Array[1..104] Of LongInt;
+  NpNm   : Array[0..15] Of Byte;
+  NpFail : Array[0..31] Of Byte;
+  NpNameZ : Array[0..127] Of Byte;
 
-Function FindNamedPipe(Name : String; Free : Boolean) : LongInt;
-Var I : LongInt;
+Function NpProc(Ordinal : LongInt) : LongInt;
+Var I, A : LongInt; S : String;
 Begin
-  FindNamedPipe := -1;
-  Name := UpStr(Name);
-  For I := 0 To MaxPipes - 1 Do
-    If Pipes[I].Used And Pipes[I].Named And (Pipes[I].Name = Name) Then
-      If (Not Free) Or (Pipes[I].State = NP_STATE_LISTENING) Or
-         ((Pipes[I].State = NP_STATE_DISCONNECTED) And Not Pipes[I].WriteOpen) Then
-      Begin
-        FindNamedPipe := I;
-        Exit;
-      End;
+  If NpMod = 0 Then
+  Begin
+    S := 'NAMPIPES';
+    For I := 1 To Length(S) Do NpNm[I - 1] := Ord(S[I]);
+    NpNm[Length(S)] := 0;
+    If DosLoadModule(LongInt(@NpFail), 32, LongInt(@NpNm), LongInt(@NpMod)) <> NO_ERROR Then NpMod := 0;
+    For I := 1 To 104 Do NpFn[I] := 0;
+  End;
+  A := 0;
+  If NpMod <> 0 Then
+  Begin
+    If NpFn[Ordinal] = 0 Then
+      If DosQueryProcAddr(NpMod, Ordinal, 0, LongInt(@A)) = NO_ERROR Then NpFn[Ordinal] := A;
+    A := NpFn[Ordinal];
+  End;
+  NpProc := A;
 End;
 
-Function DosCreateNPipe(PName, PHPipe, OpenMode, PipeMode, CbOut, CbIn, Msec : LongInt) : LongInt;
-Var P, H : LongInt; Name : String;
+Function NpCall(Ordinal, A1, A2, A3, A4, A5, A6, A7 : LongInt) : LongInt;
+Var F : LongInt;
 Begin
-  Name := UpStr(GetStr(PName));
-  If Copy(Name, 1, 6) <> '\PIPE\' Then
-  Begin
-    DosCreateNPipe := ERROR_INVALID_NAME;
-    Exit;
-  End;
-  P := NewPipe;
-  If P < 0 Then
-  Begin
-    DosCreateNPipe := ERROR_PIPE_BUSY;
-    Exit;
-  End;
-  If (Not RingInit(Pipes[P].A, CbOut)) Or (Not RingInit(Pipes[P].B, CbIn)) Then
-  Begin
-    FreePipe(P);
-    DosCreateNPipe := ERROR_NOT_ENOUGH_MEMORY;
-    Exit;
-  End;
-  H := HAlloc;
-  If H < 0 Then
-  Begin
-    FreePipe(P);
-    DosCreateNPipe := ERROR_TOO_MANY_OPEN_FILES;
-    Exit;
-  End;
-  Pipes[P].Named := True;
-  Pipes[P].Name := Name;
-  Pipes[P].OpenMode := OpenMode;
-  Pipes[P].PipeMode := PipeMode;
-  Pipes[P].WriteOpen := False;          { aucun client }
-  Pipes[P].State := NP_STATE_DISCONNECTED;
-  Hd[H].Kind := HK_NPSRV; Hd[H].Pipe := P; Hd[H].Mode := OpenMode; Hd[H].Path := Name;
-  PokeL(PHPipe, H);
-  DosCreateNPipe := NO_ERROR;
+  F := NpProc(Ordinal);
+  If F = 0 Then NpCall := ERROR_INVALID_FUNCTION
+  Else NpCall := CallPtr8(F, A1, A2, A3, A4, A5, A6, A7, 0);
 End;
 
-Function DosMakeNmPipe(PName, PHPipe, OpenMode, PipeMode, CbOut, CbIn, Timeout : LongInt) : LongInt;
+Function NpIsSrv(H : LongInt) : LongInt;
 Begin
-  DosMakeNmPipe := DosCreateNPipe(PName, PHPipe, OpenMode, PipeMode, CbOut, CbIn, Timeout);
+  If Hd[H].Kind = HK_NPSRV Then NpIsSrv := 1 Else NpIsSrv := 0;
+End;
+
+{ Lecture et ecriture d'un bout de tuyau nomme (DosRead, DosWrite) }
+Function NpIo(H, Buf, N : LongInt; Wr : Boolean; Var Done : LongInt) : LongInt;
+Var D : LongInt;
+Begin
+  D := 0;
+  If Wr Then NpIo := NpCall(103, Hd[H].Pipe, NpIsSrv(H), Buf, N, LongInt(@D), 0, 0)
+  Else NpIo := NpCall(102, Hd[H].Pipe, NpIsSrv(H), Buf, N, LongInt(@D), 0, 0);
+  Done := D;
 End;
 
 { Ouverture d'un tuyau nomme par un client (DosOpen("\PIPE\nom")) }
 Function NpClientOpen(Name : String; Var H : LongInt) : LongInt;
-Var P : LongInt;
+Var R, Tok, D : LongInt;
 Begin
-  P := FindNamedPipe(Name, False);
-  If P < 0 Then
+  PutStr(LongInt(@NpNameZ), Name, 128);
+  Tok := 0;
+  R := NpCall(101, LongInt(@NpNameZ), LongInt(@Tok), 0, 0, 0, 0, 0);
+  If R = NO_ERROR Then
   Begin
-    NpClientOpen := ERROR_FILE_NOT_FOUND;
-    Exit;
+    H := HAlloc;
+    If H < 0 Then
+    Begin
+      D := NpCall(104, Tok, 0, 0, 0, 0, 0, 0);
+      R := ERROR_TOO_MANY_OPEN_FILES;
+    End
+    Else
+    Begin
+      Hd[H].Kind := HK_NPCLI; Hd[H].Pipe := Tok; Hd[H].Mode := OPEN_ACCESS_READWRITE;
+      Hd[H].Path := UpStr(Name);
+    End;
   End;
-  P := FindNamedPipe(Name, True);
-  If P < 0 Then
-  Begin
-    NpClientOpen := ERROR_PIPE_BUSY;
-    Exit;
-  End;
+  NpClientOpen := R;
+End;
+
+{ Services de NAMPIPES.DLL : handle d'un bout cree (DosMakeNmPipe) et
+  jeton d'un handle }
+Function NpAllocHandle(Kind, Tok, Mode, PName : LongInt) : LongInt;
+Var H : LongInt;
+Begin
   H := HAlloc;
-  If H < 0 Then
+  If H >= 0 Then
   Begin
-    NpClientOpen := ERROR_TOO_MANY_OPEN_FILES;
-    Exit;
+    Hd[H].Kind := Kind; Hd[H].Pipe := Tok; Hd[H].Mode := Mode;
+    Hd[H].Path := UpStr(GetStr(PName));
   End;
-  Hd[H].Kind := HK_NPCLI; Hd[H].Pipe := P; Hd[H].Mode := OPEN_ACCESS_READWRITE;
-  Hd[H].Path := Pipes[P].Name;
-  Pipes[P].WriteOpen := True;
-  Pipes[P].State := NP_STATE_CONNECTED;
-  NpClientOpen := NO_ERROR;
+  NpAllocHandle := H;
 End;
 
-Function NpServer(H : LongInt) : LongInt;
+Function NpQueryHandle(H, PKind : LongInt) : LongInt;
 Begin
-  If HValid(H) And (HKind(H) = HK_NPSRV) Then NpServer := Hd[H].Pipe Else NpServer := -1;
+  NpQueryHandle := -1;
+  If (H < 3) Or Not HValid(H) Then Exit;
+  If (Hd[H].Kind <> HK_NPSRV) And (Hd[H].Kind <> HK_NPCLI) Then Exit;
+  PokeL(PKind, Hd[H].Kind);
+  NpQueryHandle := Hd[H].Pipe;
 End;
 
-Function NpAny(H : LongInt) : LongInt;
+Function DosCreateNPipe(PName, PHPipe, OpenMode, PipeMode, CbOut, CbIn, Msec : LongInt) : LongInt;
 Begin
-  If HValid(H) And ((HKind(H) = HK_NPSRV) Or (HKind(H) = HK_NPCLI)) Then NpAny := Hd[H].Pipe
-  Else NpAny := -1;
+  DosCreateNPipe := NpCall(1, PName, PHPipe, OpenMode, PipeMode, CbOut, CbIn, Msec);
 End;
 
-{ Le serveur se met a l'ecoute : sans client, mode non bloquant ou
-  bloquant, ERROR_PIPE_NOT_CONNECTED (un seul processus leger) }
-Function DosConnectNPipe(H : LongInt) : LongInt;
-Var P : LongInt;
+Function DosMakeNmPipe(PName, PHPipe, OpenMode, PipeMode, CbOut, CbIn, Timeout : LongInt) : LongInt;
 Begin
-  P := NpServer(H);
-  If P < 0 Then
-  Begin
-    DosConnectNPipe := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  If Pipes[P].State = NP_STATE_CONNECTED Then
-  Begin
-    DosConnectNPipe := NO_ERROR;
-    Exit;
-  End;
-  If Pipes[P].State = NP_STATE_CLOSING Then
-  Begin
-    DosConnectNPipe := ERROR_BROKEN_PIPE;
-    Exit;
-  End;
-  Pipes[P].State := NP_STATE_LISTENING;
-  DosConnectNPipe := ERROR_PIPE_NOT_CONNECTED;
+  DosMakeNmPipe := NpCall(1, PName, PHPipe, OpenMode, PipeMode, CbOut, CbIn, Timeout);
 End;
 
-Function DosConnectNmPipe(H : LongInt) : LongInt;
-Begin
-  DosConnectNmPipe := DosConnectNPipe(H);
-End;
-
-Function DosDisConnectNPipe(H : LongInt) : LongInt;
-Var P : LongInt;
-Begin
-  P := NpServer(H);
-  If P < 0 Then
-  Begin
-    DosDisConnectNPipe := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  Pipes[P].State := NP_STATE_DISCONNECTED;
-  Pipes[P].WriteOpen := False;
-  Pipes[P].A.Count := 0; Pipes[P].A.RPos := 0; Pipes[P].A.WPos := 0;
-  Pipes[P].B.Count := 0; Pipes[P].B.RPos := 0; Pipes[P].B.WPos := 0;
-  DosDisConnectNPipe := NO_ERROR;
-End;
-
-Function DosDisconnectNmPipe(H : LongInt) : LongInt;
-Begin
-  DosDisconnectNmPipe := DosDisConnectNPipe(H);
-End;
-
-{ Lire sans retirer : AVAILDATA = cbpipe (mot), cbmessage (mot) }
-Function DosPeekNPipe(H, PBuf, CbBuf, PcbActual, PAvail, PState : LongInt) : LongInt;
-Var P, N : LongInt;
-Begin
-  P := NpAny(H);
-  If P < 0 Then
-  Begin
-    DosPeekNPipe := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  If HKind(H) = HK_NPSRV Then
-  Begin
-    N := RingRead(Pipes[P].B, PBuf, CbBuf, True);
-    PokeW(PAvail, Pipes[P].B.Count);
-  End
-  Else
-  Begin
-    N := RingRead(Pipes[P].A, PBuf, CbBuf, True);
-    PokeW(PAvail, Pipes[P].A.Count);
-  End;
-  PokeW(PAvail + 2, 0);
-  PokeL(PcbActual, N);
-  PokeL(PState, Pipes[P].State);
-  DosPeekNPipe := NO_ERROR;
-End;
-
-Function DosPeekNmPipe(H, PBuf, CbBuf, PcbActual, PAvail, PState : LongInt) : LongInt;
-Begin
-  DosPeekNmPipe := DosPeekNPipe(H, PBuf, CbBuf, PcbActual, PAvail, PState);
-End;
-
-{ Etat du handle : NP_NBLK ($8000), NP_SERVER ($4000), type et mode de
-  lecture, nombre d'instances (octet bas : 1) }
-Function DosQueryNPHState(H, PState : LongInt) : LongInt;
-Var P, S : LongInt;
-Begin
-  P := NpAny(H);
-  If P < 0 Then
-  Begin
-    DosQueryNPHState := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  S := (Pipes[P].PipeMode And $8F00) Or 1;
-  If HKind(H) = HK_NPSRV Then S := S Or $4000;
-  PokeL(PState, S);
-  DosQueryNPHState := NO_ERROR;
-End;
-
-Function DosQNmPHandState(H, PState : LongInt) : LongInt;
-Begin
-  DosQNmPHandState := DosQueryNPHState(H, PState);
-End;
-
-Function DosSetNPHState(H, State : LongInt) : LongInt;
-Var P : LongInt;
-Begin
-  P := NpAny(H);
-  If P < 0 Then
-  Begin
-    DosSetNPHState := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  { seuls le mode bloquant et le mode de lecture (message/octet) changent }
-  Pipes[P].PipeMode := (Pipes[P].PipeMode And Not $8100) Or (State And $8100);
-  DosSetNPHState := NO_ERROR;
-End;
-
-Function DosSetNmPHandState(H, State : LongInt) : LongInt;
-Begin
-  DosSetNmPHandState := DosSetNPHState(H, State);
-End;
-
-{ PIPEINFO (niveau 1) : cbOut, cbIn (mots), cbMaxInst, cbCurInst, cbName
-  (octets), szName }
 Function DosQueryNPipeInfo(H, Level, PBuf, CbBuf : LongInt) : LongInt;
-Var P : LongInt;
 Begin
-  P := NpAny(H);
-  If P < 0 Then
-  Begin
-    DosQueryNPipeInfo := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  If Level <> 1 Then
-  Begin
-    DosQueryNPipeInfo := ERROR_INVALID_LEVEL;
-    Exit;
-  End;
-  If CbBuf < 7 + Length(Pipes[P].Name) + 1 Then
-  Begin
-    DosQueryNPipeInfo := ERROR_BUFFER_OVERFLOW;
-    Exit;
-  End;
-  PokeW(PBuf, Pipes[P].A.Size);
-  PokeW(PBuf + 2, Pipes[P].B.Size);
-  PokeB(PBuf + 4, 1);
-  PokeB(PBuf + 5, 1);
-  PokeB(PBuf + 6, Length(Pipes[P].Name));
-  PutStr(PBuf + 7, Pipes[P].Name, 64);
-  DosQueryNPipeInfo := NO_ERROR;
+  DosQueryNPipeInfo := NpCall(2, H, Level, PBuf, CbBuf, 0, 0, 0);
 End;
 
 Function DosQNmPipeInfo(H, Level, PBuf, CbBuf : LongInt) : LongInt;
 Begin
-  DosQNmPipeInfo := DosQueryNPipeInfo(H, Level, PBuf, CbBuf);
+  DosQNmPipeInfo := NpCall(2, H, Level, PBuf, CbBuf, 0, 0, 0);
 End;
 
-Function DosSetNPipeSem(H, HSem, Key : LongInt) : LongInt;
-Var P : LongInt;
+Function DosConnectNPipe(H : LongInt) : LongInt;
 Begin
-  P := NpAny(H);
-  If P < 0 Then
-  Begin
-    DosSetNPipeSem := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  Pipes[P].Sem := HSem;
-  Pipes[P].Key := Key;
-  DosSetNPipeSem := NO_ERROR;
+  DosConnectNPipe := NpCall(3, H, 0, 0, 0, 0, 0, 0);
 End;
 
-Function DosSetNmPipeSem(H, HSem, Key : LongInt) : LongInt;
+Function DosConnectNmPipe(H : LongInt) : LongInt;
 Begin
-  DosSetNmPipeSem := DosSetNPipeSem(H, HSem, Key);
+  DosConnectNmPipe := NpCall(3, H, 0, 0, 0, 0, 0, 0);
 End;
 
-{ PIPESEMSTATE : fStatus (octet : 1 donnees, 2 place libre, 3 fermeture,
-  0 fin), fFlag, usKey (mot), usAvail (mot) ; 6 octets par entree }
-Function DosQueryNPipeSemState(HSem, PBuf, CbBuf : LongInt) : LongInt;
-Var I, P : LongInt;
+Function DosDisConnectNPipe(H : LongInt) : LongInt;
 Begin
-  P := PBuf;
-  For I := 0 To MaxPipes - 1 Do
-    If Pipes[I].Used And Pipes[I].Named And (Pipes[I].Sem = HSem) And (P + 12 <= PBuf + CbBuf) Then
-    Begin
-      If Pipes[I].B.Count > 0 Then PokeB(P, 1) Else If Pipes[I].State = NP_STATE_CLOSING Then PokeB(P, 3)
-      Else PokeB(P, 2);
-      PokeB(P + 1, 0);
-      PokeW(P + 2, Pipes[I].Key);
-      PokeW(P + 4, Pipes[I].B.Count);
-      P := P + 6;
-    End;
-  If P + 6 > PBuf + CbBuf Then
-  Begin
-    DosQueryNPipeSemState := ERROR_BUFFER_OVERFLOW;
-    Exit;
-  End;
-  FillB(P, 6, 0);
-  DosQueryNPipeSemState := NO_ERROR;
+  DosDisConnectNPipe := NpCall(4, H, 0, 0, 0, 0, 0, 0);
 End;
 
-Function DosQNmPipeSemState(HSem, PBuf, CbBuf : LongInt) : LongInt;
+Function DosDisconnectNmPipe(H : LongInt) : LongInt;
 Begin
-  DosQNmPipeSemState := DosQueryNPipeSemState(HSem, PBuf, CbBuf);
+  DosDisconnectNmPipe := NpCall(4, H, 0, 0, 0, 0, 0, 0);
 End;
 
-{ Ecrire puis lire (transaction sur un tuyau de messages duplex) }
-Function DosTransactNPipe(H, PIn, CbIn, POut, CbOut, PcbRead : LongInt) : LongInt;
-Var R, W : LongInt;
+Function DosQueryNPHState(H, PState : LongInt) : LongInt;
 Begin
-  If NpAny(H) < 0 Then
-  Begin
-    DosTransactNPipe := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  R := DosWrite(H, PIn, CbIn, LongInt(@W));
-  If R = NO_ERROR Then R := DosRead(H, POut, CbOut, PcbRead);
-  DosTransactNPipe := R;
+  DosQueryNPHState := NpCall(5, H, PState, 0, 0, 0, 0, 0);
 End;
 
-Function DosTransactNmPipe(H, PIn, CbIn, POut, CbOut, PcbRead : LongInt) : LongInt;
+Function DosQNmPHandState(H, PState : LongInt) : LongInt;
 Begin
-  DosTransactNmPipe := DosTransactNPipe(H, PIn, CbIn, POut, CbOut, PcbRead);
+  DosQNmPHandState := NpCall(5, H, PState, 0, 0, 0, 0, 0);
 End;
 
-Function DosCallNPipe(PName, PIn, CbIn, POut, CbOut, PcbActual, Msec : LongInt) : LongInt;
-Var H, R : LongInt;
+Function DosSetNPHState(H, State : LongInt) : LongInt;
 Begin
-  R := NpClientOpen(GetStr(PName), H);
-  If R <> NO_ERROR Then
-  Begin
-    DosCallNPipe := R;
-    Exit;
-  End;
-  R := DosTransactNPipe(H, PIn, CbIn, POut, CbOut, PcbActual);
-  DosClose(H);
-  DosCallNPipe := R;
+  DosSetNPHState := NpCall(6, H, State, 0, 0, 0, 0, 0);
 End;
 
-Function DosCallNmPipe(PName, PIn, CbIn, POut, CbOut, PcbActual, Timeout : LongInt) : LongInt;
+Function DosSetNmPHandState(H, State : LongInt) : LongInt;
 Begin
-  DosCallNmPipe := DosCallNPipe(PName, PIn, CbIn, POut, CbOut, PcbActual, Timeout);
+  DosSetNmPHandState := NpCall(6, H, State, 0, 0, 0, 0, 0);
+End;
+
+Function DosPeekNPipe(H, PBuf, CbBuf, PcbActual, PAvail, PState : LongInt) : LongInt;
+Begin
+  DosPeekNPipe := NpCall(7, H, PBuf, CbBuf, PcbActual, PAvail, PState, 0);
+End;
+
+Function DosPeekNmPipe(H, PBuf, CbBuf, PcbActual, PAvail, PState : LongInt) : LongInt;
+Begin
+  DosPeekNmPipe := NpCall(7, H, PBuf, CbBuf, PcbActual, PAvail, PState, 0);
 End;
 
 Function DosWaitNPipe(PName, Msec : LongInt) : LongInt;
-Var Name : String;
 Begin
-  Name := GetStr(PName);
-  If FindNamedPipe(Name, False) < 0 Then DosWaitNPipe := ERROR_FILE_NOT_FOUND
-  Else If FindNamedPipe(Name, True) >= 0 Then DosWaitNPipe := NO_ERROR
-  Else DosWaitNPipe := ERROR_SEM_TIMEOUT;
+  DosWaitNPipe := NpCall(8, PName, Msec, 0, 0, 0, 0, 0);
 End;
 
 Function DosWaitNmPipe(PName, Timeout : LongInt) : LongInt;
 Begin
-  DosWaitNmPipe := DosWaitNPipe(PName, Timeout);
+  DosWaitNmPipe := NpCall(8, PName, Timeout, 0, 0, 0, 0, 0);
+End;
+
+Function DosTransactNPipe(H, PIn, CbIn, POut, CbOut, PcbRead : LongInt) : LongInt;
+Begin
+  DosTransactNPipe := NpCall(9, H, PIn, CbIn, POut, CbOut, PcbRead, 0);
+End;
+
+Function DosTransactNmPipe(H, PIn, CbIn, POut, CbOut, PcbRead : LongInt) : LongInt;
+Begin
+  DosTransactNmPipe := NpCall(9, H, PIn, CbIn, POut, CbOut, PcbRead, 0);
+End;
+
+Function DosCallNPipe(PName, PIn, CbIn, POut, CbOut, PcbActual, Msec : LongInt) : LongInt;
+Begin
+  DosCallNPipe := NpCall(10, PName, PIn, CbIn, POut, CbOut, PcbActual, Msec);
+End;
+
+Function DosCallNmPipe(PName, PIn, CbIn, POut, CbOut, PcbActual, Timeout : LongInt) : LongInt;
+Begin
+  DosCallNmPipe := NpCall(10, PName, PIn, CbIn, POut, CbOut, PcbActual, Timeout);
+End;
+
+Function DosSetNPipeSem(H, HSem, Key : LongInt) : LongInt;
+Begin
+  DosSetNPipeSem := NpCall(13, H, HSem, Key, 0, 0, 0, 0);
+End;
+
+Function DosSetNmPipeSem(H, HSem, Key : LongInt) : LongInt;
+Begin
+  DosSetNmPipeSem := NpCall(13, H, HSem, Key, 0, 0, 0, 0);
+End;
+
+Function DosQueryNPipeSemState(HSem, PBuf, CbBuf : LongInt) : LongInt;
+Begin
+  DosQueryNPipeSemState := NpCall(14, HSem, PBuf, CbBuf, 0, 0, 0, 0);
+End;
+
+Function DosQNmPipeSemState(HSem, PBuf, CbBuf : LongInt) : LongInt;
+Begin
+  DosQNmPipeSemState := NpCall(14, HSem, PBuf, CbBuf, 0, 0, 0, 0);
 End;
 
 { ==================================================================== }
@@ -6547,39 +6432,6 @@ Var
   MsgNm   : Array[0..15] Of Byte;
   MsgFail : Array[0..31] Of Byte;
 
-Function CallPtr8(F, A1, A2, A3, A4, A5, A6, A7, A8 : LongInt) : LongInt;
-Var R : LongInt;
-Begin
-  asm
-    push ebx
-    push esi
-    push edi
-    mov eax,A8
-    push eax
-    mov eax,A7
-    push eax
-    mov eax,A6
-    push eax
-    mov eax,A5
-    push eax
-    mov eax,A4
-    push eax
-    mov eax,A3
-    push eax
-    mov eax,A2
-    push eax
-    mov eax,A1
-    push eax
-    mov eax,F
-    call eax
-    add esp,32
-    mov R,eax
-    pop edi
-    pop esi
-    pop ebx
-  end;
-  CallPtr8 := R;
-End;
 
 { Fonction Ordinal de MSG.DLL (0 : indisponible) }
 Function MsgProc(Ordinal : LongInt) : LongInt;
@@ -7473,7 +7325,7 @@ exports
   DosGetResource2, DosGetSeg, DosGetSharedMem, DosGetShrSeg, DosGetVersion,
   DosGiveSeg, DosGiveSharedMem, DosHoldSignal, DosICreateThread,
   DosIExecPgm, DosInsertMessage, DosInsMessage, DosIQueryMessageCP,
-  DosGetMessage, DosQueryMessageCP,
+  DosGetMessage, DosQueryMessageCP, NpAllocHandle, NpQueryHandle,
   DosIRead, DosISemRequest, DosISemWait, DosISysSemClear, DosISysSemSet,
   DosIWrite, DosKillProcess, DosKillThread, DosListIO, DosListIOL,
   DosLoadModule, DosLockSeg, DosMakeNmPipe, DosMakePipe, DosMapCase,
