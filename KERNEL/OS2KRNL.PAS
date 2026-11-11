@@ -208,6 +208,7 @@ Type
     Name      : String[63];
     Path      : String[127];
     Serial    : LongInt;     { identificateur de processus (PID) unique }
+    StdOutH   : LongInt;     { sortie standard redirigee (0 : console) }
     CurDir    : String[127];
   End;
 
@@ -2944,6 +2945,27 @@ Begin
   End;
 End;
 
+{ SetStdHandle(N, H) : rediriger la sortie standard (N = -11) du
+  processus vers le fichier H (HStdOut : retour a la console). Les
+  processus lances ensuite heritent de la redirection. }
+Function SetStdHandle(N, H : LongInt) : LongInt;
+Begin
+  SetStdHandle := 0;
+  If (N <> -11) Or (CurProc < 0) Then
+  Begin
+    LastError := ErrInvalidHandle;
+    Exit;
+  End;
+  If (H = HStdOut) Or (H = 0) Then Procs[CurProc].StdOutH := 0
+  Else If FileSlot(H) >= 0 Then Procs[CurProc].StdOutH := H
+  Else
+  Begin
+    LastError := ErrInvalidHandle;
+    Exit;
+  End;
+  SetStdHandle := 1;
+End;
+
 Function GetProcessHeap : LongInt;
 Begin
   GetProcessHeap := 1;
@@ -3609,10 +3631,23 @@ Begin
   If PRead <> 0 Then MemL[0:PRead] := Got;
 End;
 
+{ Sortie standard du processus courant : 0 (console) ou handle de
+  fichier (SetStdHandle, redirection > de CMD) }
+Function StdOutTarget : LongInt;
+Var T : LongInt;
+Begin
+  T := 0;
+  If CurProc >= 0 Then T := Procs[CurProc].StdOutH;
+  If (T <> 0) And (FileSlot(T) < 0) Then T := 0;     { fichier ferme }
+  StdOutTarget := T;
+End;
+
 Function WriteFile(H, Buf, N, PWritten, Ovl : LongInt) : LongInt;
 Var F, Ram, IR, Done : LongInt;
 Begin
   WriteFile := 1;
+  If H = HStdOut Then
+    If StdOutTarget <> 0 Then H := StdOutTarget;
   If (H = HStdOut) Or (H = HStdErr) Then
     ConWrite(Buf, N)
   Else
@@ -4978,6 +5013,9 @@ Begin
   If NextSerial < 2 Then NextSerial := 2;      { PID 1 : le noyau }
   Procs[Pid].Serial := NextSerial;
   Inc(NextSerial);
+  { la redirection de la sortie standard est heritee du parent }
+  Procs[Pid].StdOutH := 0;
+  If CurProc >= 0 Then Procs[Pid].StdOutH := Procs[CurProc].StdOutH;
   Procs[Pid].CurDir := CurDir;
   ProcEntry[Pid] := ProcWinBase + Entry;
   ProcStack[Pid] := Phys + PhysSize - 16;

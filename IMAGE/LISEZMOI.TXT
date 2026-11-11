@@ -189,6 +189,15 @@ Imprimante
 PRN et LPT1 a LPT3 ecrivent sur le port parallele (adresses du BIOS) ;
 avec QEMU, -parallel file:sortie.txt recueille les donnees.
 
+Redirections de CMD
+-------------------
+  commande > fichier     remplacer le fichier (ou PRN, LPT1...)
+  commande >> fichier    ajouter a la fin du fichier
+  commande | MORE        afficher page par page (fichier COMMAND.TMP)
+Les commandes internes et les programmes lances y ecrivent : CMD
+redirige la sortie standard de son processus (SetStdHandle du noyau),
+dont heritent les programmes qu'il lance.
+
 Limites
 -------
 - L'unite C: est le CD-ROM (lecture seule) ; les fichiers et repertoires
