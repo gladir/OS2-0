@@ -23,6 +23,7 @@ Program OS2KRNL;
     Partie 5  - Minuterie (PIT), horloge temps reel (CMOS), haut-parleur
     Partie 6  - Clavier (IRQ 1) et editeur de ligne de commande
     Partie 6b - Souris PS/2 (IRQ 12), lue par MOUCALLS.DLL
+    Partie 6c - Imprimante (ports paralleles) et moniteurs (MONCALLS.DLL)
     Partie 7  - Memoire : tas du noyau et memoire physique
     Partie 8  - Pagination : fenetre des processus (00400000h-007FFFFFh)
     Partie 9  - Pilote ATAPI (CD-ROM IDE, mode PIO)
@@ -152,6 +153,8 @@ Type
     CanWrite : Boolean;
     IsNul    : Boolean;      { peripherique NUL }
     IsCon    : Boolean;      { peripherique CON }
+    IsPrn    : Boolean;      { imprimante PRN, LPT1 a LPT3 }
+    PrnIdx   : LongInt;      { 0 = LPT1 }
     Time     : LongInt;      { date et heure DOS }
     Owner    : LongInt;      { processus proprietaire }
     Name     : String[127];
@@ -235,6 +238,10 @@ Var
   KbdState         : LongInt;       { etat des touches (fsState d'OS/2) }
   KbdMode          : LongInt;       { 1 changements d'etat, 2 relachements }
   KbdE1            : LongInt;
+  KbdMonOn         : Boolean;       { moniteurs KBD$ actifs (MONCALLS.DLL) }
+  KbdMonPid        : LongInt;
+  MonKV, MonKX, MonKT : Array[0..63] Of LongInt;   { frappes pour les moniteurs }
+  MonKHead, MonKTail : LongInt;
   KbdShift, KbdCtrl, KbdAlt, KbdCaps, KbdNum, KbdE0 : Boolean;
   History          : Array[0..15] Of String[127];
   HistCount        : LongInt;
@@ -807,15 +814,37 @@ End;
 
 { Ranger une touche ; Xt : etat des touches (bits 0 a 15), 10000h
   prefixe E0h, 20000h touche relachee, 40000h changement d'etat seul }
-Procedure KbdPushX(V, Xt : LongInt);
+Function KbdPushRaw(V, Xt, Tm : LongInt) : Boolean;
 Var N : LongInt;
 Begin
+  KbdPushRaw := False;
   N := (KbdHead + 1) And 63;
   If N = KbdTail Then Exit;      { tampon plein }
   KbdBuf[KbdHead] := V;
   KbdXt[KbdHead] := Xt;
-  KbdTm[KbdHead] := Ticks * 10;
+  KbdTm[KbdHead] := Tm;
   KbdHead := N;
+  KbdPushRaw := True;
+End;
+
+{ Avec des moniteurs KBD$ (MONCALLS.DLL), la frappe va d'abord a la
+  chaine de moniteurs, qui la rend au tampon (KrnMonIo) ; 80000h :
+  touche deja traduite (caractere et code rendus par les moniteurs,
+  fbStatus dans les bits 24 a 31) }
+Procedure KbdPushX(V, Xt : LongInt);
+Var N : LongInt; D : Boolean;
+Begin
+  If KbdMonOn Then
+  Begin
+    N := (MonKTail + 1) And 63;
+    If N = MonKHead Then Exit;
+    MonKV[MonKTail] := V;
+    MonKX[MonKTail] := Xt;
+    MonKT[MonKTail] := Ticks * 10;
+    MonKTail := N;
+  End
+  Else
+    D := KbdPushRaw(V, Xt, Ticks * 10);
 End;
 
 Procedure KbdPush(V : LongInt);
@@ -919,7 +948,7 @@ Begin
   If (Sc = 0) Or (KbdState <> Old) Or (Sc = $54) Then
   Begin
     { touche d'etat : signalee seulement en mode de rapport }
-    If (Sc <> 0) And (KbdState <> Old) And ((KbdMode And 1) <> 0) Then
+    If (Sc <> 0) And (KbdState <> Old) And (((KbdMode And 1) <> 0) Or KbdMonOn) Then
     Begin
       If Up <> 0 Then KbdPushX(Sc Shl 8, KbdState Or Ext Or $60000)
       Else KbdPushX(Sc Shl 8, KbdState Or Ext Or $40000);
@@ -928,7 +957,7 @@ Begin
   End
   Else If Up <> 0 Then
   Begin
-    If (KbdMode And 2) <> 0 Then KbdPushX(Sc Shl 8, KbdState Or Ext Or $20000);
+    If ((KbdMode And 2) <> 0) Or KbdMonOn Then KbdPushX(Sc Shl 8, KbdState Or Ext Or $20000);
   End
   Else
   Begin
@@ -995,6 +1024,7 @@ Begin
   KeyHighV := KeyHigh;
   KbdHead := 0; KbdTail := 0;
   KbdState := 0; KbdMode := 0; KbdE1 := 0;
+  KbdMonOn := False; KbdMonPid := 0; MonKHead := 0; MonKTail := 0;
   KbdSyncFlags;
   N := 0;
   While ((Port[$64] And 1) <> 0) And (N < 64) Do
@@ -1025,6 +1055,9 @@ Begin
       sti
     end;
   Until (X And $60000) = 0;     { relachements et changements d'etat ignores }
+  { touche traduite par un moniteur : E0h (touche grise) -> 00h }
+  If ((X And $80000) <> 0) And ((V And $FF) = $E0) And (((V Shr 8) And $FF) <> $E0) Then
+    V := V And $FF00;
   GetKey := V;
 End;
 
@@ -1137,6 +1170,25 @@ Var
   MouIdx     : LongInt;
   MouQDx, MouQDy, MouQBtn, MouQTime : Array[0..MouQSize - 1] Of LongInt;
   MouHead, MouTail, MouLost : LongInt;
+  MouMonOn  : Boolean;                  { moniteurs MOUSE$ actifs }
+  MouMonPid : LongInt;
+  MouMDx, MouMDy, MouMBtn, MouMTime : Array[0..MouQSize - 1] Of LongInt;
+  MouMHead, MouMTail : LongInt;
+
+{ Ranger un paquet de la souris pour MOUCALLS.DLL (Y vers le bas) }
+Function MouPush(Dx, Dy, Btn, Tm : LongInt) : Boolean;
+Var N : LongInt;
+Begin
+  MouPush := False;
+  N := (MouTail + 1) Mod MouQSize;
+  If N = MouHead Then Exit;
+  MouQDx[MouTail] := Dx;
+  MouQDy[MouTail] := Dy;
+  MouQBtn[MouTail] := Btn;
+  MouQTime[MouTail] := Tm;
+  MouTail := N;
+  MouPush := True;
+End;
 
 Procedure IrqMouse; Interrupt;
 Var B, N, Dx, Dy : LongInt;
@@ -1161,16 +1213,21 @@ Begin
         Begin
           Dx := 0; Dy := 0;                 { debordement : paquet ignore }
         End;
-        N := (MouTail + 1) Mod MouQSize;
-        If N = MouHead Then Inc(MouLost)
-        Else
+        If MouMonOn Then
         Begin
-          MouQDx[MouTail] := Dx;
-          MouQDy[MouTail] := -Dy;           { Y vers le bas, comme l'ecran }
-          MouQBtn[MouTail] := MouPk[0] And 7;
-          MouQTime[MouTail] := Ticks * 10;
-          MouTail := N;
-        End;
+          { vers la chaine de moniteurs MOUSE$ }
+          N := (MouMTail + 1) Mod MouQSize;
+          If N = MouMHead Then Inc(MouLost)
+          Else
+          Begin
+            MouMDx[MouMTail] := Dx;
+            MouMDy[MouMTail] := -Dy;
+            MouMBtn[MouMTail] := MouPk[0] And 7;
+            MouMTime[MouMTail] := Ticks * 10;
+            MouMTail := N;
+          End;
+        End
+        Else If Not MouPush(Dx, -Dy, MouPk[0] And 7, Ticks * 10) Then Inc(MouLost);
       End;
     End;
   End;
@@ -1216,6 +1273,7 @@ Var Cb, X : LongInt;
 Begin
   MouOk := False;
   MouIdx := 0; MouHead := 0; MouTail := 0; MouLost := 0;
+  MouMonOn := False; MouMonPid := 0; MouMHead := 0; MouMTail := 0;
   asm
     cli
   end;
@@ -1324,6 +1382,270 @@ Begin
   KrnKbdCtl := R;
 End;
 
+
+{ ==================================================================== }
+{ Partie 6c - Imprimante (ports paralleles) et moniteurs               }
+{ ==================================================================== }
+
+{ Les ecritures sur PRN et LPT1 a LPT3 vont au port parallele (adresses
+  du BIOS en 0408h) ; avec des moniteurs (MONCALLS.DLL), elles passent
+  d'abord par la chaine de moniteurs, par paquets de 64 octets au plus.
+  KrnMonIo sert les chaines de KBD$, MOUSE$ et LPT1 a LPT3. }
+
+Const
+  PrnMQSize = 32;
+  PrnPkMax  = 64;
+
+Var
+  PrnMonOn  : Array[0..2] Of Boolean;
+  PrnMonPid : Array[0..2] Of LongInt;
+  PrnMLpt, PrnMLen : Array[0..PrnMQSize - 1] Of LongInt;
+  PrnMData  : Array[0..PrnMQSize * PrnPkMax - 1] Of Byte;
+  PrnMHead, PrnMTail : LongInt;
+
+Function LptBase(Lpt : LongInt) : LongInt;
+Begin
+  LptBase := 0;
+  If (Lpt >= 0) And (Lpt <= 2) Then LptBase := MemW[0:$408 + Lpt * 2];
+End;
+
+{ Envoyer N octets au port parallele ; rend le nombre d'octets envoyes
+  (-1 : pas de port) }
+Function PrnOut(Lpt, Buf, N : LongInt) : LongInt;
+Var B, I, T : LongInt;
+Begin
+  B := LptBase(Lpt);
+  If B = 0 Then
+  Begin
+    PrnOut := -1;
+    Exit;
+  End;
+  I := 0;
+  While I < N Do
+  Begin
+    T := 0;
+    While ((Port[B + 1] And $80) = 0) And (T < 500000) Do Inc(T);   { occupee }
+    If T >= 500000 Then
+    Begin
+      PrnOut := I;
+      Exit;
+    End;
+    Port[B] := Mem[0:Buf + I];
+    Port[B + 2] := $0D;                   { impulsion STROBE }
+    Port[B + 2] := $0C;
+    Inc(I);
+  End;
+  PrnOut := N;
+End;
+
+{ Ecriture sur l'imprimante Lpt : rend le nombre d'octets acceptes }
+Function PrnWrite(Lpt, Buf, N : LongInt) : LongInt;
+Var Done, C, Nx : LongInt;
+Begin
+  If PrnMonOn[Lpt] Then
+  Begin
+    Done := 0;
+    While Done < N Do
+    Begin
+      Nx := (PrnMTail + 1) Mod PrnMQSize;
+      If Nx = PrnMHead Then
+      Begin
+        PrnWrite := Done;
+        Exit;
+      End;
+      C := N - Done;
+      If C > PrnPkMax Then C := PrnPkMax;
+      MoveMem(Buf + Done, LongInt(@PrnMData) + PrnMTail * PrnPkMax, C);
+      PrnMLpt[PrnMTail] := Lpt;
+      PrnMLen[PrnMTail] := C;
+      PrnMTail := Nx;
+      Done := Done + C;
+    End;
+    PrnWrite := Done;
+  End
+  Else
+    PrnWrite := PrnOut(Lpt, Buf, N);
+End;
+
+Function ProcAlive(Pid : LongInt) : Boolean;
+Var I : LongInt; R : Boolean;
+Begin
+  R := Pid = 1;
+  For I := 0 To MaxProcs - 1 Do
+    If Procs[I].Running And (Procs[I].Serial = Pid) Then R := True;
+  ProcAlive := R;
+End;
+
+Function MonPid : LongInt;
+Begin
+  If CurProc >= 0 Then MonPid := Procs[CurProc].Serial Else MonPid := 1;
+End;
+
+{ Arreter la surveillance du peripherique Dev : les paquets en attente
+  sont rendus au peripherique }
+Procedure MonStop(Dev : LongInt);
+Var D : Boolean; L : LongInt;
+Begin
+  asm
+    cli
+  end;
+  If Dev = 0 Then
+  Begin
+    While MonKHead <> MonKTail Do
+    Begin
+      D := KbdPushRaw(MonKV[MonKHead], MonKX[MonKHead], MonKT[MonKHead]);
+      MonKHead := (MonKHead + 1) And 63;
+    End;
+    KbdMonOn := False;
+  End
+  Else If Dev = 1 Then
+  Begin
+    While MouMHead <> MouMTail Do
+    Begin
+      D := MouPush(MouMDx[MouMHead], MouMDy[MouMHead], MouMBtn[MouMHead], MouMTime[MouMHead]);
+      MouMHead := (MouMHead + 1) Mod MouQSize;
+    End;
+    MouMonOn := False;
+  End
+  Else If (Dev >= 2) And (Dev <= 4) Then
+    PrnMonOn[Dev - 2] := False;
+  asm
+    sti
+  end;
+  If (Dev >= 2) And (Dev <= 4) Then
+    While PrnMHead <> PrnMTail Do
+    Begin
+      L := PrnOut(PrnMLpt[PrnMHead], LongInt(@PrnMData) + PrnMHead * PrnPkMax, PrnMLen[PrnMHead]);
+      PrnMHead := (PrnMHead + 1) Mod PrnMQSize;
+    End;
+End;
+
+{ KrnMonIo(Dev, Op, P) : chaines de moniteurs (MONCALLS.DLL).
+  Dev : 0 KBD$, 1 MOUSE$, 2 a 4 LPT1 a LPT3.
+  Op 0 : surveillance activee (P <> 0) ou arretee (P = 0 ; paquets en
+         attente rendus au peripherique) ; rend l'ancien etat (1/0).
+  Op 1 : paquet suivant pour la chaine dans P ; rend 1, ou 0 si aucun.
+  Op 2 : rendre le paquet P au peripherique (fin de la chaine) ; rend 1,
+         ou 0 si le peripherique ne peut le prendre.
+  Op 3 : nombre de paquets en attente pour la chaine.
+  Op 4 : le processus P est-il actif ? (1/0)
+  Op 5 : adresse du port de LPTn (0 : absent) ; souris presente pour
+         MOUSE$.
+  Paquets : clavier P^ = touche ((code shl 8) or caractere), etat et
+  indicateurs (KbdPushX), heure ; souris P^ = dx, dy, boutons, heure ;
+  imprimante P^ = longueur puis octets (64 au plus). }
+Function KrnMonIo(Dev, Op, P : LongInt) : LongInt;
+Var R, L : LongInt; On : Boolean;
+Begin
+  R := 0;
+  Case Op Of
+    0 : Begin
+          On := P <> 0;
+          If Dev = 0 Then
+          Begin
+            If KbdMonOn Then R := 1;
+            If On And Not KbdMonOn Then
+            Begin
+              MonKHead := 0; MonKTail := 0;
+              KbdMonPid := MonPid;
+              KbdMonOn := True;
+            End
+            Else If (Not On) And KbdMonOn Then MonStop(0);
+          End
+          Else If Dev = 1 Then
+          Begin
+            If MouMonOn Then R := 1;
+            If On And Not MouMonOn Then
+            Begin
+              MouMHead := 0; MouMTail := 0;
+              MouMonPid := MonPid;
+              MouMonOn := True;
+            End
+            Else If (Not On) And MouMonOn Then MonStop(1);
+          End
+          Else If (Dev >= 2) And (Dev <= 4) Then
+          Begin
+            If PrnMonOn[Dev - 2] Then R := 1;
+            If On And Not PrnMonOn[Dev - 2] Then
+            Begin
+              PrnMonPid[Dev - 2] := MonPid;
+              PrnMonOn[Dev - 2] := True;
+            End
+            Else If (Not On) And PrnMonOn[Dev - 2] Then MonStop(Dev);
+          End;
+        End;
+    1 : If Dev = 0 Then
+        Begin
+          If MonKHead <> MonKTail Then
+          Begin
+            MemL[0:P] := MonKV[MonKHead];
+            MemL[0:P + 4] := MonKX[MonKHead];
+            MemL[0:P + 8] := MonKT[MonKHead];
+            MonKHead := (MonKHead + 1) And 63;
+            R := 1;
+          End;
+        End
+        Else If Dev = 1 Then
+        Begin
+          If MouMHead <> MouMTail Then
+          Begin
+            MemL[0:P] := MouMDx[MouMHead];
+            MemL[0:P + 4] := MouMDy[MouMHead];
+            MemL[0:P + 8] := MouMBtn[MouMHead];
+            MemL[0:P + 12] := MouMTime[MouMHead];
+            MouMHead := (MouMHead + 1) Mod MouQSize;
+            R := 1;
+          End;
+        End
+        Else If (Dev >= 2) And (Dev <= 4) Then
+        Begin
+          If (PrnMHead <> PrnMTail) And (PrnMLpt[PrnMHead] = Dev - 2) Then
+          Begin
+            L := PrnMLen[PrnMHead];
+            MemL[0:P] := L;
+            MoveMem(LongInt(@PrnMData) + PrnMHead * PrnPkMax, P + 4, L);
+            PrnMHead := (PrnMHead + 1) Mod PrnMQSize;
+            R := 1;
+          End;
+        End;
+    2 : If Dev = 0 Then
+        Begin
+          If KbdPushRaw(MemL[0:P], MemL[0:P + 4], MemL[0:P + 8]) Then R := 1;
+        End
+        Else If Dev = 1 Then
+        Begin
+          If MouPush(MemL[0:P], MemL[0:P + 4], MemL[0:P + 8], MemL[0:P + 12]) Then R := 1;
+        End
+        Else If (Dev >= 2) And (Dev <= 4) Then
+        Begin
+          L := MemL[0:P];
+          If (L >= 0) And (L <= 256) Then
+            If PrnOut(Dev - 2, P + 4, L) = L Then R := 1;
+        End;
+    3 : If Dev = 0 Then R := (MonKTail - MonKHead + 64) And 63
+        Else If Dev = 1 Then R := (MouMTail - MouMHead + MouQSize) Mod MouQSize
+        Else If (Dev >= 2) And (Dev <= 4) Then
+          If (PrnMHead <> PrnMTail) And (PrnMLpt[PrnMHead] = Dev - 2) Then R := 1;
+    4 : If ProcAlive(P) Then R := 1;
+    5 : If Dev = 1 Then
+        Begin
+          If MouOk Then R := 1;
+        End
+        Else If Dev = 0 Then R := 1
+        Else R := LptBase(Dev - 2);
+  End;
+  KrnMonIo := R;
+End;
+
+{ Fin d'un processus : ses chaines de moniteurs sont arretees }
+Procedure MonProcessExit(Pid : LongInt);
+Var I : LongInt;
+Begin
+  If KbdMonOn And (KbdMonPid = Pid) Then MonStop(0);
+  If MouMonOn And (MouMonPid = Pid) Then MonStop(1);
+  For I := 0 To 2 Do
+    If PrnMonOn[I] And (PrnMonPid[I] = Pid) Then MonStop(I + 2);
+End;
 
 { ==================================================================== }
 { Partie 7 - Memoire : tas du noyau et memoire physique                }
@@ -2348,6 +2670,7 @@ Begin
     Begin
       Files[I].Used := True;
       Files[I].IsRam := False; Files[I].IsNul := False; Files[I].IsCon := False;
+      Files[I].IsPrn := False; Files[I].PrnIdx := 0;
       Files[I].RamIdx := -1; Files[I].Lba := 0; Files[I].Size := 0; Files[I].Pos := 0;
       Files[I].CanWrite := False; Files[I].Time := 0;
       Files[I].Owner := CurProc;
@@ -3031,6 +3354,9 @@ End;
 
 Function PeekConsoleInputA(H, P, N, PRead : LongInt) : LongInt;
 Begin
+  { relachements et changements d'etat (moniteurs, KBDCALLS) ecartes }
+  If KbdMode = 0 Then
+    While KeyAvail And ((KbdXt[KbdTail] And $60000) <> 0) Do KbdTail := (KbdTail + 1) And 63;
   If KeyAvail And (N > 0) Then
   Begin
     MakeKeyRecord(P, KbdBuf[KbdTail]);
@@ -3072,6 +3398,17 @@ Begin
   If (Nm = 'NUL') Or (Nm = 'NUL:') Then
   Begin
     Files[H].IsNul := True; Files[H].CanWrite := True; Files[H].Name := 'NUL';
+    CreateFileA := HFileBase + H;
+    Exit;
+  End;
+  If (Length(Nm) = 5) And (Nm[5] = ':') And (Copy(Nm, 1, 3) = 'LPT') Then Nm := Copy(Nm, 1, 4);
+  If (Nm = 'PRN') Or (Nm = 'PRN:') Or (Nm = 'LPT1') Or (Nm = 'LPT2') Or (Nm = 'LPT3') Then
+  Begin
+    { imprimante : port parallele }
+    Files[H].IsPrn := True; Files[H].CanWrite := True;
+    If (Nm = 'PRN') Or (Nm = 'PRN:') Then Files[H].PrnIdx := 0
+    Else Files[H].PrnIdx := Ord(Nm[4]) - Ord('1');
+    Files[H].Name := Nm;
     CreateFileA := HFileBase + H;
     Exit;
   End;
@@ -3236,7 +3573,7 @@ Begin
         ReadFile := 0;
       End;
     End
-    Else If Files[F].IsNul Then
+    Else If Files[F].IsNul Or Files[F].IsPrn Then
       Got := 0
     Else If Files[F].IsRam Then
     Begin
@@ -3300,6 +3637,18 @@ Begin
       End;
     End
     Else If Files[F].IsNul Then
+    Else If Files[F].IsPrn Then
+    Begin
+      Done := PrnWrite(Files[F].PrnIdx, Buf, N);
+      If Done < 0 Then
+      Begin
+        LastError := ErrNotReady;
+        WriteFile := 0;
+        N := 0;
+      End
+      Else
+        N := Done;
+    End
     Else If Not (Files[F].IsRam And Files[F].CanWrite) Then
     Begin
       LastError := ErrAccessDenied;
@@ -4675,6 +5024,7 @@ Begin
   Procs[Pid].ExitCode := Code;
   Procs[Pid].Running := False;
   KbdMode := 0;
+  MonProcessExit(Procs[Pid].Serial);
   IfsProcessExit(Pid);
   For I := 0 To MaxFiles - 1 Do
     If Files[I].Used And (Files[I].Owner = Pid) Then Files[I].Used := False;

@@ -779,6 +779,10 @@ Begin
     If Copy(U, 1, 3) = 'NUL' Then Name := 'NUL' Else Name := 'CON';
     If (U = 'CLOCK$') Or (Copy(U, 1, 3) = 'PRN') Or (Copy(U, 1, 3) = 'LPT') Or
        (Copy(U, 1, 3) = 'COM') Then Name := 'NUL';
+    { imprimante : port parallele du noyau }
+    If Copy(U, 1, 3) = 'PRN' Then Name := 'PRN';
+    If (Copy(U, 1, 3) = 'LPT') And (Length(U) >= 4) Then
+      If (U[4] >= '1') And (U[4] <= '3') Then Name := Copy(U, 1, 4);
     KH := KCreateFileA(Z(Name, 0), $C0000000, 3, 0, 3, $80, 0);
     If KH = -1 Then
     Begin
@@ -7067,136 +7071,71 @@ Begin
   DosBeep := NO_ERROR;
 End;
 
-{ --- Moniteurs de peripheriques (KBD$) ---
-  Paquet clavier : MONFLAGS (mot), KBDKEYINFO (10 octets), KBDDDFLAGS (mot) }
-Const
-  MaxMon = 4;
-
-Type
-  TMon = Record
-    Used    : Boolean;
-    Dev     : String[15];
-    InBuf   : LongInt;
-    OutBuf  : LongInt;
-    QCnt    : LongInt;
-    Queue   : Array[0..63] Of Byte;     { paquets ecrits par DosMonWrite }
-  End;
-
+{ --- Moniteurs de peripheriques ---
+  DosMonOpen, DosMonReg, DosMonRead, DosMonWrite et DosMonClose sont
+  servis par MONCALLS.DLL (chargee au premier appel) ; voir MONCALLS.PAS }
 Var
-  Mons : Array[0..MaxMon - 1] Of TMon;
+  MonMod  : LongInt;
+  MonFn   : Array[1..5] Of LongInt;      { ordinaux de MONCALLS.DLL }
+  MonName : Array[0..15] Of Byte;
+  MonFail : Array[0..31] Of Byte;
+
+{ Adresse de la fonction Ordinal de MONCALLS.DLL (0 : indisponible) }
+Function MonProc(Ordinal : LongInt) : LongInt;
+Var I, F, A : LongInt; S : String;
+Begin
+  If MonMod = 0 Then
+  Begin
+    S := 'MONCALLS';
+    For I := 1 To Length(S) Do MonName[I - 1] := Ord(S[I]);
+    MonName[Length(S)] := 0;
+    If DosLoadModule(LongInt(@MonFail), 32, LongInt(@MonName), LongInt(@MonMod)) <> NO_ERROR Then MonMod := 0;
+    For I := 1 To 5 Do MonFn[I] := 0;
+  End;
+  F := 0;
+  If MonMod <> 0 Then
+  Begin
+    If MonFn[Ordinal] = 0 Then
+    Begin
+      A := 0;
+      If DosQueryProcAddr(MonMod, Ordinal, 0, LongInt(@A)) = NO_ERROR Then MonFn[Ordinal] := A;
+    End;
+    F := MonFn[Ordinal];
+  End;
+  MonProc := F;
+End;
+
+Function MonCall(Ordinal, A1, A2, A3, A4, A5 : LongInt) : LongInt;
+Var F : LongInt;
+Begin
+  F := MonProc(Ordinal);
+  If F = 0 Then MonCall := ERROR_INVALID_FUNCTION
+  Else MonCall := CallPtr5(F, A1, A2, A3, A4, A5);
+End;
 
 Function DosMonOpen(PDev, PHMon : LongInt) : LongInt;
-Var I : LongInt; D : String;
 Begin
-  D := UpStr(GetStr(PDev));
-  If (D <> 'KBD$') And (D <> 'MOUSE$') And (D <> 'MOU$') And (D <> 'LPT1') And (D <> 'PRN') Then
-  Begin
-    DosMonOpen := ERROR_FILE_NOT_FOUND;
-    Exit;
-  End;
-  For I := 0 To MaxMon - 1 Do
-    If Not Mons[I].Used Then
-    Begin
-      Mons[I].Used := True;
-      Mons[I].Dev := D;
-      Mons[I].InBuf := 0;
-      Mons[I].OutBuf := 0;
-      Mons[I].QCnt := 0;
-      PokeL(PHMon, I + 1);
-      DosMonOpen := NO_ERROR;
-      Exit;
-    End;
-  DosMonOpen := ERROR_TOO_MANY_OPEN_FILES;
+  DosMonOpen := MonCall(4, PDev, PHMon, 0, 0, 0);
 End;
 
 Function DosMonClose(HMon : LongInt) : LongInt;
 Begin
-  If (HMon < 1) Or (HMon > MaxMon) Or Not Mons[HMon - 1].Used Then
-  Begin
-    DosMonClose := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  Mons[HMon - 1].Used := False;
-  DosMonClose := NO_ERROR;
+  DosMonClose := MonCall(3, HMon, 0, 0, 0, 0);
 End;
 
-{ Enregistrer les tampons (le premier mot de chaque tampon donne sa taille) }
 Function DosMonReg(HMon, PInBuf, POutBuf, PosFlag, Index : LongInt) : LongInt;
 Begin
-  If (HMon < 1) Or (HMon > MaxMon) Or Not Mons[HMon - 1].Used Then
-  Begin
-    DosMonReg := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  If (PeekW(PInBuf) < 128) Or (PeekW(POutBuf) < 128) Then
-  Begin
-    DosMonReg := 382;            { ERROR_MON_BUFFER_TOO_SMALL }
-    Exit;
-  End;
-  Mons[HMon - 1].InBuf := PInBuf;
-  Mons[HMon - 1].OutBuf := POutBuf;
-  DosMonReg := NO_ERROR;
+  DosMonReg := MonCall(5, HMon, PInBuf, POutBuf, PosFlag, Index);
 End;
 
-Function MonByBuf(B : LongInt; IsOut : Boolean) : LongInt;
-Var I : LongInt;
-Begin
-  MonByBuf := -1;
-  For I := 0 To MaxMon - 1 Do
-    If Mons[I].Used And (((Not IsOut) And (Mons[I].InBuf = B)) Or (IsOut And (Mons[I].OutBuf = B))) Then
-      MonByBuf := I;
-End;
-
-{ WaitFlag 0 : attendre un paquet ; 1 : rendre immediatement }
 Function DosMonRead(PInBuf, WaitFlag, PData, PcbData : LongInt) : LongInt;
-Var M, N : LongInt; InRec : Array[0..4] Of LongInt;
 Begin
-  M := MonByBuf(PInBuf, False);
-  If M < 0 Then
-  Begin
-    DosMonRead := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  PokeL(PcbData, 0);
-  DosMonRead := NO_ERROR;
-  { paquets reinjectes par DosMonWrite d'abord }
-  If Mons[M].QCnt > 0 Then
-  Begin
-    N := Mons[M].QCnt;
-    If N > 14 Then N := 14;
-    MoveB(LongInt(@Mons[M].Queue), PData, N);
-    MoveB(LongInt(@Mons[M].Queue) + N, LongInt(@Mons[M].Queue), Mons[M].QCnt - N);
-    Mons[M].QCnt := Mons[M].QCnt - N;
-    PokeL(PcbData, N);
-    Exit;
-  End;
-  If Mons[M].Dev <> 'KBD$' Then Exit;
-  N := 0;
-  KGetNumberOfConsoleInputEvents(KStdIn, LongInt(@N));
-  If (N = 0) And (WaitFlag <> 0) Then Exit;
-  KReadConsoleInputA(KStdIn, LongInt(@InRec), 1, LongInt(@N));
-  FillB(PData, 14, 0);
-  KeyInfoFrom(LongInt(@InRec), PData + 2);
-  PokeL(PcbData, 14);
+  DosMonRead := MonCall(2, PInBuf, WaitFlag, PData, PcbData, 0);
 End;
 
 Function DosMonWrite(POutBuf, PData, CbData : LongInt) : LongInt;
-Var M : LongInt;
 Begin
-  M := MonByBuf(POutBuf, True);
-  If M < 0 Then
-  Begin
-    DosMonWrite := ERROR_INVALID_HANDLE;
-    Exit;
-  End;
-  If Mons[M].QCnt + CbData > 64 Then
-  Begin
-    DosMonWrite := 384;          { ERROR_MON_DATA_TOO_LARGE }
-    Exit;
-  End;
-  MoveB(PData, LongInt(@Mons[M].Queue) + Mons[M].QCnt, CbData);
-  Mons[M].QCnt := Mons[M].QCnt + CbData;
-  DosMonWrite := NO_ERROR;
+  DosMonWrite := MonCall(1, POutBuf, PData, CbData, 0, 0);
 End;
 
 { --- Pilotes de peripheriques virtuels : aucune session DOS virtuelle --- }
