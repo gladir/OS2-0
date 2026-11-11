@@ -223,6 +223,7 @@ Var
     8086 -> 80386 ni d emulation INT/IN/OUT), base de l image PE }
   AsmNative  : Boolean;
   BcHashReady : Boolean;      { tables de hachage des labels a initialiser }
+  ImageBaseDir : LongInt;     { directive IMAGEBASE (0 = base par defaut) }
   PEImgBase  : LongInt;
   AsmBlockSeq: LongInt;
 
@@ -2285,6 +2286,27 @@ Var
 (* Appelee quand LexColNo pointe sur accolade et le suivant est dollar *)
 (* Gere: I/INCLUDE, DEFINE, UNDEF, IFDEF, IFNDEF, IFOPT, *)
 (* ELSE, ENDIF, et les commutations I+/I-/R+/R-/etc. *)
+{ Directive IMAGEBASE : $hex, 0xhex, hexh ou decimal }
+Function ParseImageBase(A : TString) : LongInt;
+Var V : LongInt; I, D : Integer; Hex : Boolean; C : Char;
+Begin
+  While (Length(A) > 0) And (A[1] = ' ') Do Delete(A, 1, 1);
+  Hex := False;
+  If (Length(A) > 0) And (A[1] = '$') Then Begin Hex := True; Delete(A, 1, 1) End
+  Else If (Length(A) > 1) And (A[1] = '0') And (UpCase(A[2]) = 'X') Then Begin Hex := True; Delete(A, 1, 2) End
+  Else If (Length(A) > 0) And (UpCase(A[Length(A)]) = 'H') Then Begin Hex := True; Delete(A, Length(A), 1) End;
+  V := 0;
+  For I := 1 To Length(A) Do
+  Begin
+    C := UpCase(A[I]);
+    If (C >= '0') And (C <= '9') Then D := Ord(C) - 48
+    Else If Hex And (C >= 'A') And (C <= 'F') Then D := Ord(C) - 55
+    Else Break;
+    If Hex Then V := V * 16 + D Else V := V * 10 + D;
+  End;
+  ParseImageBase := V;
+End;
+
 Procedure LexHandleDollarDirective;
 Var
   Dir  : TString;
@@ -2383,6 +2405,8 @@ Begin
   { Dispatcher les directives }
   If (Dir = 'M') And D16Selected Then
     D16MDirective(Arg)
+  Else If Dir = 'IMAGEBASE' Then
+    ImageBaseDir := ParseImageBase(Arg)
   Else If (Dir = 'I') Or (Dir = 'INCLUDE') Then
   Begin
     { Supprimer quotes eventuelles }
@@ -7797,6 +7821,7 @@ Var
   ExpNames    : Array[0..1023] Of String[63];   { nom exporte (casse d origine) }
   ExpProcs    : Array[0..1023] Of Integer;      { procedure Pascal }
   ExpProcNm   : Array[0..1023] Of String[63];   { nom Pascal (majuscules) }
+  ExpIndex    : Array[0..1023] Of LongInt;      { ordinal (Index n), 0 = automatique }
   { importations declarees par External 'DLL' }
   DllImpCnt   : Integer;
   DllImpApi   : Array[0..511] Of String[63];
@@ -44372,6 +44397,9 @@ Var
   { OS/2-0 noyau : section .edata (exportations DOSCALLS.DLL) }
   Krnl, HasExp: Boolean;
   ExpN: Integer;
+  { ordinaux : base, nombre d entrees de l EAT, ordinal de chaque exportation }
+  OrdBase, NFunc, OrdMax: LongInt;
+  ExpOrd: Array[0..1023] Of LongInt;
   ExpDll: TString;
   HdrSize, EdataRVA, EdataSize, EdataRawSize, EdataFileBase: LongInt;
   ExpOrder: Array[0..1023] Of Integer;
@@ -44521,8 +44549,28 @@ Begin
       ExpOrder[J + 1] := TmpI;
     End;
     EdataRVA := ImageSize;
+    { ordinaux : Index n de la clause exports, sinon a la suite }
+    OrdBase := 0; OrdMax := 0;
+    For I := 0 To ExpN - 1 Do
+      If IsLibrary And (ExpIndex[I] > 0) Then
+      Begin
+        If (OrdBase = 0) Or (ExpIndex[I] < OrdBase) Then OrdBase := ExpIndex[I];
+        If ExpIndex[I] > OrdMax Then OrdMax := ExpIndex[I];
+      End;
+    If OrdBase = 0 Then Begin OrdBase := 1; OrdMax := 0; End;
+    For I := 0 To ExpN - 1 Do ExpOrd[I] := 0;
+    For I := 0 To ExpN - 1 Do
+      If IsLibrary And (ExpIndex[I] > 0) Then ExpOrd[I] := ExpIndex[I];
+    For I := 0 To ExpN - 1 Do
+      If ExpOrd[ExpOrder[I]] = 0 Then
+      Begin
+        If OrdMax < OrdBase Then OrdMax := OrdBase - 1;
+        Inc(OrdMax);
+        ExpOrd[ExpOrder[I]] := OrdMax;
+      End;
+    NFunc := OrdMax - OrdBase + 1;
     EatOfs := 40;
-    NptOfs := EatOfs + ExpN * 4;
+    NptOfs := EatOfs + NFunc * 4;
     OrdOfs := NptOfs + ExpN * 4;
     ExpDllOfs := OrdOfs + ExpN * 2;
     CurOfs := ExpDllOfs + Length(ExpDll) + 1;
@@ -44847,21 +44895,27 @@ Begin
     PEWrD(0); PEWrD(0);                    { caracteristiques, date }
     PEWrW(0); PEWrW(0);                    { version }
     PEWrD(EdataRVA + ExpDllOfs);           { nom de la DLL }
-    PEWrD(1);                              { base des ordinaux }
-    PEWrD(ExpN);                           { nombre de fonctions }
+    PEWrD(OrdBase);                        { base des ordinaux }
+    PEWrD(NFunc);                          { nombre de fonctions }
     PEWrD(ExpN);                           { nombre de noms }
     PEWrD(EdataRVA + EatOfs);
     PEWrD(EdataRVA + NptOfs);
     PEWrD(EdataRVA + OrdOfs);
-    For I := 0 To ExpN - 1 Do
+    { table des adresses, indexee par (ordinal - base) ; 0 = ordinal libre }
+    For J := OrdBase To OrdMax Do
     Begin
-      If Krnl Then ThunkOfs := BcFindLabel('_TPX_' + ExpNameOf(ExpOrder[I]))
-      Else ThunkOfs := BcFindLabel('_TPE_' + ExpNameOf(ExpOrder[I]));
-      If ThunkOfs < 0 Then FatalError('exportation sans code : ' + ExpNameOf(ExpOrder[I]));
-      PEWrD(PE_TEXT_RVA + ThunkOfs);
+      ThunkOfs := -1;
+      For I := 0 To ExpN - 1 Do
+        If ExpOrd[I] = J Then
+        Begin
+          If Krnl Then ThunkOfs := BcFindLabel('_TPX_' + ExpNameOf(I))
+          Else ThunkOfs := BcFindLabel('_TPE_' + ExpNameOf(I));
+          If ThunkOfs < 0 Then FatalError('exportation sans code : ' + ExpNameOf(I));
+        End;
+      If ThunkOfs >= 0 Then PEWrD(PE_TEXT_RVA + ThunkOfs) Else PEWrD(0);
     End;
     For I := 0 To ExpN - 1 Do PEWrD(EdataRVA + ExpNameOfs[I]);
-    For I := 0 To ExpN - 1 Do PEWrW(I);
+    For I := 0 To ExpN - 1 Do PEWrW(ExpOrd[ExpOrder[I]] - OrdBase);
     PEWrStr(ExpDll);
     For I := 0 To ExpN - 1 Do PEWrStr(ExpNameOf(ExpOrder[I]));
     PEPadTo(EdataFileBase + EdataRawSize);
@@ -58095,12 +58149,24 @@ Begin
           ExpProcs[ExpCount] := -1;
           ExpProcNm[ExpCount] := StrUpperCase(Nm);    { resolu apres ParseProcDecls }
           ExpNames[ExpCount] := Nm;                    { nom exporte (casse d origine) }
-          { nom Name 'externe' }
-          If (J + 2 < TokenCount) And (StrUpperCase(TokenPool[J + 1].Val) = 'NAME') And
-             (TokenPool[J + 2].Kind = TK_STRING) Then
+          ExpIndex[ExpCount] := 0;
+          { suffixes Name 'externe' et Index n (ordinal), dans un ordre quelconque }
+          While J + 2 < TokenCount Do
           Begin
-            ExpNames[ExpCount] := TokenPool[J + 2].Val;
-            J := J + 2;
+            If (StrUpperCase(TokenPool[J + 1].Val) = 'NAME') And
+               (TokenPool[J + 2].Kind In [TK_STRING, TK_CHAR]) Then
+            Begin
+              If TokenPool[J + 2].Kind = TK_CHAR Then ExpNames[ExpCount] := Chr(TokenPool[J + 2].IntVal)
+              Else ExpNames[ExpCount] := TokenPool[J + 2].Val;
+              J := J + 2;
+            End
+            Else If (StrUpperCase(TokenPool[J + 1].Val) = 'INDEX') And
+                    (TokenPool[J + 2].Kind = TK_INTEGER) Then
+            Begin
+              ExpIndex[ExpCount] := TokenPool[J + 2].IntVal;
+              J := J + 2;
+            End
+            Else Break;
           End;
           If ExpCount < 1023 Then Inc(ExpCount);
         End;
@@ -58324,8 +58390,10 @@ Begin
     PEImgBase := OS2_KRNL_BASE;
     AsmNative := True;
   End;
-  { DLL OS/2-0 : liee dans la region des DLL du noyau (00C00000h) }
+  { DLL OS/2-0 : liee dans la region des DLL du noyau (00C00000h par
+    defaut, ou base fixee par la directive IMAGEBASE) }
   If IsLibrary Then PEImgBase := OS2_DLL_BASE;
+  If (ImageBaseDir <> 0) And (Opts.DestTarget <> DEST_OS2KRNL) Then PEImgBase := ImageBaseDir;
 
   { Initialiser les variables de l emetteur (TODO 07) }
   HasProgram := False;

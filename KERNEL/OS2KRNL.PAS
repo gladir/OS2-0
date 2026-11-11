@@ -192,6 +192,9 @@ Type
 Var
   { Console }
   CurRow, CurCol   : LongInt;
+  ConRows          : LongInt;       { lignes de la console (les lignes du bas
+                                      peuvent etre reservees, ex. FKA.DLL) }
+  ConRowsOwner     : LongInt;       { processus qui a reduit la console }
   TextAttr         : LongInt;
   SerialOk         : Boolean;
   SerialMute       : Boolean;       { pas de copie serie (edition de ligne) }
@@ -403,15 +406,15 @@ End;
 Procedure ScrollUp;
 Var I : LongInt;
 Begin
-  MoveMem(VideoBase + ScrCols * 2, VideoBase, ScrCols * (ScrRows - 1) * 2);
+  MoveMem(VideoBase + ScrCols * 2, VideoBase, ScrCols * (ConRows - 1) * 2);
   For I := 0 To ScrCols - 1 Do
-    MemW[0:VideoBase + ((ScrRows - 1) * ScrCols + I) * 2] := (TextAttr Shl 8) Or $20;
+    MemW[0:VideoBase + ((ConRows - 1) * ScrCols + I) * 2] := (TextAttr Shl 8) Or $20;
 End;
 
 Procedure ClearScreen;
 Var I : LongInt;
 Begin
-  For I := 0 To ScrCols * ScrRows - 1 Do
+  For I := 0 To ScrCols * ConRows - 1 Do
     MemW[0:VideoBase + I * 2] := (TextAttr Shl 8) Or $20;
   CurRow := 0; CurCol := 0;
   UpdateCursor;
@@ -440,10 +443,10 @@ Begin
     CurCol := 0;
     Inc(CurRow);
   End;
-  If CurRow >= ScrRows Then
+  If CurRow >= ConRows Then
   Begin
     ScrollUp;
-    CurRow := ScrRows - 1;
+    CurRow := ConRows - 1;
   End;
 End;
 
@@ -897,11 +900,11 @@ Var
     For J := 1 To Length(S) Do ConPutRaw(S[J]);
     For J := Length(S) + 1 To OldLen Do ConPutRaw(' ');
     { la saisie a pu faire defiler l'ecran }
-    While (StartRow > 0) And ((StartRow * ScrCols + StartCol + OldLen) > ScrRows * ScrCols - 1) Do
+    While (StartRow > 0) And ((StartRow * ScrCols + StartCol + OldLen) > ConRows * ScrCols - 1) Do
       Dec(StartRow);
     CurRow := StartRow + (StartCol + Pos) Div ScrCols;
     CurCol := (StartCol + Pos) Mod ScrCols;
-    If CurRow >= ScrRows Then CurRow := ScrRows - 1;
+    If CurRow >= ConRows Then CurRow := ConRows - 1;
     UpdateCursor;
     If Length(S) > OldLen Then OldLen := Length(S);
     SerialMute := False;
@@ -1913,24 +1916,43 @@ Begin
   CurCol := Coord And $FFFF;
   CurRow := (Coord Shr 16) And $FFFF;
   If CurCol >= ScrCols Then CurCol := ScrCols - 1;
-  If CurRow >= ScrRows Then CurRow := ScrRows - 1;
+  If CurRow >= ConRows Then CurRow := ConRows - 1;
   UpdateCursor;
   SetConsoleCursorPosition := 1;
 End;
 
 Function GetConsoleScreenBufferInfo(H, P : LongInt) : LongInt;
 Begin
-  MemW[0:P] := ScrCols;       MemW[0:P + 2] := ScrRows;
+  MemW[0:P] := ScrCols;       MemW[0:P + 2] := ConRows;
   MemW[0:P + 4] := CurCol;    MemW[0:P + 6] := CurRow;
   MemW[0:P + 8] := TextAttr;
   MemW[0:P + 10] := 0;        MemW[0:P + 12] := 0;
-  MemW[0:P + 14] := ScrCols - 1; MemW[0:P + 16] := ScrRows - 1;
-  MemW[0:P + 18] := ScrCols;  MemW[0:P + 20] := ScrRows;
+  MemW[0:P + 14] := ScrCols - 1; MemW[0:P + 16] := ConRows - 1;
+  MemW[0:P + 18] := ScrCols;  MemW[0:P + 20] := ConRows;
   GetConsoleScreenBufferInfo := 1;
 End;
 
+{ Hauteur de la zone de defilement de la console (80 colonnes, 1 a 25
+  lignes) : les lignes du bas restent libres pour l'application (zone des
+  touches de fonction de FKA.DLL). Retablie a la fin du processus. }
 Function SetConsoleScreenBufferSize(H, Size : LongInt) : LongInt;
+Var Rows : LongInt;
 Begin
+  SetConsoleScreenBufferSize := 0;
+  Rows := (Size Shr 16) And $FFFF;
+  If (Rows < 1) Or (Rows > ScrRows) Or ((Size And $FFFF) <> ScrCols) Then
+  Begin
+    LastError := ErrInvalidParam;
+    Exit;
+  End;
+  ConRows := Rows;
+  If Rows < ScrRows Then ConRowsOwner := CurProc Else ConRowsOwner := -2;
+  While CurRow >= ConRows Do
+  Begin
+    ScrollUp;
+    Dec(CurRow);
+  End;
+  UpdateCursor;
   SetConsoleScreenBufferSize := 1;
 End;
 
@@ -3005,6 +3027,7 @@ Type
     Base     : LongInt;
     Size     : LongInt;
     NExp, Funcs, Names, Ords : LongInt;
+    OrdBase, NFunc : LongInt;   { base des ordinaux, entrees de l'EAT }
   End;
 
 Var
@@ -3019,9 +3042,11 @@ Begin
   Base := Mods[M].Base;
   If Name = '' Then
   Begin
-    { par ordinal (base des ordinaux : 1) }
-    If (Ordinal >= 1) And (Ordinal <= Mods[M].NExp) Then
-      ModuleExport := Base + MemL[0:Mods[M].Funcs + (Ordinal - 1) * 4];
+    { par ordinal (base des ordinaux de la DLL, entree non nulle) }
+    I := Ordinal - Mods[M].OrdBase;
+    If (I >= 0) And (I < Mods[M].NFunc) Then
+      If MemL[0:Mods[M].Funcs + I * 4] <> 0 Then
+        ModuleExport := Base + MemL[0:Mods[M].Funcs + I * 4];
     Exit;
   End;
   U := UpStr(Name);
@@ -3191,9 +3216,13 @@ Begin
   Mods[M].Base := Base;
   Mods[M].Size := ImgSize;
   Mods[M].NExp := 0;
+  Mods[M].OrdBase := 1;
+  Mods[M].NFunc := 0;
   If ExpRva <> 0 Then
   Begin
     Mods[M].NExp := MemL[0:Base + ExpRva + 24];
+    Mods[M].OrdBase := MemL[0:Base + ExpRva + 16];
+    Mods[M].NFunc := MemL[0:Base + ExpRva + 20];
     Mods[M].Funcs := Base + MemL[0:Base + ExpRva + 28];
     Mods[M].Names := Base + MemL[0:Base + ExpRva + 32];
     Mods[M].Ords := Base + MemL[0:Base + ExpRva + 36];
@@ -3438,6 +3467,14 @@ Begin
   For I := 0 To MaxFinds - 1 Do
     If Finds[I].Used And (Finds[I].Owner = Pid) Then Finds[I].Used := False;
   KFreeOwner(Pid);
+  { console reduite par ce processus : rendre toutes les lignes }
+  If (ConRows < ScrRows) And (ConRowsOwner = Pid) Then
+  Begin
+    For I := ConRows * ScrCols To ScrRows * ScrCols - 1 Do
+      MemW[0:VideoBase + I * 2] := $0720;
+    ConRows := ScrRows;
+    ConRowsOwner := -2;
+  End;
   KFree(Procs[Pid].CmdBuf);
   KFree(Procs[Pid].PtAlloc);
   PhysNext := Procs[Pid].PhysBase;
@@ -3737,6 +3774,8 @@ Var
 
 BEGIN
   TextAttr := $07;
+  ConRows := ScrRows;
+  ConRowsOwner := -2;
   CurRow := Mem[0:BootInfo + $28];
   CurCol := 0;
   CurProc := -1;

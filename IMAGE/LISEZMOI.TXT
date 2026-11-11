@@ -3,10 +3,10 @@ IMAGE - CD-ROM amorcable de OS/2-0
 
 OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
-              CMD.EXE, TESTDOS.EXE et les commandes du depot compilees
-              avec OS2PC (-COS2).
+              FKA.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE et les
+              commandes du depot compilees avec OS2PC (-COS2).
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
-              DOSCALLS.DLL et CONFIG.SYS (copies faites par
+              DOSCALLS.DLL, FKA.DLL et CONFIG.SYS (copies faites par
               KERNEL\BUILD.sh).
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
@@ -25,6 +25,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC CMD.PAS                             -> CMD.EXE (et les commandes)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
+  OS2PC DLL\FKA.PAS                         -> FKA.DLL (touches de fonction)
+  OS2PC DLL\TESTFKA.PAS                     -> TESTFKA.EXE (essai de FKA.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -53,7 +55,8 @@ Carte memoire
   00100000h          OS2KRNL (image PE)
   fin de l'image..4 Mo tas du noyau
   00400000h-007FFFFFh fenetre du processus courant (pagination)
-  00C00000h-00FFFFFFh DLL (DOSCALLS.DLL a 00C00000h), partagees
+  00C00000h-00FFFFFFh DLL partagees (DOSCALLS.DLL a 00C00000h, FKA.DLL
+                     a 00D00000h : directive {$IMAGEBASE} d'OS2PC)
   01000000h et plus  memoire physique des processus (image + pile)
 
 CONFIG.SYS
@@ -84,7 +87,9 @@ Limites
   memoire superpose, perdu a l'arret.
 - Les programmes s'executent en anneau 0, un a la fois (le parent attend
   la fin de l'enfant, comme DosExecPgm synchrone).
-- Clavier americain (QWERTY), ecran texte 80 x 25.
+- Clavier americain (QWERTY), ecran texte 80 x 25 ; un programme peut
+  reserver les lignes du bas (SetConsoleScreenBufferSize, utilise par
+  FKA.DLL pour la zone des touches de fonction).
 - Une exception d'un programme affiche "Runtime error N" (filtre du
   runtime) ou l'ecran SYS3175/TRAP et rend la main a CMD ; les
   gestionnaires DosSetExceptionHandler sont appeles avant.
