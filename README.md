@@ -243,7 +243,25 @@ Le fichier <b>DLL/NLS.PAS</b> est la bibliothèque OS/2 <b>NLS.DLL</b> (langues 
 
 Le programme <b>DLL/TESTNLS.PAS</b> vérifie ces fonctions (31 vérifications).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque KBDCALLS.DLL</h3>
+
+Le fichier <b>DLL/KBDCALLS.PAS</b> est le sous-système clavier OS/2 <b>KBDCALLS.DLL</b> (lié à 00C80000h), avec ses 25 fonctions et leurs ordinaux d'origine (1 KbdSetCustXt ... 25 KbdSetHWId). Le noyau range chaque frappe (IRQ 1) avec l'état des touches de changement d'état et l'heure, et la met à disposition par KrnKbdRead et KrnKbdCtl ; KBDCALLS la traduit avec la table du clavier logique (codes étendus 00h ou E0h compatibles avec le BIOS et OS/2).
+
+<table>
+	<tr><th>Fonctions</th><th>Rôle</th></tr>
+	<tr><td>KbdCharIn, KbdPeek, KbdFlushBuffer</td><td>Lecture d'un caractère (KBDKEYINFO, avec ou sans attente), consultation sans retrait, vidage du tampon.</td></tr>
+	<tr><td>KbdStringIn</td><td>Lecture d'une chaîne : en mode ASCII avec édition (Retour arrière, Échap, gabarit F1 et F3) et écho, en mode binaire caractère par caractère.</td></tr>
+	<tr><td>KbdGetStatus, KbdSetStatus</td><td>Écho, mode ASCII ou binaire, caractère de fin (1 ou 2 octets), rapport des touches de changement d'état, verrouillages (avec les voyants).</td></tr>
+	<tr><td>KbdOpen, KbdClose, KbdGetFocus, KbdFreeFocus</td><td>Claviers logiques et attribution du clavier physique.</td></tr>
+	<tr><td>KbdGetCp, KbdSetCp, KbdSetCustXt, KbdXlate</td><td>Page de codes, table de traduction personnalisée, traduction d'un code de balayage.</td></tr>
+	<tr><td>KbdGetHWId, KbdSetHWId</td><td>Identification du clavier (AB41h, clavier étendu).</td></tr>
+	<tr><td>KbdRegister, KbdDeRegister</td><td>Remplacement de fonctions par un sous-système clavier chargé depuis une DLL.</td></tr>
+	<tr><td>KbdInit, KbdShellInit, KbdLoadInstance, KbdSwitchFgnd, KbdSetFgnd, KbdFree, KbdSynch</td><td>Initialisation de la session et de l'interpréteur, premier plan, libération des ressources d'un processus, accès synchronisé.</td></tr>
+</table>
+
+Le programme <b>DLL/TESTKBD.PAS</b> vérifie ces fonctions (97 vérifications ; la seconde partie lit des touches, envoyées sous QEMU par <code>sendkey</code>).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>

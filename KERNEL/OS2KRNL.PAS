@@ -231,6 +231,10 @@ Var
   { Clavier }
   KbdBuf           : Array[0..63] Of LongInt;   { (scan shl 8) or ascii }
   KbdHead, KbdTail : LongInt;
+  KbdXt, KbdTm     : Array[0..63] Of LongInt;   { etat et heure (ms) }
+  KbdState         : LongInt;       { etat des touches (fsState d'OS/2) }
+  KbdMode          : LongInt;       { 1 changements d'etat, 2 relachements }
+  KbdE1            : LongInt;
   KbdShift, KbdCtrl, KbdAlt, KbdCaps, KbdNum, KbdE0 : Boolean;
   History          : Array[0..15] Of String[127];
   HistCount        : LongInt;
@@ -786,17 +790,63 @@ Const
 Var
   KeyLowV, KeyHighV : String;   { copies des tables (indexation fiable) }
 
-Procedure KbdPush(V : LongInt);
+{ Etat des touches au format fsState d'OS/2 (KBDCALLS.DLL) :
+  0001h Maj droite, 0002h Maj gauche, 0004h Ctrl, 0008h Alt,
+  0010h/0020h/0040h/0080h Arret defil/Verr num/Verr maj/Inser actifs,
+  0100h Ctrl gauche, 0200h Alt gauche, 0400h Ctrl droite, 0800h Alt
+  droite, 1000h/2000h/4000h Arret defil/Verr num/Verr maj enfoncees,
+  8000h Syst. }
+Procedure KbdSyncFlags;
+Begin
+  KbdShift := (KbdState And $0003) <> 0;
+  KbdCtrl := (KbdState And $0004) <> 0;
+  KbdAlt := (KbdState And $0008) <> 0;
+  KbdNum := (KbdState And $0020) <> 0;
+  KbdCaps := (KbdState And $0040) <> 0;
+End;
+
+{ Ranger une touche ; Xt : etat des touches (bits 0 a 15), 10000h
+  prefixe E0h, 20000h touche relachee, 40000h changement d'etat seul }
+Procedure KbdPushX(V, Xt : LongInt);
 Var N : LongInt;
 Begin
   N := (KbdHead + 1) And 63;
   If N = KbdTail Then Exit;      { tampon plein }
   KbdBuf[KbdHead] := V;
+  KbdXt[KbdHead] := Xt;
+  KbdTm[KbdHead] := Ticks * 10;
   KbdHead := N;
 End;
 
+Procedure KbdPush(V : LongInt);
+Begin
+  KbdPushX(V, KbdState);
+End;
+
+Procedure KbdSetBit(B : LongInt; On : Boolean);
+Begin
+  If On Then KbdState := KbdState Or B
+  Else KbdState := KbdState And Not B;
+End;
+
+{ Voyants du clavier d'apres les verrouillages }
+Procedure KbdLeds;
+Var N, L : LongInt;
+Begin
+  L := 0;
+  If (KbdState And $10) <> 0 Then L := L Or 1;
+  If (KbdState And $20) <> 0 Then L := L Or 2;
+  If (KbdState And $40) <> 0 Then L := L Or 4;
+  N := 0;
+  While ((Port[$64] And 2) <> 0) And (N < 100000) Do Inc(N);
+  Port[$60] := $ED;
+  N := 0;
+  While ((Port[$64] And 2) <> 0) And (N < 100000) Do Inc(N);
+  Port[$60] := L;
+End;
+
 Procedure IrqKeyboard;
-Var Sc, Ch, Up : LongInt;
+Var Sc, Ch, Up, Old, Ext, B : LongInt; Toggle : Boolean;
 Begin
   Sc := Port[$60];
   If Sc = $E0 Then
@@ -805,64 +855,132 @@ Begin
     Port[$20] := $20;
     Exit;
   End;
+  If Sc = $E1 Then
+  Begin
+    KbdE1 := 2;                  { Pause : E1 1D 45 E1 9D C5 }
+    Port[$20] := $20;
+    Exit;
+  End;
+  If (Sc = $FA) Or (Sc = $FE) Or (KbdE1 > 0) Then
+  Begin
+    { accuse de reception (voyants) ou suite de Pause }
+    If KbdE1 > 0 Then
+    Begin
+      Dec(KbdE1);
+      If (KbdE1 = 0) And (Sc = $45) Then KbdPushX($4500, KbdState Or $10000);
+    End;
+    KbdE0 := False;
+    Port[$20] := $20;
+    Exit;
+  End;
   Up := Sc And $80;
   Sc := Sc And $7F;
-  Case Sc Of
-    $2A, $36 : KbdShift := Up = 0;
-    $1D      : KbdCtrl := Up = 0;
-    $38      : KbdAlt := Up = 0;
+  Ext := 0;
+  If KbdE0 Then Ext := $10000;
+  Old := KbdState;
+  Toggle := False;
+  B := 0;
+  If KbdE0 And ((Sc = $2A) Or (Sc = $36)) Then
+    Sc := 0                      { fausses touches Maj (Impr. ecran...) }
   Else
+    Case Sc Of
+      $2A : KbdSetBit($0002, Up = 0);
+      $36 : KbdSetBit($0001, Up = 0);
+      $1D : Begin
+              If KbdE0 Then KbdSetBit($0400, Up = 0) Else KbdSetBit($0100, Up = 0);
+              KbdSetBit($0004, (KbdState And $0500) <> 0);
+            End;
+      $38 : Begin
+              If KbdE0 Then KbdSetBit($0800, Up = 0) Else KbdSetBit($0200, Up = 0);
+              KbdSetBit($0008, (KbdState And $0A00) <> 0);
+            End;
+      $3A : B := $40;
+      $45 : B := $20;
+      $46 : If Not KbdE0 Then B := $10;
+      $54 : KbdSetBit($8000, Up = 0);
+    End;
+  If B <> 0 Then
+  Begin
+    { touche de verrouillage : bascule a l'enfoncement (sans la
+      repetition automatique) }
     If Up = 0 Then
     Begin
-      If Sc = $3A Then KbdCaps := Not KbdCaps
-      Else If Sc = $45 Then KbdNum := Not KbdNum
+      If (KbdState And (B Shl 8)) = 0 Then
+      Begin
+        KbdState := KbdState Xor B;
+        Toggle := True;
+      End;
+      KbdState := KbdState Or (B Shl 8);
+    End
+    Else
+      KbdState := KbdState And Not (B Shl 8);
+  End;
+  KbdSyncFlags;
+  If (Sc = 0) Or (KbdState <> Old) Or (Sc = $54) Then
+  Begin
+    { touche d'etat : signalee seulement en mode de rapport }
+    If (Sc <> 0) And (KbdState <> Old) And ((KbdMode And 1) <> 0) Then
+    Begin
+      If Up <> 0 Then KbdPushX(Sc Shl 8, KbdState Or Ext Or $60000)
+      Else KbdPushX(Sc Shl 8, KbdState Or Ext Or $40000);
+    End;
+    If Toggle Then KbdLeds;
+  End
+  Else If Up <> 0 Then
+  Begin
+    If (KbdMode And 2) <> 0 Then KbdPushX(Sc Shl 8, KbdState Or Ext Or $20000);
+  End
+  Else
+  Begin
+    { Inser bascule l'etat d'insertion }
+    If (Sc = $52) And (KbdE0 Or Not KbdNum Or KbdShift) Then KbdState := KbdState Xor $0080;
+    Ch := 0;
+    If KbdE0 Then
+    Begin
+      { touches etendues : fleches, Inser, Suppr, Debut, Fin... }
+      If Sc = $1C Then Ch := 13
+      Else If Sc = $35 Then Ch := Ord('/');
+    End
+    Else If Sc < 58 Then
+    Begin
+      If KbdShift Then
+      Begin
+        Ch := Ord(KeyHighV[Sc + 1]);
+        If Ch = Ord('x') Then Ch := 0;
+      End
       Else
       Begin
-        Ch := 0;
-        If KbdE0 Then
-        Begin
-          { touches etendues : fleches, Inser, Suppr, Debut, Fin... }
-          If Sc = $1C Then Ch := 13
-          Else If Sc = $35 Then Ch := Ord('/');
-        End
-        Else If Sc < 58 Then
-        Begin
-          If KbdShift Then
-          Begin
-            Ch := Ord(KeyHighV[Sc + 1]);
-            If Ch = Ord('x') Then Ch := 0;
-          End
-          Else
-          Begin
-            Ch := Ord(KeyLowV[Sc + 1]);
-            If Ch = Ord('X') Then Ch := 0;
-          End;
-          Case Sc Of
-            $01 : Ch := 27;
-            $0E : Ch := 8;
-            $0F : Ch := 9;
-            $1C : Ch := 13;
-          End;
-          If KbdCaps And (Chr(Ch) In ['a'..'z']) Then Ch := Ch - 32
-          Else If KbdCaps And (Chr(Ch) In ['A'..'Z']) Then Ch := Ch + 32;
-          If KbdCtrl And (Chr(Ch) In ['a'..'z']) Then Ch := Ch - 96
-          Else If KbdCtrl And (Chr(Ch) In ['A'..'Z']) Then Ch := Ch - 64;
-          If KbdAlt Then Ch := 0;
-        End
-        Else If (Sc >= $47) And (Sc <= $53) And KbdNum And Not KbdShift Then
-        Begin
-          { pave numerique }
-          Case Sc Of
-            $47 : Ch := Ord('7'); $48 : Ch := Ord('8'); $49 : Ch := Ord('9');
-            $4A : Ch := Ord('-'); $4B : Ch := Ord('4'); $4C : Ch := Ord('5');
-            $4D : Ch := Ord('6'); $4E : Ch := Ord('+'); $4F : Ch := Ord('1');
-            $50 : Ch := Ord('2'); $51 : Ch := Ord('3'); $52 : Ch := Ord('0');
-            $53 : Ch := Ord('.');
-          End;
-        End;
-        KbdPush((Sc Shl 8) Or Ch);
+        Ch := Ord(KeyLowV[Sc + 1]);
+        If Ch = Ord('X') Then Ch := 0;
       End;
+      Case Sc Of
+        $01 : Ch := 27;
+        $0E : Ch := 8;
+        $0F : Ch := 9;
+        $1C : Ch := 13;
+      End;
+      If KbdCaps And (Chr(Ch) In ['a'..'z']) Then Ch := Ch - 32
+      Else If KbdCaps And (Chr(Ch) In ['A'..'Z']) Then Ch := Ch + 32;
+      If KbdCtrl And (Chr(Ch) In ['a'..'z']) Then Ch := Ch - 96
+      Else If KbdCtrl And (Chr(Ch) In ['A'..'Z']) Then Ch := Ch - 64;
+      If KbdAlt Then Ch := 0;
+    End
+    Else If (Sc >= $47) And (Sc <= $53) And KbdNum And Not KbdShift Then
+    Begin
+      { pave numerique }
+      Case Sc Of
+        $47 : Ch := Ord('7'); $48 : Ch := Ord('8'); $49 : Ch := Ord('9');
+        $4A : Ch := Ord('-'); $4B : Ch := Ord('4'); $4C : Ch := Ord('5');
+        $4D : Ch := Ord('6'); $4E : Ch := Ord('+'); $4F : Ch := Ord('1');
+        $50 : Ch := Ord('2'); $51 : Ch := Ord('3'); $52 : Ch := Ord('0');
+        $53 : Ch := Ord('.');
+      End;
+    End
+    Else If (Sc = $4A) Or (Sc = $4E) Then
+    Begin
+      If Sc = $4A Then Ch := Ord('-') Else Ch := Ord('+');
     End;
+    KbdPushX((Sc Shl 8) Or Ch, KbdState Or Ext);
   End;
   KbdE0 := False;
   Port[$20] := $20;
@@ -876,6 +994,8 @@ Begin
   KeyLowV := KeyLow;
   KeyHighV := KeyHigh;
   KbdHead := 0; KbdTail := 0;
+  KbdState := 0; KbdMode := 0; KbdE1 := 0;
+  KbdSyncFlags;
   N := 0;
   While ((Port[$64] And 1) <> 0) And (N < 64) Do
   Begin
@@ -891,17 +1011,20 @@ End;
 
 { Lire une touche : (scancode shl 8) or ascii }
 Function GetKey : LongInt;
-Var V : LongInt;
+Var V, X : LongInt;
 Begin
-  While KbdHead = KbdTail Do Idle;
-  asm
-    cli
-  end;
-  V := KbdBuf[KbdTail];
-  KbdTail := (KbdTail + 1) And 63;
-  asm
-    sti
-  end;
+  Repeat
+    While KbdHead = KbdTail Do Idle;
+    asm
+      cli
+    end;
+    V := KbdBuf[KbdTail];
+    X := KbdXt[KbdTail];
+    KbdTail := (KbdTail + 1) And 63;
+    asm
+      sti
+    end;
+  Until (X And $60000) = 0;     { relachements et changements d'etat ignores }
   GetKey := V;
 End;
 
@@ -1155,6 +1278,52 @@ Begin
   MemL[0:P + 12] := 40;
   If MouOk Then KrnMouInfo := 1 Else KrnMouInfo := 0;
 End;
+
+{ KrnKbdRead(P, Flags) : touche suivante du clavier (KBDCALLS.DLL).
+  P^ : (scan shl 8) or ascii, etat et indicateurs (voir KbdPushX), heure
+  en ms. Flags : 1 lire sans retirer, 2 attendre une touche. Rend 1 si
+  une touche est rendue, 0 si le tampon est vide. }
+Function KrnKbdRead(P, Flags : LongInt) : LongInt;
+Begin
+  KrnKbdRead := 0;
+  If (Flags And 2) <> 0 Then
+    While KbdHead = KbdTail Do Idle;
+  If KbdHead <> KbdTail Then
+  Begin
+    MemL[0:P] := KbdBuf[KbdTail];
+    MemL[0:P + 4] := KbdXt[KbdTail];
+    MemL[0:P + 8] := KbdTm[KbdTail];
+    If (Flags And 1) = 0 Then KbdTail := (KbdTail + 1) And 63;
+    KrnKbdRead := 1;
+  End;
+End;
+
+{ KrnKbdCtl(Op, V) : 0 etat des touches ; 1 changer les verrouillages
+  (bits 10h a 80h de V, voyants mis a jour) ; 2 mode (1 changements
+  d'etat, 2 relachements ; rend l'ancien) ; 3 vider le tampon ;
+  4 nombre de touches en attente }
+Function KrnKbdCtl(Op, V : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := 0;
+  Case Op Of
+    0 : R := KbdState;
+    1 : Begin
+          KbdState := (KbdState And Not $F0) Or (V And $F0);
+          KbdSyncFlags;
+          KbdLeds;
+          R := KbdState;
+        End;
+    2 : Begin
+          R := KbdMode;
+          KbdMode := V And 3;
+        End;
+    3 : KbdTail := KbdHead;
+    4 : R := (KbdHead - KbdTail + 64) And 63;
+  End;
+  KrnKbdCtl := R;
+End;
+
 
 { ==================================================================== }
 { Partie 7 - Memoire : tas du noyau et memoire physique                }
@@ -4505,6 +4674,7 @@ Begin
   If Pid < 0 Then Exit;
   Procs[Pid].ExitCode := Code;
   Procs[Pid].Running := False;
+  KbdMode := 0;
   IfsProcessExit(Pid);
   For I := 0 To MaxFiles - 1 Do
     If Files[I].Used And (Files[I].Owner = Pid) Then Files[I].Used := False;
