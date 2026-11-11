@@ -593,6 +593,16 @@ Begin
           Keep := True;
         End;
       End
+      Else If ((X And $20000) = 0) And ((X And $80000) <> 0) Then
+      Begin
+        { touche rendue par les moniteurs de KBD$ (MONCALLS.DLL) : deja
+          traduite, fbStatus dans les bits 24 a 31 }
+        KChar := KRaw[0] And $FF;
+        KScan := (KRaw[0] Shr 8) And $FF;
+        KStatus := (X Shr 24) And $FF;
+        If (KStatus And (ST_FINAL Or ST_INTERIM)) = 0 Then KStatus := KStatus Or ST_FINAL;
+        Keep := True;
+      End
       Else If (X And $20000) = 0 Then
         Keep := Translate(HXt[H], (KRaw[0] Shr 8) And $7F, (X And $10000) <> 0, KState);
       If Keep Then

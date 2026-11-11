@@ -23,6 +23,9 @@ Var
  TmpLanguage:String;
  Pipe,PipeToCommand:Boolean;
  PipeFile:Text;
+ RedirOn:Boolean;      { sortie standard redirigee (>, >> ou |) }
+ RedirLevel:Byte;      { niveau de traitement par lots de la redirection }
+ RedirFile:Text;
  InCmd:Byte;
  Option:(optNone,optCommand);
  Echo:Boolean;
@@ -175,9 +178,79 @@ Function GetErrorMessage(Code:Word):String;Begin
  End;
 End;
 
+{$IFDEF OS2PC}
+Function SetStdHandle(N,H:LongInt):LongInt; External 'DOSCALLS';
+{$ENDIF}
+
+Function TrimR(S:String):String;
+Begin
+ While(Length(S)>0)and(S[Length(S)]in[' ',#9])do S:=Copy(S,1,Length(S)-1);
+ TrimR:=S;
+End;
+
+ { Rediriger la sortie standard vers le fichier ou le peripherique Name
+   (Add : ajout a la fin, >>). Sous OS/2-0, le noyau redirige la sortie
+   standard du processus (SetStdHandle) : les commandes internes et les
+   programmes lances y ecrivent ; ailleurs, Output est reassigne. }
+Procedure StartRedir(Name:String;Add:Boolean);
+Var
+ Err:Integer;
+ {$IFDEF OS2PC}
+ PL:^LongInt;
+ R:LongInt;
+ {$ENDIF}
+Begin
+ If(RedirOn)or(Name='')Then Exit;
+ Assign(RedirFile,Name);
+ {$I-}
+ If(Add)Then Begin
+  Append(RedirFile);
+  If IoResult<>0 Then Rewrite(RedirFile);
+ End
+  Else
+ Rewrite(RedirFile);
+ Err:=IoResult;
+ {$I+}
+ If Err<>0Then Begin
+  WriteLn('Redirection impossible vers ',Name,' : ',GetErrorMessage(Err));
+  Exit;
+ End;
+ {$IFDEF OS2PC}
+  PL:=@RedirFile;
+  R:=SetStdHandle(-11,PL^);
+ {$ELSE}
+  Close(RedirFile);
+  Assign(Output,Name);
+  Append(Output);
+ {$ENDIF}
+ RedirOn:=True;
+ RedirLevel:=InCmd;
+End;
+
+ { Retour de la sortie standard a la console }
+Procedure StopRedir;
+{$IFDEF OS2PC}
+Var
+ R:LongInt;
+{$ENDIF}
+Begin
+ If Not(RedirOn)Then Exit;
+ {$IFDEF OS2PC}
+  R:=SetStdHandle(-11,0);
+  Close(RedirFile);
+ {$ELSE}
+  Close(Output);
+  AssignCrt(Output);
+  Rewrite(Output);
+ {$ENDIF}
+ RedirOn:=False;
+End;
+
 Procedure ExtractCommand;
 Var
  I,J:Byte;
+ Target:String;
+ Add:Boolean;
 Begin
  For I:=1 to Length(CmdStr)do Begin
   If Not(CmdStr[I]in['A'..'Z','a'..'z','_','-','0'..'9'])Then Begin
@@ -186,31 +259,26 @@ Begin
    For J:=1 to Length(ParamList)do Begin
     Case ParamList[J]of
      '|':Begin
-      If Not(Pipe)Then Begin
-       {$I-}Assign(PipeFile,'COMMAND.TMP');
-       Rewrite(PipeFile);{$I-}
-       If IoResult<>0 Then Begin
-        WriteLn('Tuyau invalide !');
-       End;
-       Pipe:=True;
-      End;
+       { la sortie de la commande va dans COMMAND.TMP, lu ensuite par MORE }
+      StartRedir('COMMAND.TMP',False);
       PipeToCommand:=True;
       PipeCommand:=TrimL(Copy(ParamList,J+1,255));
       If J=1 Then ParamList:=''
-             Else ParamList:=Copy(ParamList,1,J-1);
+             Else ParamList:=TrimR(Copy(ParamList,1,J-1));
+      Break;
      End;
      '>':Begin
-      If Not(Pipe)Then Begin
-       {$I-}Assign(PipeFile,TrimL(Copy(ParamList,J+1,255)));
-       Rewrite(PipeFile);{$I-}
-       If IoResult<>0 Then Begin
-        WriteLn('Tuyau invalide !');
-       End
-        Else
-       Pipe:=True;
+       { > fichier : remplacer ; >> fichier : ajouter a la fin }
+      Target:=Copy(ParamList,J+1,255);
+      Add:=False;
+      If(Length(Target)>0)and(Target[1]='>')Then Begin
+       Add:=True;
+       Target:=Copy(Target,2,255);
       End;
+      StartRedir(TrimR(TrimL(Target)),Add);
       If J=1 Then ParamList:=''
-             Else ParamList:=Copy(ParamList,1,J-1);
+             Else ParamList:=TrimR(Copy(ParamList,1,J-1));
+      Break;
      End;
     End;
    End;
@@ -1518,6 +1586,8 @@ Var
 Begin
  Exec(CurrCommand,ParamList);
  Err:=DosError;
+  { les messages qui suivent vont a la console }
+ If(RedirOn)and(RedirLevel=InCmd)Then StopRedir;
  Case Err of
   0:;
   2:WriteLn('Commande ou nom de fichier non reconnu');
@@ -1535,7 +1605,9 @@ Var
  OY:Byte;
  Error:Word;
  PipeS:String;
+ WasRedir:Boolean;
 Begin
+ WasRedir:=RedirOn;
   { Change d'unit, de disque A:, B:, C:, D:,... }
  If(Length(CmdStr)=2)and(CmdStr[2]=':')and(CmdStr[1]in['A'..'Z','a'..'z'])Then Begin
   {$I-}GetDir(Ord(UpCase(CmdStr[1]))-64,PipeS);
@@ -1551,7 +1623,12 @@ Restart:
  CommandFound:=False;
  For J:=Low(CommandList) to High(CommandList) do Begin
   If(PipeToCommand)and(StrToUpper(CurrCommand)='MORE')Then Begin
-   Reset(PipeFile);
+   Assign(PipeFile,'COMMAND.TMP');
+   {$I-}Reset(PipeFile);{$I+}
+   If IoResult<>0Then Begin
+    PipeToCommand:=False;
+    Exit;
+   End;
    OY:=1;
    While Not EOF(PipeFile)do Begin
     ReadLn(PipeFile,PipeS);
@@ -1570,6 +1647,7 @@ Restart:
    Pipe:=False;
    PipeToCommand:=False;
    CommandFound:=True;
+   WriteLn;
    Exit;
   End
    Else
@@ -1616,27 +1694,28 @@ Restart:
    End;
    If J<=High(CommandList)Then Begin
     CommandFound:=True;
-    WriteLn;
     Break;
    End;
   End;
  End;
+  { un programme externe ecrit lui aussi dans la redirection (heritee) }
+ If Not(CommandFound)and(PipeToCommand)Then Begin
+  UnknownCommand;
+  CommandFound:=True;
+ End;
  If(PipeToCommand)Then Begin
-  If Not(CommandFound)Then Begin
-   WriteLn('Commande non support‚ dans un contexte du tuyau');
-   Exit;
-  End;
+  If Not(WasRedir)Then StopRedir;
   CmdStr:=PipeCommand;
   PipeCommand:='';
-  Goto Restart;
- End;
- If(Pipe)Then Begin
-  If Not(CommandFound)Then Begin
-   WriteLn('Redirection non support‚ dans un contexte du tuyau');
+  If CmdStr=''Then Begin
+   PipeToCommand:=False;
    Exit;
   End;
-  Pipe:=False;
-  Close(PipeFile);
+  Goto Restart;
+ End;
+ If(CommandFound)Then Begin
+  If Not(WasRedir)Then StopRedir;
+  WriteLn;
  End;
  If Not(CommandFound)Then Begin
   If CmdStr='?'Then Begin
@@ -1669,6 +1748,7 @@ Restart:
   End
    Else
   UnknownCommand;
+  If Not(WasRedir)Then StopRedir;
  End;
 End;
 
@@ -1687,7 +1767,7 @@ BEGIN
   If StrToUpper(Copy(TmpLanguage,1,2))='IT'Then Language:=_Italian Else
   If StrToUpper(Copy(TmpLanguage,1,2))='SP'Then Language:=_Spain;
  End;
- Echo:=True;Pipe:=False;PipeToCommand:=False;
+ Echo:=True;Pipe:=False;PipeToCommand:=False;RedirOn:=False;
  InCmd:=0;
  If(ParamStr(1)='/?')or(ParamStr(1)='--help')or(ParamStr(1)='-h')Then Begin
   Case Language of

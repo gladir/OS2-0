@@ -261,7 +261,37 @@ Le fichier <b>DLL/KBDCALLS.PAS</b> est le sous-système clavier OS/2 <b>KBDCALLS
 
 Le programme <b>DLL/TESTKBD.PAS</b> vérifie ces fonctions (97 vérifications ; la seconde partie lit des touches, envoyées sous QEMU par <code>sendkey</code>).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque MONCALLS.DLL</h3>
+
+Le fichier <b>DLL/MONCALLS.PAS</b> est la bibliothèque OS/2 <b>MONCALLS.DLL</b> des moniteurs de périphériques (liée à 00CB0000h), avec ses 5 fonctions et leurs ordinaux d'origine. Un moniteur s'insère dans le flux de données d'un périphérique de caractères : le noyau détourne vers la chaîne des moniteurs les frappes du clavier (KBD$, avant KBDCALLS et la console), les paquets de la souris (MOUSE$, avant MOUCALLS) et les données écrites sur l'imprimante (LPT1 à LPT3 et PRN, avant le port parallèle) ; chaque moniteur peut modifier, supprimer ou ajouter des paquets. Les fonctions DosMon* de DOSCALLS.DLL sont transmises à MONCALLS.DLL.
+
+<table>
+	<tr><th>Fonction</th><th>Ordinal</th><th>Description</th></tr>
+	<tr><td>DosMonWrite</td><td>1</td><td>Rendre un paquet au flux par le tampon de sortie : il passe au moniteur suivant, ou au périphérique après le dernier.</td></tr>
+	<tr><td>DosMonRead</td><td>2</td><td>Lire le paquet suivant de la chaîne dans le tampon d'entrée (avec ou sans attente).</td></tr>
+	<tr><td>DosMonClose</td><td>3</td><td>Terminer la surveillance (les paquets en attente continuent vers le périphérique).</td></tr>
+	<tr><td>DosMonOpen</td><td>4</td><td>Ouvrir KBD$, MOUSE$, LPT1 à LPT3 ou PRN pour le surveiller.</td></tr>
+	<tr><td>DosMonReg</td><td>5</td><td>Enregistrer les tampons d'entrée et de sortie (MONIN, MONOUT) au début, à la fin ou à la place par défaut de la chaîne.</td></tr>
+</table>
+
+Le programme <b>DLL/TESTMON.PAS</b> vérifie ces fonctions (52 vérifications : chaîne de trois moniteurs de l'imprimante, touches modifiées, supprimées ou ajoutées, déplacement de la souris doublé).
+
+<h3>Bibliothèque MSG.DLL</h3>
+
+Le fichier <b>DLL/MSG.PAS</b> est la bibliothèque OS/2 <b>MSG.DLL</b> des messages (liée à 00D80000h), avec ses 9 points d'entrée et leurs ordinaux d'origine. Elle lit les fichiers de messages d'OS/2 au format MKMSGF (index de mots ou de doubles mots, types E, W, I, H, P), cherche le fichier dans le chemin indiqué, le répertoire courant, DPATH, C:\ et C:\OS2\SYSTEM, garde les fichiers ouverts jusqu'à DosCloseMessageFile et consulte d'abord un segment de messages en mémoire s'il est fourni. Les principaux messages système (OSO001.MSG) y sont intégrés. Les fonctions de messages de DOSCALLS.DLL (DosGetMessage, DosInsertMessage, DosPutMessage, DosQueryMessageCP...) lui sont transmises.
+
+<table>
+	<tr><th>Fonction</th><th>Ordinal</th><th>Description</th></tr>
+	<tr><td>Dos16PutMessage, DosPutMessage (Dos32PutMessage)</td><td>1, 5</td><td>Écrire un message dans un fichier ou à l'écran (lignes coupées entre les mots à 80 colonnes).</td></tr>
+	<tr><td>Dos16TrueGetMessage, DosTrueGetMessage (Dos32TrueGetMessage)</td><td>2, 6</td><td>Lire un message (préfixe « SYS0002: » des erreurs et avertissements, %0 sans fin de ligne) et y insérer les variables %1 à %9 ; message d'erreur SYS0317, SYS0318 ou SYS0319 si le message ou le fichier est introuvable.</td></tr>
+	<tr><td>DosInsMessage, DosInsertMessage (Dos32InsertMessage)</td><td>3, 4</td><td>Insérer les variables %1 à %9 dans un message en mémoire.</td></tr>
+	<tr><td>Dos16IQueryMessageCP, DosIQueryMessageCP (Dos32IQueryMessageCP)</td><td>7, 8</td><td>Pages de codes et langue d'un fichier de messages.</td></tr>
+	<tr><td>DosCloseMessageFile (Dos32CloseMessageFile)</td><td>9</td><td>Fermer un fichier de messages gardé ouvert.</td></tr>
+</table>
+
+Les points d'entrée d'OS/2 1.x (Dos16*, DosInsMessage) rendent les longueurs dans un mot, ceux d'OS/2 2.x dans un double mot. Le programme <b>DLL/TESTMSG.PAS</b> vérifie ces fonctions (45 vérifications, avec des fichiers de messages qu'il fabrique sur le disque virtuel HPFS).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
