@@ -392,7 +392,27 @@ Le fichier <b>DLL/HELPMGR.PAS</b> est la bibliothèque OS/2 <b>HELPMGR.DLL</b> (
 
 Deux points d'entrée internes à OS/2-0 donnent ce qu'IPF ferait à la touche F1 : HMQUERYPANELID (ordinal 100 : panneau d'aide d'une fenêtre selon la table d'aide) et HMQUERYINSTANCEINFO (ordinal 101). Le programme <b>DLL/TESTHLP.PAS</b> vérifie ces fonctions (29 vérifications ; OS2PC ne produisant pas de ressources, le module de WinLoadHelpTable est une image PE construite en mémoire).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque LIBUNI.DLL</h3>
+
+Le fichier <b>DLL/LIBUNI.PAS</b> est la bibliothèque OS/2 <b>LIBUNI.DLL</b> (liée à 00900000h), les services Unicode et de locales (ULS, Universal Language Support), avec ses 78 points d'entrée et leurs ordinaux d'origine. Les chaînes sont en UniChar (UCS-2) ; les tables des caractères (attributs, majuscules et minuscules, valeurs numériques, classes bidirectionnelles, décompositions canoniques) couvrent le plan multilingue de base et sont générées à partir de la base Unicode 15.1. Douze locales sont fournies : C, POSIX, UNIVERSAL, en_US, en_GB, fr_FR, fr_CA, de_DE, es_ES, it_IT, nl_NL et pt_BR (jours, mois, formats des dates et des heures, nombres, monnaie, noms des langues et des pays) ; le nom vide désigne la locale par défaut (variables LC_ALL, LC_xxx, LANG, puis la fonction Locale).
+
+<table>
+	<tr><th>Fonctions</th><th>Rôle</th></tr>
+	<tr><td>UniCreateLocaleObject, UniFreeLocaleObject, UniQueryLocaleObject, UniLocaleStrToToken, UniLocaleTokenToStr, UniMapCtryToLocale, Locale</td><td>Objets locales (nom, jeton, code de pays ; catégories LC_*).</td></tr>
+	<tr><td>UniQueryLocaleItem, UniQueryLocaleValue, UniQueryLocaleInfo, UniFreeLocaleInfo, UniFreeMem</td><td>Éléments des locales (136 LocaleItem), structure UniLconv.</td></tr>
+	<tr><td>UniQueryAlpha... UniQueryXdigit, UniQueryChar, UniQueryAttr, UniCreateAttrObject, UniQueryCharAttr, UniScanForAttr, UniFreeAttrObject</td><td>Attributs des caractères (CT_*).</td></tr>
+	<tr><td>UniQueryCharType, UniQueryCharTypeTable, UniQueryStringType, UniQueryNumericValue</td><td>Types UNICTYPE (classe, bidi, écriture, attributs étendus, pages de codes), valeur numérique.</td></tr>
+	<tr><td>UniToupper, UniTolower, UniTransUpper, UniTransLower, UniStrupr, UniStrlwr</td><td>Majuscules et minuscules.</td></tr>
+	<tr><td>UniStrcat... UniStrtok (21 fonctions)</td><td>Chaînes UniChar.</td></tr>
+	<tr><td>UniStrcoll, UniStrxfrm, UniMakeKey, UniGetColval</td><td>Collation à trois niveaux (lettre, accent, casse).</td></tr>
+	<tr><td>UniCreateTransformObject, UniTransformStr, UniFreeTransformObject, UniProcessUconv</td><td>Transformations (upper, lower, compose, decompose, hiragana, katakana, fullwidth, halfwidth) ; page de codes 437 ou 850 vers Unicode.</td></tr>
+	<tr><td>UniStrtol, UniStrtoul, UniStrtod, UniStrftime, UniStrptime, UniStrfmon</td><td>Nombres, dates et heures, montants selon la locale.</td></tr>
+	<tr><td>UniMakeUserLocale, UniSetUserLocaleItem, UniGetOverride, UniDeleteUserLocale, UniCompleteUserLocale, UniQueryLocaleList, UniQueryLanguageName, UniQueryCountryName</td><td>Locales de l'utilisateur (C:\USERLOC.INI), liste des locales, noms des langues et des pays.</td></tr>
+</table>
+
+UniMakeKey, UniGetColval, UniGetOverride, UniProcessUconv et Locale ne sont pas documentées par IBM : leur rôle est décrit dans le source. Le programme <b>DLL/TESTUNI.PAS</b> vérifie ces fonctions (107 vérifications).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
