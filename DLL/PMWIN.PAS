@@ -3,7 +3,8 @@
   @website(https://www.gladir.com/os2-0)
   @abstract(Target: OS2PC -COS2)
   @description: Bibliotheque OS/2 PMWIN.DLL de OS/2-0 (gestionnaire de
-                fenetres de Presentation Manager, en mode texte).
+                fenetres de Presentation Manager, ecran graphique
+                640 x 480 x 16 couleurs ou ecran texte).
 }
 
 Library PMWIN;
@@ -23,13 +24,24 @@ Library PMWIN;
   presse-papiers, atomes, tas, valeurs et couleurs du systeme, pages de
   codes, ressources et erreurs.
 
-  OS/2-0 n'a pas d'ecran graphique : le bureau est l'ecran texte de 80 x
-  25 cellules, vu en coordonnees de PM de 640 x 400 pels (une cellule =
-  8 x 16 pels ; origine en bas a gauche, y vers le haut). Une cellule est
-  dessinee si son centre est dans la zone de dessin. Les couleurs
-  (CLR_*, SYSCLR_*, RVB 00RRGGBBh) deviennent les 16 couleurs du texte
-  (8 pour le fond). Le clavier (KBDCALLS.DLL) et la souris (MOUCALLS.DLL)
-  sont lus par WinGetMsg et WinPeekMsg.
+  Ecran : la premiere file de messages (WinCreateMsgQueue) passe l'ecran
+  en mode graphique 640 x 480 x 16 couleurs (VioSetMode, mode 12h du VGA ;
+  origine en bas a gauche, y vers le haut). Les fenetres y sont dessinees
+  en pels : cadres et boutons en relief, barre de titre, menu systeme,
+  boutons de reduction et d'agrandissement, barre d'actions et menus
+  deroulants (mnemoniques soulignes, coches, sous-menus), cases a cocher,
+  boutons radio, champs de saisie et listes en creux, barres de
+  defilement (fleches, curseur a glisser), bitmaps OS/2 (1, 4, 8 et 24
+  bits), texte de la police 8 x 16 du VGA ; le pointeur de la souris
+  (fleche) et le curseur (rectangle inverse) sont superposes. Le dernier
+  WinTerminate rend l'ecran au mode texte (CMD le fait aussi a la fin
+  d'un programme). Avec PMMODE=TEXTE dans l'environnement, PM reste dans
+  l'ecran texte de 80 x 25 cellules, vu en coordonnees de 640 x 400 pels
+  (une cellule = 8 x 16 pels, dessinee si son centre est dans la zone de
+  dessin). Les couleurs (CLR_*, SYSCLR_*, RVB 00RRGGBBh) deviennent les
+  16 couleurs du VGA (8 pour le fond en mode texte). Le clavier
+  (KBDCALLS.DLL) et la souris (MOUCALLS.DLL, positions en pels en mode
+  graphique) sont lus par WinGetMsg et WinPeekMsg.
 
   Procedures de fenetre, de dialogue et de crochet : une adresse dans le
   programme (00400000h-007FFFFFh) est une fonction d'un programme OS2PC
@@ -37,7 +49,10 @@ Library PMWIN;
   nettoyee par la fonction) ; ailleurs (point d'entree exporte d'une DLL,
   convention _System). Les procedures des classes du systeme sont le
   point d'entree interne WINSYSCLASSPROC (ordinal 1000) ; WINQUERYPSINFO
-  (ordinal 1001, interne) decrit un HPS pour PMGPI.DLL.
+  (ordinal 1001, interne) decrit un HPS pour PMGPI.DLL, WINQUERYSCREENTEXT
+  (1002, interne) rend le texte ecrit a l'ecran (programmes d'essai) et
+  WINHIDEOVERLAYS (1003, interne) retire le pointeur et le curseur avant
+  un dessin direct de PMGPI.DLL.
 
   Handles : HAB 00010001h..., HMQ 00510001h..., HWND 8000xxyyh (HWND_DESKTOP
   1 et HWND_OBJECT 2 acceptes), HPS 5053xxxxh, HDC 4443xxxxh, HPOINTER
@@ -51,9 +66,11 @@ Library PMWIN;
   bits) ; un nom present deux fois est exporte en majuscules a l'ordinal
   bas.
 
-  Limites : pas de GPI (les regions HRGN se limitent a 0 : toute la
-  fenetre), pas de bitmap reelle (une bitmap est dessinee en trame),
-  WinCatch et WinThrow ne peuvent derouler la pile (WinThrow rend FALSE),
+  Limites : les fonctions Gpi* sont dans PMGPI.DLL (les regions HRGN de
+  PMWIN se limitent a 0 : toute la fenetre ; en mode texte, une bitmap
+  est dessinee en trame), une seule police (8 x 16), pointeurs du systeme
+  dessines en fleche, WinScrollWindow deplace les pels par octets entiers
+  (le reste est a redessiner), WinCatch et WinThrow ne peuvent derouler la pile (WinThrow rend FALSE),
   les messages envoyes a une fenetre d'un autre processus ne sont remis
   que si sa procedure est dans une DLL (les processus s'executent l'un
   apres l'autre).
@@ -210,10 +227,6 @@ Const
   MaxEnum = 16;
   MaxLib = 16;
   ArenaSize = 262144;
-  ScrCols = 80;
-  ScrRows = 25;
-  ScrCX = 640;
-  ScrCY = 400;
 
   { classes du systeme (WC_* = FFFF00nnh) }
   CK_FRAME = 1; CK_COMBOBOX = 2; CK_BUTTON = 3; CK_MENU = 4; CK_STATIC = 5;
@@ -292,6 +305,19 @@ Var
   Dummy, MyMod : LongInt;
 
 Var
+  GMode : LongInt;                        { 1 : ecran graphique }
+  ScrCols, ScrRows, ScrCX, ScrCY : LongInt;
+  GCx1, GCy1, GCx2, GCy2 : LongInt;       { decoupage (pels de l'ecran, x2 et y2 exclus) }
+  GFont : Array[0..4095] Of Byte;         { police 8 x 16 }
+  GMask : LongInt;                        { masque de bits courant du VGA }
+  GPtrOn, GPtrX, GPtrY : LongInt;         { pointeur dessine (x, ligne du haut) }
+  GPtrSave : Array[0..255] Of Byte;       { pels sous le pointeur }
+  GCarWant, GCarOn : LongInt;             { curseur demande, curseur dessine }
+  GCarX1, GCarY1, GCarX2, GCarY2 : LongInt;
+  GCdX1, GCdY1, GCdX2, GCdY2 : LongInt;   { rectangle dessine }
+  GShadow : Array[0..2399] Of Byte;       { caracteres de l'ecran (80 x 30) }
+  BrdX, BrdY, TitleH, MenuH, VsbW, HsbH, MRowH, MPad : LongInt;
+  GPl : Array[0..11] Of LongInt;
   HwBit : LongInt;
   POrd : Array[0..MaxWin - 1] Of LongInt;
   PCnt : LongInt;
@@ -329,6 +355,10 @@ Function MouDrawPtr(H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouDrawPtr
 Function MouRemovePtr(PRect, H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouRemovePtr';
 Function VioSetCurPos(Row, Col, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioSetCurPos';
 Function VioSetCurType(PInfo, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioSetCurType';
+Function VioSetMode(PMode, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioSetMode';
+Function VioGetMode(PMode, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioGetMode';
+Function VioGetFont(PInfo, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioGetFont';
+Function DcScanEnv(PName, PP : LongInt) : LongInt; External 'DOSCALLS' Name 'DosScanEnv';
 
 { --- acces a la memoire --- }
 Function RdL(A : LongInt) : LongInt;
@@ -855,7 +885,7 @@ Begin
   Else If (Clr <= -10) And (Clr >= -63) Then Rgb := SysClr[-Clr]
   Else If (Clr >= 0) And (Clr <= 15) Then R := ClrVga[Clr]
   Else If Clr > 15 Then Rgb := Clr And $FFFFFF;
-  If Bg Then Lim := 7 Else Lim := 15;
+  If Bg And (GMode = 0) Then Lim := 7 Else Lim := 15;
   If Rgb >= 0 Then
   Begin
     Best := 0; BestD := $7FFFFFFF;
@@ -872,7 +902,7 @@ Begin
     End;
     R := Best;
   End;
-  If Bg And (R > 7) Then R := R - 8;
+  If Bg And (R > 7) And (GMode = 0) Then R := R - 8;
   VgaColor := R;
 End;
 
@@ -888,6 +918,685 @@ Begin
   P := 0;
   If DcGetResource(Hmod, Typ, Id, LongInt(@P)) <> 0 Then P := 0;
   GetRes := P;
+End;
+
+
+{ ==================================================================== }
+{ Partie 1b - Ecran graphique de PM (VGA 640 x 480 x 16 couleurs)      }
+{ ==================================================================== }
+{ Sauf si l'environnement contient PMMODE=TEXTE, la premiere file de
+  messages passe l'ecran dans le mode 12h du VGA (VioSetMode) : 640 x 480
+  pels de 16 couleurs, origine en bas a gauche. Les attributs (couleur du
+  texte, couleur du fond) deviennent des couleurs de pels et le texte est
+  dessine avec la police 8 x 16 du VGA ; les cadres, barres de titre,
+  menus et controles sont dessines en relief. Le pointeur de la souris et
+  le curseur sont superposes : ils sont retires avant un dessin qui les
+  touche et remis quand le programme lit ses messages. }
+
+
+Const
+  { pointeur (fleche) : contour noir, interieur blanc ; bit 15 = pel de
+    gauche }
+  PtrB : Array[0..15] Of LongInt = ($8000, $C000, $A000, $9000, $8800, $8400, $8200, $8100,
+                                    $8080, $83C0, $9200, $A900, $C900, $8480, $0480, $0300);
+  PtrW : Array[0..15] Of LongInt = ($0000, $0000, $4000, $6000, $7000, $7800, $7C00, $7E00,
+                                    $7F00, $7C00, $6C00, $4600, $0600, $0300, $0300, $0000);
+
+{ --- ports du VGA --- }
+Procedure GOut(P, V : LongInt);
+Begin
+  asm
+    mov edx,P
+    mov eax,V
+    out dx,al
+  end;
+End;
+
+Function GIn(P : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := 0;
+  asm
+    mov edx,P
+    xor eax,eax
+    in al,dx
+    mov R,eax
+  end;
+  GIn := R;
+End;
+
+{ ecriture dans les 4 plans : mode d'ecriture 2 (couleur dans l'octet
+  ecrit), operation Op (0 remplacement, 3 ou exclusif) }
+Procedure GBegin(Op : LongInt);
+Begin
+  GOut($3CE, 5); GOut($3CF, 2);
+  GOut($3CE, 3); GOut($3CF, Op Shl 3);
+  GOut($3C4, 2); GOut($3C5, $0F);
+  GOut($3CE, 8); GOut($3CF, $FF);
+  GMask := $FF;
+End;
+
+Procedure GEnd;
+Begin
+  GOut($3CE, 8); GOut($3CF, $FF);
+  GOut($3CE, 3); GOut($3CF, 0);
+  GOut($3CE, 5); GOut($3CF, 0);
+  GMask := $FF;
+End;
+
+Procedure GSetMask(M : LongInt);
+Begin
+  If M <> GMask Then
+  Begin
+    GOut($3CE, 8); GOut($3CF, M);
+    GMask := M;
+  End;
+End;
+
+{ pels X1 a X2 - 1 de la ligne Row (0 en haut) dont le bit du motif est
+  mis (bit 7 : x multiple de 8) }
+Procedure GRow(Row, X1, X2, C, Pat : LongInt);
+Var A, B, B1, B2, M : LongInt;
+Begin
+  If (X1 >= X2) Or (Row < 0) Or (Row >= ScrCY) Then Exit;
+  A := $A0000 + Row * 80;
+  B1 := X1 Shr 3; B2 := (X2 - 1) Shr 3;
+  B := B1;
+  While B <= B2 Do
+  Begin
+    M := Pat And $FF;
+    If B = B1 Then M := M And ($FF Shr (X1 And 7));
+    If B = B2 Then M := M And (($FF00 Shr (((X2 - 1) And 7) + 1)) And $FF);
+    If M <> 0 Then
+    Begin
+      GSetMask(M);
+      Dummy := RdB(A + B);
+      WrB(A + B, C);
+    End;
+    Inc(B);
+  End;
+End;
+
+{ 8 pels (bit 7 a gauche) a partir de x sur la ligne Row }
+Procedure GMask8(Row, X, Bits, C : LongInt);
+Var A, Sh, M0, M1 : LongInt;
+Begin
+  Bits := Bits And $FF;
+  If (Bits = 0) Or (Row < 0) Or (Row >= ScrCY) Then Exit;
+  If X < 0 Then
+  Begin
+    If X <= -8 Then Exit;
+    Bits := (Bits Shl (-X)) And $FF;
+    X := 0;
+    If Bits = 0 Then Exit;
+  End;
+  A := $A0000 + Row * 80 + (X Shr 3);
+  Sh := X And 7;
+  M0 := Bits Shr Sh;
+  If Sh <> 0 Then M1 := (Bits Shl (8 - Sh)) And $FF Else M1 := 0;
+  If M0 <> 0 Then
+  Begin
+    GSetMask(M0);
+    Dummy := RdB(A);
+    WrB(A, C);
+  End;
+  If (M1 <> 0) And ((X Shr 3) < 79) Then
+  Begin
+    GSetMask(M1);
+    Dummy := RdB(A + 1);
+    WrB(A + 1, C);
+  End;
+End;
+
+{ couleur d'un pel (x, ligne du haut) }
+Function GGetRaw(X, Row : LongInt) : LongInt;
+Var A, M, P, V : LongInt;
+Begin
+  V := 0;
+  If (X >= 0) And (X < ScrCX) And (Row >= 0) And (Row < ScrCY) Then
+  Begin
+    A := $A0000 + Row * 80 + (X Shr 3);
+    M := $80 Shr (X And 7);
+    For P := 0 To 3 Do
+    Begin
+      GOut($3CE, 4); GOut($3CF, P);
+      If (RdB(A) And M) <> 0 Then V := V Or (1 Shl P);
+    End;
+    GOut($3CE, 4); GOut($3CF, 0);
+  End;
+  GGetRaw := V;
+End;
+
+{ --- pointeur de la souris --- }
+Procedure GPtrHide;
+Var R, X, Row, C, Px : LongInt;
+Begin
+  If GPtrOn = 0 Then Exit;
+  GPtrOn := 0;
+  GBegin(0);
+  For R := 0 To 15 Do
+  Begin
+    Row := GPtrY + R;
+    For X := 0 To 15 Do
+    Begin
+      Px := GPtrX + X;
+      If (Px < ScrCX) And (((PtrB[R] Or PtrW[R]) And ($8000 Shr X)) <> 0) Then
+      Begin
+        C := GPtrSave[R * 16 + X];
+        GMask8(Row, Px And Not 7, $80 Shr (Px And 7), C);
+      End;
+    End;
+  End;
+  GEnd;
+End;
+
+Procedure GPtrDraw(X0, Row0 : LongInt);
+Var R, X, Row, Px, B, P, Bt, A, N, V : LongInt;
+Begin
+  GPtrX := X0; GPtrY := Row0;
+  { pels sous le pointeur : 3 octets par plan et par ligne }
+  For R := 0 To 15 Do
+  Begin
+    Row := Row0 + R;
+    If (Row >= 0) And (Row < ScrCY) Then
+    Begin
+      A := $A0000 + Row * 80 + (X0 Shr 3);
+      For P := 0 To 3 Do
+      Begin
+        GOut($3CE, 4); GOut($3CF, P);
+        For Bt := 0 To 2 Do
+          If (X0 Shr 3) + Bt < 80 Then GPl[P * 3 + Bt] := RdB(A + Bt) Else GPl[P * 3 + Bt] := 0;
+      End;
+      For X := 0 To 15 Do
+      Begin
+        B := (X0 And 7) + X;
+        V := 0;
+        For P := 0 To 3 Do
+          If (GPl[P * 3 + (B Shr 3)] And ($80 Shr (B And 7))) <> 0 Then V := V Or (1 Shl P);
+        GPtrSave[R * 16 + X] := V;
+      End;
+    End;
+  End;
+  GOut($3CE, 4); GOut($3CF, 0);
+  GBegin(0);
+  For R := 0 To 15 Do
+  Begin
+    Row := Row0 + R;
+    If (Row >= 0) And (Row < ScrCY) Then
+      For X := 0 To 15 Do
+      Begin
+        Px := X0 + X;
+        N := $8000 Shr X;
+        If Px < ScrCX Then
+        Begin
+          If (PtrB[R] And N) <> 0 Then GMask8(Row, Px And Not 7, $80 Shr (Px And 7), 0)
+          Else If (PtrW[R] And N) <> 0 Then GMask8(Row, Px And Not 7, $80 Shr (Px And 7), 15);
+        End;
+      End;
+  End;
+  GEnd;
+  GPtrOn := 1;
+End;
+
+{ --- curseur (rectangle inverse) --- }
+Procedure GXorRaw(X1, Y1, X2, Y2 : LongInt);
+Var Y : LongInt;
+Begin
+  X1 := MaxI(X1, 0); Y1 := MaxI(Y1, 0); X2 := MinI(X2, ScrCX); Y2 := MinI(Y2, ScrCY);
+  If (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  GBegin(3);
+  Y := Y1;
+  While Y < Y2 Do
+  Begin
+    GRow(ScrCY - 1 - Y, X1, X2, 15, $FF);
+    Inc(Y);
+  End;
+  GEnd;
+End;
+
+Function GHits(X1, Y1, X2, Y2, A1, B1, A2, B2 : LongInt) : Boolean;
+Begin
+  GHits := (X1 < A2) And (A1 < X2) And (Y1 < B2) And (B1 < Y2);
+End;
+
+Procedure GCarHide;
+Begin
+  If GCarOn = 0 Then Exit;
+  If (GPtrOn <> 0) And GHits(GCdX1, GCdY1, GCdX2, GCdY2, GPtrX, ScrCY - GPtrY - 16, GPtrX + 16, ScrCY - GPtrY) Then GPtrHide;
+  GXorRaw(GCdX1, GCdY1, GCdX2, GCdY2);
+  GCarOn := 0;
+End;
+
+{ retirer ce qui est superpose au rectangle (pels de l'ecran) }
+Procedure GHide(X1, Y1, X2, Y2 : LongInt);
+Begin
+  If (GPtrOn <> 0) And GHits(X1, Y1, X2, Y2, GPtrX, ScrCY - GPtrY - 16, GPtrX + 16, ScrCY - GPtrY) Then GPtrHide;
+  If (GCarOn <> 0) And GHits(X1, Y1, X2, Y2, GCdX1, GCdY1, GCdX2, GCdY2) Then GCarHide;
+End;
+
+Procedure GHideAll;
+Begin
+  GPtrHide;
+  GCarHide;
+End;
+
+{ --- texte de l'ecran (programmes d'essai) --- }
+Procedure GShadowClear(X1, Y1, X2, Y2 : LongInt);
+Var C, R, Top : LongInt;
+Begin
+  For R := 0 To ScrRows - 1 Do
+  Begin
+    Top := ScrCY - R * 16;
+    If (Top - 16 >= Y1) And (Top <= Y2) Then
+      For C := 0 To ScrCols - 1 Do
+        If (C * 8 >= X1) And (C * 8 + 8 <= X2) Then GShadow[R * 80 + C] := 32;
+  End;
+End;
+
+Procedure GShadowSet(X, Y, Ch : LongInt);
+Var C, R : LongInt;
+Begin
+  If (X < 0) Or (Y < 0) Or (Y + 16 > ScrCY) Then Exit;
+  C := (X + 4) Div 8;
+  R := (ScrCY - Y - 16 + 8) Div 16;
+  If (C >= 0) And (C < ScrCols) And (R >= 0) And (R < ScrRows) Then GShadow[R * 80 + C] := Ch And 255;
+End;
+
+{ --- dessin (pels de l'ecran, y vers le haut, decoupage GCx1...) --- }
+Procedure GClipAll;
+Begin
+  GCx1 := 0; GCy1 := 0; GCx2 := ScrCX; GCy2 := ScrCY;
+End;
+
+Procedure GClip(X1, Y1, X2, Y2 : LongInt);
+Begin
+  GCx1 := MaxI(X1, 0); GCy1 := MaxI(Y1, 0); GCx2 := MinI(X2, ScrCX); GCy2 := MinI(Y2, ScrCY);
+End;
+
+{ rectangle de couleur C ; Pat : motif (FFh plein, AAh damier) ; Op : 0
+  remplacement, 3 ou exclusif }
+Procedure GFillPat(X1, Y1, X2, Y2, C, Pat, Op : LongInt);
+Var Y, P : LongInt;
+Begin
+  X1 := MaxI(X1, GCx1); Y1 := MaxI(Y1, GCy1); X2 := MinI(X2, GCx2); Y2 := MinI(Y2, GCy2);
+  If (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  GHide(X1, Y1, X2, Y2);
+  GBegin(Op);
+  Y := Y1;
+  While Y < Y2 Do
+  Begin
+    P := Pat;
+    If (Pat = $AA) And ((Y And 1) <> 0) Then P := $55;
+    GRow(ScrCY - 1 - Y, X1, X2, C And 15, P);
+    Inc(Y);
+  End;
+  GEnd;
+  If (Pat = $FF) And (Op = 0) Then GShadowClear(X1, Y1, X2, Y2);
+End;
+
+Procedure GFill(X1, Y1, X2, Y2, C : LongInt);
+Begin
+  GFillPat(X1, Y1, X2, Y2, C, $FF, 0);
+End;
+
+Procedure GHLine(X1, X2, Y, C : LongInt);
+Begin
+  GFill(X1, Y, X2, Y + 1, C);
+End;
+
+Procedure GVLine(X, Y1, Y2, C : LongInt);
+Begin
+  GFill(X, Y1, X + 1, Y2, C);
+End;
+
+Procedure GPix(X, Y, C : LongInt);
+Begin
+  GFill(X, Y, X + 1, Y + 1, C);
+End;
+
+{ contour d'un pel }
+Procedure GFrame(X1, Y1, X2, Y2, C : LongInt);
+Begin
+  If (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  GHLine(X1, X2, Y2 - 1, C); GHLine(X1, X2, Y1, C);
+  GVLine(X1, Y1, Y2, C); GVLine(X2 - 1, Y1, Y2, C);
+End;
+
+{ relief de W pels : Lt en haut et a gauche, Dk en bas et a droite }
+Procedure GBevel(X1, Y1, X2, Y2, Lt, Dk, W : LongInt);
+Var I : LongInt;
+Begin
+  I := 0;
+  While (I < W) And (X1 + I < X2 - I) And (Y1 + I < Y2 - I) Do
+  Begin
+    GHLine(X1 + I, X2 - I, Y2 - 1 - I, Lt);
+    GVLine(X1 + I, Y1 + I, Y2 - I, Lt);
+    GHLine(X1 + I, X2 - I, Y1 + I, Dk);
+    GVLine(X2 - 1 - I, Y1 + I, Y2 - I, Dk);
+    Inc(I);
+  End;
+End;
+
+{ segment (Bresenham) }
+Procedure GLine(X1, Y1, X2, Y2, C : LongInt);
+Var Dx, Dy, Sx, Sy, E, E2, N : LongInt;
+Begin
+  Dx := X2 - X1; If Dx < 0 Then Dx := -Dx;
+  Dy := Y2 - Y1; If Dy < 0 Then Dy := -Dy;
+  If X1 < X2 Then Sx := 1 Else Sx := -1;
+  If Y1 < Y2 Then Sy := 1 Else Sy := -1;
+  E := Dx - Dy;
+  N := 0;
+  While N < 2048 Do
+  Begin
+    GPix(X1, Y1, C);
+    If (X1 = X2) And (Y1 = Y2) Then N := 2048
+    Else
+    Begin
+      E2 := 2 * E;
+      If E2 > -Dy Then
+      Begin
+        E := E - Dy; X1 := X1 + Sx;
+      End;
+      If E2 < Dx Then
+      Begin
+        E := E + Dx; Y1 := Y1 + Sy;
+      End;
+    End;
+    Inc(N);
+  End;
+End;
+
+{ fleche pleine dans le rectangle : 0 haut, 1 bas, 2 gauche, 3 droite }
+Procedure GArrow(X1, Y1, X2, Y2, Dir, C : LongInt);
+Var Cx, Cy, S, I, T : LongInt;
+Begin
+  Cx := (X1 + X2) Div 2; Cy := (Y1 + Y2) Div 2;
+  S := MaxI(2, (MinI(X2 - X1, Y2 - Y1) + 1) Div 3);
+  T := S Div 2;
+  I := 0;
+  While I < S Do
+  Begin
+    Case Dir Of
+      0 : GFill(Cx - I, Cy + T - I, Cx + I + 1, Cy + T - I + 1, C);
+      1 : GFill(Cx - I, Cy - T + I, Cx + I + 1, Cy - T + I + 1, C);
+      2 : GFill(Cx - T + I, Cy - I, Cx - T + I + 1, Cy + I + 1, C);
+      3 : GFill(Cx + T - I, Cy - I, Cx + T - I + 1, Cy + I + 1, C);
+    End;
+    Inc(I);
+  End;
+End;
+
+{ disque plein de rayon R }
+Procedure GDisc(Cx, Cy, R, C : LongInt);
+Var Y, W : LongInt;
+Begin
+  Y := -R;
+  While Y <= R Do
+  Begin
+    W := 0;
+    While (W + 1) * (W + 1) + Y * Y <= R * R + R Do Inc(W);
+    GFill(Cx - W, Cy + Y, Cx + W + 1, Cy + Y + 1, C);
+    Inc(Y);
+  End;
+End;
+
+{ caractere 8 x 16 : coin bas gauche (x, y) ; Opaque : fond Bg }
+Procedure GGlyph(X, Y, Ch, Fg, Bg : LongInt; Opaque : Boolean);
+Var R, Bits, Cm, I, Yy, Row : LongInt;
+Begin
+  If (X + 8 <= GCx1) Or (X >= GCx2) Or (Y + 16 <= GCy1) Or (Y >= GCy2) Then Exit;
+  GHide(X, Y, X + 8, Y + 16);
+  Cm := 0;
+  For I := 0 To 7 Do
+    If (X + I >= GCx1) And (X + I < GCx2) Then Cm := Cm Or ($80 Shr I);
+  GBegin(0);
+  For R := 0 To 15 Do
+  Begin
+    Yy := Y + 15 - R;
+    If (Yy >= GCy1) And (Yy < GCy2) Then
+    Begin
+      Row := ScrCY - 1 - Yy;
+      Bits := GFont[(Ch And 255) * 16 + R];
+      GMask8(Row, X, Bits And Cm, Fg And 15);
+      If Opaque Then GMask8(Row, X, (Not Bits) And Cm, Bg And 15);
+    End;
+  End;
+  GEnd;
+  If (Cm = $FF) And (Y >= GCy1) And (Y + 16 <= GCy2) Then GShadowSet(X, Y, Ch);
+End;
+
+{ texte (au plus N caracteres) ; le caractere suivant un ~ est souligne
+  si Mn }
+Procedure GText(X, Y : LongInt; S : String; N, Fg, Bg : LongInt; Opaque, Mn : Boolean);
+Var J, Ch : LongInt; Hi : Boolean;
+Begin
+  Hi := False;
+  J := 1;
+  While (J <= Length(S)) And (N > 0) Do
+  Begin
+    Ch := Ord(S[J]);
+    If Mn And (Ch = 126) And Not Hi Then Hi := True
+    Else
+    Begin
+      GGlyph(X, Y, Ch, Fg, Bg, Opaque);
+      If Hi Then GHLine(X, X + 7, Y + 1, Fg);
+      Hi := False;
+      X := X + 8;
+      Dec(N);
+    End;
+    Inc(J);
+  End;
+End;
+
+{ largeur visible d'un texte (sans les ~) }
+Function GTextW(S : String; Mn : Boolean) : LongInt;
+Var J, N : LongInt;
+Begin
+  N := 0;
+  For J := 1 To Length(S) Do
+    If Not (Mn And (Ord(S[J]) = 126)) Then Inc(N);
+  GTextW := N * 8;
+End;
+
+{ metriques du mode (pels) }
+Procedure GMetrics;
+Begin
+  ScrCols := 80;
+  If GMode <> 0 Then
+  Begin
+    ScrCX := 640; ScrCY := 480; ScrRows := 30;
+    BrdX := 4; BrdY := 4; TitleH := 20; MenuH := 20; VsbW := 16; HsbH := 16; MRowH := 20; MPad := 3;
+  End
+  Else
+  Begin
+    ScrCX := 640; ScrCY := 400; ScrRows := 25;
+    BrdX := 8; BrdY := 16; TitleH := 16; MenuH := 16; VsbW := 8; HsbH := 16; MRowH := 16; MPad := 16;
+  End;
+  GClipAll;
+End;
+
+{ deplacer le contenu du rectangle de (Dx, Dy) pels (Dx multiple de 8) :
+  octets entiers copies par les registres de verrouillage du VGA }
+Procedure GScroll(X1, Y1, X2, Y2, Dx, Dy : LongInt);
+Var B1, B2, Db, Y, Ys, B, Bs, Ad, As, Stp, Ye : LongInt;
+Begin
+  B1 := (X1 + 7) Shr 3; B2 := X2 Shr 3;
+  If B1 >= B2 Then Exit;
+  Db := Dx Div 8;
+  GHideAll;
+  GOut($3CE, 5); GOut($3CF, 1);
+  GOut($3C4, 2); GOut($3C5, $0F);
+  If Dy > 0 Then
+  Begin
+    Y := Y2 - 1; Ye := Y1 - 1; Stp := -1;
+  End
+  Else
+  Begin
+    Y := Y1; Ye := Y2; Stp := 1;
+  End;
+  While Y <> Ye Do
+  Begin
+    Ys := Y - Dy;
+    If (Ys >= Y1) And (Ys < Y2) Then
+    Begin
+      Ad := $A0000 + (ScrCY - 1 - Y) * 80;
+      As := $A0000 + (ScrCY - 1 - Ys) * 80;
+      If Db > 0 Then
+      Begin
+        B := B2 - 1;
+        While B >= B1 Do
+        Begin
+          Bs := B - Db;
+          If (Bs >= B1) And (Bs < B2) Then
+          Begin
+            Dummy := RdB(As + Bs);
+            WrB(Ad + B, 0);
+          End;
+          Dec(B);
+        End;
+      End
+      Else
+      Begin
+        B := B1;
+        While B < B2 Do
+        Begin
+          Bs := B - Db;
+          If (Bs >= B1) And (Bs < B2) Then
+          Begin
+            Dummy := RdB(As + Bs);
+            WrB(Ad + B, 0);
+          End;
+          Inc(B);
+        End;
+      End;
+    End;
+    Y := Y + Stp;
+  End;
+  GOut($3CE, 5); GOut($3CF, 0);
+End;
+
+{ couleur du VGA la plus proche d'une couleur RVB }
+Function GNear(Rgb : LongInt) : LongInt;
+Var I, B, D, Bd, Dr, Dg, Db : LongInt;
+Begin
+  B := 0; Bd := $7FFFFFFF;
+  For I := 0 To 15 Do
+  Begin
+    Dr := ((Rgb Shr 16) And 255) - ((VgaRgb[I] Shr 16) And 255);
+    Dg := ((Rgb Shr 8) And 255) - ((VgaRgb[I] Shr 8) And 255);
+    Db := (Rgb And 255) - (VgaRgb[I] And 255);
+    D := Dr * Dr + Dg * Dg + Db * Db;
+    If D < Bd Then
+    Begin
+      Bd := D; B := I;
+    End;
+  End;
+  GNear := B;
+End;
+
+{ bitmap OS/2 (BITMAPFILEHEADER, ou tableau 'BA') dans le rectangle de
+  l'ecran (etiree) ; une bitmap monochrome prend les couleurs Fg (1) et
+  Bg (0) }
+Procedure GBitmap(P, X1, Y1, X2, Y2, Fg, Bg : LongInt; Inv : Boolean);
+Var Hd, Cx, Cy, Bpp, Pal, PalSz, Bits, Stride, X, Y, Sx, Sy, V, C, A, Run, RunC, J, N : LongInt;
+    Map : Array[0..255] Of Byte;
+Begin
+  If P = 0 Then Exit;
+  If RdW(P) = $4142 Then P := P + 14;
+  If RdW(P) <> $4D42 Then Exit;
+  Hd := P + 14;
+  If RdL(Hd) = 12 Then
+  Begin
+    Cx := RdW(Hd + 4); Cy := RdW(Hd + 6); Bpp := RdW(Hd + 10); PalSz := 3;
+  End
+  Else
+  Begin
+    Cx := RdL(Hd + 4); Cy := RdL(Hd + 8); Bpp := RdW(Hd + 14); PalSz := 4;
+  End;
+  If (Cx <= 0) Or (Cy <= 0) Or (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  If (Bpp <> 1) And (Bpp <> 4) And (Bpp <> 8) And (Bpp <> 24) Then Exit;
+  Pal := Hd + RdL(Hd);
+  Bits := P + RdL(P + 10);
+  Stride := ((Cx * Bpp + 31) Div 32) * 4;
+  If Bpp <= 8 Then
+  Begin
+    N := 1 Shl Bpp;
+    For J := 0 To N - 1 Do
+      Map[J] := GNear(RdB(Pal + J * PalSz) Or (RdB(Pal + J * PalSz + 1) Shl 8) Or (RdB(Pal + J * PalSz + 2) Shl 16));
+    If Bpp = 1 Then
+    Begin
+      Map[0] := Bg And 15; Map[1] := Fg And 15;
+    End;
+  End;
+  Y := Y1;
+  While Y < Y2 Do
+  Begin
+    Sy := ((Y - Y1) * Cy) Div (Y2 - Y1);
+    A := Bits + Sy * Stride;
+    Run := X1; RunC := -1;
+    X := X1;
+    While X < X2 Do
+    Begin
+      Sx := ((X - X1) * Cx) Div (X2 - X1);
+      Case Bpp Of
+        1 : C := Map[(RdB(A + Sx Shr 3) Shr (7 - (Sx And 7))) And 1];
+        4 : Begin
+              V := RdB(A + Sx Shr 1);
+              If (Sx And 1) = 0 Then V := V Shr 4 Else V := V And 15;
+              C := Map[V];
+            End;
+        8 : C := Map[RdB(A + Sx)];
+      Else
+        C := GNear(RdB(A + Sx * 3) Or (RdB(A + Sx * 3 + 1) Shl 8) Or (RdB(A + Sx * 3 + 2) Shl 16));
+      End;
+      If Inv Then C := 15 - C;
+      If C <> RunC Then
+      Begin
+        If RunC >= 0 Then GFill(Run, Y, X, Y + 1, RunC);
+        Run := X; RunC := C;
+      End;
+      Inc(X);
+    End;
+    If RunC >= 0 Then GFill(Run, Y, X2, Y + 1, RunC);
+    Inc(Y);
+  End;
+End;
+
+{ bitmap du systeme (SBMP_*) : bouton en relief avec un symbole }
+Procedure GSysBitmap(N, X1, Y1, X2, Y2 : LongInt);
+Var Cx, Cy : LongInt;
+Begin
+  GFill(X1, Y1, X2, Y2, 7);
+  GBevel(X1, Y1, X2, Y2, 15, 8, 1);
+  Cx := (X1 + X2) Div 2; Cy := (Y1 + Y2) Div 2;
+  Case N Of
+    2 : GArrow(X1, Y1, X2, Y2, 0, 0);
+    3 : GArrow(X1, Y1, X2, Y2, 1, 0);
+    4 : GArrow(X1, Y1, X2, Y2, 3, 0);
+    5 : GArrow(X1, Y1, X2, Y2, 2, 0);
+    6 : Begin
+          GLine(Cx - 4, Cy, Cx - 1, Cy - 3, 0); GLine(Cx - 1, Cy - 3, Cx + 4, Cy + 3, 0);
+        End;
+    9, 26 : GArrow(X1, Y1, X2, Y2, 1, 0);
+    10, 27 : GArrow(X1, Y1, X2, Y2, 0, 0);
+    11, 28 : Begin
+               GArrow(X1, Cy, X2, Y2, 0, 0); GArrow(X1, Y1, X2, Cy, 1, 0);
+             End;
+    1, 12, 25 : GFill(Cx - 4, Cy - 1, Cx + 4, Cy + 1, 0);
+  Else
+    GFrame(Cx - 3, Cy - 3, Cx + 3, Cy + 3, 0);
+  End;
+End;
+
+{ image du pointeur : coin bas gauche (x, y) }
+Procedure GPtrImage(X, Y : LongInt);
+Var R, C : LongInt;
+Begin
+  For R := 0 To 15 Do
+    For C := 0 To 15 Do
+      If (PtrB[R] And ($8000 Shr C)) <> 0 Then GPix(X + C, Y + 15 - R, 0)
+      Else If (PtrW[R] And ($8000 Shr C)) <> 0 Then GPix(X + C, Y + 15 - R, 15);
 End;
 
 
@@ -2140,6 +2849,15 @@ End;
 { --- cellules de l'ecran texte --- }
 Procedure PutCell(C, R, Ch, A : LongInt);
 Begin
+  If GMode <> 0 Then
+  Begin
+    If (C >= 0) And (C < ScrCols) And (R >= 0) And (R < ScrRows) Then
+    Begin
+      GClipAll;
+      GGlyph(C * 8, ScrCY - 16 - R * 16, Ch, A And 15, (A Shr 4) And 15, True);
+    End;
+    Exit;
+  End;
   If (C >= 0) And (C < ScrCols) And (R >= 0) And (R < ScrRows) Then
   Begin
     WrB($B8000 + (R * ScrCols + C) * 2, Ch);
@@ -2149,12 +2867,18 @@ End;
 
 Function GetAttr(C, R : LongInt) : LongInt;
 Begin
-  GetAttr := RdB($B8000 + (R * ScrCols + C) * 2 + 1);
+  If GMode <> 0 Then GetAttr := (GGetRaw(C * 8 + 4, R * 16 + 8) Shl 4) Or 15
+  Else GetAttr := RdB($B8000 + (R * ScrCols + C) * 2 + 1);
 End;
 
 Procedure SetAttr(C, R, A : LongInt);
 Begin
-  WrB($B8000 + (R * ScrCols + C) * 2 + 1, A);
+  If GMode <> 0 Then
+  Begin
+    GClipAll;
+    GFill(C * 8, ScrCY - 16 - R * 16, C * 8 + 8, ScrCY - R * 16, (A Shr 4) And 15);
+  End
+  Else WrB($B8000 + (R * ScrCols + C) * 2 + 1, A);
 End;
 
 { cellule d'un point ecran : colonne, ligne }
@@ -2311,12 +3035,50 @@ Begin
              Not ((PsWin[K] > 1) And (WNoUpd[PsWin[K]] <> 0));
 End;
 
+{ ecran graphique : decoupage du dessin de l'espace K ; faux si rien ne
+  peut etre dessine }
+Function GPsClip(K : LongInt) : Boolean;
+Begin
+  GClip(PsX1[K], PsY1[K], PsX2[K], PsY2[K]);
+  GPsClip := (GCx1 < GCx2) And (GCy1 < GCy2) And
+             Not ((LockUpdWin > 1) And ((PsWin[K] = LockUpdWin) Or IsChildOf(PsWin[K], LockUpdWin))) And
+             Not ((PsWin[K] > 1) And (WNoUpd[PsWin[K]] <> 0));
+End;
+
 { Remplir un rectangle (coordonnees de l'espace) }
 Procedure FillPS(K, X1, Y1, X2, Y2, Ch, A : LongInt);
-Var C, R, C1, C2, R1, R2 : LongInt;
+Var C, R, C1, C2, R1, R2, Fg, Bg, Xx, Yy : LongInt;
 Begin
   X1 := X1 + PsOrgX[K]; X2 := X2 + PsOrgX[K]; Y1 := Y1 + PsOrgY[K]; Y2 := Y2 + PsOrgY[K];
   If (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  If GMode <> 0 Then
+  Begin
+    If Not GPsClip(K) Then Exit;
+    Fg := A And 15; Bg := (A Shr 4) And 15;
+    If Ch = $DB Then GFill(X1, Y1, X2, Y2, Fg)
+    Else
+    Begin
+      GFill(X1, Y1, X2, Y2, Bg);
+      If (Ch = $B0) Or (Ch = $B1) Or (Ch = $B2) Then GFillPat(X1, Y1, X2, Y2, Fg, $AA, 0)
+      Else If (Ch = $C4) Or (Ch = $CD) Then GHLine(X1, X2, (Y1 + Y2) Div 2, Fg)
+      Else If (Ch = $B3) Or (Ch = $BA) Then GVLine((X1 + X2) Div 2, Y1, Y2, Fg)
+      Else If (Ch > 32) And (Ch < 255) Then
+      Begin
+        Yy := Y2 - 16;
+        While Yy >= Y1 Do
+        Begin
+          Xx := X1;
+          While Xx + 8 <= X2 Do
+          Begin
+            GGlyph(Xx, Yy, Ch, Fg, Bg, True);
+            Xx := Xx + 8;
+          End;
+          Yy := Yy - 16;
+        End;
+      End;
+    End;
+    Exit;
+  End;
   C1 := ColOf(X1); C2 := ColOf(X2 - 1);
   R1 := RowOf(Y2 - 1); R2 := RowOf(Y1);
   For R := R1 To R2 Do
@@ -2331,9 +3093,21 @@ End;
 Procedure CharPS(K, X, Y, Ch, A : LongInt);
 Var C, R : LongInt;
 Begin
+  If GMode <> 0 Then
+  Begin
+    If GPsClip(K) Then GGlyph(X + PsOrgX[K], Y + PsOrgY[K], Ch, A And 15, (A Shr 4) And 15, True);
+    Exit;
+  End;
   C := ColOf(X + PsOrgX[K]);
   R := RowOf(Y + PsOrgY[K]);
   If CanDraw(K, C, R) Then PutCell(C, R, Ch, A);
+End;
+
+{ ecran graphique : soulignement du caractere mnemonique en (x, y) }
+Procedure UnderPS(K, X, Y, A : LongInt);
+Begin
+  If GMode <> 0 Then
+    If GPsClip(K) Then GHLine(X + PsOrgX[K], X + PsOrgX[K] + 7, Y + PsOrgY[K] + 1, A And 15);
 End;
 
 Function WinGetPS(H : LongInt) : LongInt;
@@ -2661,6 +3435,23 @@ Begin
     X1 := MaxI(X1, RdL(PClip) + A); Y1 := MaxI(Y1, RdL(PClip + 4) + B);
     X2 := MinI(X2, RdL(PClip + 8) + A); Y2 := MinI(Y2, RdL(PClip + 12) + B);
   End;
+  If GMode <> 0 Then
+  Begin
+    { pels deplaces par octets entiers (bords et deplacements non
+      alignes : a redessiner) }
+    If (X1 < X2) And (Y1 < Y2) Then
+    Begin
+      If (Dx Mod 8) = 0 Then
+      Begin
+        GScroll(X1, Y1, X2, Y2, Dx, Dy);
+        If (X1 And 7) <> 0 Then InvalFrom(I, X1, Y1, MinI(X2, (X1 + 7) And Not 7), Y2);
+        If (X2 And 7) <> 0 Then InvalFrom(I, MaxI(X1, X2 And Not 7), Y1, X2, Y2);
+      End
+      Else InvalFrom(I, X1, Y1, X2, Y2);
+    End;
+  End
+  Else
+  Begin
   DC := Dx Div 8; DR := -(Dy Div 16);
   C1 := ColOf(X1); C2 := ColOf(X2 - 1); R1 := RowOf(Y2 - 1); R2 := RowOf(Y1);
   { deplacer les cellules dans le bon ordre }
@@ -2682,6 +3473,7 @@ Begin
         If (SC >= C1) And (SC <= C2) And (SR >= R1) And (SR <= R2) Then
           PutCell(C, R, RdB($B8000 + (SR * ScrCols + SC) * 2), GetAttr(SC, SR));
       End;
+  End;
   { zone decouverte }
   U1 := X1; V1 := Y1; U2 := X2; V2 := Y2;
   If Dx > 0 Then U2 := MinI(X2, X1 + Dx) Else If Dx < 0 Then U1 := MaxI(X1, X2 + Dx);
@@ -2857,6 +3649,13 @@ Begin
   WinInvertRect := 0;
   K := PsIdx(Hps);
   If (K < 0) Or (P = 0) Then Exit;
+  If GMode <> 0 Then
+  Begin
+    If GPsClip(K) Then
+      GFillPat(RdL(P) + PsOrgX[K], RdL(P + 4) + PsOrgY[K], RdL(P + 8) + PsOrgX[K], RdL(P + 12) + PsOrgY[K], 15, $FF, 3);
+    WinInvertRect := 1;
+    Exit;
+  End;
   C1 := ColOf(RdL(P) + PsOrgX[K]); C2 := ColOf(RdL(P + 8) - 1 + PsOrgX[K]);
   R1 := RowOf(RdL(P + 12) - 1 + PsOrgY[K]); R2 := RowOf(RdL(P + 4) + PsOrgY[K]);
   For R := R1 To R2 Do
@@ -2883,6 +3682,15 @@ Begin
   End;
   X1 := X1 + PsOrgX[K]; X2 := X2 + PsOrgX[K]; Y1 := Y1 + PsOrgY[K]; Y2 := Y2 + PsOrgY[K];
   If (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  If GMode <> 0 Then
+  Begin
+    If GPsClip(K) Then
+    Begin
+      GFrame(X1, Y1, X2, Y2, A And 15);
+      If Dbl Then GFrame(X1 + 1, Y1 + 1, X2 - 1, Y2 - 1, A And 15);
+    End;
+    Exit;
+  End;
   C1 := ColOf(X1); C2 := ColOf(X2 - 1); R1 := RowOf(Y2 - 1); R2 := RowOf(Y1);
   For C := C1 To C2 Do
   Begin
@@ -2903,12 +3711,37 @@ End;
 { WinDrawBorder(hps, prcl, cx, cy, clrFore, clrBack, flCmd) : BOOL ;
   DB_PATINVERT 1, DB_DESTINVERT 2, DB_INTERIOR 8, DB_DLGBORDER 200h }
 Function WinDrawBorder(Hps, P, Cx, Cy, Fg, Bg, Fl : LongInt) : LongInt;
-Var K, X1, Y1, X2, Y2 : LongInt;
+Var K, X1, Y1, X2, Y2, F, Op : LongInt;
 Begin
   WinDrawBorder := 0;
   K := PsIdx(Hps);
   If (K < 0) Or (P = 0) Then Exit;
   X1 := RdL(P); Y1 := RdL(P + 4); X2 := RdL(P + 8); Y2 := RdL(P + 12);
+  If GMode <> 0 Then
+  Begin
+    If GPsClip(K) Then
+    Begin
+      X1 := X1 + PsOrgX[K]; X2 := X2 + PsOrgX[K]; Y1 := Y1 + PsOrgY[K]; Y2 := Y2 + PsOrgY[K];
+      Cx := MaxI(Cx, 0); Cy := MaxI(Cy, 0);
+      If (Fl And 8) <> 0 Then GFill(X1 + Cx, Y1 + Cy, X2 - Cx, Y2 - Cy, VgaColor(Bg, True));
+      F := VgaColor(Fg, False);
+      If (Fl And 3) <> 0 Then
+      Begin
+        Op := 3; F := 15;
+      End
+      Else Op := 0;
+      If Cy > 0 Then
+      Begin
+        GFillPat(X1, Y2 - Cy, X2, Y2, F, $FF, Op); GFillPat(X1, Y1, X2, Y1 + Cy, F, $FF, Op);
+      End;
+      If Cx > 0 Then
+      Begin
+        GFillPat(X1, Y1 + Cy, X1 + Cx, Y2 - Cy, F, $FF, Op); GFillPat(X2 - Cx, Y1 + Cy, X2, Y2 - Cy, F, $FF, Op);
+      End;
+    End;
+    WinDrawBorder := 1;
+    Exit;
+  End;
   If (Fl And 8) <> 0 Then FillPS(K, X1, Y1, X2, Y2, 32, Attr(Fg, Bg));
   If (Cx > 0) Or (Cy > 0) Then BoxPS(K, X1, Y1, X2, Y2, Attr(Fg, Bg), (Fl And $200) <> 0);
   WinDrawBorder := 1;
@@ -2967,7 +3800,11 @@ Begin
     Begin
       If (X >= X1) And (X + 8 <= X2) Then
       Begin
-        If Mn Then CharPS(K, X, Y, Ch, AM) Else CharPS(K, X, Y, Ch, A);
+        If Mn And (GMode <> 0) Then
+        Begin
+          CharPS(K, X, Y, Ch, A); UnderPS(K, X, Y, A);
+        End
+        Else If Mn Then CharPS(K, X, Y, Ch, AM) Else CharPS(K, X, Y, Ch, A);
       End;
       X := X + 8;
       Inc(Drawn);
@@ -3060,6 +3897,18 @@ Begin
       X2 := X1 + RdL(PSrc + 8) - RdL(PSrc); Y2 := Y1 + RdL(PSrc + 12) - RdL(PSrc + 4);
     End;
   End;
+  If GMode <> 0 Then
+  Begin
+    If GPsClip(K) Then
+    Begin
+      X1 := X1 + PsOrgX[K]; X2 := X2 + PsOrgX[K]; Y1 := Y1 + PsOrgY[K]; Y2 := Y2 + PsOrgY[K];
+      If BmData[B] < 0 Then GSysBitmap(-BmData[B], X1, Y1, X2, Y2)
+      Else GBitmap(BmData[B], X1, Y1, X2, Y2, VgaColor(Fg, False), VgaColor(Bg, True), (Fl And 1) <> 0);
+      If (Fl And 2) <> 0 Then GFillPat(X1, Y1, X2, Y2, 7, $AA, 0);
+    End;
+    WinDrawBitmap := 1;
+    Exit;
+  End;
   If (Fl And 2) <> 0 Then Ch := $B0 Else Ch := $B1;
   If (Fl And 1) <> 0 Then A := Attr(Bg, Fg) Else A := Attr(Fg, Bg);
   FillPS(K, X1, Y1, X2, Y2, Ch, A);
@@ -3144,6 +3993,14 @@ Function WinShowPointer(HDesk, Show : LongInt) : LongInt;
 Var H : LongInt;
 Begin
   H := CurMou;
+  If GMode <> 0 Then
+  Begin
+    If Show <> 0 Then Inc(PtrLevel) Else Dec(PtrLevel);
+    If PtrLevel < 0 Then GPtrHide;
+    SysVal[44] := PtrLevel;
+    WinShowPointer := 1;
+    Exit;
+  End;
   If Show <> 0 Then
   Begin
     Inc(PtrLevel);
@@ -3167,9 +4024,17 @@ Function WinSetPointerPos(HDesk, X, Y : LongInt) : LongInt;
 Var H : LongInt;
 Begin
   H := CurMou;
-  MouseX := X; MouseY := Y;
-  WrW(LongInt(@NameZ), MaxI(0, MinI(ScrRows - 1, RowOf(Y))));
-  WrW(LongInt(@NameZ) + 2, MaxI(0, MinI(ScrCols - 1, ColOf(X))));
+  MouseX := MaxI(0, MinI(X, ScrCX - 1)); MouseY := MaxI(0, MinI(Y, ScrCY - 1));
+  If GMode <> 0 Then
+  Begin
+    WrW(LongInt(@NameZ), ScrCY - 1 - MouseY);
+    WrW(LongInt(@NameZ) + 2, MouseX);
+  End
+  Else
+  Begin
+    WrW(LongInt(@NameZ), MaxI(0, MinI(ScrRows - 1, RowOf(Y))));
+    WrW(LongInt(@NameZ) + 2, MaxI(0, MinI(ScrCols - 1, ColOf(X))));
+  End;
   If H <> 0 Then Dummy := MouSetPtrPos(LongInt(@NameZ), H);
   WinSetPointerPos := 1;
 End;
@@ -3181,8 +4046,16 @@ Begin
   If H <> 0 Then
     If MouGetPtrPos(LongInt(@NameZ), H) = 0 Then
     Begin
-      MouseX := RdW(LongInt(@NameZ) + 2) * 8 + 4;
-      MouseY := (ScrRows - 1 - RdW(LongInt(@NameZ))) * 16 + 8;
+      If GMode <> 0 Then
+      Begin
+        MouseX := MaxI(0, MinI(RdW(LongInt(@NameZ) + 2), ScrCX - 1));
+        MouseY := MaxI(0, MinI(ScrCY - 1 - RdW(LongInt(@NameZ)), ScrCY - 1));
+      End
+      Else
+      Begin
+        MouseX := RdW(LongInt(@NameZ) + 2) * 8 + 4;
+        MouseY := (ScrRows - 1 - RdW(LongInt(@NameZ))) * 16 + 8;
+      End;
     End;
   WrL(P, MouseX); WrL(P + 4, MouseY);
   WinQueryPointerPos := 1;
@@ -3318,6 +4191,12 @@ Begin
     WinDrawPointer := 0;
     Exit;
   End;
+  If GMode <> 0 Then
+  Begin
+    If GPsClip(K) Then GPtrImage(X + PsOrgX[K], Y + PsOrgY[K]);
+    WinDrawPointer := 1;
+    Exit;
+  End;
   If (Fs And 2) <> 0 Then A := $70 Else If (Fs And 1) <> 0 Then A := $08 Else A := $0F;
   CharPS(K, X, Y, PtrGlyph(H), A Or (GetAttr(MaxI(0, ColOf(X + PsOrgX[K])), MaxI(0, MinI(24, RowOf(Y + PsOrgY[K])))) And $70));
   WinDrawPointer := 1;
@@ -3330,16 +4209,42 @@ Begin
   If (K < 0) Or Not PtrValid(H) Then WinStretchPointer := 0
   Else
   Begin
-    FillPS(K, X, Y, X + MaxI(Cx, 8), Y + MaxI(Cy, 16), PtrGlyph(H), $0F);
+    If GMode <> 0 Then
+    Begin
+      If GPsClip(K) Then GPtrImage(X + PsOrgX[K], Y + PsOrgY[K]);
+    End
+    Else FillPS(K, X, Y, X + MaxI(Cx, 8), Y + MaxI(Cy, 16), PtrGlyph(H), $0F);
     WinStretchPointer := 1;
   End;
 End;
 
 { --- curseur (curseur materiel de l'ecran texte) --- }
 Procedure ShowHwCursor;
-Var Vis : Boolean; C, R : LongInt;
+Var Vis : Boolean; C, R, X1, Y1, X2, Y2, A, B : LongInt;
 Begin
   Vis := (CursorWin > 1) And (WUse[CursorWin] <> 0) And (CurShown > 0) And Shown(CursorWin);
+  If GMode <> 0 Then
+  Begin
+    { curseur dessine (rectangle inverse) : CURSOR_FRAME 2 : contour }
+    X1 := 0; Y1 := 0; X2 := 0; Y2 := 0;
+    If Vis Then
+    Begin
+      A := AbsX(CursorWin) + CurX; B := AbsY(CursorWin) + CurY;
+      X1 := A; Y1 := B; X2 := A + CurCX; Y2 := B + CurCY;
+      If CurCX <= 0 Then X2 := A + 2;
+      If CurCY <= 0 Then Y2 := B + 16;
+      If VisRect(CursorWin, A, B, C, R) Then
+      Begin
+        X1 := MaxI(X1, A); Y1 := MaxI(Y1, B); X2 := MinI(X2, C); Y2 := MinI(Y2, R);
+      End
+      Else X2 := X1;
+      If (X1 >= X2) Or (Y1 >= Y2) Then Vis := False;
+    End;
+    If (GCarOn <> 0) And ((Not Vis) Or (X1 <> GCdX1) Or (Y1 <> GCdY1) Or (X2 <> GCdX2) Or (Y2 <> GCdY2)) Then GCarHide;
+    If Vis Then GCarWant := 1 Else GCarWant := 0;
+    GCarX1 := X1; GCarY1 := Y1; GCarX2 := X2; GCarY2 := Y2;
+    Exit;
+  End;
   If Vis Then
   Begin
     C := ColOf(AbsX(CursorWin) + CurX);
@@ -4570,8 +5475,16 @@ Begin
     If MouReadEventQue(LongInt(@Ev), LongInt(@Wait), H) <> 0 Then Exit;
     If (RdW(LongInt(@Ev)) = 0) And (RdL(LongInt(@Ev) + 2) = 0) Then Exit;
     Fs := RdW(LongInt(@Ev));
-    MouseX := RdW(LongInt(@Ev) + 8) * 8 + 4;
-    MouseY := (ScrRows - 1 - RdW(LongInt(@Ev) + 6)) * 16 + 8;
+    If GMode <> 0 Then
+    Begin
+      MouseX := MaxI(0, MinI(RdW(LongInt(@Ev) + 8), ScrCX - 1));
+      MouseY := MaxI(0, MinI(ScrCY - 1 - RdW(LongInt(@Ev) + 6), ScrCY - 1));
+    End
+    Else
+    Begin
+      MouseX := RdW(LongInt(@Ev) + 8) * 8 + 4;
+      MouseY := (ScrRows - 1 - RdW(LongInt(@Ev) + 6)) * 16 + 8;
+    End;
     Btn := 0;
     If (Fs And $06) <> 0 Then Btn := Btn Or 1;
     If (Fs And $18) <> 0 Then Btn := Btn Or 2;
@@ -4636,6 +5549,22 @@ Begin
   Dummy := Call3(HkProc[R], QHab[Q], 1, 0);
 End;
 
+{ ecran graphique : remettre le curseur et le pointeur }
+Procedure GShow(Q : LongInt);
+Begin
+  If GMode = 0 Then Exit;
+  If (GCarWant <> 0) And (GCarOn = 0) And (GCarX1 < GCarX2) And (GCarY1 < GCarY2) Then
+  Begin
+    GCdX1 := GCarX1; GCdY1 := GCarY1; GCdX2 := GCarX2; GCdY2 := GCarY2;
+    If (GPtrOn <> 0) And GHits(GCdX1, GCdY1, GCdX2, GCdY2, GPtrX, ScrCY - GPtrY - 16, GPtrX + 16, ScrCY - GPtrY) Then GPtrHide;
+    GXorRaw(GCdX1, GCdY1, GCdX2, GCdY2);
+    GCarOn := 1;
+  End;
+  If (GPtrOn <> 0) And ((GPtrX <> MouseX) Or (GPtrY <> ScrCY - 1 - MouseY)) Then GPtrHide;
+  If (GPtrOn = 0) And (PtrLevel >= 0) And (Q >= 0) Then
+    If QMou[Q] <> 0 Then GPtrDraw(MouseX, ScrCY - 1 - MouseY);
+End;
+
 Procedure PollInput(Q : LongInt);
 Begin
   If (QLockIn[Q] <> 0) Or (PhysInput = 0) Then Exit;
@@ -4652,6 +5581,7 @@ Begin
   Got := False;
   Repeat
     PollInput(Q);
+    GShow(Q);
     Got := QTake(Q, HF, First, Last, Remove, P);
     If Not Got Then
     Begin
@@ -5130,7 +6060,11 @@ Begin
     If Mn And (Ch = 126) And Not Hi Then Hi := True
     Else
     Begin
-      If Hi Then CharPS(K, X, Y, Ch, AM) Else CharPS(K, X, Y, Ch, A);
+      If Hi And (GMode <> 0) Then
+      Begin
+        CharPS(K, X, Y, Ch, A); UnderPS(K, X, Y, A);
+      End
+      Else If Hi Then CharPS(K, X, Y, Ch, AM) Else CharPS(K, X, Y, Ch, A);
       Hi := False;
       X := X + 8;
       Dec(N);
@@ -5173,6 +6107,80 @@ End;
 Function CtlBg(I : LongInt) : LongInt;
 Begin
   If (WPar[I] > 1) And (KindOf(WPar[I]) = CK_FRAME) Then CtlBg := -34 Else CtlBg := -20;
+End;
+
+{ --- ecran graphique : dessin des controles (coordonnees de l'espace K) --- }
+Function GCol(Clr : LongInt) : LongInt;
+Begin
+  GCol := VgaColor(Clr, False);
+End;
+
+Procedure GFillPS(K, X1, Y1, X2, Y2, C : LongInt);
+Begin
+  If GPsClip(K) Then GFill(X1 + PsOrgX[K], Y1 + PsOrgY[K], X2 + PsOrgX[K], Y2 + PsOrgY[K], C);
+End;
+
+{ relief de W pels (Lt en haut et a gauche) }
+Procedure GBevelPS(K, X1, Y1, X2, Y2, Lt, Dk, W : LongInt);
+Begin
+  If GPsClip(K) Then GBevel(X1 + PsOrgX[K], Y1 + PsOrgY[K], X2 + PsOrgX[K], Y2 + PsOrgY[K], Lt, Dk, W);
+End;
+
+Procedure GFramePS(K, X1, Y1, X2, Y2, C : LongInt);
+Begin
+  If GPsClip(K) Then GFrame(X1 + PsOrgX[K], Y1 + PsOrgY[K], X2 + PsOrgX[K], Y2 + PsOrgY[K], C);
+End;
+
+{ contour en pointilles (focus) }
+Procedure GDotPS(K, X1, Y1, X2, Y2, C : LongInt);
+Begin
+  If GPsClip(K) Then
+  Begin
+    X1 := X1 + PsOrgX[K]; X2 := X2 + PsOrgX[K]; Y1 := Y1 + PsOrgY[K]; Y2 := Y2 + PsOrgY[K];
+    GFillPat(X1, Y2 - 1, X2, Y2, C, $AA, 0); GFillPat(X1, Y1, X2, Y1 + 1, C, $AA, 0);
+    GFillPat(X1, Y1, X1 + 1, Y2, C, $AA, 0); GFillPat(X2 - 1, Y1, X2, Y2, C, $AA, 0);
+  End;
+End;
+
+Procedure GArrowPS(K, X1, Y1, X2, Y2, Dir, C : LongInt);
+Begin
+  If GPsClip(K) Then GArrow(X1 + PsOrgX[K], Y1 + PsOrgY[K], X2 + PsOrgX[K], Y2 + PsOrgY[K], Dir, C);
+End;
+
+Procedure GLinePS(K, X1, Y1, X2, Y2, C : LongInt);
+Begin
+  If GPsClip(K) Then GLine(X1 + PsOrgX[K], Y1 + PsOrgY[K], X2 + PsOrgX[K], Y2 + PsOrgY[K], C);
+End;
+
+Procedure GDiscPS(K, X, Y, R, C : LongInt);
+Begin
+  If GPsClip(K) Then GDisc(X + PsOrgX[K], Y + PsOrgY[K], R, C);
+End;
+
+{ texte transparent (Opaque faux) ou sur le fond Bg ; ~ souligne si Mn }
+Procedure GTextPS(K, X, Y : LongInt; S : String; N, Fg, Bg : LongInt; Opaque, Mn : Boolean);
+Begin
+  If GPsClip(K) Then GText(X + PsOrgX[K], Y + PsOrgY[K], S, N, Fg, Bg, Opaque, Mn);
+End;
+
+{ bouton en relief (enfonce : Dn) }
+Procedure GButtonPS(K, X1, Y1, X2, Y2, Bg : LongInt; Dn : Boolean);
+Begin
+  GFillPS(K, X1, Y1, X2, Y2, Bg);
+  If Dn Then
+  Begin
+    GBevelPS(K, X1, Y1, X2, Y2, 0, 15, 1); GBevelPS(K, X1 + 1, Y1 + 1, X2 - 1, Y2 - 1, 8, Bg, 1);
+  End
+  Else
+  Begin
+    GBevelPS(K, X1, Y1, X2, Y2, 15, 0, 1); GBevelPS(K, X1 + 1, Y1 + 1, X2 - 1, Y2 - 1, Bg, 8, 1);
+  End;
+End;
+
+{ champ en creux }
+Procedure GSunkenPS(K, X1, Y1, X2, Y2 : LongInt);
+Begin
+  GBevelPS(K, X1, Y1, X2, Y2, 8, 15, 1); GBevelPS(K, X1 + 1, Y1 + 1, X2 - 1, Y2 - 1, 0, 7, 1);
 End;
 
 Function OwnerH(I : LongInt) : LongInt;
@@ -5344,10 +6352,29 @@ Begin
                ((WS0[I] And (FCF_BORDER Or FCF_DLGBORDER Or FCF_SIZEBORDER)) <> 0);
 End;
 
+{ ecran graphique : largeur de la bordure (FS_SIZEBORDER 4, FS_DLGBORDER 3,
+  FS_BORDER 1) }
+Function GBorderW(I : LongInt) : LongInt;
+Begin
+  If ((WStyle[I] And FS_SIZEBORDER) <> 0) Or ((WS0[I] And FCF_SIZEBORDER) <> 0) Then GBorderW := 4
+  Else If ((WStyle[I] And FS_DLGBORDER) <> 0) Or ((WS0[I] And FCF_DLGBORDER) <> 0) Then GBorderW := 3
+  Else If HasBorder(I) Then GBorderW := 1
+  Else GBorderW := 0;
+End;
+
 { marges du cadre (pels) : gauche, bas, droite, haut }
 Procedure FrameInsets(I : LongInt; Var L, B, R, T : LongInt);
 Var Bd : Boolean;
 Begin
+  If GMode <> 0 Then
+  Begin
+    L := GBorderW(I); R := L; B := L; T := L;
+    If (ChildId(I, FID_TITLEBAR) >= 0) Or (ChildId(I, FID_SYSMENU) >= 0) Or (ChildId(I, FID_MINMAX) >= 0) Then T := T + TitleH;
+    If ChildId(I, FID_MENU) >= 0 Then T := T + MenuH;
+    If ChildId(I, FID_VERTSCROLL) >= 0 Then R := R + VsbW;
+    If ChildId(I, FID_HORZSCROLL) >= 0 Then B := B + HsbH;
+    Exit;
+  End;
   Bd := HasBorder(I);
   If Bd Then
   Begin
@@ -5385,9 +6412,43 @@ End;
 
 { disposer les controles du cadre ; rend leur nombre }
 Function FormatFrameI(I, P, Max : LongInt) : LongInt;
-Var L, B, R, T, Cx, Cy, J, N, Sw, Mw, Bw, Bh, Hs, Vs : LongInt;
+Var L, B, R, T, Cx, Cy, J, N, Sw, Mw, Bw, Bh, Hs, Vs, Th : LongInt;
 Begin
   FrameInsets(I, L, B, R, T);
+  If GMode <> 0 Then
+  Begin
+    Bw := GBorderW(I);
+    Cx := WCX[I]; Cy := WCY[I];
+    N := 0; Sw := 0; Mw := 0; Th := 0;
+    If (ChildId(I, FID_TITLEBAR) >= 0) Or (ChildId(I, FID_SYSMENU) >= 0) Or (ChildId(I, FID_MINMAX) >= 0) Then Th := TitleH;
+    J := ChildId(I, FID_SYSMENU);
+    If J >= 0 Then
+    Begin
+      Sw := TitleH;
+      Place(J, Bw, Cy - Bw - TitleH, TitleH, TitleH, P, Max, N);
+    End;
+    J := ChildId(I, FID_MINMAX);
+    If J >= 0 Then
+    Begin
+      Mw := MenuWidthPels(J);
+      Place(J, Cx - Bw - Mw, Cy - Bw - TitleH, Mw, TitleH, P, Max, N);
+    End;
+    J := ChildId(I, FID_TITLEBAR);
+    If J >= 0 Then Place(J, Bw + Sw, Cy - Bw - TitleH, Cx - 2 * Bw - Sw - Mw, TitleH, P, Max, N);
+    J := ChildId(I, FID_MENU);
+    If J >= 0 Then Place(J, Bw, Cy - Bw - Th - MenuH, Cx - 2 * Bw, MenuH, P, Max, N);
+    Hs := 0; Vs := 0;
+    If ChildId(I, FID_HORZSCROLL) >= 0 Then Hs := HsbH;
+    If ChildId(I, FID_VERTSCROLL) >= 0 Then Vs := VsbW;
+    J := ChildId(I, FID_VERTSCROLL);
+    If J >= 0 Then Place(J, Cx - Bw - Vs, Bw + Hs, Vs, Cy - T - Bw - Hs, P, Max, N);
+    J := ChildId(I, FID_HORZSCROLL);
+    If J >= 0 Then Place(J, Bw, Bw, Cx - 2 * Bw - Vs, Hs, P, Max, N);
+    J := ChildId(I, FID_CLIENT);
+    If J >= 0 Then Place(J, L, B, Cx - L - R, Cy - B - T, P, Max, N);
+    FormatFrameI := N;
+    Exit;
+  End;
   If HasBorder(I) Then
   Begin
     Bw := 8; Bh := 16;
@@ -5550,12 +6611,12 @@ Begin
   N := 0;
   For J := 2 To MaxWin - 1 Do
     If (J <> I) And (WUse[J] <> 0) And (WPar[J] = WPar[I]) And ((WStyle[J] And WS_MINIMIZED) <> 0) Then Inc(N);
-  X := (N Mod 4) * 160; Y := (N Div 4) * 16;
+  X := (N Mod 4) * 160; Y := (N Div 4) * (TitleH + 2 * GBorderW(I));
   If PPtl <> 0 Then
   Begin
     X := RdL(PPtl); Y := RdL(PPtl + 4);
   End;
-  WrL(P, SWP_MINIMIZE Or SWP_MOVE Or SWP_SIZE); WrL(P + 4, 16); WrL(P + 8, 160); WrL(P + 12, Y); WrL(P + 16, X);
+  WrL(P, SWP_MINIMIZE Or SWP_MOVE Or SWP_SIZE); WrL(P + 4, TitleH + 2 * GBorderW(I)); WrL(P + 8, 160); WrL(P + 12, Y); WrL(P + 16, X);
   WrL(P + 20, 0); WrL(P + 24, H);
   WinGetMinPosition := 1;
 End;
@@ -5574,13 +6635,29 @@ Begin
 End;
 
 Procedure FramePaint(I : LongInt);
-Var K, A, Bg : LongInt; Act : Boolean;
+Var K, A, Bg, Bw, Bc : LongInt; Act : Boolean;
 Begin
   K := BeginP(I);
   If K < 0 Then Exit;
   Act := (ActiveWin = I);
   If (WFlags[I] And 4) <> 0 Then Bg := -34 Else Bg := -20;
   If Act Then A := Attr(-15, Bg) Else A := Attr(-14, Bg);
+  If GMode <> 0 Then
+  Begin
+    Bw := GBorderW(I);
+    GFillPS(K, Bw, Bw, WCX[I] - Bw, WCY[I] - Bw, GCol(Bg));
+    If Bw = 1 Then GFramePS(K, 0, 0, WCX[I], WCY[I], 0)
+    Else If Bw > 1 Then
+    Begin
+      If Act Then Bc := GCol(-15) Else Bc := GCol(-14);
+      GFillPS(K, 0, 0, WCX[I], Bw, Bc); GFillPS(K, 0, WCY[I] - Bw, WCX[I], WCY[I], Bc);
+      GFillPS(K, 0, Bw, Bw, WCY[I] - Bw, Bc); GFillPS(K, WCX[I] - Bw, Bw, WCX[I], WCY[I] - Bw, Bc);
+      GBevelPS(K, 0, 0, WCX[I], WCY[I], 15, 0, 1);
+      GBevelPS(K, Bw - 1, Bw - 1, WCX[I] - Bw + 1, WCY[I] - Bw + 1, 8, 15, 1);
+    End;
+    EndP(K);
+    Exit;
+  End;
   FillPS(K, 0, 0, WCX[I], WCY[I], 32, Attr(-17, Bg));
   If HasBorder(I) And ((WStyle[I] And WS_MINIMIZED) = 0) Then BoxPS(K, 0, 0, WCX[I], WCY[I], A, Act);
   EndP(K);
@@ -5653,9 +6730,13 @@ Begin
           Begin
             For J := 0 To 19 Do Tr[J] := 0;
             Tr[0] := 8; Tr[1] := 16; Tr[2] := 8; Tr[3] := 16; Tr[4] := 8; Tr[5] := 16;
+            If GMode <> 0 Then
+            Begin
+              Tr[0] := 4; Tr[1] := 4; Tr[2] := 1; Tr[3] := 1; Tr[4] := 8; Tr[5] := 8;
+            End;
             Tr[6] := WX[I]; Tr[7] := WY[I]; Tr[8] := WX[I] + WCX[I]; Tr[9] := WY[I] + WCY[I];
             Tr[10] := 0; Tr[11] := 0; Tr[12] := WCX[WPar[I]]; Tr[13] := WCY[WPar[I]];
-            Tr[14] := 80; Tr[15] := 48; Tr[16] := 640; Tr[17] := 400;
+            Tr[14] := 80; Tr[15] := 48; Tr[16] := ScrCX; Tr[17] := ScrCY;
             If Lo16(Mp1) = SC_MOVE Then Tr[18] := $0F Or $80 Else Tr[18] := 4 Or 8 Or $80;
             If WinTrackRect(HwOf(WPar[I]), 0, LongInt(@Tr)) <> 0 Then
               Dummy := WinSetWindowPos(H, 0, Tr[6], Tr[7], Tr[8] - Tr[6], Tr[9] - Tr[7], SWP_MOVE Or SWP_SIZE);
@@ -5716,6 +6797,18 @@ Begin
         If K >= 0 Then
         Begin
           If WS0[I] <> 0 Then A := Attr(-28, -23) Else A := Attr(-29, -22);
+          If GMode <> 0 Then
+          Begin
+            GFillPS(K, 0, 0, WCX[I], WCY[I], (A Shr 4) And 15);
+            GBevelPS(K, 0, 0, WCX[I], WCY[I], 15, 8, 1);
+            S := WTextGet(I);
+            N := MaxI((WCX[I] - 8) Div 8, 0);
+            If Length(S) > N Then S := Copy(S, 1, N);
+            X := MaxI((WCX[I] - Length(S) * 8) Div 2, 4);
+            GTextPS(K, X, (WCY[I] - 16) Div 2, S, N, A And 15, 0, False, False);
+            EndP(K);
+            Exit;
+          End;
           FillPS(K, 0, 0, WCX[I], WCY[I], 32, A);
           S := WTextGet(I);
           N := WCX[I] Div 8;
@@ -5801,6 +6894,13 @@ Begin
           S := WTextGet(I);
           Case Typ Of
             SS_GROUPBOX :
+              If GMode <> 0 Then
+              Begin
+                GFramePS(K, 0, 0, WCX[I] - 1, WCY[I] - 8, 8);
+                GFramePS(K, 1, 1, WCX[I], WCY[I] - 7, 15);
+                If S <> '' Then GTextPS(K, 12, WCY[I] - 16, ' ' + S + ' ', MaxI(WCX[I] Div 8 - 3, 0), A And 15, (A Shr 4) And 15, True, True);
+              End
+              Else
               Begin
                 BoxPS(K, 0, 0, WCX[I], WCY[I], A, False);
                 If S <> '' Then TextPS(K, 16, WCY[I] - 16, MaxI(WCX[I] Div 8 - 4, 0), ' ' + S + ' ', A, MnA(A), True);
@@ -5812,7 +6912,8 @@ Begin
             3, 4, 11 :
               Begin
                 FillPS(K, 0, 0, WCX[I], WCY[I], 32, A);
-                TextPS(K, 0, WCY[I] - 16, 3, '[*]', A, A, False);
+                If GMode <> 0 Then GButtonPS(K, 0, 0, MinI(WCX[I], 32), MinI(WCY[I], 32), 7, False)
+                Else TextPS(K, 0, WCY[I] - 16, 3, '[*]', A, A, False);
               End;
           Else
             Begin
@@ -5914,6 +7015,61 @@ Begin
   Else Notify(I, BN_CLICKED);
 End;
 
+{ ecran graphique : bouton poussoir, case a cocher, bouton radio }
+Procedure GButtonPaint(I, K : LongInt);
+Var T, Fg, Bg, Tw, X, Y, Cy, X2, Y2, Ins : LongInt; S : String; Foc, Dn, Dis : Boolean;
+Begin
+  T := WStyle[I] And $0F;
+  Foc := FocusWin = I; Dn := WS1[I] <> 0; Dis := (WStyle[I] And WS_DISABLED) <> 0;
+  S := WTextGet(I); Tw := GTextW(S, True);
+  X2 := WCX[I]; Y2 := WCY[I];
+  If (T = BS_PUSHBUTTON) Or (T = BS_USERBUTTON) Then
+  Begin
+    Bg := GCol(PPColor(I, 3, -40)); Fg := GCol(PPColor(I, 1, -17));
+    If Dis Then Fg := 8;
+    Ins := 0;
+    If (WStyle[I] And BS_DEFAULT) <> 0 Then
+    Begin
+      GFramePS(K, 0, 0, X2, Y2, 0);
+      Ins := 1;
+    End;
+    GButtonPS(K, Ins, Ins, X2 - Ins, Y2 - Ins, Bg, Dn);
+    X := (X2 - Tw) Div 2; Y := (Y2 - 16) Div 2;
+    If Dn Then
+    Begin
+      Inc(X); Dec(Y);
+    End;
+    GTextPS(K, X, Y, S, 255, Fg, Bg, False, True);
+    If Foc Then GDotPS(K, MaxI(X - 3, 3), MaxI(Y - 1, 3), MinI(X + Tw + 3, X2 - 3), MinI(Y + 17, Y2 - 3), 0);
+  End
+  Else
+  Begin
+    Bg := GCol(PPColor(I, 3, CtlBg(I))); Fg := GCol(PPColor(I, 1, -26));
+    If Dis Then Fg := 8;
+    GFillPS(K, 0, 0, X2, Y2, Bg);
+    Cy := Y2 Div 2;
+    If (T = BS_RADIOBUTTON) Or (T = BS_AUTORADIOBUTTON) Then
+    Begin
+      GDiscPS(K, 7, Cy, 6, 8); GDiscPS(K, 7, Cy, 5, 15);
+      If WS0[I] <> 0 Then GDiscPS(K, 7, Cy, 2, 0);
+    End
+    Else
+    Begin
+      GFillPS(K, 1, Cy - 6, 14, Cy + 7, 15);
+      GSunkenPS(K, 1, Cy - 6, 14, Cy + 7);
+      If WS0[I] = 2 Then GFillPS(K, 4, Cy - 3, 11, Cy + 4, 8)
+      Else If WS0[I] <> 0 Then
+      Begin
+        GLinePS(K, 4, Cy, 6, Cy - 3, 0); GLinePS(K, 6, Cy - 3, 11, Cy + 3, 0);
+        GLinePS(K, 4, Cy + 1, 6, Cy - 2, 0); GLinePS(K, 6, Cy - 2, 11, Cy + 4, 0);
+      End;
+    End;
+    X := 20; Y := Cy - 8;
+    GTextPS(K, X, Y, S, MaxI((X2 - X) Div 8, 0), Fg, Bg, False, True);
+    If Foc Then GDotPS(K, X - 2, MaxI(Y - 1, 0), MinI(X + Tw + 2, X2), MinI(Y + 17, Y2), 0);
+  End;
+End;
+
 Function ButtonProc(I, Msg, Mp1, Mp2 : LongInt) : LongInt;
 Var K, A, AT, T, Bg, Fg, Y, N, X, J, C : LongInt; S, M : String; Foc : Boolean;
 Begin
@@ -5923,7 +7079,12 @@ Begin
     WM_PAINT :
       Begin
         K := BeginP(I);
-        If K >= 0 Then
+        If (K >= 0) And (GMode <> 0) Then
+        Begin
+          GButtonPaint(I, K);
+          EndP(K);
+        End
+        Else If K >= 0 Then
         Begin
           Foc := FocusWin = I;
           S := WTextGet(I);
@@ -6076,9 +7237,26 @@ End;
 { WS0 curseur (fin de selection), WS1 limite, WS2 premier caractere   }
 { visible, WS3 modifie, WS4 debut de selection                         }
 { ==================================================================== }
+{ marge du texte d'un champ (ecran graphique : bordure en creux) }
+Function EfM(I : LongInt) : LongInt;
+Begin
+  If GMode <> 0 Then EfM := 3 Else EfM := 0;
+End;
+
+{ colonnes et lignes visibles }
+Function EfCols(I : LongInt) : LongInt;
+Begin
+  EfCols := MaxI((WCX[I] - 2 * EfM(I)) Div 8, 1);
+End;
+
+Function EfRows(I : LongInt) : LongInt;
+Begin
+  EfRows := MaxI((WCY[I] - 2 * EfM(I)) Div 16, 1);
+End;
+
 Function EfY(I : LongInt) : LongInt;
 Begin
-  If KindOf(I) = CK_MLE Then EfY := WCY[I] - 16 Else EfY := (WCY[I] - 16) Div 2;
+  If KindOf(I) = CK_MLE Then EfY := WCY[I] - 16 - EfM(I) Else EfY := (WCY[I] - 16) Div 2;
 End;
 
 { position (colonne, ligne) du caractere P dans un texte multiligne de
@@ -6110,10 +7288,12 @@ Begin
   If FocusWin <> I Then Exit;
   If KindOf(I) = CK_MLE Then
   Begin
-    MlePos(WTextGet(I), MaxI(WCX[I] Div 8, 1), WS0[I], C, R);
+    MlePos(WTextGet(I), EfCols(I), WS0[I], C, R);
     R := R - WS2[I];
-    Dummy := WinCreateCursor(HwOf(I), C * 8, WCY[I] - 16 * (R + 1), 8, 16, $8000, 0);
+    If GMode <> 0 Then Dummy := WinCreateCursor(HwOf(I), EfM(I) + C * 8, EfY(I) - 16 * R, 2, 16, $8000, 0)
+    Else Dummy := WinCreateCursor(HwOf(I), C * 8, WCY[I] - 16 * (R + 1), 8, 16, $8000, 0);
   End
+  Else If GMode <> 0 Then Dummy := WinCreateCursor(HwOf(I), EfM(I) + (WS0[I] - WS2[I]) * 8, EfY(I), 2, 16, $8000, 0)
   Else Dummy := WinCreateCursor(HwOf(I), (WS0[I] - WS2[I]) * 8, EfY(I), 8, 16, $8000, 0);
 End;
 
@@ -6123,14 +7303,14 @@ Var N, C, R : LongInt;
 Begin
   If KindOf(I) = CK_MLE Then
   Begin
-    MlePos(WTextGet(I), MaxI(WCX[I] Div 8, 1), WS0[I], C, R);
-    N := MaxI(WCY[I] Div 16, 1);
+    MlePos(WTextGet(I), EfCols(I), WS0[I], C, R);
+    N := EfRows(I);
     If R < WS2[I] Then WS2[I] := R;
     If R >= WS2[I] + N Then WS2[I] := R - N + 1;
   End
   Else
   Begin
-    N := MaxI(WCX[I] Div 8, 1);
+    N := EfCols(I);
     If WS0[I] < WS2[I] Then WS2[I] := WS0[I];
     If WS0[I] - WS2[I] >= N Then WS2[I] := WS0[I] - N + 1;
   End;
@@ -6195,12 +7375,13 @@ Begin
   If (WStyle[I] And WS_DISABLED) <> 0 Then A := (A And $F0) Or 8;
   ASel := Attr(-33, -32);
   FillPS(K, 0, 0, WCX[I], WCY[I], 32, A);
+  If GMode <> 0 Then GSunkenPS(K, 0, 0, WCX[I], WCY[I]);
   S := WTextGet(I);
   Foc := FocusWin = I;
-  W := MaxI(WCX[I] Div 8, 1);
+  W := EfCols(I);
   If Mle Then
   Begin
-    Rows := WCY[I] Div 16;
+    Rows := EfRows(I);
     C := 0; R := 0;
     For J := 1 To Length(S) Do
     Begin
@@ -6214,8 +7395,8 @@ Begin
         If (R >= WS2[I]) And (R < WS2[I] + Rows) Then
         Begin
           If Foc And (J - 1 >= MinI(WS4[I], WS0[I])) And (J - 1 < MaxI(WS4[I], WS0[I])) Then
-            CharPS(K, C * 8, WCY[I] - 16 * (R - WS2[I] + 1), Ch, ASel)
-          Else CharPS(K, C * 8, WCY[I] - 16 * (R - WS2[I] + 1), Ch, A);
+            CharPS(K, EfM(I) + C * 8, WCY[I] - EfM(I) - 16 * (R - WS2[I] + 1), Ch, ASel)
+          Else CharPS(K, EfM(I) + C * 8, WCY[I] - EfM(I) - 16 * (R - WS2[I] + 1), Ch, A);
         End;
         Inc(C);
         If C >= W Then
@@ -6234,7 +7415,7 @@ Begin
       Begin
         Ch := Ord(S[WS2[I] + J + 1]);
         If (WStyle[I] And ES_UNREADABLE) <> 0 Then Ch := 42;
-        X := J * 8;
+        X := EfM(I) + J * 8;
         If Foc And (WS2[I] + J >= MinI(WS4[I], WS0[I])) And (WS2[I] + J < MaxI(WS4[I], WS0[I])) Then
           CharPS(K, X, Y, Ch, ASel)
         Else CharPS(K, X, Y, Ch, A);
@@ -6429,7 +7610,7 @@ Begin
         Begin
           If FocusWin <> I Then FocusTo(I);
           S := WTextGet(I);
-          If Not Mle Then WS0[I] := MinI(WS2[I] + MaxI(SLo(Mp1), 0) Div 8, Length(S));
+          If Not Mle Then WS0[I] := MinI(WS2[I] + MaxI(SLo(Mp1) - EfM(I), 0) Div 8, Length(S));
           WS4[I] := WS0[I];
           InvalWin(I);
           EfCursor(I);
@@ -6450,6 +7631,17 @@ End;
 { liste : WS0 premier visible, WS1 article courant ;                   }
 { liste deroulante : WS5 article courant                               }
 { ==================================================================== }
+{ marge et lignes visibles d'une liste (ecran graphique : bordure en creux) }
+Function LM(I : LongInt) : LongInt;
+Begin
+  If GMode <> 0 Then LM := 2 Else LM := 0;
+End;
+
+Function LRows(I : LongInt) : LongInt;
+Begin
+  LRows := MaxI((WCY[I] - 2 * LM(I)) Div 16, 1);
+End;
+
 Function LCur(I : LongInt) : LongInt;
 Begin
   If KindOf(I) = CK_COMBOBOX Then LCur := WS5[I] Else LCur := WS1[I];
@@ -6462,7 +7654,7 @@ Begin
   Else
   Begin
     WS1[I] := V;
-    N := MaxI(WCY[I] Div 16, 1);
+    N := LRows(I);
     If V >= 0 Then
     Begin
       If V < WS0[I] Then WS0[I] := V;
@@ -6520,23 +7712,28 @@ Begin
   A := Attr(PPColor(I, 1, -17), PPColor(I, 3, -20));
   ASel := Attr(-33, -32);
   FillPS(K, 0, 0, WCX[I], WCY[I], 32, A);
+  If GMode <> 0 Then GSunkenPS(K, 0, 0, WCX[I], WCY[I]);
   Foc := FocusWin = I;
-  Rows := WCY[I] Div 16;
-  N := WCX[I] Div 8;
+  Rows := LRows(I);
+  N := (WCX[I] - 2 * LM(I)) Div 8;
   For R := 0 To Rows - 1 Do
   Begin
     Ix := WS0[I] + R;
     It := ItAt(I, Ix);
     If It >= 0 Then
     Begin
-      Y := WCY[I] - 16 * (R + 1);
+      Y := WCY[I] - LM(I) - 16 * (R + 1);
       If LSel(It) Then
       Begin
-        FillPS(K, 0, Y, WCX[I], Y + 16, 32, ASel);
-        TextPS(K, 8, Y, N - 1, ItTextGet(It), ASel, ASel, False);
+        FillPS(K, LM(I), Y, WCX[I] - LM(I), Y + 16, 32, ASel);
+        TextPS(K, LM(I) + 8, Y, N - 1, ItTextGet(It), ASel, ASel, False);
       End
-      Else TextPS(K, 8, Y, N - 1, ItTextGet(It), A, A, False);
-      If Foc And (Ix = WS1[I]) Then CharPS(K, 0, Y, 16, A);
+      Else TextPS(K, LM(I) + 8, Y, N - 1, ItTextGet(It), A, A, False);
+      If Foc And (Ix = WS1[I]) Then
+      Begin
+        If GMode <> 0 Then GDotPS(K, LM(I), Y, WCX[I] - LM(I), Y + 16, (A And 15))
+        Else CharPS(K, 0, Y, 16, A);
+      End;
     End;
   End;
   EndP(K);
@@ -6694,7 +7891,7 @@ Begin
         Vk := 0;
         If (Lo16(Mp1) And KC_VIRTUALKEY) <> 0 Then Vk := Hi16(Mp2);
         Ix := WS1[I];
-        Rows := MaxI(WCY[I] Div 16, 1);
+        Rows := LRows(I);
         ListProc := 1;
         If Vk = VK_UP Then Ix := Ix - 1
         Else If Vk = VK_DOWN Then Ix := Ix + 1
@@ -6732,7 +7929,7 @@ Begin
     WM_BUTTON1DOWN, WM_BUTTON1DBLCLK :
       Begin
         If FocusWin <> I Then FocusTo(I);
-        Ix := WS0[I] + (WCY[I] - 1 - SHi(Mp1)) Div 16;
+        Ix := WS0[I] + MaxI(WCY[I] - LM(I) - 1 - SHi(Mp1), 0) Div 16;
         K := ItAt(I, Ix);
         If K >= 0 Then
         Begin
@@ -6767,7 +7964,12 @@ Begin
     K := WinGetPS(HwOf(I));
     If K <> 0 Then
     Begin
-      CharPS(K - $50530001, WCX[I] - 8, EfY(I), 25, Attr(-17, -40));
+      If GMode <> 0 Then
+      Begin
+        GButtonPS(K - $50530001, WCX[I] - 18, 2, WCX[I] - 2, WCY[I] - 2, 7, False);
+        GArrowPS(K - $50530001, WCX[I] - 18, 2, WCX[I] - 2, WCY[I] - 2, 1, 0);
+      End
+      Else CharPS(K - $50530001, WCX[I] - 8, EfY(I), 25, Attr(-17, -40));
       Dummy := WinReleasePS(K);
     End;
     ComboProc := 0;
@@ -6812,11 +8014,61 @@ Begin
   Else CharPS(K, C * 8, 0, Ch, A);
 End;
 
+{ ecran graphique : longueur L, fleches A, position Tp et taille Ts du
+  curseur (pels le long de la barre, depuis le haut ou la gauche) }
+Procedure SbGeom(I : LongInt; Var L, A, Tp, Ts : LongInt);
+Var Tr, Rg : LongInt;
+Begin
+  If (WStyle[I] And SBS_VERT) <> 0 Then
+  Begin
+    L := WCY[I]; A := WCX[I];
+  End
+  Else
+  Begin
+    L := WCX[I]; A := WCY[I];
+  End;
+  A := MaxI(MinI(A, L Div 2), 0);
+  Tr := MaxI(L - 2 * A, 0);
+  If (WS3[I] > 0) And (WS4[I] > 0) Then Ts := MaxI(8, (Tr * WS3[I]) Div WS4[I]) Else Ts := MaxI(8, A);
+  Ts := MinI(Ts, Tr);
+  Rg := WS2[I] - WS1[I];
+  If Rg > 0 Then Tp := A + ((Tr - Ts) * (WS0[I] - WS1[I])) Div Rg Else Tp := A;
+End;
+
+Procedure GSbPaint(I, K : LongInt);
+Var L, A, Tp, Ts, X2, Y2, Dc : LongInt; Dis : Boolean;
+Begin
+  SbGeom(I, L, A, Tp, Ts);
+  Dis := (WStyle[I] And WS_DISABLED) <> 0;
+  X2 := WCX[I]; Y2 := WCY[I];
+  GFillPS(K, 0, 0, X2, Y2, 7);
+  If GPsClip(K) Then GFillPat(PsOrgX[K], PsOrgY[K], PsOrgX[K] + X2, PsOrgY[K] + Y2, 15, $AA, 0);
+  If Dis Then Dc := 8 Else Dc := 0;
+  If (WStyle[I] And SBS_VERT) <> 0 Then
+  Begin
+    GButtonPS(K, 0, Y2 - A, X2, Y2, 7, False); GArrowPS(K, 0, Y2 - A, X2, Y2, 0, Dc);
+    GButtonPS(K, 0, 0, X2, A, 7, False); GArrowPS(K, 0, 0, X2, A, 1, Dc);
+    If (Not Dis) And (Ts > 0) Then GButtonPS(K, 0, Y2 - Tp - Ts, X2, Y2 - Tp, 7, False);
+  End
+  Else
+  Begin
+    GButtonPS(K, 0, 0, A, Y2, 7, False); GArrowPS(K, 0, 0, A, Y2, 2, Dc);
+    GButtonPS(K, X2 - A, 0, X2, Y2, 7, False); GArrowPS(K, X2 - A, 0, X2, Y2, 3, Dc);
+    If (Not Dis) And (Ts > 0) Then GButtonPS(K, Tp, 0, Tp + Ts, Y2, 7, False);
+  End;
+End;
+
 Procedure SbPaint(I : LongInt);
 Var K, A, N, C, T : LongInt; V : Boolean;
 Begin
   K := BeginP(I);
   If K < 0 Then Exit;
+  If GMode <> 0 Then
+  Begin
+    GSbPaint(I, K);
+    EndP(K);
+    Exit;
+  End;
   A := Attr(-17, -25);
   V := (WStyle[I] And SBS_VERT) <> 0;
   FillPS(K, 0, 0, WCX[I], WCY[I], 176, A);
@@ -6846,7 +8098,7 @@ Begin
 End;
 
 Function ScrollProc(I, Msg, Mp1, Mp2 : LongInt) : LongInt;
-Var C, T, N, Vk : LongInt;
+Var C, T, N, Vk, L, A, Tp, Ts : LongInt;
 Begin
   ScrollProc := 0;
   Case Msg Of
@@ -6877,7 +8129,25 @@ Begin
       End;
     WM_BUTTON1DOWN, WM_BUTTON1DBLCLK :
       Begin
-        If (WStyle[I] And WS_DISABLED) = 0 Then
+        If ((WStyle[I] And WS_DISABLED) = 0) And (GMode <> 0) Then
+        Begin
+          SbGeom(I, L, A, Tp, Ts);
+          If (WStyle[I] And SBS_VERT) <> 0 Then C := WCY[I] - 1 - SHi(Mp1) Else C := SLo(Mp1);
+          If C < A Then SbSend(I, SB_LINEUP)
+          Else If C >= L - A Then SbSend(I, SB_LINEDOWN)
+          Else If C < Tp Then SbSend(I, SB_PAGEUP)
+          Else If C >= Tp + Ts Then SbSend(I, SB_PAGEDOWN)
+          Else
+          Begin
+            { glisser le curseur }
+            WS5[I] := C - Tp + 1;
+            CaptureWin := I;
+            ScrollProc := 1;
+            Exit;
+          End;
+          SbSend(I, SB_ENDSCROLL);
+        End
+        Else If (WStyle[I] And WS_DISABLED) = 0 Then
         Begin
           N := SbLen(I);
           If (WStyle[I] And SBS_VERT) <> 0 Then C := (WCY[I] - 1 - SHi(Mp1)) Div 16 Else C := SLo(Mp1) Div 8;
@@ -6906,6 +8176,34 @@ Begin
         SbSend(I, SB_ENDSCROLL);
         ScrollProc := 1;
       End;
+    WM_MOUSEMOVE :
+      If (WS5[I] > 0) And (CaptureWin = I) Then
+      Begin
+        SbGeom(I, L, A, Tp, Ts);
+        If (WStyle[I] And SBS_VERT) <> 0 Then C := WCY[I] - 1 - SHi(Mp1) Else C := SLo(Mp1);
+        C := C - (WS5[I] - 1);
+        If L - 2 * A - Ts > 0 Then N := WS1[I] + ((C - A) * (WS2[I] - WS1[I])) Div (L - 2 * A - Ts)
+        Else N := WS1[I];
+        N := MaxI(WS1[I], MinI(N, WS2[I]));
+        If N <> WS0[I] Then
+        Begin
+          WS0[I] := N;
+          InvalWin(I);
+          SbSend(I, 5);
+        End;
+        ScrollProc := 1;
+      End
+      Else ScrollProc := DefWP(HwOf(I), Msg, Mp1, Mp2);
+    WM_BUTTON1UP :
+      If WS5[I] > 0 Then
+      Begin
+        WS5[I] := 0;
+        If CaptureWin = I Then CaptureWin := 0;
+        SbSend(I, SB_SLIDERPOSITION);
+        SbSend(I, SB_ENDSCROLL);
+        ScrollProc := 1;
+      End
+      Else ScrollProc := DefWP(HwOf(I), Msg, Mp1, Mp2);
     WM_ENABLE :
       InvalWin(I);
     WM_QUERYDLGCODE :
@@ -6924,14 +8222,18 @@ Begin
   IsBar := (WStyle[I] And MS_ACTIONBAR) <> 0;
 End;
 
+{ largeur (pels) d'un article d'une barre }
 Function MItemW(I, K : LongInt) : LongInt;
 Begin
-  If (ItStyle[K] And MIS_SEPARATOR) <> 0 Then MItemW := 1
-  Else If (WId[I] = FID_SYSMENU) Or (WId[I] = FID_MINMAX) Then MItemW := VisLen(ItTextGet(K))
-  Else MItemW := VisLen(ItTextGet(K)) + 2;
+  If (ItStyle[K] And MIS_SEPARATOR) <> 0 Then MItemW := 8
+  Else If (WId[I] = FID_SYSMENU) Or (WId[I] = FID_MINMAX) Then
+  Begin
+    If GMode <> 0 Then MItemW := TitleH Else MItemW := VisLen(ItTextGet(K)) * 8;
+  End
+  Else MItemW := (VisLen(ItTextGet(K)) + 2) * 8;
 End;
 
-{ colonne d'un article d'une barre }
+{ position (pels) d'un article d'une barre }
 Function MItemX(I, Ps : LongInt) : LongInt;
 Var J, X, K : LongInt;
 Begin
@@ -6948,7 +8250,7 @@ Function MenuWidthPels(I : LongInt) : LongInt;
 Var J, N, W, K : LongInt;
 Begin
   N := ItCnt(I);
-  If IsBar(I) Then MenuWidthPels := MItemX(I, N) * 8
+  If IsBar(I) Then MenuWidthPels := MItemX(I, N)
   Else
   Begin
     W := 4;
@@ -6963,7 +8265,7 @@ End;
 
 Function MenuHeightPels(I : LongInt) : LongInt;
 Begin
-  If IsBar(I) Then MenuHeightPels := 16 Else MenuHeightPels := (ItCnt(I) + 2) * 16;
+  If IsBar(I) Then MenuHeightPels := MenuH Else MenuHeightPels := ItCnt(I) * MRowH + 2 * MPad;
 End;
 
 Function NewMenuWin(HPar, HOwn, Style, Id : LongInt) : LongInt;
@@ -7074,13 +8376,13 @@ Begin
   Cx := MenuWidthPels(S); Cy := MenuHeightPels(S);
   If IsBar(I) Then
   Begin
-    X := AbsX(I) + MItemX(I, Ps) * 8;
+    X := AbsX(I) + MItemX(I, Ps);
     Y := AbsY(I) - Cy;
   End
   Else
   Begin
-    X := AbsX(I) + WCX[I] - 16;
-    Y := AbsY(I) + WCY[I] - 16 * (Ps + 1) + 16 - Cy;
+    If GMode <> 0 Then X := AbsX(I) + WCX[I] - 4 Else X := AbsX(I) + WCX[I] - 16;
+    Y := AbsY(I) + WCY[I] - MRowH * Ps - Cy;
   End;
   X := MaxI(0, MinI(X, ScrCX - Cx)); Y := MaxI(0, MinI(Y, ScrCY - Cy));
   WPar[S] := 0;
@@ -7155,7 +8457,7 @@ Begin
   N := ItCnt(I);
   If IsBar(I) Then
   Begin
-    C := X Div 8; Cx := 0;
+    C := X; Cx := 0;
     For J := 0 To N - 1 Do
     Begin
       K := ItAt(I, J);
@@ -7168,8 +8470,10 @@ Begin
   End
   Else
   Begin
-    J := (WCY[I] - 1 - Y) Div 16 - 1;
-    If (J >= 0) And (J < N) And (X >= 8) And (X < WCX[I] - 8) Then R := J;
+    If GMode <> 0 Then C := MPad Else C := 8;
+    J := WCY[I] - MPad - 1 - Y;
+    If J >= 0 Then J := J Div MRowH Else J := -1;
+    If (J >= 0) And (J < N) And (X >= C) And (X < WCX[I] - C) Then R := J;
   End;
   If R >= 0 Then
   Begin
@@ -7179,11 +8483,139 @@ Begin
   MenuHit := R;
 End;
 
+{ ecran graphique : barre d'actions, menu deroulant, menu systeme et
+  boutons de reduction et d'agrandissement }
+Procedure GMenuPaint(I, K : LongInt);
+Var J, N, X, W, It, Y, Fg, Bg, Hf, Hb, Df, C, Cx, Cy, Tb, F : LongInt; S, S2 : String; Act, Sel : Boolean;
+Begin
+  Fg := GCol(-18); Bg := GCol(-21); Hf := GCol(-45); Hb := GCol(-44); Df := GCol(-46);
+  N := ItCnt(I);
+  Act := (WS1[MenuRoot(I)] <> 0) Or Not IsBar(I);
+  If (WId[I] = FID_SYSMENU) Or (WId[I] = FID_MINMAX) Then
+  Begin
+    F := WPar[I];
+    X := 0;
+    For J := 0 To N - 1 Do
+    Begin
+      It := ItAt(I, J);
+      If It >= 0 Then
+      Begin
+        W := MItemW(I, It);
+        Sel := Act And (WS0[I] = J);
+        GButtonPS(K, X, 0, X + W, WCY[I], 7, Sel);
+        Cx := X + W Div 2; Cy := WCY[I] Div 2;
+        If Sel Then
+        Begin
+          Inc(Cx); Dec(Cy);
+        End;
+        Case ItId[It] Of
+          SC_SYSMENU :
+            Begin
+              GFillPS(K, Cx - 5, Cy - 1, Cx + 6, Cy + 2, 15); GFramePS(K, Cx - 6, Cy - 2, Cx + 7, Cy + 3, 0);
+            End;
+          SC_MINIMIZE :
+            GFramePS(K, Cx - 2, Cy - 2, Cx + 3, Cy + 3, 0);
+          SC_MAXIMIZE, SC_RESTORE :
+            If (F > 1) And ((WStyle[F] And WS_MAXIMIZED) <> 0) Then
+            Begin
+              GFramePS(K, Cx - 5, Cy - 5, Cx + 3, Cy + 3, 0); GFramePS(K, Cx - 2, Cy - 2, Cx + 6, Cy + 6, 0);
+            End
+            Else
+            Begin
+              GFramePS(K, Cx - 6, Cy - 6, Cx + 7, Cy + 7, 0); GFramePS(K, Cx - 6, Cy + 4, Cx + 7, Cy + 7, 0);
+            End;
+        Else
+          GTextPS(K, X + (W - GTextW(ItTextGet(It), True)) Div 2, (WCY[I] - 16) Div 2, ItTextGet(It), 3, 0, 7, False, True);
+        End;
+        X := X + W;
+      End;
+    End;
+    Exit;
+  End;
+  If IsBar(I) Then
+  Begin
+    GFillPS(K, 0, 0, WCX[I], WCY[I], Bg);
+    GFillPS(K, 0, 0, WCX[I], 1, 8);
+    X := 0;
+    For J := 0 To N - 1 Do
+    Begin
+      It := ItAt(I, J);
+      If It >= 0 Then
+      Begin
+        W := MItemW(I, It);
+        If (ItStyle[It] And MIS_SEPARATOR) <> 0 Then GFillPS(K, X + 3, 3, X + 4, WCY[I] - 3, 8)
+        Else
+        Begin
+          C := Fg;
+          If (ItAttr[It] And MIA_DISABLED) <> 0 Then C := Df;
+          If Act And (WS0[I] = J) Then
+          Begin
+            GFillPS(K, X, 1, X + W, WCY[I], Hb);
+            C := Hf;
+          End;
+          GTextPS(K, X + 8, (WCY[I] - 16) Div 2, ItTextGet(It), W Div 8, C, Bg, False, True);
+        End;
+        X := X + W;
+      End;
+    End;
+    Exit;
+  End;
+  { menu deroulant }
+  GFillPS(K, 0, 0, WCX[I], WCY[I], Bg);
+  GFramePS(K, 0, 0, WCX[I], WCY[I], 0);
+  GBevelPS(K, 1, 1, WCX[I] - 1, WCY[I] - 1, 15, 8, 1);
+  For J := 0 To N - 1 Do
+  Begin
+    It := ItAt(I, J);
+    Y := WCY[I] - MPad - MRowH * (J + 1);
+    If It >= 0 Then
+    Begin
+      If (ItStyle[It] And MIS_SEPARATOR) <> 0 Then
+      Begin
+        GFillPS(K, MPad + 3, Y + MRowH Div 2, WCX[I] - MPad - 3, Y + MRowH Div 2 + 1, 8);
+        GFillPS(K, MPad + 3, Y + MRowH Div 2 - 1, WCX[I] - MPad - 3, Y + MRowH Div 2, 15);
+      End
+      Else
+      Begin
+        C := Fg; Tb := Bg;
+        If (ItAttr[It] And MIA_DISABLED) <> 0 Then C := Df;
+        If WS0[I] = J Then
+        Begin
+          GFillPS(K, MPad, Y, WCX[I] - MPad, Y + MRowH, Hb);
+          C := Hf; Tb := Hb;
+        End;
+        If (ItAttr[It] And MIA_CHECKED) <> 0 Then
+        Begin
+          Cy := Y + MRowH Div 2;
+          GLinePS(K, 5, Cy, 8, Cy - 3, C); GLinePS(K, 8, Cy - 3, 13, Cy + 3, C);
+          GLinePS(K, 5, Cy + 1, 8, Cy - 2, C); GLinePS(K, 8, Cy - 2, 13, Cy + 4, C);
+        End;
+        S := ItTextGet(It); S2 := '';
+        For X := Length(S) DownTo 1 Do
+          If (S2 = '') And (Ord(S[X]) = 9) Then
+          Begin
+            S2 := Copy(S, X + 1, 255); S := Copy(S, 1, X - 1);
+          End;
+        GTextPS(K, 16, Y + (MRowH - 16) Div 2, S, MaxI((WCX[I] - 32) Div 8, 0), C, Tb, False, True);
+        If S2 <> '' Then
+          GTextPS(K, WCX[I] - 16 - GTextW(S2, True), Y + (MRowH - 16) Div 2, S2, 32, C, Tb, False, True);
+        If (ItStyle[It] And MIS_SUBMENU) <> 0 Then GArrowPS(K, WCX[I] - 14, Y + 2, WCX[I] - 4, Y + MRowH - 2, 3, C);
+      End;
+    End;
+  End;
+End;
+
 Procedure MenuPaint(I : LongInt);
 Var K, A, AH, AD, J, N, X, Y, W, It, AA, Cw : LongInt; S : String; Act : Boolean;
 Begin
   K := BeginP(I);
   If K < 0 Then Exit;
+  If GMode <> 0 Then
+  Begin
+    GMenuPaint(I, K);
+    EndP(K);
+    Exit;
+  End;
   A := Attr(-18, -21); AH := Attr(-45, -44); AD := (A And $F0) Or 8;
   FillPS(K, 0, 0, WCX[I], WCY[I], 32, A);
   N := ItCnt(I);
@@ -7200,12 +8632,12 @@ Begin
         If Act And (WS0[I] = J) Then AA := AH
         Else If (ItAttr[It] And MIA_DISABLED) <> 0 Then AA := AD
         Else AA := A;
-        If (ItStyle[It] And MIS_SEPARATOR) <> 0 Then CharPS(K, X * 8, 0, 179, A)
+        If (ItStyle[It] And MIS_SEPARATOR) <> 0 Then CharPS(K, X, 0, 179, A)
         Else
         Begin
-          FillPS(K, X * 8, 0, (X + W) * 8, 16, 32, AA);
-          If (WId[I] = FID_SYSMENU) Or (WId[I] = FID_MINMAX) Then TextPS(K, X * 8, 0, W, ItTextGet(It), AA, MnA(AA), True)
-          Else TextPS(K, X * 8 + 8, 0, W - 2, ItTextGet(It), AA, MnA(AA), True);
+          FillPS(K, X, 0, X + W, 16, 32, AA);
+          If (WId[I] = FID_SYSMENU) Or (WId[I] = FID_MINMAX) Then TextPS(K, X, 0, W Div 8, ItTextGet(It), AA, MnA(AA), True)
+          Else TextPS(K, X + 8, 0, W Div 8 - 2, ItTextGet(It), AA, MnA(AA), True);
         End;
         X := X + W;
       End;
@@ -8327,6 +9759,7 @@ Begin
   If Lines = 0 Then Lines := 1;
   W := MinI(MaxI(W, X + Iw), 72);
   Cx := (W + 4) * 8; Cy := (Lines + 5) * 16;
+  If GMode <> 0 Then Cy := Cy + 16;
   X := ((ScrCX - Cx) Div 16) * 8; Y := ((ScrCY - Cy) Div 32) * 16;
   { cadre }
   MemZero(LongInt(@Fcd), 12);
@@ -8367,8 +9800,12 @@ Begin
     If K = 0 Then St := St Or WS_GROUP;
     If K = Def Then St := St Or BS_DEFAULT;
     If Ids[K] = MBID_HELP Then St := St Or $100;
-    B := WinCreateWindow(H, $FFFF0003, LongInt(@Buf), St, Bx, 16, (VisLen(Lab[K]) + 4) * 8, 16, H, HWND_BOTTOM,
-                         Ids[K], 0, 0);
+    If GMode <> 0 Then
+      B := WinCreateWindow(H, $FFFF0003, LongInt(@Buf), St, Bx, 10, (VisLen(Lab[K]) + 4) * 8, 26, H, HWND_BOTTOM,
+                           Ids[K], 0, 0)
+    Else
+      B := WinCreateWindow(H, $FFFF0003, LongInt(@Buf), St, Bx, 16, (VisLen(Lab[K]) + 4) * 8, 16, H, HWND_BOTTOM,
+                           Ids[K], 0, 0);
     If (K = Def) And (WData[D] <> 0) Then WrL(WData[D] + $18, B);
     Bx := Bx + (VisLen(Lab[K]) + 6) * 8;
   End;
@@ -8441,6 +9878,13 @@ End;
 Procedure TrackDraw(X1, Y1, X2, Y2 : LongInt);
 Var C, R, C1, C2, R1, R2 : LongInt;
 Begin
+  If GMode <> 0 Then
+  Begin
+    GHideAll;
+    GXorRaw(X1, Y1, X2, Y1 + 2); GXorRaw(X1, Y2 - 2, X2, Y2);
+    GXorRaw(X1, Y1 + 2, X1 + 2, Y2 - 2); GXorRaw(X2 - 2, Y1 + 2, X2, Y2 - 2);
+    Exit;
+  End;
   C1 := MaxI(ColOf(X1), 0); C2 := MinI(ColOf(X2 - 1), ScrCols - 1);
   R1 := MaxI(RowOf(Y2 - 1), 0); R2 := MinI(RowOf(Y1), ScrRows - 1);
   If (C1 > C2) Or (R1 > R2) Then Exit;
@@ -10337,6 +11781,13 @@ End;
 Function DebugCls : LongInt;
 Var C, R : LongInt;
 Begin
+  If GMode <> 0 Then
+  Begin
+    GClipAll;
+    GFill(0, 0, ScrCX, ScrCY, 0);
+    DebugCls := 0;
+    Exit;
+  End;
   For R := 0 To ScrRows - 1 Do
     For C := 0 To ScrCols - 1 Do PutCell(C, R, 32, 7);
   Dummy := VioSetCurPos(0, 0, 0);
@@ -10526,8 +11977,10 @@ Begin
     If (QPid[C] <> 0) And Alive(QPid[C]) Then Others := True;
   If Not Others Then
   Begin
-    For R := 0 To ScrRows - 1 Do
-      For C := 0 To ScrCols - 1 Do PutCell(C, R, 32, 7);
+    If GMode <> 0 Then GLeave
+    Else
+      For R := 0 To ScrRows - 1 Do
+        For C := 0 To ScrCols - 1 Do PutCell(C, R, 32, 7);
     CursorWin := 0; CurShown := 0; CurFs := 0;
     WrW(LongInt(@NameZ2), 14); WrW(LongInt(@NameZ2) + 2, 15); WrW(LongInt(@NameZ2) + 4, 1); WrW(LongInt(@NameZ2) + 6, 0);
     Dummy := VioSetCurType(LongInt(@NameZ2), 0);
@@ -10611,6 +12064,107 @@ Begin
   SysVal[108] := 108;
 End;
 
+{ --- ecran graphique de PM --- }
+{ valeurs et couleurs du systeme du mode }
+Procedure GSysVals;
+Var K : LongInt;
+Begin
+  For K := 4 To 5 Do SysVal[K] := SvDef[K];
+  For K := 20 To 41 Do SysVal[K] := SvDef[K];
+  For K := 10 To 50 Do SysClr[K] := ClrDef[K];
+  If GMode <> 0 Then
+  Begin
+    SysVal[4] := 4; SysVal[5] := 4; SysVal[20] := 640; SysVal[21] := 480; SysVal[22] := 16; SysVal[23] := 16;
+    SysVal[24] := 16; SysVal[25] := 16; SysVal[26] := 1; SysVal[27] := 1; SysVal[28] := 3; SysVal[29] := 3;
+    SysVal[30] := 20; SysVal[31] := 16; SysVal[32] := 16; SysVal[33] := 20; SysVal[34] := 20; SysVal[35] := 20;
+    SysVal[36] := 640; SysVal[37] := 460; SysVal[40] := 16; SysVal[41] := 16;
+    { cadres gris, boutons gris, champs blancs, selection bleue }
+    SysClr[14] := $AAAAAA; SysClr[15] := $AAAAAA; SysClr[25] := $AAAAAA; SysClr[39] := $555555;
+    SysClr[40] := $AAAAAA; SysClr[41] := $FFFFFF; SysClr[44] := $0000AA; SysClr[45] := $FFFFFF;
+    SysClr[47] := $FFFFFF; SysClr[42] := $FFFFFF;
+  End;
+  WCX[0] := ScrCX; WCY[0] := ScrCY;
+End;
+
+{ PMMODE=TEXTE dans l'environnement : PM reste en mode texte }
+Function GWanted : Boolean;
+Var P : LongInt; S : String;
+Begin
+  P := 0; S := '';
+  PutZ(LongInt(@NameZ2), 'PMMODE');
+  If DcScanEnv(LongInt(@NameZ2), LongInt(@P)) = 0 Then
+    If P <> 0 Then S := UpStr(GetZ(P));
+  GWanted := Not ((S <> '') And (S[1] = 'T'));
+End;
+
+{ passer l'ecran en 640 x 480 x 16 couleurs (VioSetMode) }
+Procedure GEnter;
+Var K, P, H : LongInt;
+Begin
+  { police 8 x 16 du VGA (lue en mode texte : VioGetFont n'est pas
+    disponible en mode graphique) }
+  If GMode = 0 Then
+  Begin
+    MemZero(LongInt(@NameZ2), 16);
+    WrW(LongInt(@NameZ2), 14); WrW(LongInt(@NameZ2) + 2, 1);
+    If VioGetFont(LongInt(@NameZ2), 0) = 0 Then
+    Begin
+      P := RdL(LongInt(@NameZ2) + 8); H := RdW(LongInt(@NameZ2) + 6);
+      For K := 0 To 4095 Do
+        If (P <> 0) And ((K Mod 16) < H) Then GFont[K] := RdB(P + (K Div 16) * H + K Mod 16) Else GFont[K] := 0;
+    End;
+  End;
+  MemZero(LongInt(@NameZ2), 40);
+  WrW(LongInt(@NameZ2), 12); NameZ2[2] := 3; NameZ2[3] := 4;
+  WrW(LongInt(@NameZ2) + 4, 80); WrW(LongInt(@NameZ2) + 6, 30);
+  WrW(LongInt(@NameZ2) + 8, 640); WrW(LongInt(@NameZ2) + 10, 480);
+  If VioSetMode(LongInt(@NameZ2), 0) <> 0 Then Exit;
+  GMode := 1;
+  GPtrOn := 0; GCarOn := 0; GCarWant := 0;
+  For K := 0 To 2399 Do GShadow[K] := 32;
+  GMetrics;
+  GSysVals;
+End;
+
+{ revenir au mode texte 80 x 25 }
+Procedure GLeave;
+Begin
+  If GMode = 0 Then Exit;
+  GPtrOn := 0; GCarOn := 0; GCarWant := 0;
+  MemZero(LongInt(@NameZ2), 40);
+  WrW(LongInt(@NameZ2), 8); NameZ2[2] := 1; NameZ2[3] := 4;
+  WrW(LongInt(@NameZ2) + 4, 80); WrW(LongInt(@NameZ2) + 6, 25);
+  Dummy := VioSetMode(LongInt(@NameZ2), 0);
+  GMode := 0;
+  GMetrics;
+  GSysVals;
+End;
+
+{ WINQUERYSCREENTEXT (ordinal 1002, interne : programmes d'essai) :
+  (ligne, colonne, nombre, tampon) -> caracteres ecrits a l'ecran (mode
+  texte : cellules ; mode graphique : caracteres dessines aux positions
+  des cellules de 8 x 16 pels) ; rend 1 si l'ecran est graphique }
+Function WinQueryScreenText(Row, Col, N, P : LongInt) : LongInt;
+Var K : LongInt;
+Begin
+  For K := 0 To N - 1 Do
+    If (Row >= 0) And (Row < ScrRows) And (Col + K >= 0) And (Col + K < ScrCols) Then
+    Begin
+      If GMode <> 0 Then WrB(P + K, GShadow[Row * 80 + Col + K])
+      Else WrB(P + K, RdB($B8000 + (Row * ScrCols + Col + K) * 2));
+    End
+    Else WrB(P + K, 32);
+  WinQueryScreenText := GMode;
+End;
+
+{ WINHIDEOVERLAYS (ordinal 1003, interne : PMGPI.DLL) : retirer le
+  pointeur et le curseur avant un dessin direct a l'ecran }
+Function WinHideOverlays : LongInt;
+Begin
+  If GMode <> 0 Then GHideAll;
+  WinHideOverlays := GMode;
+End;
+
 Procedure RegSys(N : String; Kind, Cb : LongInt);
 Begin
   Dummy := ClsAdd(N, SysProc, 0, Cb, 0, Kind);
@@ -10664,6 +12218,7 @@ End;
 { Premiere file de messages : ecran de PM }
 Procedure ScreenStart;
 Begin
+  If GWanted Then GEnter Else GLeave;
   CursorWin := 0;
   ShowHwCursor;
   InvalScreen(0, 0, ScrCX, ScrCY);
@@ -12635,13 +14190,17 @@ exports
   WinLockInput Index 995 Name 'WinLockInput',
   WinSetSysFont Index 996 Name 'WinSetSysFont',
   WinSysClassProc Index 1000 Name 'WINSYSCLASSPROC',
-  WinQueryPSInfo Index 1001 Name 'WINQUERYPSINFO';
+  WinQueryPSInfo Index 1001 Name 'WINQUERYPSINFO',
+  WinQueryScreenText Index 1002 Name 'WINQUERYSCREENTEXT',
+  WinHideOverlays Index 1003 Name 'WINHIDEOVERLAYS';
 
 Var
   InitI : LongInt;
 
 BEGIN
   HwBit := $80000000;
+  GMode := 0;
+  GMetrics;
   HeapInitIn(LongInt(@Arena), ArenaSize);
   For InitI := 0 To MaxWin - 1 Do
   Begin

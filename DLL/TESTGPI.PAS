@@ -19,7 +19,8 @@ Program TESTGPI;
   segments retenus, correlation, donnees de limites, metafichiers,
   remplissage par diffusion, piles d'attributs. Il dessine ensuite a
   l'ecran en 640 x 480 x 16 couleurs (VioSetMode, quelques secondes)
-  puis dans un espace de presentation de PMWIN en mode texte. }
+  puis dans un espace de presentation de PMWIN (ecran graphique de PM :
+  640 x 480 x 16 couleurs ; ecran texte si PMMODE=TEXTE). }
 
 Function DosQueryModuleHandle(PName, PHmod : LongInt) : LongInt; External 'DOSCALLS';
 Function DosQueryProcAddr(H, Ord, PName, PPfn : LongInt) : LongInt; External 'DOSCALLS';
@@ -143,6 +144,7 @@ Function WinGetScreenPS(H : LongInt) : LongInt; External 'PMWIN';
 Function WinReleasePS(H : LongInt) : LongInt; External 'PMWIN';
 Function WinDestroyMsgQueue(H : LongInt) : LongInt; External 'PMWIN';
 Function WinTerminate(H : LongInt) : LongInt; External 'PMWIN';
+Function WinQuerySysValue(H, I : LongInt) : LongInt; External 'PMWIN';
 
 Const
   OD_MEMORY = 8; OD_DIRECT = 5; OD_METAFILE = 3;
@@ -809,18 +811,31 @@ BEGIN
   WrW(LongInt(@Mode), 8); Mode[2] := 1; Mode[3] := 4; WrW(LongInt(@Mode) + 4, 80); WrW(LongInt(@Mode) + 6, 25);
   R := VioSetMode(LongInt(@Mode), 0);
 
-  { --- espace de presentation de PMWIN (mode texte) --- }
+  { --- espace de presentation de PMWIN : ecran graphique de PM (ou ecran
+    texte avec PMMODE=TEXTE) --- }
   Hab := WinInitialize(0);
   Hmq := WinCreateMsgQueue(Hab, 0);
   Hpss := WinGetScreenPS(1);
   R := GpiSetColor(Hpss, CLR_BLUE);
   R := GoTo2(Hpss, 80, 80); R := BoxTo(Hpss, DRO_FILL, 159, 111);
-  A := RdB($B8000 + ((24 - 96 Div 16) * 80 + 15) * 2 + 1);
-  R := GpiSetColor(Hpss, CLR_YELLOW);
-  R := GpiCharStringAt(Hpss, PtA(320, 200), 3, Z('GPI'));
-  B := RdB($B8000 + (12 * 80 + 40) * 2);
-  Check('GpiBox et texte dans un espace de PMWIN (cellules : fond ' + IStr((A Shr 4) And 7) + ')',
-        (((A Shr 4) And 7) = 1) And (B = Ord('G')));
+  If WinQuerySysValue(1, 21) = 480 Then
+  Begin
+    R := GpiSetColor(Hpss, CLR_YELLOW);
+    R := GpiCharStringAt(Hpss, PtA(320, 200), 3, Z('GPI'));
+    A := Pel(Hpss, 100, 100);
+    N := Count(Hpss, 320, 190, 343, 217, CLR_YELLOW);
+    Check('GpiBox et texte dans un espace de PMWIN (ecran graphique : ' + IStr(N) + ' pels jaunes)',
+          (A = CLR_BLUE) And (N > 20));
+  End
+  Else
+  Begin
+    A := RdB($B8000 + ((24 - 96 Div 16) * 80 + 15) * 2 + 1);
+    R := GpiSetColor(Hpss, CLR_YELLOW);
+    R := GpiCharStringAt(Hpss, PtA(320, 200), 3, Z('GPI'));
+    B := RdB($B8000 + (12 * 80 + 40) * 2);
+    Check('GpiBox et texte dans un espace de PMWIN (cellules : fond ' + IStr((A Shr 4) And 7) + ')',
+          (((A Shr 4) And 7) = 1) And (B = Ord('G')));
+  End;
   R := WinReleasePS(Hpss);
   R := WinDestroyMsgQueue(Hmq);
   R := WinTerminate(Hab);

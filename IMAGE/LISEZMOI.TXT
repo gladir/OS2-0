@@ -198,8 +198,10 @@ Les 29 fonctions Mou* (ordinaux 1 a 30, sans 28). Le noyau recoit les
 paquets de la souris PS/2 (IRQ 12) ; MOUCALLS.DLL en fait des evenements
 (file de 64, masque, echelle, seuils), tient la position en lignes et
 colonnes de l'ecran texte et dessine le pointeur (masques ET et OU
-exclusif de la cellule, apres MouDrawPtr). Avec QEMU, la souris se
-pilote aussi par le moniteur (mouse_move, mouse_button).
+exclusif de la cellule, apres MouDrawPtr). En mode graphique
+(VioSetMode), lignes et colonnes sont des pels (0 a 479, 0 a 639) et le
+pointeur est dessine par le programme (PMWIN.DLL). Avec QEMU, la souris
+se pilote aussi par le moniteur (mouse_move, mouse_button).
 
 NLS.DLL
 -------
@@ -377,18 +379,29 @@ PMWIN.DLL
 ---------
 Le gestionnaire de fenetres de Presentation Manager : 649 ordinaux
 (1 a 640 : interface 16 bits, noms en majuscules si la fonction a aussi
-un ordinal 32 bits ; 700 a 996), WINSYSCLASSPROC (ordinal 1000) et
+un ordinal 32 bits ; 700 a 996), WINSYSCLASSPROC (ordinal 1000),
 WINQUERYPSINFO (ordinal 1001 : fenetre, origine et rectangle visible
-d'un HPS, pour PMGPI.DLL).
+d'un HPS, pour PMGPI.DLL), WINQUERYSCREENTEXT (1002 : texte ecrit a
+l'ecran, programmes d'essai) et WINHIDEOVERLAYS (1003 : pointeur et
+curseur retires avant un dessin de PMGPI.DLL).
 Classes et fenetres, files de messages, WM_PAINT, minuteries, crochets,
-focus, clavier et souris (lus par WinGetMsg/WinPeekMsg), dessin en
-cellules, controles (cadre, titre, bouton, statique, saisie, liste,
-liste deroulante, defilement, menu, texte multiligne), dialogues,
-boites de message, accelerateurs, presse-papiers, atomes, tas,
-ressources, valeurs et couleurs du systeme, pages de codes 437 et 850.
-Le bureau est l'ecran texte de 80 x 25 vu en 640 x 400 pels (cellule
-de 8 x 16, origine en bas a gauche). Les fonctions Gpi* sont dans
-PMGPI.DLL ; WinThrow rend FALSE
+focus, clavier et souris (lus par WinGetMsg/WinPeekMsg), dessin,
+controles (cadre, titre, bouton, statique, saisie, liste, liste
+deroulante, defilement, menu, texte multiligne), dialogues, boites de
+message, accelerateurs, presse-papiers, atomes, tas, ressources, valeurs
+et couleurs du systeme, pages de codes 437 et 850.
+Ecran graphique : la premiere file de messages passe l'ecran en
+640 x 480 x 16 couleurs (mode 12h du VGA, origine en bas a gauche) ;
+cadres et boutons en relief, barre de titre de 20 pels, menu systeme,
+boutons de reduction et d'agrandissement, barre d'actions et menus
+deroulants (mnemoniques soulignes, coches, sous-menus), cases a cocher,
+boutons radio, champs et listes en creux, barres de defilement (curseur
+a glisser), bitmaps OS/2 (1, 4, 8, 24 bits), police 8 x 16 du VGA,
+pointeur en fleche et curseur superposes ; une fenetre se deplace en
+tirant sa barre de titre. Le dernier WinTerminate (ou CMD a la fin du
+programme) rend l'ecran au mode texte. Avec SET PMMODE=TEXTE, PM reste
+dans l'ecran texte de 80 x 25 vu en 640 x 400 pels (cellule de 8 x 16).
+Les fonctions Gpi* sont dans PMGPI.DLL ; WinThrow rend FALSE
 (pas de deroulement de la pile). Procedures de fenetre : convention
 Pascal pour un programme OS2PC (00400000h-007FFFFFh), _System sinon.
 
@@ -405,9 +418,10 @@ PU_*), bitmaps (1, 4, 8 et 24 bits) et GpiBitBlt (256 operations ROP),
 tables de couleurs, palettes, polices, segments retenus, correlation,
 donnees de limites, metafichiers (en-tete OS20MF01). Cibles : bitmap en
 memoire (OD_MEMORY), ecran graphique (OD_DIRECT : 640 x 480 x 16 et les
-autres modes de VioSetMode), espaces de presentation de PMWIN en mode
-texte (640 x 400 pels sur 80 x 25 cellules : couleur du fond des
-cellules, texte dans les cellules) et metafichier (OD_METAFILE). Les
+autres modes de VioSetMode), espaces de presentation de PMWIN (ecran
+graphique de PM ; avec PMMODE=TEXTE, 640 x 400 pels sur 80 x 25
+cellules : couleur du fond des cellules, texte dans les cellules) et
+metafichier (OD_METAFILE). Les
 elements des segments et des metafichiers sont des appels Gpi*
 enregistres (pas d'ordres GOCA) ; codes PMERR_* approches ; l'ordinal
 541 se nomme GPISETPATTERNSET comme dans la liste fournie (GpiSetPattern

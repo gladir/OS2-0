@@ -268,7 +268,7 @@ Var
   { divers }
   Arena : Array[0..ArenaSize - 1] Of Byte;
   Recording, Replaying, ReplayDepth, LastErr : LongInt;
-  PmMod, PmErrFn, PmInfoFn, PmFromDc : LongInt;
+  PmMod, PmErrFn, PmInfoFn, PmFromDc, PmHideFn : LongInt;
   NameZ : Array[0..259] Of Byte;
   Scratch : Array[0..1023] Of Byte;
   Dummy : LongInt;
@@ -812,6 +812,21 @@ Begin
   PmInfo := CallSys2(PmInfoFn, H, P) <> 0;
 End;
 
+{ ecran graphique de PM : retirer le pointeur et le curseur de PMWIN avant
+  de dessiner directement a l'ecran (WINHIDEOVERLAYS, ordinal 1003) }
+Procedure PmHide;
+Begin
+  If PmMod = 0 Then
+  Begin
+    PutZ(LongInt(@NameZ), 'PMWIN');
+    If DcQueryModuleHandle(LongInt(@NameZ), LongInt(@PmMod)) <> 0 Then PmMod := 0;
+  End;
+  If PmMod = 0 Then Exit;
+  If PmHideFn = 0 Then
+    If DcQueryProcAddr(PmMod, 1003, 0, LongInt(@PmHideFn)) <> 0 Then PmHideFn := 0;
+  If PmHideFn <> 0 Then Dummy := CallSys2(PmHideFn, 0, 0);
+End;
+
 Function PmWndFromDc(Hdc : LongInt) : LongInt;
 Begin
   PmWndFromDc := 0;
@@ -1247,6 +1262,7 @@ Begin
     BeginDraw := False;
     Exit;
   End;
+  If (TgKind = TG_PLANAR) Or (TgKind = TG_LINEAR) Then PmHide;
   If (Gps[K].X[gxClipRgn] >= 0) And (RgUse[Gps[K].X[gxClipRgn]] <> 0) Then ClipRegion(Gps[K].X[gxClipRgn], TgOffX, TgOffY);
   If (Gps[K].X[gxClipPath] >= 0) And (RgUse[Gps[K].X[gxClipPath]] <> 0) Then ClipRegion(Gps[K].X[gxClipPath], TgOffX, TgOffY);
   LimitClip(K);
@@ -10235,5 +10251,5 @@ BEGIN
       FontOk := 1;
     End;
   CurK := -1; RMode := 0; Replaying := 0; ReplayDepth := 0;
-  PmMod := 0; PmErrFn := 0; PmInfoFn := 0; PmFromDc := 0;
+  PmMod := 0; PmErrFn := 0; PmInfoFn := 0; PmFromDc := 0; PmHideFn := 0;
 END.

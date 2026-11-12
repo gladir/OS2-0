@@ -27,6 +27,7 @@ Program TESTWIN;
 Function DosQueryModuleHandle(PName, PHmod : LongInt) : LongInt; External 'DOSCALLS';
 Function DosQueryProcAddr(H, Ord, PName, PPfn : LongInt) : LongInt; External 'DOSCALLS';
 Function DosWrite(H, Buf, Cb, PActual : LongInt) : LongInt; External 'DOSCALLS';
+Function WinQueryScreenText(Row, Col, N, P : LongInt) : LongInt; External 'PMWIN' Name 'WINQUERYSCREENTEXT';
 
 Function WinInitialize(Fl : LongInt) : LongInt; External 'PMWIN';
 Function WinTerminate(Hab : LongInt) : LongInt; External 'PMWIN';
@@ -239,6 +240,8 @@ Var
   Ok, Fail, R, R2, I, N, A, B, C, P, X, Hab, Hmq, Frame, Client, Btn, Lb, Ef, Sb, Mnu, Dlg, Hk, Hmod, T0 : LongInt;
   Name, Name2, Buf : Array[0..255] Of Byte;
   Fl : LongInt;
+  Gr, Seen : Boolean;                    { ecran graphique de PM ; texte vu a l'ecran }
+  MgL, MgB, MgR, MgT : LongInt;          { marges du cadre d'essai }
   Rc1, Rc2, Rc3 : Array[0..3] Of LongInt;
   Pt : Array[0..1] Of LongInt;
   Swp : Array[0..8] Of LongInt;
@@ -370,12 +373,15 @@ Begin
   End;
 End;
 
-{ texte de l'ecran (ligne, colonne, longueur) }
+{ texte de l'ecran (ligne, colonne, longueur) : caracteres dessines par
+  PMWIN (WINQUERYSCREENTEXT, ordinal interne 1002 : cellules de l'ecran
+  texte ou caracteres de 8 x 16 pels de l'ecran graphique) }
 Function Scr(Row, Col, N : LongInt) : String;
-Var S : String; K : LongInt;
+Var S : String; K : LongInt; SB : Array[0..79] Of Byte;
 Begin
   S := '';
-  For K := 0 To N - 1 Do S := S + Chr(RdB($B8000 + (Row * 80 + Col + K) * 2));
+  K := WinQueryScreenText(Row, Col, N, LongInt(@SB));
+  For K := 0 To N - 1 Do S := S + Chr(SB[K]);
   Scr := S;
 End;
 
@@ -384,7 +390,7 @@ Function ScrHas(T : String) : Boolean;
 Var Row : LongInt; F : Boolean;
 Begin
   F := False;
-  For Row := 0 To 24 Do
+  For Row := 0 To 29 Do
     If Pos(T, Scr(Row, 0, 80)) > 0 Then F := True;
   ScrHas := F;
 End;
@@ -625,18 +631,29 @@ BEGIN
   R2 := WinQueryWindowPos(Frame, LongInt(@Swp));
   Check('WinSetWindowPos, WinQueryWindowPos', (R = 1) And (Swp[1] = 288) And (Swp[2] = 480) And (Swp[3] = 48) And
         (Swp[4] = 80));
+  { marges du cadre : ecran graphique (bordure 4, titre 20, barre de
+    defilement 16) ou ecran texte (cellules de 8 x 16) }
+  Gr := WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) = 480;
+  If Gr Then
+  Begin
+    MgL := 4; MgB := 4; MgR := 4 + 16; MgT := 4 + 20;
+  End
+  Else
+  Begin
+    MgL := 8; MgB := 16; MgR := 8 + 8; MgT := 16;
+  End;
   R := WinQueryWindowRect(Client, LongInt(@Rc1));
-  Check('WinQueryWindowRect du client (' + IStr(Rc1[2]) + 'x' + IStr(Rc1[3]) + ')', (Rc1[0] = 0) And (Rc1[2] = 480 - 24) And
-        (Rc1[3] = 288 - 32));
+  Check('WinQueryWindowRect du client (' + IStr(Rc1[2]) + 'x' + IStr(Rc1[3]) + ')', (Rc1[0] = 0) And
+        (Rc1[2] = 480 - MgL - MgR) And (Rc1[3] = 288 - MgB - MgT));
   Rc2[0] := 80; Rc2[1] := 48; Rc2[2] := 560; Rc2[3] := 336;
   R := WinCalcFrameRect(Frame, LongInt(@Rc2), 1);
-  Check('WinCalcFrameRect', (Rc2[0] = 88) And (Rc2[1] = 64) And (Rc2[2] = 560 - 16) And (Rc2[3] = 336 - 16));
+  Check('WinCalcFrameRect', (Rc2[0] = 80 + MgL) And (Rc2[1] = 48 + MgB) And (Rc2[2] = 560 - MgR) And (Rc2[3] = 336 - MgT));
   R := WinSetWindowULong(Client, 4, $12345678);
   Check('WinSetWindowULong, WinQueryWindowULong, WinQueryWindowUShort (QWS_ID)',
         (WinQueryWindowULong(Client, 4) = $12345678) And (WinQueryWindowUShort(Client, -1) = FID_CLIENT));
   Pt[0] := 0; Pt[1] := 0;
   R := WinMapWindowPoints(Client, HWND_DESKTOP, LongInt(@Pt), 1);
-  Check('WinMapWindowPoints (' + IStr(Pt[0]) + ', ' + IStr(Pt[1]) + ')', (Pt[0] = 88) And (Pt[1] = 64));
+  Check('WinMapWindowPoints (' + IStr(Pt[0]) + ', ' + IStr(Pt[1]) + ')', (Pt[0] = 80 + MgL) And (Pt[1] = 48 + MgB));
   Pt[0] := 200; Pt[1] := 200;
   Check('WinWindowFromPoint : client', WinWindowFromPoint(HWND_DESKTOP, LongInt(@Pt), 1) = Client);
   A := WinBeginEnumWindows(Frame);
@@ -654,8 +671,10 @@ BEGIN
   R := A;
   Check('WinPostMsg, WinPeekMsg, WinDispatchMsg, WinQueryQueueStatus', (R = 1) And (NPosted = 1) And
         ((R2 And $20) <> 0));
-  Check('WM_PAINT et WinDrawText (ecran : "Bonjour PM")', (NPaint >= 1) And ScrHas('Bonjour PM'));
-  Check('barre de titre a l''ecran ("Essai PMWIN")', ScrHas('Essai PMWIN'));
+  Seen := ScrHas('Bonjour PM');
+  Check('WM_PAINT et WinDrawText (ecran : "Bonjour PM")', (NPaint >= 1) And Seen);
+  Seen := ScrHas('Essai PMWIN');
+  Check('barre de titre a l''ecran ("Essai PMWIN")', Seen);
   R := WinBroadcastMsg(Frame, WM_USER + 1, 0, 0, 1);
   Check('WinBroadcastMsg (envoi aux enfants)', (R = 1) And (NPosted = 2));
   R := WinSendMsg(12345, WM_USER, 0, 0);
@@ -730,8 +749,12 @@ BEGIN
         (WinEnumClipbrdFmts(Hab, 0) = 1) And (WinEnumClipbrdFmts(Hab, 1) = 0));
 
   { --- systeme --- }
-  Check('WinQuerySysValue : ecran 640 x 400, titre 16', (WinQuerySysValue(HWND_DESKTOP, SV_CXSCREEN) = 640) And
-        (WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) = 400) And (WinQuerySysValue(HWND_DESKTOP, SV_CYTITLEBAR) = 16));
+  If Gr Then
+    Check('WinQuerySysValue : ecran 640 x 480, titre 20', (WinQuerySysValue(HWND_DESKTOP, SV_CXSCREEN) = 640) And
+          (WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) = 480) And (WinQuerySysValue(HWND_DESKTOP, SV_CYTITLEBAR) = 20))
+  Else
+    Check('WinQuerySysValue : ecran 640 x 400, titre 16', (WinQuerySysValue(HWND_DESKTOP, SV_CXSCREEN) = 640) And
+          (WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) = 400) And (WinQuerySysValue(HWND_DESKTOP, SV_CYTITLEBAR) = 16));
   R := WinSetSysValue(HWND_DESKTOP, SV_CXDBLCLK, 12);
   Check('WinSetSysValue', (R = 1) And (WinQuerySysValue(HWND_DESKTOP, SV_CXDBLCLK) = 12));
   R := WinSetSysValue(HWND_DESKTOP, SV_CXDBLCLK, 8);
