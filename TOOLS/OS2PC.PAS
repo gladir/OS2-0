@@ -112,7 +112,7 @@ Const
   OS2_BOOT_SEG = $07C0;
   OS2_LDR_SEG  = $2000;
   OS2_KRNL_BASE = $00100000;  { base de l image PE du noyau (1 Mo) }
-  OS2_DLL_BASE  = $00C00000;  { base des DLL OS/2-0 (region 12-16 Mo) }
+  OS2_DLL_BASE  = $00C00000;  { base preferee par defaut des DLL OS/2-0 (region 8-16 Mo) }
   { Liste des API (noms Win32) utilisees par le runtime : le noyau OS/2-0
     (-COS2KRNL) exporte un point d entree pour chacune (DOSCALLS.DLL). }
   OS2_API_COUNT = 138;
@@ -227,6 +227,10 @@ Var
   ImageBaseDir : LongInt;     { directive IMAGEBASE (0 = base par defaut) }
   PEImgBase  : LongInt;
   AsmBlockSeq: LongInt;
+  { OS/2-0 : relocalisations de base d une bibliotheque (section .reloc,
+    RVA des adresses absolues de 32 bits) }
+  PERelCnt   : LongInt;
+  PERelRva   : Array[0..65535] Of LongInt;
 
 { ------------------------------------------------------------ }
 { Fonctions utilitaires                                        }
@@ -44449,6 +44453,9 @@ Var
   ExpOrder: Array[0..1023] Of Integer;
   ExpNameOfs: Array[0..1023] Of LongInt;
   EatOfs, NptOfs, OrdOfs, ExpDllOfs, TmpI, ThunkOfs: LongInt;
+  { OS/2-0 bibliotheque : section .reloc }
+  HasRel: Boolean;
+  RelRVA, RelSize, RelRawSize, RelFileBase, RelPage, RelK, RelN: LongInt;
 
   Function AlignUp(V, A: LongInt): LongInt;
   Begin AlignUp := ((V + A - 1) Div A) * A; End;
@@ -44689,6 +44696,71 @@ Begin
       End;
     End;
 
+  { ========== OS/2-0 bibliotheque : relocalisations de base ==========
+    Les adresses absolues de 32 bits (donnees, IAT, adresses de code)
+    sont listees dans .reloc : le noyau peut charger la DLL ailleurs
+    qu a sa base preferee (type IMAGE_REL_BASED_HIGHLOW). }
+  HasRel := IsLibrary And Not Krnl;
+  RelRVA := 0; RelSize := 0; RelRawSize := 0;
+  If HasRel Then
+  Begin
+    PERelCnt := 0;
+    For I := 0 To BcFixupCnt - 1 Do
+      If ((BcFixups[I].Kind = BC_FIX_ABS32_DATA) Or (BcFixups[I].Kind = BC_FIX_ABS32_IMP) Or
+          (BcFixups[I].Kind = BC_FIX_ABS32_CODE)) And (BcFixups[I].CodeOfs + 3 < BcCodeLen) Then
+        If PERelCnt <= 65535 Then
+        Begin
+          PERelRva[PERelCnt] := PE_TEXT_RVA + BcFixups[I].CodeOfs;
+          Inc(PERelCnt);
+        End;
+    For I := 0 To BcDFixCnt - 1 Do
+      If (BcDFixOfs[I] >= 0) And (BcDFixOfs[I] + 3 < BcDataLen) Then
+        If (BcData[BcDFixOfs[I]] Or BcData[BcDFixOfs[I] + 1] Or BcData[BcDFixOfs[I] + 2] Or
+            BcData[BcDFixOfs[I] + 3]) <> 0 Then
+          If PERelCnt <= 65535 Then
+          Begin
+            PERelRva[PERelCnt] := DataRVA + BcDFixOfs[I];
+            Inc(PERelCnt);
+          End;
+    If PERelCnt > 65535 Then FatalError('trop de relocalisations dans la bibliotheque');
+    { tri (les listes sont presque triees) }
+    For I := 1 To PERelCnt - 1 Do
+    Begin
+      TmpI := PERelRva[I]; J := I - 1;
+      While (J >= 0) And (PERelRva[J] > TmpI) Do
+      Begin
+        PERelRva[J + 1] := PERelRva[J]; Dec(J);
+      End;
+      PERelRva[J + 1] := TmpI;
+    End;
+    { sans doublon (une adresse n est relocalisee qu une fois) }
+    J := 0;
+    For I := 0 To PERelCnt - 1 Do
+      If (I = 0) Or (PERelRva[I] <> PERelRva[J - 1]) Then
+      Begin
+        PERelRva[J] := PERelRva[I]; Inc(J);
+      End;
+    PERelCnt := J;
+    { taille : un bloc par page de 4 Ko (8 octets + 2 par entree, aligne a 4) }
+    RelSize := 0;
+    I := 0;
+    While I < PERelCnt Do
+    Begin
+      RelPage := PERelRva[I] And Not 4095;
+      RelN := 0;
+      While (I < PERelCnt) And ((PERelRva[I] And Not 4095) = RelPage) Do
+      Begin
+        Inc(RelN); Inc(I);
+      End;
+      If Odd(RelN) Then Inc(RelN);
+      RelSize := RelSize + 8 + RelN * 2;
+    End;
+    If RelSize = 0 Then RelSize := 8;            { bloc vide : DLL sans adresse absolue }
+    RelRVA := ImageSize;
+    RelRawSize := AlignUp(RelSize, PE_FILE_ALIGN_);
+    ImageSize := RelRVA + AlignUp(RelSize, PE_SECT_ALIGN_);
+  End;
+
   { ========== Ecrire le fichier PE ========== }
   Assign(PEBinF, FileName);
   Rewrite(PEBinF, 1);
@@ -44730,12 +44802,13 @@ Begin
 
   { ===== COFF File Header (20 octets) ===== }
   PEWrW($014C);         { Machine = i386 }
-  If HasExp Then PEWrW(4) Else PEWrW(3);   { NumberOfSections }
+  If HasRel Then PEWrW(5) Else If HasExp Then PEWrW(4) Else PEWrW(3);   { NumberOfSections }
   PEWrD(0);             { TimeDateStamp }
   PEWrD(0);             { PointerToSymbolTable }
   PEWrD(0);             { NumberOfSymbols }
   PEWrW(224);           { SizeOfOptionalHeader }
-  If IsLibrary Then PEWrW($2103)   { DLL|EXEC|32BIT|NO_RELOCS }
+  If HasRel Then PEWrW($2102)      { DLL|EXEC|32BIT (relocalisable) }
+  Else If IsLibrary Then PEWrW($2103)   { DLL|EXEC|32BIT|NO_RELOCS }
   Else PEWrW($0103);    { Characteristics: EXEC|32BIT|NO_RELOCS }
 
   { ===== Optional Header PE32 (224 octets) ===== }
@@ -44787,7 +44860,8 @@ Begin
   PEWrD(0); PEWrD(0);   { [2] Resource }
   PEWrD(0); PEWrD(0);   { [3] Exception }
   PEWrD(0); PEWrD(0);   { [4] Security }
-  PEWrD(0); PEWrD(0);   { [5] Base Reloc }
+  If HasRel Then Begin PEWrD(RelRVA); PEWrD(RelSize); End   { [5] Base Reloc }
+  Else Begin PEWrD(0); PEWrD(0); End;
   PEWrD(0); PEWrD(0);   { [6] Debug }
   PEWrD(0); PEWrD(0);   { [7] Architecture }
   PEWrD(0); PEWrD(0);   { [8] Global Ptr }
@@ -44851,6 +44925,19 @@ Begin
     PEWrD(0); PEWrD(0);
     PEWrW(0); PEWrW(0);
     PEWrD(LongInt($40000040)); { IDATA | MEM_READ }
+  End;
+
+  { .reloc (bibliotheque OS/2-0) }
+  If HasRel Then
+  Begin
+    PEWrName8('.reloc');
+    PEWrD(RelSize);
+    PEWrD(RelRVA);
+    PEWrD(RelRawSize);
+    PEWrD(HdrSize + TextRawSize + DataRawSize + IdataRawSize + EdataRawSize);
+    PEWrD(0); PEWrD(0);
+    PEWrW(0); PEWrW(0);
+    PEWrD(LongInt($42000040)); { IDATA | DISCARDABLE | MEM_READ }
   End;
 
   { Padding jusqu a FILE_ALIGN }
@@ -44963,6 +45050,35 @@ Begin
     PEWrStr(ExpDll);
     For I := 0 To ExpN - 1 Do PEWrStr(ExpNameOf(ExpOrder[I]));
     PEPadTo(EdataFileBase + EdataRawSize);
+  End;
+
+  { ===== Section .reloc (bibliotheque OS/2-0) ===== }
+  If HasRel Then
+  Begin
+    RelFileBase := HdrSize + TextRawSize + DataRawSize + IdataRawSize + EdataRawSize;
+    PEPadTo(RelFileBase);
+    If PERelCnt = 0 Then
+    Begin
+      PEWrD(0); PEWrD(8);
+    End;
+    I := 0;
+    While I < PERelCnt Do
+    Begin
+      RelPage := PERelRva[I] And Not 4095;
+      RelN := 0;
+      RelK := I;
+      While (RelK < PERelCnt) And ((PERelRva[RelK] And Not 4095) = RelPage) Do Inc(RelK);
+      RelN := RelK - I;
+      PEWrD(RelPage);
+      If Odd(RelN) Then PEWrD(8 + (RelN + 1) * 2) Else PEWrD(8 + RelN * 2);
+      While I < RelK Do
+      Begin
+        PEWrW($3000 Or (PERelRva[I] And 4095));
+        Inc(I);
+      End;
+      If Odd(RelN) Then PEWrW(0);           { IMAGE_REL_BASED_ABSOLUTE (remplissage) }
+    End;
+    PEPadTo(RelFileBase + RelRawSize);
   End;
 
   If Opts.Verbose Then

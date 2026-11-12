@@ -6,16 +6,18 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
               KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
-              OS2SM.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
+              OS2SM.DLL, HELPMGR.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
-              TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE et les
-              commandes du depot compilees avec OS2PC (-COS2).
+              TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE,
+              TESTHLP.EXE et les commandes du depot compilees avec
+              OS2PC (-COS2).
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
-              RMINFO.DLL, OS2SM.DLL et CONFIG.SYS (copies faites par
+              RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL et CONFIG.SYS (copies
+              faites par
               KERNEL\BUILD.sh).
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
@@ -66,6 +68,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTRM.PAS                      -> TESTRM.EXE (essai de RMINFO.DLL)
   OS2PC DLL\OS2SM.PAS                       -> OS2SM.DLL (liste des taches)
   OS2PC DLL\TESTSM.PAS                      -> TESTSM.EXE (essai de OS2SM.DLL)
+  OS2PC DLL\HELPMGR.PAS                     -> HELPMGR.DLL (gestionnaire d'aide)
+  OS2PC DLL\TESTHLP.PAS                     -> TESTHLP.EXE (essai de HELPMGR.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -98,8 +102,9 @@ Carte memoire
   00100000h          OS2KRNL (image PE)
   fin de l'image..4 Mo tas du noyau
   00400000h-007FFFFFh fenetre du processus courant (pagination)
-  00800000h-00FFFFFFh DLL partagees (RMINFO.DLL a 00800000h, OS2SM.DLL
-                     a 00850000h, DOSCALLS.DLL a 00C00000h,
+  00800000h-00FFFFFFh DLL partagees, a leur base preferee (RMINFO.DLL a
+                     00800000h, OS2SM.DLL a 00850000h, HELPMGR.DLL a
+                     00880000h, DOSCALLS.DLL a 00C00000h,
                      KBDCALLS.DLL a 00C80000h, MONCALLS.DLL a
                      00CB0000h, FKA.DLL a 00D00000h, NLS.DLL a
                      00D40000h, MSG.DLL a 00D80000h, NAMPIPES.DLL a
@@ -107,7 +112,10 @@ Carte memoire
                      00E70000h, SPOOLCP.DLL a 00EA0000h, VIOCALLS.DLL a
                      00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
                      00F80000h, SESMGR.DLL a 00FA0000h : directive
-                     {$IMAGEBASE} d'OS2PC ; 32 modules au plus)
+                     {$IMAGEBASE} d'OS2PC) ; si la place est prise,
+                     le noyau reloge la DLL (section .reloc) a la
+                     premiere place libre ; la table des modules
+                     grandit au besoin (tas du noyau)
   01000000h et plus  memoire physique des processus (image + pile)
   haut de la memoire disque virtuel HPFS (/RAMDISK:n Ko)
 
@@ -301,6 +309,18 @@ sessions. Fichier C:\OS2SM.INI : RUN=programme parametres
 (StartSystemExecutables), FONT=fichier (ShlLoadPublicFonts), section
 [Bureau] ecrite par WinSave. Pas de Presentation Manager : les handles
 de fenetres sont conserves tels quels, PROG_PM est refuse.
+
+HELPMGR.DLL
+-----------
+Les 6 points d'entree du gestionnaire d'aide IPF : WinCreateHelpInstance
+(HELPINIT : titre, tutoriel, bibliotheques .HLP, table d'aide),
+WinDestroyHelpInstance, WinAssociateHelpInstance, WinQueryHelpInstance,
+WinCreateHelpTable (HELPTABLE en memoire) et WinLoadHelpTable
+(ressources RT_HELPTABLE et RT_HELPSUBTABLE d'un module). Bibliotheques
+cherchees telles quelles, dans le repertoire courant, dans HELP (SET
+HELP=D:\AIDE; du CONFIG.SYS) puis dans C:\ ; signature HSP verifiee.
+Points d'entree internes : HMQUERYPANELID (100, panneau d'aide d'une
+fenetre selon la table d'aide), HMQUERYINSTANCEINFO (101).
 
 Imprimante
 ----------

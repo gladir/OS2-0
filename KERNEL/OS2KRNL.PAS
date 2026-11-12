@@ -85,7 +85,8 @@ Const
   PhysProcBase  = $01000000;   { memoire physique des processus (>= 16 Mo) }
   DllBase       = $00800000;   { region des DLL (8 Mo - 16 Mo), partagee }
   DllTop        = $01000000;
-  MaxMods       = 32;
+  ModFirstCap   = 16;          { table des modules : 16 entrees, doublee au besoin }
+  DllAlign      = $00010000;   { placement des DLL relogees : 64 Ko }
 
   { Tas du noyau }
   HeapMagicUsed = $55534544;   { 'DESU' }
@@ -4610,10 +4611,15 @@ Begin
 End;
 
 { --- Modules de liens dynamiques (DLL) ---
-  Une DLL OS/2-0 (OS2PC, Library) est une image PE liee dans la region
-  00800000h-00FFFFFFh, projetee a l'identique et partagee par tous les
-  processus. Elle est chargee a sa base (une seule fois), ses importations
-  sont liees, puis son code d'initialisation (point d'entree) est execute. }
+  Une DLL OS/2-0 (OS2PC, Library) est une image PE chargee (une seule
+  fois) dans la region 00800000h-00FFFFFFh, projetee a l'identique et
+  partagee par tous les processus. Elle est placee a sa base preferee
+  (directive $IMAGEBASE d'OS2PC) si cette place est libre, sinon a la
+  premiere place libre de la region : ses adresses absolues sont alors
+  corrigees (section .reloc). Ses importations sont liees, puis son code
+  d'initialisation (point d'entree) est execute. La table des modules est
+  allouee dans le tas du noyau et doublee au besoin : le nombre de DLL
+  n'est limite que par la place dans la region. }
 
 Type
   TModule = Record
@@ -4626,31 +4632,110 @@ Type
     OrdBase, NFunc : LongInt;   { base des ordinaux, entrees de l'EAT }
   End;
 
+  TModArr = Array[0..4095] Of TModule;
+  PModArr = ^TModArr;
+
 Var
-  Mods      : Array[0..MaxMods - 1] Of TModule;
+  Mods      : PModArr;          { table des modules (tas du noyau) }
+  ModCap    : LongInt;          { nombre d'entrees de la table }
   EntryTmp  : LongInt;
+
+{ Entree libre de la table des modules (la table est doublee si elle est
+  pleine) ; -1 si le tas du noyau est epuise }
+Function NewModSlot : LongInt;
+Var I, NC, A : LongInt;
+Begin
+  For I := 0 To ModCap - 1 Do
+    If Not Mods^[I].Used Then
+    Begin
+      NewModSlot := I;
+      Exit;
+    End;
+  If ModCap = 0 Then NC := ModFirstCap Else NC := ModCap * 2;
+  NewModSlot := -1;
+  A := KAlloc(NC * SizeOf(TModule));
+  If A = 0 Then Exit;
+  FillMem(A, NC * SizeOf(TModule), 0);
+  If ModCap > 0 Then
+  Begin
+    MoveMem(LongInt(Mods), A, ModCap * SizeOf(TModule));
+    KFree(LongInt(Mods));
+  End;
+  Mods := Pointer(A);
+  NewModSlot := ModCap;
+  ModCap := NC;
+End;
+
+{ La place [B, B + Sz[ de la region des DLL est-elle libre ? }
+Function DllSpaceFree(B, Sz : LongInt) : Boolean;
+Var I : LongInt; Ok : Boolean;
+Begin
+  Ok := (B >= DllBase) And (B + Sz <= DllTop) And (B + Sz <= PhysTop);
+  For I := 0 To ModCap - 1 Do
+    If Ok And Mods^[I].Used And (B < Mods^[I].Base + Mods^[I].Size) And (Mods^[I].Base < B + Sz) Then Ok := False;
+  DllSpaceFree := Ok;
+End;
+
+{ Premiere place libre de Sz octets dans la region des DLL (0 : aucune) }
+Function DllFindSpace(Sz : LongInt) : LongInt;
+Var B, R : LongInt;
+Begin
+  R := 0;
+  B := DllBase;
+  While (R = 0) And (B + Sz <= DllTop) Do
+  Begin
+    If DllSpaceFree(B, Sz) Then R := B;
+    B := B + DllAlign;
+  End;
+  DllFindSpace := R;
+End;
+
+{ Appliquer les relocalisations de base (IMAGE_REL_BASED_HIGHLOW) d'une
+  image chargee a Base au lieu de sa base preferee (Delta) }
+Procedure DllRelocate(Base, RelRva, RelSize, Delta : LongInt);
+Var P, E, Page, BS, K, Ent, A : LongInt;
+Begin
+  P := Base + RelRva;
+  E := P + RelSize;
+  While P + 8 <= E Do
+  Begin
+    Page := MemL[0:P];
+    BS := MemL[0:P + 4];
+    If BS < 8 Then BS := E - P;              { bloc invalide : fin }
+    For K := 0 To (BS - 8) Div 2 - 1 Do
+    Begin
+      Ent := MemW[0:P + 8 + K * 2];
+      If (Ent Shr 12) = 3 Then
+      Begin
+        A := Base + Page + (Ent And 4095);
+        MemL[0:A] := MemL[0:A] + Delta;
+      End;
+    End;
+    P := P + BS;
+  End;
+End;
 
 Function ModuleExport(M : LongInt; Name : String; Ordinal : LongInt) : LongInt;
 Var I, O, Base : LongInt; U : String;
 Begin
   ModuleExport := 0;
-  If (M < 0) Or Not Mods[M].Used Then Exit;
-  Base := Mods[M].Base;
+  If (M < 0) Or Not Mods^[M].Used Then Exit;
+  Base := Mods^[M].Base;
   If Name = '' Then
   Begin
     { par ordinal (base des ordinaux de la DLL, entree non nulle) }
-    I := Ordinal - Mods[M].OrdBase;
-    If (I >= 0) And (I < Mods[M].NFunc) Then
-      If MemL[0:Mods[M].Funcs + I * 4] <> 0 Then
-        ModuleExport := Base + MemL[0:Mods[M].Funcs + I * 4];
+    I := Ordinal - Mods^[M].OrdBase;
+    If (I >= 0) And (I < Mods^[M].NFunc) Then
+      If MemL[0:Mods^[M].Funcs + I * 4] <> 0 Then
+        ModuleExport := Base + MemL[0:Mods^[M].Funcs + I * 4];
     Exit;
   End;
   U := UpStr(Name);
-  For I := 0 To Mods[M].NExp - 1 Do
-    If MemNameEq(Base + MemL[0:Mods[M].Names + I * 4], U) Then
+  For I := 0 To Mods^[M].NExp - 1 Do
+    If MemNameEq(Base + MemL[0:Mods^[M].Names + I * 4], U) Then
     Begin
-      O := MemW[0:Mods[M].Ords + I * 2];
-      ModuleExport := Base + MemL[0:Mods[M].Funcs + O * 4];
+      O := MemW[0:Mods^[M].Ords + I * 2];
+      ModuleExport := Base + MemL[0:Mods^[M].Funcs + O * 4];
       Exit;
     End;
 End;
@@ -4661,8 +4746,8 @@ Begin
   FindModule := -1;
   Name := UpStr(BaseName(Name));
   If Pos('.', Name) = 0 Then Name := Name + '.DLL';
-  For I := 0 To MaxMods - 1 Do
-    If Mods[I].Used And (Mods[I].Name = Name) Then
+  For I := 0 To ModCap - 1 Do
+    If Mods^[I].Used And (Mods^[I].Name = Name) Then
     Begin
       FindModule := I;
       Exit;
@@ -4740,6 +4825,7 @@ Function LoadModule(Name : String) : LongInt;
 Var
   M, I, Buf, Size, Pe, Opt, NSect, OptSize, Base, ImgSize, HdrSize, Entry : LongInt;
   Sec, VSize, VAddr, RawSize, RawPtr, N, ImpRva, ExpRva, Desc, Thunks, Iat, J, V, Adr : LongInt;
+  Pref, RelRva, RelSize : LongInt;
   Path, Nm, Dll : String;
   SaveFilter, SaveProc : LongInt;
 Begin
@@ -4750,14 +4836,12 @@ Begin
   LastError := 126;                        { ERROR_MOD_NOT_FOUND }
   Path := FindLibrary(Name);
   If Path = '' Then Exit;
-  M := -1;
-  For I := 0 To MaxMods - 1 Do
-    If Not Mods[I].Used Then
-    Begin
-      M := I;
-      Break;
-    End;
-  If M < 0 Then Exit;
+  M := NewModSlot;
+  If M < 0 Then
+  Begin
+    LastError := 8;                        { ERROR_NOT_ENOUGH_MEMORY }
+    Exit;
+  End;
   Buf := ReadWholeFile(Path, Size);
   If Buf = 0 Then Exit;
   LastError := ErrBadFormat;
@@ -4771,25 +4855,34 @@ Begin
   OptSize := MemW[0:Pe + 20];
   Opt := Pe + 24;
   Entry := MemL[0:Opt + 16];
-  Base := MemL[0:Opt + 28];
+  Pref := MemL[0:Opt + 28];
   ImgSize := (MemL[0:Opt + 56] + 4095) And Not 4095;
   HdrSize := MemL[0:Opt + 60];
   ExpRva := MemL[0:Opt + 96];
   ImpRva := MemL[0:Opt + 104];
-  { la DLL doit tenir dans la region des DLL, sans chevaucher une autre }
-  If (Base < DllBase) Or (Base + ImgSize > DllTop) Or (Base + ImgSize > PhysTop) Then
+  RelRva := MemL[0:Opt + 136];
+  RelSize := MemL[0:Opt + 140];
+  { place dans la region des DLL : la base preferee si elle est libre,
+    sinon (DLL relocalisable) la premiere place libre }
+  Base := Pref;
+  If Not DllSpaceFree(Base, ImgSize) Then
   Begin
-    ConPutLn('SYS0191: ' + Path + ' n''est pas liee dans la region des DLL (00800000h-00FFFFFFh).');
-    KFree(Buf);
-    Exit;
-  End;
-  For I := 0 To MaxMods - 1 Do
-    If Mods[I].Used And (Base < Mods[I].Base + Mods[I].Size) And (Mods[I].Base < Base + ImgSize) Then
+    If (RelRva = 0) Or (RelSize = 0) Then
     Begin
-      ConPutLn('SYS0191: ' + Path + ' chevauche ' + Mods[I].Name + '.');
+      ConPutLn('SYS0191: ' + Path + ' n''est pas relocalisable et sa place (' + HexStr(Pref, 8) +
+               'h) est prise ou hors de la region des DLL (00800000h-00FFFFFFh).');
       KFree(Buf);
       Exit;
     End;
+    Base := DllFindSpace(ImgSize);
+    If Base = 0 Then
+    Begin
+      ConPutLn('SYS0191: plus de place dans la region des DLL pour ' + Path + '.');
+      LastError := 8;
+      KFree(Buf);
+      Exit;
+    End;
+  End;
   FillMem(Base, ImgSize, 0);
   MoveMem(Buf, Base, HdrSize);
   Sec := Opt + OptSize;
@@ -4806,22 +4899,28 @@ Begin
     Sec := Sec + 40;
   End;
   KFree(Buf);
-  Mods[M].Used := True;
-  Mods[M].Name := UpStr(BaseName(Path));
-  Mods[M].Path := Path;
-  Mods[M].Base := Base;
-  Mods[M].Size := ImgSize;
-  Mods[M].NExp := 0;
-  Mods[M].OrdBase := 1;
-  Mods[M].NFunc := 0;
+  If Base <> Pref Then
+  Begin
+    DllRelocate(Base, RelRva, RelSize, Base - Pref);
+    MemL[0:Base + MemL[0:Base + $3C] + 52] := Base;     { ImageBase de l'en-tete }
+    KLog(UpStr(BaseName(Path)) + ' relogee en ' + HexStr(Base, 8) + 'h (base ' + HexStr(Pref, 8) + 'h prise).');
+  End;
+  Mods^[M].Used := True;
+  Mods^[M].Name := UpStr(BaseName(Path));
+  Mods^[M].Path := Path;
+  Mods^[M].Base := Base;
+  Mods^[M].Size := ImgSize;
+  Mods^[M].NExp := 0;
+  Mods^[M].OrdBase := 1;
+  Mods^[M].NFunc := 0;
   If ExpRva <> 0 Then
   Begin
-    Mods[M].NExp := MemL[0:Base + ExpRva + 24];
-    Mods[M].OrdBase := MemL[0:Base + ExpRva + 16];
-    Mods[M].NFunc := MemL[0:Base + ExpRva + 20];
-    Mods[M].Funcs := Base + MemL[0:Base + ExpRva + 28];
-    Mods[M].Names := Base + MemL[0:Base + ExpRva + 32];
-    Mods[M].Ords := Base + MemL[0:Base + ExpRva + 36];
+    Mods^[M].NExp := MemL[0:Base + ExpRva + 24];
+    Mods^[M].OrdBase := MemL[0:Base + ExpRva + 16];
+    Mods^[M].NFunc := MemL[0:Base + ExpRva + 20];
+    Mods^[M].Funcs := Base + MemL[0:Base + ExpRva + 28];
+    Mods^[M].Names := Base + MemL[0:Base + ExpRva + 32];
+    Mods^[M].Ords := Base + MemL[0:Base + ExpRva + 36];
   End;
   { importations }
   If ImpRva <> 0 Then
@@ -4839,7 +4938,7 @@ Begin
       Begin
         Nm := PStr(Base + V + 2);
         Adr := KernelExport(Nm);
-        If (Adr = 0) And (UpStr(Dll) <> Mods[M].Name) Then
+        If (Adr = 0) And (UpStr(Dll) <> Mods^[M].Name) Then
         Begin
           I := LoadModule(Dll);
           If I >= 0 Then Adr := ModuleExport(I, Nm, 0);
@@ -4848,7 +4947,7 @@ Begin
         If Adr = 0 Then
         Begin
           ConPutLn('SYS0191: ' + Nm + ' introuvable (' + Path + ').');
-          Mods[M].Used := False;
+          Mods^[M].Used := False;
           LastError := 127;
           Exit;
         End;
@@ -5175,7 +5274,7 @@ Function ModuleHandleByName(Name : String) : LongInt;
 Var M : LongInt;
 Begin
   M := FindModule(Name);
-  If M >= 0 Then ModuleHandleByName := Mods[M].Base
+  If M >= 0 Then ModuleHandleByName := Mods^[M].Base
   Else If UpStr(Name) = 'OS2KRNL' Then ModuleHandleByName := $00100000
   Else ModuleHandleByName := 0;
 End;
@@ -5184,15 +5283,15 @@ Function LoadLibraryA(PName : LongInt) : LongInt;
 Var M : LongInt;
 Begin
   M := LoadModule(PStr(PName));
-  If M >= 0 Then LoadLibraryA := Mods[M].Base Else LoadLibraryA := 0;
+  If M >= 0 Then LoadLibraryA := Mods^[M].Base Else LoadLibraryA := 0;
 End;
 
 Function ModuleOfHandle(H : LongInt) : LongInt;
 Var I : LongInt;
 Begin
   ModuleOfHandle := -1;
-  For I := 0 To MaxMods - 1 Do
-    If Mods[I].Used And (Mods[I].Base = H) Then ModuleOfHandle := I;
+  For I := 0 To ModCap - 1 Do
+    If Mods^[I].Used And (Mods^[I].Base = H) Then ModuleOfHandle := I;
 End;
 
 { GetProcAddress(module, nom ou ordinal < 65536) }
@@ -5235,7 +5334,7 @@ Begin
   Else
   Begin
     M := ModuleOfHandle(H);
-    If M >= 0 Then S := Mods[M].Path;
+    If M >= 0 Then S := Mods^[M].Path;
   End;
   If S = '' Then
   Begin
@@ -5256,9 +5355,9 @@ Begin
   Else If (A >= $00100000) And (A < HeapStart) Then
     KrnModuleFromAddr := $00100000
   Else
-    For I := 0 To MaxMods - 1 Do
-      If Mods[I].Used And (A >= Mods[I].Base) And (A < Mods[I].Base + Mods[I].Size) Then
-        KrnModuleFromAddr := Mods[I].Base;
+    For I := 0 To ModCap - 1 Do
+      If Mods^[I].Used And (A >= Mods^[I].Base) And (A < Mods^[I].Base + Mods^[I].Size) Then
+        KrnModuleFromAddr := Mods^[I].Base;
 End;
 
 { Etiquette du volume (descripteur primaire ISO 9660), numero de serie, CDFS }
@@ -5442,7 +5541,7 @@ Begin
   Ifss[I].FExit := ModuleExport(M, 'FS_EXIT', 0);
   Ifss[I].FShutdown := ModuleExport(M, 'FS_SHUTDOWN', 0);
   A := ModuleExport(M, 'FS_NAME', 0);
-  If A <> 0 Then Ifss[I].Name := PStr(A) Else Ifss[I].Name := Mods[M].Name;
+  If A <> 0 Then Ifss[I].Name := PStr(A) Else Ifss[I].Name := Mods^[M].Name;
   If (Ifss[I].FMount = 0) Or (Ifss[I].FOpen = 0) Then
   Begin
     KLog('SYS1719: ' + Path + ' n''est pas un pilote IFS.');
@@ -5457,7 +5556,7 @@ Begin
     Exit;
   End;
   Inc(NIfs);
-  KLog(Mods[M].Name + ' (' + Ifss[I].Name + ') charge en ' + HexStr(Mods[M].Base, 8) + 'h.');
+  KLog(Mods^[M].Name + ' (' + Ifss[I].Name + ') charge en ' + HexStr(Mods^[M].Base, 8) + 'h.');
   { /RAMDISK:n : disque virtuel de n Ko (propre a OS/2-0) }
   P := Pos('/RAMDISK:', UpStr(Parm));
   If P > 0 Then
@@ -5604,6 +5703,8 @@ BEGIN
   PhysTop := MemTotalKb * 1024;
   PhysNext := PhysProcBase;
   HeapInit(KBase + KSize + 65536, ProcWinBase);
+  Mods := Nil;
+  ModCap := 0;
   InitPaging;
   InitExports;
   RootLba := MemL[0:BootInfo + 4];
@@ -5636,8 +5737,8 @@ BEGIN
   Begin
     I := LoadModule('DOSCALLS.DLL');
     If I >= 0 Then
-      KLog('DOSCALLS.DLL chargee en ' + HexStr(Mods[I].Base, 8) + 'h (' +
-           IntStr(Mods[I].NExp) + ' fonctions).');
+      KLog('DOSCALLS.DLL chargee en ' + HexStr(Mods^[I].Base, 8) + 'h (' +
+           IntStr(Mods^[I].NExp) + ' fonctions).');
   End;
   { systemes de fichiers installables (IFS=) et leurs volumes }
   For I := 0 To NIfsLines - 1 Do LoadIfs(IfsLines[I]);
