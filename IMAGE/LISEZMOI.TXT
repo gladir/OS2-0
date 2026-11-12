@@ -7,13 +7,13 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
-              PMGPI.DLL, CMD.EXE,
+              PMGPI.DLL, PMMERGE.DLL, CMD.EXE,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
               TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE,
               TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE,
-              TESTGPI.EXE et les
+              TESTGPI.EXE, TESTMRG.EXE et les
               commandes du depot
               compilees avec
               OS2PC (-COS2).
@@ -22,7 +22,7 @@ SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
               RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL,
-              PMWIN.DLL, PMGPI.DLL et
+              PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL et
               CONFIG.SYS (copies
               faites par
               KERNEL\BUILD.sh).
@@ -85,6 +85,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTWIN.PAS                     -> TESTWIN.EXE (essai de PMWIN.DLL)
   OS2PC DLL\PMGPI.PAS                       -> PMGPI.DLL (interface graphique GPI)
   OS2PC DLL\TESTGPI.PAS                     -> TESTGPI.EXE (essai de PMGPI.DLL)
+  OS2PC DLL\PMMERGE.PAS                     -> PMMERGE.DLL (PM fusionne de Warp 4)
+  OS2PC DLL\TESTMRG.PAS                     -> TESTMRG.EXE (essai de PMMERGE.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -128,7 +130,8 @@ Carte memoire
                      00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
                      00F80000h, SESMGR.DLL a 00FA0000h, LIBUNI.DLL a
                      00900000h, PMDRAG.DLL a 00A00000h, PMWIN.DLL a
-                     00B00000h, PMGPI.DLL a 00800000h : directive
+                     00B00000h, PMGPI.DLL et PMMERGE.DLL a 00800000h :
+                     directive
                      {$IMAGEBASE} d'OS2PC) ; si la place est prise,
                      le noyau reloge la DLL (section .reloc) a la
                      premiere place libre ; la table des modules
@@ -427,6 +430,23 @@ enregistres (pas d'ordres GOCA) ; codes PMERR_* approches ; l'ordinal
 541 se nomme GPISETPATTERNSET comme dans la liste fournie (GpiSetPattern
 dans OS/2). Un programme qui passe en mode graphique revient au mode
 texte (VioSetMode) avant de finir.
+
+PMMERGE.DLL
+-----------
+Le Presentation Manager fusionne d'OS/2 Warp 4 : 1039 ordinaux (2000 a
+10021). Les fonctions Win* et Win32* du gestionnaire de fenetres sont
+transmises a PMWIN.DLL, celles de la liste des taches et du demarrage
+des programmes a OS2SM.DLL. PMMERGE realise les profils (Prf*, Prf32*,
+WinQueryProfile*, WinWriteProfile* : fichiers INI au format binaire
+d'OS/2, OS2.INI et OS2SYS.INI ou USER_INI et SYSTEM_INI, fichiers
+ouverts par PrfOpenProfile), la liste des programmes et des groupes
+(PrfAddProgram, PrfQueryProgramTitles, PrfCreateGroup...), les
+proprietes des fenetres et des classes, les couleurs des controles, la
+zone de travail du bureau, le curseur DAX, les fonctions Edit* (sur un
+champ de saisie designe par son HWND), les tas WinXX*, la memoire SS* et
+les semaphores RamSem*. Les entrees du moteur graphique et du code 16
+bits (Gre*, Dispatch16Gate*, PFN*R2...) rendent 0 ; les entrees de
+donnees (ShellWindow, PSharedHeap...) rendent l'adresse de la donnee.
 
 Imprimante
 ----------
