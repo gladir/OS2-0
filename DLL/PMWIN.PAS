@@ -36,7 +36,8 @@ Library PMWIN;
   (convention Pascal : parametres empiles de gauche a droite, pile
   nettoyee par la fonction) ; ailleurs (point d'entree exporte d'une DLL,
   convention _System). Les procedures des classes du systeme sont le
-  point d'entree interne WINSYSCLASSPROC (ordinal 1000).
+  point d'entree interne WINSYSCLASSPROC (ordinal 1000) ; WINQUERYPSINFO
+  (ordinal 1001, interne) decrit un HPS pour PMGPI.DLL.
 
   Handles : HAB 00010001h..., HMQ 00510001h..., HWND 8000xxyyh (HWND_DESKTOP
   1 et HWND_OBJECT 2 acceptes), HPS 5053xxxxh, HDC 4443xxxxh, HPOINTER
@@ -10565,6 +10566,39 @@ Begin
   WinThrow := 0;
 End;
 
+
+{ WINQUERYPSINFO (ordinal 1001, interne : PMGPI.DLL) : (hps ou hwnd, p)
+  -> p[0] HWND, p[1], p[2] origine, p[3] a p[6] rectangle visible (pels
+  de l'ecran 640 x 400) ; BOOL }
+Function WinQueryPSInfo(H, P : LongInt) : LongInt;
+Var K, I, X1, Y1, X2, Y2 : LongInt;
+Begin
+  WinQueryPSInfo := 0;
+  If P = 0 Then Exit;
+  I := -1;
+  If (H And $FFFF0000) = $50530000 Then
+  Begin
+    K := H - $50530001;
+    If (K < 0) Or (K >= MaxPS) Then Exit;
+    If PsUse[K] = 0 Then Exit;
+    I := PsWin[K];
+    WrL(P, HwOf(I)); WrL(P + 4, PsOrgX[K]); WrL(P + 8, PsOrgY[K]);
+    WrL(P + 12, PsX1[K]); WrL(P + 16, PsY1[K]); WrL(P + 20, PsX2[K]); WrL(P + 24, PsY2[K]);
+  End
+  Else
+  Begin
+    I := WIdx(H);
+    If I < 0 Then Exit;
+    If Not VisRect(I, X1, Y1, X2, Y2) Then
+    Begin
+      X2 := X1; Y2 := Y1;
+    End;
+    WrL(P, HwOf(I)); WrL(P + 4, AbsX(I)); WrL(P + 8, AbsY(I));
+    WrL(P + 12, X1); WrL(P + 16, Y1); WrL(P + 20, X2); WrL(P + 24, Y2);
+  End;
+  WinQueryPSInfo := 1;
+End;
+
 { ==================================================================== }
 { Initialisation                                                        }
 { ==================================================================== }
@@ -12600,7 +12634,8 @@ exports
   WinThreadAssocQueue Index 994 Name 'WinThreadAssocQueue',
   WinLockInput Index 995 Name 'WinLockInput',
   WinSetSysFont Index 996 Name 'WinSetSysFont',
-  WinSysClassProc Index 1000 Name 'WINSYSCLASSPROC';
+  WinSysClassProc Index 1000 Name 'WINSYSCLASSPROC',
+  WinQueryPSInfo Index 1001 Name 'WINQUERYPSINFO';
 
 Var
   InitI : LongInt;
