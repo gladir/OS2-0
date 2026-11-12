@@ -5853,7 +5853,8 @@ End;
 { Partie 13 - Modules et ressources                                    }
 { ==================================================================== }
 { HMODULE = adresse de base de l'image : 00400000h pour le programme,
-  00C00000h... pour une DLL, 00100000h pour le noyau. }
+  00800000h-00FFFFFFh pour une DLL (sa base, preferee ou de
+  relocalisation), 00100000h pour le noyau. }
 
 Var
   ExtLibBegin, ExtLibEnd : String;

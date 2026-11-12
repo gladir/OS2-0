@@ -134,12 +134,12 @@ Le compilateur <b>OS2PC.PAS</b> (« OS/2 Pascal Compiler », dossier <b>TOOLS</b
 	<tr><td><b>-COS2BOOT</b></td><td>Image binaire brute 8086 chargée en 07C0:0000, sans DOS (OS2BOOT).</td></tr>
 	<tr><td><b>-COS2LDR</b></td><td>Image binaire brute 8086 chargée en 2000:0000, sans DOS (OS2LDR).</td></tr>
 	<tr><td><b>-COS2KRNL</b></td><td>Noyau 32 bits : image PE liée à 1 Mo, assembleur 80386 natif (IN/OUT, INT, LGDT, LIDT, MOV CRn, IRETD...), procédures <i>Interrupt</i>, accès direct à Mem/MemW/MemL/Port/PortW ; les fonctions utilisées par le runtime (WriteFile, CreateFileA...) sont les procédures Pascal du noyau, exportées sous le nom DOSCALLS.DLL.</td></tr>
-	<tr><td><b>-COS2</b></td><td>Destination par défaut : programme 32 bits pour OS/2-0 (CMD.EXE et les commandes), dont les importations sont liées par le noyau. Un source commençant par <code>Library</code> produit une DLL (clause <code>exports nom [Name 'externe'] [Index ordinal]</code>, base fixée par <code>{$IMAGEBASE $00D00000}</code> ; une constante <code>Const NOM = 'texte';</code> ou entière peut aussi être exportée comme donnée) ; une fonction déclarée <code>External 'DLL' [Name 'nom']</code> est importée de cette DLL.</td></tr>
+	<tr><td><b>-COS2</b></td><td>Destination par défaut : programme 32 bits pour OS/2-0 (CMD.EXE et les commandes), dont les importations sont liées par le noyau. Un source commençant par <code>Library</code> produit une DLL (clause <code>exports nom [Name 'externe'] [Index ordinal]</code>, base préférée fixée par <code>{$IMAGEBASE $00D00000}</code>, section <code>.reloc</code> produite pour que le noyau puisse la reloger ; une constante <code>Const NOM = 'texte';</code> ou entière peut aussi être exportée comme donnée) ; une fonction déclarée <code>External 'DLL' [Name 'nom']</code> est importée de cette DLL.</td></tr>
 </table>
 
 <h3>Bibliothèque DOSCALLS.DLL</h3>
 
-Le fichier <b>DLL/DOSCALLS.PAS</b> est la bibliothèque OS/2 <b>DOSCALLS.DLL</b> : elle implémente les 315 fonctions <b>Dos*</b> des API d'OS/2 1.x et 2.x : fichiers et répertoires, recherche, attributs, tuyaux anonymes et nommés, mémoire (objets, mémoire partagée, segments, sous-allocation), sémaphores (événement, mutex, MuxWait, système, RAM), minuteries, processus et processus légers, exceptions et signaux, modules et ressources, pays, pages de codes et messages, périphériques, moniteurs, etc. Elle se compile avec OS2PC (<code>Library DOSCALLS; ... exports ...</code>) en une DLL liée à 00C00000h, que le noyau charge au démarrage et partage entre tous les processus. Un programme l'utilise ainsi (convention <i>_System</i> d'OS/2) :
+Le fichier <b>DLL/DOSCALLS.PAS</b> est la bibliothèque OS/2 <b>DOSCALLS.DLL</b> : elle implémente les 315 fonctions <b>Dos*</b> des API d'OS/2 1.x et 2.x : fichiers et répertoires, recherche, attributs, tuyaux anonymes et nommés, mémoire (objets, mémoire partagée, segments, sous-allocation), sémaphores (événement, mutex, MuxWait, système, RAM), minuteries, processus et processus légers, exceptions et signaux, modules et ressources, pays, pages de codes et messages, périphériques, moniteurs, etc. Elle se compile avec OS2PC (<code>Library DOSCALLS; ... exports ...</code>) en une DLL liée à 00C00000h, que le noyau charge au démarrage et partage entre tous les processus. Le noyau place chaque DLL à sa base préférée si la place est libre, sinon il la reloge (section <code>.reloc</code> produite par OS2PC) à la première place libre de la région 00800000h-00FFFFFFh ; la table des modules grandit au besoin, si bien que le nombre de DLL n'est limité que par la place dans cette région (8 Mo). Un programme l'utilise ainsi (convention <i>_System</i> d'OS/2) :
 
 <pre>Function DosBeep(Freq, Duration : LongInt) : LongInt; External 'DOSCALLS';</pre>
 
@@ -328,7 +328,71 @@ Le fichier <b>DLL/QUECALLS.PAS</b> est la bibliothèque OS/2 <b>QUECALLS.DLL</b>
 
 Le programme <b>DLL/TESTQUE.PAS</b> vérifie ces fonctions (31 vérifications, avec un écrivain d'un autre processus et la file de fin d'une session).
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Bibliothèque SPOOLCP.DLL</h3>
+
+Le fichier <b>DLL/SPOOLCP.PAS</b> est la bibliothèque OS/2 <b>SPOOLCP.DLL</b>, le commutateur de polices des imprimantes (liée à 00EA0000h), avec ses 5 fonctions et leurs ordinaux d'origine. Pour chaque imprimante (PRN, LPT1 à LPT3), elle connaît les polices résidentes et celles d'un fichier de polices, et pour chaque fichier ouvert vers l'imprimante (handle du port ou fichier de spoule) la page de codes et la police actives. Activer une police écrit sur ce handle la séquence de commande qui la choisit, précédée la première fois des données à télécharger dans l'imprimante.
+
+<table>
+	<tr><th>Fonction</th><th>Ordinal</th><th>Description</th></tr>
+	<tr><td>DosPFSCloseUser</td><td>1</td><td>Le fichier est fermé : sa page de codes et sa police actives sont oubliées.</td></tr>
+	<tr><td>DosPFSQueryAct</td><td>2</td><td>Page de codes et police actives d'un fichier.</td></tr>
+	<tr><td>DosPFSInit</td><td>3</td><td>Installer le commutateur d'une imprimante : polices résidentes (HWFONTS) et fichier de polices.</td></tr>
+	<tr><td>DosPFSActivate</td><td>4</td><td>Activer une page de codes et une police (téléchargement, puis séquence de choix).</td></tr>
+	<tr><td>DosPFSVerifyFont</td><td>5</td><td>La page de codes et la police sont-elles disponibles ?</td></tr>
+</table>
+
+Le fichier de polices est un fichier texte propre à OS/2-0 (lignes TYPE, FONT et LOAD, octets en hexadécimal), et non le format .DCP d'IBM. Le programme <b>DLL/TESTPFS.PAS</b> vérifie ces fonctions (26 vérifications ; avec QEMU, <code>-parallel file:</code> recueille les séquences envoyées à LPT1).
+
+<h3>Bibliothèque RMINFO.DLL</h3>
+
+Le fichier <b>DLL/RMINFO.PAS</b> est la bibliothèque OS/2 <b>RMINFO.DLL</b> du gestionnaire de ressources (Resource Manager, liée à 00800000h), avec ses 34 points d'entrée et leurs ordinaux d'origine (les fonctions _RMxxx sont les seconds points d'entrée des fonctions RMxxx). Elle tient l'arbre des pilotes, adaptateurs, périphériques détectés et ressources matérielles (ports d'entrée/sortie, interruptions, mémoire, DMA, minuteries) ; une ressource exclusive ne peut être allouée deux fois, une ressource partagée ou multiplexée peut l'être par plusieurs pilotes du même mode. Au chargement, l'arbre décrit le matériel géré par le noyau (pilote OS2KRNL : contrôleur d'interruptions, minuterie, horloge, clavier, souris, IDE, VGA, ports COM et LPT présents) avec leurs identificateurs PnP (PNP0303...).
+
+<table>
+	<tr><th>Fonctions</th><th>Rôle</th></tr>
+	<tr><td>RMCreateDriver, RMDestroyDriver</td><td>Inscription d'un pilote (DRIVERSTRUCT) ; sa destruction retire ses adaptateurs, périphériques et ressources.</td></tr>
+	<tr><td>RMAllocResource, RMDeallocResource</td><td>Allocation (RESOURCESTRUCT : exclusive, partagée ou multiplexée) et libération des ressources.</td></tr>
+	<tr><td>RMCreateAdapter, RMDestroyAdapter, RMCreateDetected, RMDestroyDetected</td><td>Adaptateurs (éventuellement imbriqués) et périphériques détectés, avec leurs ressources (AHRESOURCE).</td></tr>
+	<tr><td>RMEnumNodes, RMGetNodeInfo, RMHandleToResourceHandleList, RMDevIDToHandleList</td><td>Énumération des nœuds, informations d'un nœud, ressources d'un nœud, recherche par identificateurs (HANDLELIST).</td></tr>
+	<tr><td>RMConvertID</td><td>Identificateur EISA/PnP compressé ↔ texte (0303D041h ↔ PNP0303).</td></tr>
+	<tr><td>RMGetSnoopLevel, RMSetSnoopLevel, RMSaveDetectedData, RMDeleteDetectedData</td><td>Niveau de détection du matériel ; sauvegarde des périphériques détectés (C:\RMDETECT.DAT).</td></tr>
+</table>
+
+Le programme <b>DLL/TESTRM.PAS</b> vérifie ces fonctions (37 vérifications ; <code>TESTRM LISTE</code> affiche l'arbre).
+
+<h3>Bibliothèque OS2SM.DLL</h3>
+
+Le fichier <b>DLL/OS2SM.PAS</b> est la bibliothèque OS/2 <b>OS2SM.DLL</b> (liée à 00850000h), la partie « gestion des sessions » de l'interpréteur de Presentation Manager, avec ses 46 points d'entrée et leurs ordinaux d'origine (1 à 45 et la donnée SHELLWINDOW, ordinal 103). Elle tient la liste des tâches (switch list : structures SWCNTRL, SWENTRY et SWBLOCK) et s'appuie sur SESMGR.DLL : une entrée désigne une session, la choisir l'exécute. OS2SM s'inscrit auprès de SESMGR (DosRegisterNotification, point d'entrée interne OS2SMNOTIFY, ordinal 200) : chaque session démarrée reçoit une entrée, une session terminée quitte la liste et la session courante est suivie. OS/2-0 n'a pas Presentation Manager : les handles de fenêtres sont conservés tels quels et un programme PM (PROG_PM) est refusé.
+
+<table>
+	<tr><th>Fonctions</th><th>Rôle</th></tr>
+	<tr><td>WinInitSessionMgr</td><td>Le processus devient l'interpréteur propriétaire du gestionnaire de sessions (DosSMInitialize).</td></tr>
+	<tr><td>WinAddSwitchEntry, WinCreateSwitchEntry, WinChangeSwitchEntry, WinSetSwEntry, WinQuerySwitchEntry, WinRemoveSwitchEntry, WinInitSwEntry, WinQuerySwitchHandle, WinQuerySwitchList</td><td>Entrées de la liste des tâches (HSWITCH : indice et génération ; un handle périmé est refusé).</td></tr>
+	<tr><td>WinSwitchToProgram, WinSwitchToProgram2, WinSwitchToTaskManager, WinSetFgndWindow, WinProcessHotKey</td><td>Passage d'un programme à l'autre (DosSMSwitch ; Ctrl+Échap, Alt+Échap et Alt+Tab).</td></tr>
+	<tr><td>SheStartProgram, SheStartLongProgram, WinInstStartApp, WinExecProgram</td><td>Démarrage d'un programme dans une session (STARTDATA, PROGDETAILS) ou dans la session courante (DosExecPgm).</td></tr>
+	<tr><td>WinEndProgram, WinStopProgram, WinEndWindowSession, WinTerminateApp, WinInitSession, WinEndSession</td><td>Fin d'un programme ou d'une session et de ses entrées.</td></tr>
+	<tr><td>WinQueryTaskTitle, WinQuerySessionTitle, WinSetTitle, WinQueryTaskSizePos, WinQueryExtIdFocus, WinSetExtIdFocus</td><td>Titres, taille et position (SWP) des tâches ; focus du clavier étendu.</td></tr>
+	<tr><td>SheInitializeIniFile, StartSystemExecutables, ShlLoadPublicFonts, ShlUnloadPublicFonts, WinSave</td><td>Fichier de l'interpréteur C:\OS2SM.INI (lignes RUN= et FONT=, section [Bureau]).</td></tr>
+	<tr><td>SheSystemShutdown, WinNoShutdown</td><td>Arrêt du système (bureau sauvé, tampons vidés), qui peut être empêché.</td></tr>
+	<tr><td>WinStpRegister, WinSwitchProgramRegister, WinCplRegister, WinPMFileRegister, LPFNSHELLWNDPROC, LPFNICONWNDPROC, FNBADAPPDLGPROC</td><td>Inscriptions de fenêtres et de modules ; procédures de fenêtre de l'interpréteur.</td></tr>
+</table>
+
+Le programme <b>DLL/TESTSM.PAS</b> vérifie ces fonctions (62 vérifications ; les sessions exécutent <code>TESTSM KID titre</code>).
+
+<h3>Bibliothèque HELPMGR.DLL</h3>
+
+Le fichier <b>DLL/HELPMGR.PAS</b> est la bibliothèque OS/2 <b>HELPMGR.DLL</b> (liée à 00880000h), le gestionnaire d'aide IPF (Information Presentation Facility), avec ses 6 points d'entrée et leurs ordinaux d'origine. Une application crée une instance d'aide à partir d'une structure HELPINIT (titre, tutoriel, bibliothèques .HLP, table d'aide), puis l'associe à ses fenêtres cadres. Les bibliothèques sont cherchées telles quelles, dans le répertoire courant, dans la variable HELP (<code>SET HELP=D:\AIDE;</code> dans le CONFIG.SYS du CD-ROM) puis dans C:\ ; un fichier .HLP commence par la signature HSP. OS/2-0 n'a pas Presentation Manager : les handles de fenêtres sont conservés tels quels.
+
+<table>
+	<tr><th>Fonction</th><th>Rôle</th></tr>
+	<tr><td>WinCreateHelpInstance</td><td>Créer une instance d'aide (HELPINIT ; erreur dans ulReturnCode : HMERR_OPEN_LIB_FILE, HMERR_INVALID_LIB_FILE, HMERR_HELPTABLE_UNDEFINE, HMERR_NO_MEMORY).</td></tr>
+	<tr><td>WinDestroyHelpInstance</td><td>Détruire une instance (ses associations sont retirées).</td></tr>
+	<tr><td>WinAssociateHelpInstance, WinQueryHelpInstance</td><td>Associer une instance à une fenêtre cadre (instance nulle : retirer l'association) ; instance d'une fenêtre.</td></tr>
+	<tr><td>WinCreateHelpTable, WinLoadHelpTable</td><td>Remplacer la table d'aide d'une instance : HELPTABLE et HELPSUBTABLE en mémoire (copiées), ou ressources RT_HELPTABLE et RT_HELPSUBTABLE d'un module (DosGetResource).</td></tr>
+</table>
+
+Deux points d'entrée internes à OS/2-0 donnent ce qu'IPF ferait à la touche F1 : HMQUERYPANELID (ordinal 100 : panneau d'aide d'une fenêtre selon la table d'aide) et HMQUERYINSTANCEINFO (ordinal 101). Le programme <b>DLL/TESTHLP.PAS</b> vérifie ces fonctions (29 vérifications ; OS2PC ne produisant pas de ressources, le module de WinLoadHelpTable est une image PE construite en mémoire).
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
