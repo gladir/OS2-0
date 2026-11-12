@@ -179,8 +179,15 @@ VioSetCursorPos et VioScrollLe) ecrivent directement dans l'ecran
 (000B8000h) et programment le VGA par ses ports (les programmes et les
 DLL s'executent en anneau 0) ; le curseur et l'attribut sont ceux de la
 console du noyau. VioWrtTty interprete les sequences ANSI. Le handle
-hvio 0 designe l'ecran, un handle de VioCreatePS un espace AVIO. Seul le
-mode texte 80 x 25 est gere ; VioPrtSc imprime dans C:\PRTSC.TXT.
+hvio 0 designe l'ecran, un handle de VioCreatePS un espace AVIO.
+VioSetMode gere le mode texte 80 x 25 et les modes graphiques du VGA
+(fbType 3) : 640 x 480 x 16 (12h, par defaut), 640 x 480 x 2 (11h),
+640 x 350 x 16 (10h), 640 x 200 x 16 (0Eh), 320 x 200 x 16 (0Dh) et
+320 x 200 x 256 (13h) ; la memoire est en 000A0000h (VioGetPhysBuf),
+les fonctions du mode texte rendent ERROR_VIO_MODE, VioPopUp repasse
+en texte le temps de la fenetre surgissante, et le retour au texte
+recharge la police et la palette (le programme doit revenir au texte
+avant de se terminer). VioPrtSc imprime dans C:\PRTSC.TXT.
 
 MOUCALLS.DLL
 ------------
