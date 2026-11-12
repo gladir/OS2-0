@@ -6,19 +6,22 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
               KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
-              OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, CMD.EXE,
+              OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
+              CMD.EXE,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
               TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE,
-              TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE et les commandes du depot
+              TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE et les
+              commandes du depot
               compilees avec
               OS2PC (-COS2).
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
-              RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL et
+              RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL,
+              PMWIN.DLL et
               CONFIG.SYS (copies
               faites par
               KERNEL\BUILD.sh).
@@ -77,6 +80,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTUNI.PAS                     -> TESTUNI.EXE (essai de LIBUNI.DLL)
   OS2PC DLL\PMDRAG.PAS                      -> PMDRAG.DLL (glisser-deposer)
   OS2PC DLL\TESTDRG.PAS                     -> TESTDRG.EXE (essai de PMDRAG.DLL)
+  OS2PC DLL\PMWIN.PAS                       -> PMWIN.DLL (gestionnaire de fenetres)
+  OS2PC DLL\TESTWIN.PAS                     -> TESTWIN.EXE (essai de PMWIN.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -119,7 +124,8 @@ Carte memoire
                      00E70000h, SPOOLCP.DLL a 00EA0000h, VIOCALLS.DLL a
                      00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
                      00F80000h, SESMGR.DLL a 00FA0000h, LIBUNI.DLL a
-                     00900000h, PMDRAG.DLL a 00A00000h : directive
+                     00900000h, PMDRAG.DLL a 00A00000h, PMWIN.DLL a
+                     00B00000h : directive
                      {$IMAGEBASE} d'OS2PC) ; si la place est prise,
                      le noyau reloge la DLL (section .reloc) a la
                      premiere place libre ; la table des modules
@@ -356,6 +362,22 @@ la souris (DrgDrag : relachement du bouton ou Echap) ou differe
 Presentation Manager, les fenetres sont inscrites aupres de PMDRAG
 (DRGREGISTERWINDOW, ordinal 200 : handle, rectangle en pels de l'ecran
 640 x 400, procedure de fenetre _System ou Pascal d'OS2PC).
+
+PMWIN.DLL
+---------
+Le gestionnaire de fenetres de Presentation Manager : 649 ordinaux
+(1 a 640 : interface 16 bits, noms en majuscules si la fonction a aussi
+un ordinal 32 bits ; 700 a 996) et WINSYSCLASSPROC (ordinal 1000).
+Classes et fenetres, files de messages, WM_PAINT, minuteries, crochets,
+focus, clavier et souris (lus par WinGetMsg/WinPeekMsg), dessin en
+cellules, controles (cadre, titre, bouton, statique, saisie, liste,
+liste deroulante, defilement, menu, texte multiligne), dialogues,
+boites de message, accelerateurs, presse-papiers, atomes, tas,
+ressources, valeurs et couleurs du systeme, pages de codes 437 et 850.
+Le bureau est l'ecran texte de 80 x 25 vu en 640 x 400 pels (cellule
+de 8 x 16, origine en bas a gauche). Pas de GPI ; WinThrow rend FALSE
+(pas de deroulement de la pile). Procedures de fenetre : convention
+Pascal pour un programme OS2PC (00400000h-007FFFFFh), _System sinon.
 
 Imprimante
 ----------
