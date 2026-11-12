@@ -7832,16 +7832,16 @@ Var
   IsLibrary   : Boolean;
   LibName     : TString;
   ExpCount    : Integer;
-  ExpNames    : Array[0..1023] Of String[63];   { nom exporte (casse d origine) }
-  ExpProcs    : Array[0..1023] Of Integer;      { procedure Pascal }
-  ExpProcNm   : Array[0..1023] Of String[63];   { nom Pascal (majuscules) }
-  ExpIndex    : Array[0..1023] Of LongInt;      { ordinal (Index n), 0 = automatique }
+  ExpNames    : Array[0..4095] Of String[63];   { nom exporte (casse d origine) }
+  ExpProcs    : Array[0..4095] Of Integer;      { procedure Pascal }
+  ExpProcNm   : Array[0..4095] Of String[63];   { nom Pascal (majuscules) }
+  ExpIndex    : Array[0..4095] Of LongInt;      { ordinal (Index n), 0 = automatique }
   { exportation de donnees : constante Const NOM = 'chaine' ou entier
     (ex. FS_NAME et FS_ATTRIBUTE d un IFS) : 0 = procedure, 1 = entier
     (DD), 2 = chaine ASCIIZ (emise en mots DD) }
-  ExpDataKind : Array[0..1023] Of Byte;
-  ExpDataInt  : Array[0..1023] Of LongInt;
-  ExpDataStr  : Array[0..1023] Of String[63];
+  ExpDataKind : Array[0..4095] Of Byte;
+  ExpDataInt  : Array[0..4095] Of LongInt;
+  ExpDataStr  : Array[0..4095] Of String[63];
   { importations declarees par External 'DLL' }
   DllImpCnt   : Integer;
   DllImpApi   : Array[0..511] Of String[63];
@@ -44447,11 +44447,11 @@ Var
   ExpN: Integer;
   { ordinaux : base, nombre d entrees de l EAT, ordinal de chaque exportation }
   OrdBase, NFunc, OrdMax: LongInt;
-  ExpOrd: Array[0..1023] Of LongInt;
+  ExpOrd: Array[0..4095] Of LongInt;
   ExpDll: TString;
   HdrSize, EdataRVA, EdataSize, EdataRawSize, EdataFileBase: LongInt;
-  ExpOrder: Array[0..1023] Of Integer;
-  ExpNameOfs: Array[0..1023] Of LongInt;
+  ExpOrder: Array[0..4095] Of Integer;
+  ExpNameOfs: Array[0..4095] Of LongInt;
   EatOfs, NptOfs, OrdOfs, ExpDllOfs, TmpI, ThunkOfs: LongInt;
   { OS/2-0 bibliotheque : section .reloc }
   HasRel: Boolean;
@@ -58352,7 +58352,7 @@ Begin
             End
             Else Break;
           End;
-          If ExpCount < 1023 Then Inc(ExpCount);
+          If ExpCount < 4095 Then Inc(ExpCount);
         End;
         Inc(J);
       End;

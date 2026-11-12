@@ -13,10 +13,13 @@ Program TESTVIO;
 
   TESTVIO   verifie les 76 fonctions de VIOCALLS.DLL : les resultats sont
             relus par VIO, directement dans la memoire de l'ecran
-            (000B8000h) et dans les registres du VGA. TESTVIOR.DLL sert
+            (000B8000h) et dans les registres du VGA ; les modes
+            graphiques (640 x 480 x 16, 320 x 200 x 256...) sont essayes
+            a la fin (pels ecrits en 000A0000h). TESTVIOR.DLL sert
             de sous-systeme de remplacement (VioRegister, VioGlobalReg). }
 
 Function VioEndPopup(Hvio : LongInt) : LongInt; External 'VIOCALLS';
+Function DosSleep(Ms : LongInt) : LongInt; External 'DOSCALLS';
 Function VioGetPhysBuf(PPhys, Reserved : LongInt) : LongInt; External 'VIOCALLS';
 Function VioGetAnsi(PAnsi, Hvio : LongInt) : LongInt; External 'VIOCALLS';
 Function VioFree(Hvio : LongInt) : LongInt; External 'VIOCALLS';
@@ -136,7 +139,7 @@ Var
   S : String;
   OutBuf : Array[0..32767] Of Byte;     { resultats, affiches a la fin (pas de
                                        defilement pendant les essais) }
-  OutLen : LongInt;
+  OutLen, Dummy, Fs0, Bad, C, P : LongInt;
 
 Function IStr(V : LongInt) : String;
 Var T : String;
@@ -242,6 +245,66 @@ Begin
   T := '';
   For K := 0 To C - 1 Do T := T + Chr(Buf2[K]);
   VioText := T;
+End;
+
+{ Ports du VGA }
+Procedure PortOut(P, V : LongInt);
+Begin
+  asm
+    mov edx,P
+    mov eax,V
+    out dx,al
+  end;
+End;
+
+Function PortIn(P : LongInt) : LongInt;
+Var V : LongInt;
+Begin
+  V := 0;
+  asm
+    mov edx,P
+    xor eax,eax
+    in al,dx
+    mov V,eax
+  end;
+  PortIn := V;
+End;
+
+{ Registre du controleur graphique (3CEh/3CFh) }
+Function GcReg(I : LongInt) : LongInt;
+Begin
+  PortOut($3CE, I);
+  GcReg := PortIn($3CF);
+End;
+
+{ Somme de controle de la police du VGA (plan 2, 16 lignes x 256) }
+Function FontSum : LongInt;
+Var C, L, T : LongInt;
+Begin
+  PortOut($3C4, 4); PortOut($3C5, 7);
+  PortOut($3CE, 4); PortOut($3CF, 2);
+  PortOut($3CE, 5); PortOut($3CF, 0);
+  PortOut($3CE, 6); PortOut($3CF, 4);
+  T := 0;
+  For C := 0 To 255 Do
+    For L := 0 To 15 Do T := T + RdB($A0000 + C * 32 + L) * (L + 1);
+  PortOut($3C4, 4); PortOut($3C5, 3);
+  PortOut($3CE, 4); PortOut($3CF, 0);
+  PortOut($3CE, 5); PortOut($3CF, $10);
+  PortOut($3CE, 6); PortOut($3CF, $0E);
+  FontSum := T;
+End;
+
+{ Mode graphique : VIOMODEINFO de 12 octets (fbType 3) }
+Function GrMode(Bits, W, H : LongInt) : LongInt;
+Begin
+  FillChar(Info, 64, 0);
+  WrW(LongInt(@Info), 12); Info[2] := 3; Info[3] := Bits;
+  WrW(LongInt(@Info) + 8, W); WrW(LongInt(@Info) + 10, H);
+  GrMode := VioSetMode(LongInt(@Info), 0);
+  FillChar(Info, 64, 0);
+  WrW(LongInt(@Info), 34);
+  Dummy := VioGetMode(LongInt(@Info), 0);
 End;
 
 { Registre du CRTC lu directement (port 3D4h/3D5h) }
@@ -436,7 +499,7 @@ BEGIN
   WrW(LongInt(@Info) + 4, 80);
   Info[2] := 3;
   R := VioSetMode(LongInt(@Info), 0);
-  Check('VioSetMode graphique refuse', R = ERROR_VIO_MODE);
+  Check('VioSetMode graphique 720 x 400 refuse', R = ERROR_VIO_MODE);
   FillChar(Info, 64, 0);
   WrW(LongInt(@Info), 34);
   R := VioGetConfig(0, LongInt(@Info), 0);
@@ -732,6 +795,88 @@ BEGIN
   R := VioSetMode(LongInt(@Info), 0);
   VioGetCurPos(LongInt(@Y), LongInt(@X), 0);
   Check('VioSetMode 80 x 25 (ecran efface, curseur en haut)', (R = 0) And (Y = 0) And (X = 0) And (Scr(12, 60) = $0720));
+
+  { --- modes graphiques --- }
+  Fs0 := FontSum;
+  R := GrMode(4, 640, 480);
+  Check('VioSetMode 640 x 480 x 16 (VGA 12h), VioGetMode', (R = 0) And (Info[2] = 3) And (Info[3] = 4) And
+        (RdW(LongInt(@Info) + 4) = 80) And (RdW(LongInt(@Info) + 6) = 30) And (RdW(LongInt(@Info) + 8) = 640) And
+        (RdW(LongInt(@Info) + 10) = 480) And (RdL(LongInt(@Info) + 14) = $A0000) And (RdL(LongInt(@Info) + 18) = 38400));
+  Check('registres du VGA : 480 lignes (CRTC 12h = DFh), mode graphique (GC 6)', (Crtc($12) = $DF) And
+        ((GcReg(6) And 1) = 1) And ((PortIn($3CC) And $C0) = $C0));
+  WrL(LongInt(@Info) + 40, 0); WrL(LongInt(@Info) + 44, 0);
+  R := VioGetPhysBuf(LongInt(@Info) + 40, 0);
+  Check('VioGetPhysBuf : 000A0000h, 38400 octets par plan', (R = 0) And (RdL(LongInt(@Info) + 40) = $A0000) And
+        (RdL(LongInt(@Info) + 44) = 38400));
+  Buf[0] := Ord('X');
+  R := VioWrtCharStr(LongInt(@Buf), 1, 0, 0, 0);
+  R2 := VioSetCurPos(0, 0, 0);
+  Check('fonctions du mode texte refusees (ERROR_VIO_MODE)', (R = ERROR_VIO_MODE) And (R2 = ERROR_VIO_MODE));
+  { 16 bandes de couleur (plans de bits, masque des plans du sequenceur) }
+  For C := 0 To 15 Do
+  Begin
+    PortOut($3C4, 2); PortOut($3C5, C);
+    For Y := 96 To 383 Do
+      For X := 0 To 4 Do WrB($A0000 + Y * 80 + C * 5 + X, $FF);
+  End;
+  PortOut($3C4, 2); PortOut($3C5, $0F);
+  { cadre blanc }
+  For X := 0 To 79 Do
+  Begin
+    WrB($A0000 + 40 * 80 + X, $FF); WrB($A0000 + 439 * 80 + X, $FF);
+  End;
+  For Y := 40 To 439 Do
+  Begin
+    WrB($A0000 + Y * 80, RdB($A0000 + Y * 80) Or $80); WrB($A0000 + Y * 80 + 79, RdB($A0000 + Y * 80 + 79) Or 1);
+  End;
+  Bad := 0;
+  For C := 0 To 15 Do
+    For P := 0 To 3 Do
+    Begin
+      PortOut($3CE, 4); PortOut($3CF, P);
+      If ((RdB($A0000 + 200 * 80 + C * 5 + 2) = $FF) <> (((C Shr P) And 1) = 1)) Then Inc(Bad);
+    End;
+  PortOut($3CE, 4); PortOut($3CF, 0);
+  Check('pels ecrits et relus dans les 4 plans (16 couleurs)', Bad = 0);
+  Dummy := DosSleep(1500);
+  A := 0;
+  R := VioPopUp(LongInt(@A), 0);
+  FillChar(Info, 64, 0);
+  WrW(LongInt(@Info), 34);
+  Dummy := VioGetMode(LongInt(@Info), 0);
+  B := Info[2];
+  R2 := VioEndPopup(0);
+  FillChar(Info, 64, 0);
+  WrW(LongInt(@Info), 34);
+  Dummy := VioGetMode(LongInt(@Info), 0);
+  Check('VioPopUp en mode graphique : texte, puis VioEndPopup : 640 x 480', (R = 0) And (B = 1) And (R2 = 0) And
+        (Info[2] = 3) And (RdW(LongInt(@Info) + 8) = 640));
+  R := GrMode(8, 320, 200);
+  Check('VioSetMode 320 x 200 x 256 (VGA 13h)', (R = 0) And (Info[3] = 8) And (RdW(LongInt(@Info) + 8) = 320) And
+        (RdL(LongInt(@Info) + 18) = 64000) And ((GcReg(5) And $40) = $40));
+  For Y := 0 To 199 Do
+    For X := 0 To 319 Do WrB($A0000 + Y * 320 + X, (X Div 20) + (Y Div 25) * 16);
+  Bad := 0;
+  For X := 0 To 15 Do
+    If RdB($A0000 + 100 * 320 + X * 20 + 5) <> X + 64 Then Inc(Bad);
+  Check('pels du mode 13h (un octet par pel)', Bad = 0);
+  Dummy := DosSleep(1500);
+  R := GrMode(4, 320, 200);
+  R2 := Info[3];
+  A := RdW(LongInt(@Info) + 8);
+  B := GrMode(4, 640, 350);
+  Check('VioSetMode 320 x 200 x 16 (0Dh) et 640 x 350 x 16 (10h)', (R = 0) And (R2 = 4) And (A = 320) And (B = 0) And
+        (RdW(LongInt(@Info) + 10) = 350) And (Crtc($12) = $5D));
+  R := GrMode(2, 640, 480);
+  R2 := GrMode(1, 640, 480);
+  Check('VioSetMode 640 x 480 x 4 refuse, 640 x 480 x 2 (11h)', (R = ERROR_VIO_MODE) And (R2 = 0) And (Info[3] = 1));
+  FillChar(Info, 64, 0);
+  WrW(LongInt(@Info), 8); Info[2] := 1; Info[3] := 4; WrW(LongInt(@Info) + 4, 80); WrW(LongInt(@Info) + 6, 25);
+  R := VioSetMode(LongInt(@Info), 0);
+  Buf[0] := Ord('O'); Buf[1] := Ord('K');
+  R2 := VioWrtCharStr(LongInt(@Buf), 2, 0, 0, 0);
+  Check('retour au texte 80 x 25 : police rechargee, ecriture', (R = 0) And (R2 = 0) And (FontSum = Fs0) And
+        (Crtc(9) And $1F = 15) And (Scr(0, 0) And $FF = Ord('O')) And ((GcReg(6) And 1) = 0));
 
   DosWrite(1, LongInt(@OutBuf), OutLen, LongInt(@N));
   WriteLn;

@@ -180,6 +180,24 @@ End;
 
 {$IFDEF OS2PC}
 Function SetStdHandle(N,H:LongInt):LongInt; External 'DOSCALLS';
+Function VioGetMode(P,H:LongInt):LongInt; External 'VIOCALLS';
+Function VioSetMode(P,H:LongInt):LongInt; External 'VIOCALLS';
+
+{ Un programme (Presentation Manager, graphiques) a laisse l'ecran en
+  mode graphique : revenir au mode texte 80 x 25 }
+Procedure TextModeBack;
+Var
+ M:Array[0..39]of Byte;
+ I:Integer;
+Begin
+ For I:=0 to 39 do M[I]:=0;
+ M[0]:=12;
+ If VioGetMode(LongInt(@M),0)=0Then If(M[2]and 2)<>0Then Begin
+  For I:=0 to 39 do M[I]:=0;
+  M[0]:=8;M[2]:=1;M[3]:=4;M[4]:=80;M[6]:=25;
+  VioSetMode(LongInt(@M),0);
+ End;
+End;
 {$ENDIF}
 
 Function TrimR(S:String):String;
@@ -1586,6 +1604,9 @@ Var
 Begin
  Exec(CurrCommand,ParamList);
  Err:=DosError;
+ {$IFDEF OS2PC}
+  TextModeBack;
+ {$ENDIF}
   { les messages qui suivent vont a la console }
  If(RedirOn)and(RedirLevel=InCmd)Then StopRedir;
  Case Err of

@@ -20,6 +20,13 @@ Library VIOCALLS;
   l'ecran, tampon video logique (LVB), impression de l'ecran, ainsi que
   les espaces de presentation AVIO (VioCreatePS...).
 
+  Modes : texte 80 x 25 et, par VioSetMode, les modes graphiques du VGA
+  640 x 480 x 16 (12h), 640 x 480 x 2 (11h), 640 x 350 x 16 (10h),
+  640 x 200 x 16 (0Eh), 320 x 200 x 16 (0Dh) et 320 x 200 x 256 (13h) :
+  memoire en 000A0000h (VioGetPhysBuf), fonctions du mode texte refusees
+  (ERROR_VIO_MODE), retour au texte par VioSetMode (police et palette
+  rechargees).
+
   Dans OS/2-0, les programmes et les DLL s'executent en anneau 0 :
   VIOCALLS.DLL ecrit directement dans la memoire de l'ecran (000B8000h)
   et programme le VGA par ses ports (CRTC, controleur d'attributs, DAC,
@@ -271,6 +278,10 @@ Var
   LineBuf   : Array[0..255] Of Byte;
   ConH      : LongInt;
   Dummy     : LongInt;
+  { mode graphique : numero du mode VGA (0 : texte 80 x 25), largeur,
+    hauteur, bits par pel, octets d'un plan }
+  GrMode, GrW, GrH, GrBits, GrPlane : LongInt;
+  PopGr     : LongInt;        { mode graphique a rendre apres VioEndPopup }
 
 { ==================================================================== }
 { Partie 2 - Services du noyau et de DOSCALLS.DLL                      }
@@ -776,6 +787,182 @@ Begin
   CursorApply;
 End;
 
+{ --- modes graphiques du VGA ---
+  Registres de chaque mode : Misc (3C2h), sequenceur (5), CRTC (25),
+  controleur graphique (9), controleur d'attributs (21) : 61 valeurs.
+  Ordre : 03h texte 80 x 25, 0Dh 320 x 200 x 16, 0Eh 640 x 200 x 16,
+  10h 640 x 350 x 16, 11h 640 x 480 x 2, 12h 640 x 480 x 16,
+  13h 320 x 200 x 256 }
+Const
+  NVgaModes = 7;
+  VgaModeNo : Array[0..6] Of LongInt = ($03, $0D, $0E, $10, $11, $12, $13);
+  VgaModeW  : Array[0..6] Of LongInt = (720, 320, 640, 640, 640, 640, 320);
+  VgaModeH  : Array[0..6] Of LongInt = (400, 200, 200, 350, 480, 480, 200);
+  VgaModeB  : Array[0..6] Of LongInt = (4, 4, 4, 4, 1, 4, 8);
+  VgaRegs : Array[0..426] Of LongInt = (
+    { 03h }
+    $67, $03, $00, $03, $00, $02,
+    $5F, $4F, $50, $82, $55, $81, $BF, $1F, $00, $4F, $0D, $0E, $00, $00, $00, $00,
+    $9C, $8E, $8F, $28, $1F, $96, $B9, $A3, $FF,
+    $00, $00, $00, $00, $00, $10, $0E, $00, $FF,
+    $00, $01, $02, $03, $04, $05, $14, $07, $38, $39, $3A, $3B, $3C, $3D, $3E, $3F,
+    $0C, $00, $0F, $08, $00,
+    { 0Dh }
+    $63, $03, $09, $0F, $00, $06,
+    $2D, $27, $28, $90, $2B, $80, $BF, $1F, $00, $C0, $00, $00, $00, $00, $00, $00,
+    $9C, $8E, $8F, $14, $00, $96, $B9, $E3, $FF,
+    $00, $00, $00, $00, $00, $00, $05, $0F, $FF,
+    $00, $01, $02, $03, $04, $05, $06, $07, $10, $11, $12, $13, $14, $15, $16, $17,
+    $01, $00, $0F, $00, $00,
+    { 0Eh }
+    $63, $03, $01, $0F, $00, $06,
+    $5F, $4F, $50, $82, $54, $80, $BF, $1F, $00, $C1, $00, $00, $00, $00, $00, $00,
+    $9C, $8E, $8F, $28, $00, $96, $B9, $E3, $FF,
+    $00, $00, $00, $00, $00, $00, $05, $0F, $FF,
+    $00, $01, $02, $03, $04, $05, $06, $07, $10, $11, $12, $13, $14, $15, $16, $17,
+    $01, $00, $0F, $00, $00,
+    { 10h }
+    $A3, $03, $01, $0F, $00, $06,
+    $5F, $4F, $50, $82, $54, $80, $BF, $1F, $00, $40, $00, $00, $00, $00, $00, $00,
+    $83, $85, $5D, $28, $0F, $63, $BA, $E3, $FF,
+    $00, $00, $00, $00, $00, $00, $05, $0F, $FF,
+    $00, $01, $02, $03, $04, $05, $14, $07, $38, $39, $3A, $3B, $3C, $3D, $3E, $3F,
+    $01, $00, $0F, $00, $00,
+    { 11h }
+    $E3, $03, $01, $0F, $00, $06,
+    $5F, $4F, $50, $82, $54, $80, $0B, $3E, $00, $40, $00, $00, $00, $00, $00, $00,
+    $EA, $0C, $DF, $28, $00, $E7, $04, $E3, $FF,
+    $00, $00, $00, $00, $00, $00, $05, $0F, $FF,
+    $00, $3F, $3F, $3F, $3F, $3F, $3F, $3F, $3F, $3F, $3F, $3F, $3F, $3F, $3F, $3F,
+    $01, $00, $0F, $00, $00,
+    { 12h }
+    $E3, $03, $01, $0F, $00, $06,
+    $5F, $4F, $50, $82, $54, $80, $0B, $3E, $00, $40, $00, $00, $00, $00, $00, $00,
+    $EA, $0C, $DF, $28, $00, $E7, $04, $E3, $FF,
+    $00, $00, $00, $00, $00, $00, $05, $0F, $FF,
+    $00, $01, $02, $03, $04, $05, $14, $07, $38, $39, $3A, $3B, $3C, $3D, $3E, $3F,
+    $01, $00, $0F, $00, $00,
+    { 13h }
+    $63, $03, $01, $0F, $00, $0E,
+    $5F, $4F, $50, $82, $54, $80, $BF, $1F, $00, $41, $00, $00, $00, $00, $00, $00,
+    $9C, $0E, $8F, $28, $40, $96, $B9, $A3, $FF,
+    $00, $00, $00, $00, $00, $40, $05, $0F, $FF,
+    $00, $01, $02, $03, $04, $05, $06, $07, $08, $09, $0A, $0B, $0C, $0D, $0E, $0F,
+    $41, $00, $0F, $00, $00);
+
+{ Programmer le VGA avec les registres du mode numero K (0 a 6) }
+Procedure VgaLoad(K : LongInt);
+Var B, I : LongInt;
+Begin
+  B := K * 61;
+  OutB($3C2, VgaRegs[B]);
+  OutB($3C4, 0); OutB($3C5, 1);                  { remise a zero synchrone }
+  For I := 1 To 4 Do
+  Begin
+    OutB($3C4, I); OutB($3C5, VgaRegs[B + 1 + I]);
+  End;
+  OutB($3C4, 0); OutB($3C5, 3);
+  CrtcSet($11, CrtcGet($11) And $7F);            { deverrouiller CRTC 0-7 }
+  For I := 0 To 24 Do
+  Begin
+    If I = 3 Then CrtcSet(I, VgaRegs[B + 6 + I] Or $80)
+    Else If I = $11 Then CrtcSet(I, VgaRegs[B + 6 + I] And $7F)
+    Else CrtcSet(I, VgaRegs[B + 6 + I]);
+  End;
+  CrtcSet($11, VgaRegs[B + 6 + $11]);
+  For I := 0 To 8 Do
+  Begin
+    OutB($3CE, I); OutB($3CF, VgaRegs[B + 31 + I]);
+  End;
+  Dummy := InB($3DA);
+  For I := 0 To 20 Do
+  Begin
+    OutB($3C0, I); OutB($3C0, VgaRegs[B + 40 + I]);
+  End;
+  Dummy := InB($3DA);
+  OutB($3C0, $20);
+End;
+
+{ Effacer la memoire graphique (000A0000h, 64 Ko, les 4 plans) }
+Procedure GrClear;
+Begin
+  OutB($3C4, 2); OutB($3C5, $0F);
+  OutB($3CE, 1); OutB($3CF, 0);                  { pas de fixation/remise }
+  OutB($3CE, 3); OutB($3CF, 0);
+  OutB($3CE, 8); OutB($3CF, $FF);
+  FillB($000A0000, 65536, 0);
+End;
+
+{ Palette de 256 couleurs du mode 13h : 16 couleurs du VGA, 16 gris,
+  cube de 6 x 6 x 6 couleurs, puis gris }
+Procedure Dac256;
+Var I, R, G, B : LongInt; C : Array[0..2] Of Byte;
+Begin
+  For I := 0 To 15 Do
+  Begin
+    C[0] := DefDac[DefPal[I] * 3]; C[1] := DefDac[DefPal[I] * 3 + 1]; C[2] := DefDac[DefPal[I] * 3 + 2];
+    DacSet(I, LongInt(@C));
+  End;
+  For I := 0 To 15 Do
+  Begin
+    C[0] := I * 4 + 3; C[1] := C[0]; C[2] := C[0];
+    DacSet(16 + I, LongInt(@C));
+  End;
+  For I := 0 To 215 Do
+  Begin
+    R := I Div 36; G := (I Div 6) Mod 6; B := I Mod 6;
+    C[0] := R * 12 + R Div 2; C[1] := G * 12 + G Div 2; C[2] := B * 12 + B Div 2;
+    DacSet(32 + I, LongInt(@C));
+  End;
+  For I := 248 To 255 Do
+  Begin
+    C[0] := (I - 248) * 8 + 7; C[1] := C[0]; C[2] := C[0];
+    DacSet(I, LongInt(@C));
+  End;
+End;
+
+{ Passer au mode graphique numero K (1 a 6) }
+Procedure GrEnter(K : LongInt);
+Var I : LongInt;
+Begin
+  { la police courante est dans FontBuf (rechargee au retour au texte) }
+  VgaLoad(K);
+  GrClear;
+  If VgaModeB[K] = 8 Then Dac256
+  Else For I := 0 To 255 Do DacSet(I, LongInt(@DefDac) + I * 3);
+  If VgaModeNo[K] = $13 Then
+  Begin
+    OutB($3C4, 2); OutB($3C5, $0F);
+  End;
+  GrMode := VgaModeNo[K]; GrW := VgaModeW[K]; GrH := VgaModeH[K]; GrBits := VgaModeB[K];
+  If GrBits = 8 Then GrPlane := GrW * GrH Else GrPlane := (GrW Div 8) * GrH;
+End;
+
+{ Revenir au mode texte 80 x 25 : registres, police, palette, curseur }
+Procedure GrLeave;
+Var I, M : LongInt;
+Begin
+  If GrMode = 0 Then Exit;
+  VgaLoad(0);
+  If CellHeight <> 16 Then CrtcSet(9, (CrtcGet(9) And $E0) Or (CellHeight - 1));
+  WriteFont(LongInt(@FontBuf), CellHeight);
+  For I := 0 To 255 Do DacSet(I, LongInt(@DefDac) + I * 3);
+  For I := 0 To 15 Do AcSet(I, DefPal[I]);
+  AcSet($11, Overscan);
+  M := AcGet($10);
+  If Blink = 0 Then AcSet($10, M Or 8) Else AcSet($10, M And Not 8);
+  GrMode := 0; GrW := 0; GrH := 0; GrBits := 0; GrPlane := 0;
+  CursorApply;
+End;
+
+{ Code d'erreur des fonctions du mode texte (ERROR_VIO_MODE en mode
+  graphique pour l'ecran) }
+Function TextErr(Hvio : LongInt) : LongInt;
+Begin
+  If (Hvio = 0) And (GrMode <> 0) Then TextErr := ERROR_VIO_MODE
+  Else TextErr := SurfErr(Hvio);
+End;
+
 { ==================================================================== }
 { Partie 6 - Remplacement du sous-systeme (VioRegister)                }
 { ==================================================================== }
@@ -883,7 +1070,7 @@ End;
 Function WriteRun(Hvio, Row, Col, Src, Count, Step, Mode, AttrC : LongInt) : LongInt;
 Var R, Avail, I, A, CS, Ext : LongInt;
 Begin
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If R = NO_ERROR Then R := PosErr(Hvio, Row, Col, Avail);
   If R = NO_ERROR Then
   Begin
@@ -921,7 +1108,7 @@ End;
 Function ReadRun(Hvio, Row, Col, Dst, PCb, Mode : LongInt) : LongInt;
 Var R, Avail, Count, I, A, CS, USz : LongInt;
 Begin
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If R = NO_ERROR Then R := PosErr(Hvio, Row, Col, Avail);
   If R = NO_ERROR Then
   Begin
@@ -947,7 +1134,7 @@ End;
 Function ScrollRect(Hvio, Top, Left, Bot, Right, N, PCell, Dir : LongInt) : LongInt;
 Var R, CS, Rows, Cols, Y, X, H, W, Fill0, Fill1 : LongInt;
 Begin
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If R = NO_ERROR Then
   Begin
     Rows := SRows(Hvio); Cols := SCols(Hvio); CS := SCell(Hvio);
@@ -1246,7 +1433,7 @@ Begin
     VioGetCurPos := HookRet;
     Exit;
   End;
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If (R = NO_ERROR) And ((PRow = 0) Or (PCol = 0)) Then R := ERROR_VIO_PTR;
   If R = NO_ERROR Then
   Begin
@@ -1268,7 +1455,7 @@ Begin
     VioSetCurPos := HookRet;
     Exit;
   End;
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If R = NO_ERROR Then
   Begin
     If (Row < 0) Or (Row >= SRows(Hvio)) Then R := ERROR_VIO_ROW
@@ -1289,7 +1476,7 @@ Begin
     VioGetCurType := HookRet;
     Exit;
   End;
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If (R = NO_ERROR) And (PInfo = 0) Then R := ERROR_VIO_PTR;
   If R = NO_ERROR Then
   Begin
@@ -1319,7 +1506,7 @@ Begin
     VioSetCurType := HookRet;
     Exit;
   End;
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If (R = NO_ERROR) And (PInfo = 0) Then R := ERROR_VIO_PTR;
   If R = NO_ERROR Then
   Begin
@@ -1380,7 +1567,7 @@ Begin
     VioWrtCellStr := HookRet;
     Exit;
   End;
-  If SurfErr(Hvio) <> NO_ERROR Then CS := 2 Else CS := SCell(Hvio);
+  If TextErr(Hvio) <> NO_ERROR Then CS := 2 Else CS := SCell(Hvio);
   VioWrtCellStr := WriteRun(Hvio, Row, Col, PCells, Cb Div CS, CS, 2, 0);
 End;
 
@@ -1509,7 +1696,7 @@ Begin
     VioWrtTty := HookRet;
     Exit;
   End;
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If (R = NO_ERROR) And (PCh = 0) And (Cb > 0) Then R := ERROR_VIO_PTR;
   If (R = NO_ERROR) And (Cb > 0) Then TtyWrite(Hvio, PCh, Cb);
   VioWrtTty := R;
@@ -1566,7 +1753,7 @@ Begin
     VioGetBuf := HookRet;
     Exit;
   End;
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If (R = NO_ERROR) And ((PLvb = 0) Or (PCb = 0)) Then R := ERROR_VIO_PTR;
   If (R = NO_ERROR) And (Hvio <> 0) Then
   Begin
@@ -1608,7 +1795,7 @@ Begin
     VioShowBuf := HookRet;
     Exit;
   End;
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If R = NO_ERROR Then
   Begin
     If (Ofs < 0) Or (Cb < 0) Then R := ERROR_VIO_INVALID_LENGTH
@@ -1652,12 +1839,14 @@ Begin
     N := RdL(PPhys + 4);
     If A = 0 Then
     Begin
-      A := ScrBase;
+      If GrMode <> 0 Then A := $000A0000 Else A := ScrBase;
       WrL(PPhys, A);
     End;
     If N = 0 Then
     Begin
-      N := ScrBytes;
+      If GrMode = $13 Then N := 65536
+      Else If GrMode <> 0 Then N := GrPlane
+      Else N := ScrBytes;
       WrL(PPhys + 4, N);
     End;
     If (A < $000A0000) Or (A + N > $000C0000) Or (N < 0) Then R := ERROR_VIO_INVALID_PARMS
@@ -1694,6 +1883,31 @@ Begin
     Begin
       Cols := SCols(Hvio); Rows := SRows(Hvio);
       FillB(LongInt(@Scratch), 34, 0);
+      If (Hvio = 0) And (GrMode <> 0) Then
+      Begin
+        { mode graphique : col x row = cellules de 8 x 8 (200 lignes),
+          8 x 14 (350) ou 8 x 16 (480) }
+        WrW(LongInt(@Scratch), Cb);
+        WrB(LongInt(@Scratch) + 2, 3);              { VGMT_OTHER + VGMT_GRAPHICS }
+        WrB(LongInt(@Scratch) + 3, GrBits);
+        WrW(LongInt(@Scratch) + 4, GrW Div 8);
+        If GrH = 200 Then WrW(LongInt(@Scratch) + 6, 25)
+        Else If GrH = 350 Then WrW(LongInt(@Scratch) + 6, 25)
+        Else WrW(LongInt(@Scratch) + 6, 30);
+        WrW(LongInt(@Scratch) + 8, GrW);
+        WrW(LongInt(@Scratch) + 10, GrH);
+        WrB(LongInt(@Scratch) + 12, 0);
+        WrB(LongInt(@Scratch) + 13, 1);
+        WrL(LongInt(@Scratch) + 14, $000A0000);
+        WrL(LongInt(@Scratch) + 18, GrPlane);
+        If GrBits = 8 Then WrL(LongInt(@Scratch) + 22, GrPlane)
+        Else WrL(LongInt(@Scratch) + 22, GrPlane * 4);
+        WrL(LongInt(@Scratch) + 26, GrPlane);
+        If Cb > 34 Then Cb := 34;
+        MoveB(LongInt(@Scratch), PMode, Cb);
+        VioGetMode := R;
+        Exit;
+      End;
       WrW(LongInt(@Scratch), Cb);
       WrB(LongInt(@Scratch) + 2, 1);               { VGMT_OTHER : couleur, texte }
       WrB(LongInt(@Scratch) + 3, 4);               { 16 couleurs }
@@ -1715,32 +1929,72 @@ Begin
 End;
 
 { ---------------------------------------------------------------------
-  VioSetMode(pvioModeInfo, hvio) : fixer le mode video. OS/2-0 gere le
-  mode texte 80 x 25 (16 couleurs ou monochrome) : l'ecran est efface,
-  le curseur place en haut a gauche avec sa forme par defaut ; les
-  modes graphiques ou d'autres dimensions rendent ERROR_VIO_MODE. }
+  VioSetMode(pvioModeInfo, hvio) : fixer le mode video (VIOMODEINFO,
+  voir VioGetMode ; les champs absents de cb prennent la valeur par
+  defaut). fbType : 01h VGMT_OTHER (couleur), 02h VGMT_GRAPHICS, 04h
+  VGMT_DISABLEBURST ; color : bits par pel (1, 4 ou 8). Modes :
+    texte 80 x 25 (16 couleurs ou monochrome) ;
+    graphiques (fbType 03h) : 640 x 480 x 16 (mode VGA 12h, par defaut),
+    640 x 480 x 2 (11h), 640 x 350 x 16 (10h), 640 x 200 x 16 (0Eh),
+    320 x 200 x 16 (0Dh), 320 x 200 x 256 (13h) ; la resolution est
+    donnee par hres et vres (ou col x 8 et row x 8, 14 ou 16).
+  En mode graphique, la memoire de l'ecran est en 000A0000h
+  (VioGetPhysBuf) : plans de bits du VGA (mode 13h : un octet par pel) ;
+  les fonctions du mode texte rendent ERROR_VIO_MODE. Le retour au mode
+  texte recharge la police, la palette et efface l'ecran. }
 Function VioSetMode(PMode, Hvio : LongInt) : LongInt;
-Var R, Cb, I : LongInt;
+Var R, Cb, I, Fb, Bits, Cols, Rows, W, H, K : LongInt;
 Begin
   If Hooked(VB_SETMODE, 2, PMode, Hvio, 0, 0, 0, 0, 0) Then
   Begin
     VioSetMode := HookRet;
     Exit;
   End;
-  R := NO_ERROR;
+  R := NO_ERROR; K := -1;
   If Hvio <> 0 Then R := ERROR_VIO_INVALID_HANDLE
   Else If PMode = 0 Then R := ERROR_VIO_PTR
   Else
   Begin
     Cb := RdW(PMode);
     If Cb < 3 Then R := ERROR_VIO_INVALID_LENGTH
-    Else If (RdB(PMode + 2) And 2) <> 0 Then R := ERROR_VIO_MODE        { graphique }
-    Else If (Cb >= 4) And (RdB(PMode + 3) > 4) Then R := ERROR_VIO_MODE
-    Else If (Cb >= 6) And (RdW(PMode + 4) <> 0) And (RdW(PMode + 4) <> NCols) Then R := ERROR_VIO_MODE
-    Else If (Cb >= 8) And (RdW(PMode + 6) <> 0) And (RdW(PMode + 6) <> NRows) Then R := ERROR_VIO_MODE;
+    Else
+    Begin
+      Fb := RdB(PMode + 2);
+      Bits := 0; Cols := 0; Rows := 0; W := 0; H := 0;
+      If Cb >= 4 Then Bits := RdB(PMode + 3);
+      If Cb >= 6 Then Cols := RdW(PMode + 4);
+      If Cb >= 8 Then Rows := RdW(PMode + 6);
+      If Cb >= 10 Then W := RdW(PMode + 8);
+      If Cb >= 12 Then H := RdW(PMode + 10);
+      If (Fb And 2) <> 0 Then
+      Begin
+        If Bits = 0 Then Bits := 4;
+        If W = 0 Then W := Cols * 8;
+        If (W = 0) And (Bits = 8) Then W := 320;
+        If W = 0 Then W := 640;
+        If H = 0 Then
+        Begin
+          If (Rows = 25) And (W = 320) Then H := 200
+          Else If Rows = 25 Then H := 350
+          Else If Rows = 30 Then H := 480
+          Else If Rows = 43 Then H := 350
+          Else If Rows = 60 Then H := 480
+          Else If W = 320 Then H := 200
+          Else H := 480;
+        End;
+        For I := 1 To NVgaModes - 1 Do
+          If (VgaModeW[I] = W) And (VgaModeH[I] = H) And (VgaModeB[I] = Bits) Then K := I;
+        If K < 0 Then R := ERROR_VIO_MODE;
+      End
+      Else If Bits > 4 Then R := ERROR_VIO_MODE
+      Else If (Cols <> 0) And (Cols <> NCols) Then R := ERROR_VIO_MODE
+      Else If (Rows <> 0) And (Rows <> NRows) Then R := ERROR_VIO_MODE;
+    End;
   End;
-  If R = NO_ERROR Then
+  If (R = NO_ERROR) And (K > 0) Then GrEnter(K)
+  Else If R = NO_ERROR Then
   Begin
+    GrLeave;
     For I := 0 To NCols * NRows - 1 Do WrW(SBase(0) + I * 2, $0720);
     SetAttr(0, 7);
     SetCur(0, 0, 0);
@@ -1749,6 +2003,7 @@ Begin
   End;
   VioSetMode := R;
 End;
+
 
 { ---------------------------------------------------------------------
   VioGetConfig(usConfigId, pvioin, hvio) : configuration materielle
@@ -1900,7 +2155,8 @@ End;
 { ---------------------------------------------------------------------
   VioGetFont(pviofi, hvio) : police affichee (type 0) ou d'origine
   (type 1). VIOFONTINFO : cb, type, cxCell, cyCell, pbData (4), cbData.
-  pbData = 0 : l'adresse d'une copie interne est rendue. }
+  pbData = 0 : l'adresse d'une copie interne est rendue. Permise en mode
+  graphique (police du mode texte, pour dessiner les caracteres). }
 Function VioGetFont(PInfo, Hvio : LongInt) : LongInt;
 Var R, T, Need, Src : LongInt;
 Begin
@@ -1918,7 +2174,8 @@ Begin
     Need := 256 * CellHeight;
     If T = 0 Then
     Begin
-      ReadFont(LongInt(@FontBuf), CellHeight);
+      { en mode graphique, le plan 2 ne contient plus la police }
+      If GrMode = 0 Then ReadFont(LongInt(@FontBuf), CellHeight);
       Src := LongInt(@FontBuf);
     End
     Else If T = 1 Then
@@ -1955,7 +2212,7 @@ Begin
     VioSetFont := HookRet;
     Exit;
   End;
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If (R = NO_ERROR) And (PInfo = 0) Then R := ERROR_VIO_PTR;
   If (R = NO_ERROR) And (RdW(PInfo) < 14) Then R := ERROR_VIO_INVALID_LENGTH;
   If R = NO_ERROR Then
@@ -2081,6 +2338,16 @@ Begin
     End
     Else
     Begin
+      { en mode graphique : la fenetre surgissante est en mode texte ; le
+        mode graphique est rendu (efface) par VioEndPopup }
+      PopGr := 0;
+      For I := 1 To NVgaModes - 1 Do
+        If (GrMode <> 0) And (VgaModeNo[I] = GrMode) Then PopGr := I;
+      If PopGr > 0 Then
+      Begin
+        GrLeave;
+        F := F And Not 2;
+      End;
       ScreenSave(LongInt(@PopBuf), PopRow, PopCol, PopAttr);
       InPopup := True;
       PopPid := MyPid;
@@ -2112,6 +2379,8 @@ Begin
     ScreenRestore(LongInt(@PopBuf), PopRow, PopCol, PopAttr);
     InPopup := False;
     PopPid := 0;
+    If PopGr > 0 Then GrEnter(PopGr);
+    PopGr := 0;
   End;
   VioEndPopup := R;
 End;
@@ -2995,7 +3264,7 @@ End;
 Function VioCheckCharType(PType, Row, Col, Hvio : LongInt) : LongInt;
 Var R, Avail, I, T, C : LongInt;
 Begin
-  R := SurfErr(Hvio);
+  R := TextErr(Hvio);
   If (R = NO_ERROR) And (PType = 0) Then R := ERROR_VIO_PTR;
   If R = NO_ERROR Then R := PosErr(Hvio, Row, Col, Avail);
   If R = NO_ERROR Then

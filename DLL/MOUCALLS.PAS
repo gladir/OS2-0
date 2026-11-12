@@ -26,7 +26,10 @@ Library MOUCALLS;
   du noyau toutes les 10 ms). Le pointeur est dessine dans l'ecran texte
   (000B8000h) en combinant la cellule avec les masques ET et OU exclusif
   de sa forme (par defaut FFFFh et 7700h : couleurs inversees) ; comme
-  sous OS/2, il n'apparait qu'apres MouDrawPtr.
+  sous OS/2, il n'apparait qu'apres MouDrawPtr. Quand l'ecran est en mode
+  graphique (VioSetMode), les lignes et colonnes sont des pels (0 a 479 et
+  0 a 639 en 640 x 480) et le pointeur est dessine par le programme (PM :
+  PMWIN.DLL).
 
   Convention _System (comme DOSCALLS.DLL) : valeurs de 32 bits, pointeurs
   lineaires. Un pointeur vers une valeur simple (pcButtons, pfsEvents,
@@ -167,6 +170,7 @@ Var
   Prm       : Array[0..7] Of LongInt;
 
   Pk        : Array[0..3] Of LongInt;
+  GrW, GrH  : LongInt;                   { mode graphique : pels (0 : texte) }
   InfoK     : Array[0..3] Of LongInt;
   FailName  : Array[0..63] Of Byte;
   RealDrv   : String;
@@ -181,6 +185,7 @@ Function KSleep(Ms : LongInt) : LongInt; External 'DOSCALLS' Name 'Sleep';
 Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
 Function DosLoadModule(PFail, CbFail, PName, PHmod : LongInt) : LongInt; External 'DOSCALLS';
 Function DosQueryProcAddr(H, Ord, PName, PPfn : LongInt) : LongInt; External 'DOSCALLS';
+Function VioGetMode(PMode, Hvio : LongInt) : LongInt; External 'VIOCALLS';
 
 { ==================================================================== }
 { Partie 3 - Utilitaires                                               }
@@ -254,14 +259,82 @@ Begin
   HErr := R;
 End;
 
+{ ecran : nombre de lignes et de colonnes (pels en mode graphique), pels
+  par unite de l'echelle (une cellule : 8 x 16 pels) }
+Function MaxRows : LongInt;
+Begin
+  If GrH > 0 Then MaxRows := GrH Else MaxRows := NRows;
+End;
+
+Function MaxCols : LongInt;
+Begin
+  If GrW > 0 Then MaxCols := GrW Else MaxCols := NCols;
+End;
+
+Function UnitY : LongInt;
+Begin
+  If GrH > 0 Then UnitY := 16 Else UnitY := 1;
+End;
+
+Function UnitX : LongInt;
+Begin
+  If GrW > 0 Then UnitX := 8 Else UnitX := 1;
+End;
+
 Function CurRow : LongInt;
 Begin
-  CurRow := PosY Div RowScale;
+  CurRow := (PosY * UnitY) Div RowScale;
 End;
 
 Function CurCol : LongInt;
 Begin
-  CurCol := PosX Div ColScale;
+  CurCol := (PosX * UnitX) Div ColScale;
+End;
+
+{ mickeys de la ligne et de la colonne }
+Function RowPos(Row : LongInt) : LongInt;
+Begin
+  RowPos := (Row * RowScale + UnitY - 1) Div UnitY;
+End;
+
+Function ColPos(Col : LongInt) : LongInt;
+Begin
+  ColPos := (Col * ColScale + UnitX - 1) Div UnitX;
+End;
+
+Procedure ClampPos;
+Begin
+  If PosX < 0 Then PosX := 0;
+  If PosY < 0 Then PosY := 0;
+  If PosX > ColPos(MaxCols) - 1 Then PosX := ColPos(MaxCols) - 1;
+  If PosY > RowPos(MaxRows) - 1 Then PosY := RowPos(MaxRows) - 1;
+End;
+
+{ mode de l'ecran (VioGetMode) : en passant au mode graphique ou au mode
+  texte, la position garde sa proportion }
+Procedure ModeCheck;
+Var Mi : Array[0..39] Of Byte; K, W, H, R, C, OR_, OC : LongInt;
+Begin
+  For K := 0 To 39 Do Mi[K] := 0;
+  Mi[0] := 12;
+  W := 0; H := 0;
+  If VioGetMode(LongInt(@Mi), 0) = 0 Then
+    If (Mi[2] And 2) <> 0 Then
+    Begin
+      W := Mi[8] Or (Mi[9] Shl 8); H := Mi[10] Or (Mi[11] Shl 8);
+    End;
+  If (W <> GrW) Or (H <> GrH) Then
+  Begin
+    R := CurRow; C := CurCol; OR_ := MaxRows; OC := MaxCols;
+    Shown := False;
+    GrW := W; GrH := H;
+    If (OR_ > 0) And (OC > 0) Then
+    Begin
+      PosY := RowPos((R * MaxRows) Div OR_);
+      PosX := ColPos((C * MaxCols) Div OC);
+    End;
+    ClampPos;
+  End;
 End;
 
 { ==================================================================== }
@@ -292,6 +365,7 @@ End;
 
 Procedure ShowPtr;
 Begin
+  If GrW > 0 Then Exit;
   If (Not Shown) And PtrVisible Then
   Begin
     ShownAddr := ScrBase + (CurRow * NCols + CurCol) * 2;
@@ -339,16 +413,14 @@ Procedure Poll;
 Var Dx, Dy, B, T, Fs, OldR, OldC : LongInt; Moved : Boolean;
 Begin
   If Not Present Then Exit;
+  ModeCheck;
   OldR := CurRow; OldC := CurCol;
   While KrnMouRead(LongInt(@Pk)) <> 0 Do
   Begin
     Dx := Accel(Pk[0]); Dy := Accel(Pk[1]); B := Pk[2]; T := Pk[3];
     PosX := PosX + Dx;
     PosY := PosY + Dy;
-    If PosX < 0 Then PosX := 0;
-    If PosY < 0 Then PosY := 0;
-    If PosX > NCols * ColScale - 1 Then PosX := NCols * ColScale - 1;
-    If PosY > NRows * RowScale - 1 Then PosY := NRows * RowScale - 1;
+    ClampPos;
     Moved := (Dx <> 0) Or (Dy <> 0);
     { etat : bouton 1 = gauche (bit 0), 2 = droit (bit 1), 3 = milieu (bit 2) }
     Fs := 0;
@@ -623,13 +695,13 @@ Begin
   If R = NO_ERROR Then
   Begin
     Row := RdW(PPos); Col := RdW(PPos + 2);
-    If (Row >= NRows) Or (Col >= NCols) Then R := ERROR_MOUSE_INV_PARMS
+    Poll;
+    If (Row >= MaxRows) Or (Col >= MaxCols) Then R := ERROR_MOUSE_INV_PARMS
     Else
     Begin
-      Poll;
       HidePtr;
-      PosY := Row * RowScale;
-      PosX := Col * ColScale;
+      PosY := RowPos(Row);
+      PosX := ColPos(Col);
       ShowPtr;
     End;
   End;
@@ -738,7 +810,7 @@ Begin
   If (R = NO_ERROR) And (PRect = 0) Then R := ERROR_MOUSE_INV_PARMS;
   If R = NO_ERROR Then
   Begin
-    If (RdW(PRect) >= NRows) Or (RdW(PRect + 2) >= NCols) Or (RdW(PRect + 4) = 0) Or
+    If (RdW(PRect) >= MaxRows) Or (RdW(PRect + 2) >= MaxCols) Or (RdW(PRect + 4) = 0) Or
        (RdW(PRect + 6) = 0) Then R := ERROR_MOUSE_INV_PARMS
     Else
     Begin
@@ -832,7 +904,7 @@ Begin
       Poll;
       Row := CurRow; Col := CurCol;
       RowScale := Rs; ColScale := Cs;
-      PosY := Row * RowScale; PosX := Col * ColScale;
+      PosY := RowPos(Row); PosX := ColPos(Col);
     End;
   End;
   MouSetScaleFact := R;
@@ -1035,8 +1107,8 @@ Begin
   AndMask := $FFFF; XorMask := $7700;
   DrawOn := False;
   ExclOn := False;
-  PosY := 12 * RowScale;
-  PosX := 40 * ColScale;
+  PosY := RowPos(MaxRows Div 2);
+  PosX := ColPos(MaxCols Div 2);
   QHead := 0; QCount := 0;
 End;
 
