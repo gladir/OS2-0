@@ -83,9 +83,9 @@ Const
   ProcWinSize   = $00400000;
   ProcStackSize = $00040000;   { 256 Ko de pile par processus }
   PhysProcBase  = $01000000;   { memoire physique des processus (>= 16 Mo) }
-  DllBase       = $00C00000;   { region des DLL (12 Mo - 16 Mo), partagee }
+  DllBase       = $00800000;   { region des DLL (8 Mo - 16 Mo), partagee }
   DllTop        = $01000000;
-  MaxMods       = 16;
+  MaxMods       = 32;
 
   { Tas du noyau }
   HeapMagicUsed = $55534544;   { 'DESU' }
@@ -4611,7 +4611,7 @@ End;
 
 { --- Modules de liens dynamiques (DLL) ---
   Une DLL OS/2-0 (OS2PC, Library) est une image PE liee dans la region
-  00C00000h-00FFFFFFh, projetee a l'identique et partagee par tous les
+  00800000h-00FFFFFFh, projetee a l'identique et partagee par tous les
   processus. Elle est chargee a sa base (une seule fois), ses importations
   sont liees, puis son code d'initialisation (point d'entree) est execute. }
 
@@ -4779,7 +4779,7 @@ Begin
   { la DLL doit tenir dans la region des DLL, sans chevaucher une autre }
   If (Base < DllBase) Or (Base + ImgSize > DllTop) Or (Base + ImgSize > PhysTop) Then
   Begin
-    ConPutLn('SYS0191: ' + Path + ' n''est pas liee dans la region des DLL (00C00000h).');
+    ConPutLn('SYS0191: ' + Path + ' n''est pas liee dans la region des DLL (00800000h-00FFFFFFh).');
     KFree(Buf);
     Exit;
   End;

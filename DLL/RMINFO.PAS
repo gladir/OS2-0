@@ -8,7 +8,7 @@
 
 Library RMINFO;
 
-{$IMAGEBASE $00ED0000}
+{$IMAGEBASE $00800000}
 {$R-,S-,I-}
 
 { Compilation : OS2PC RMINFO.PAS   (produit RMINFO.DLL)

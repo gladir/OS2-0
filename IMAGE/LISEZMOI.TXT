@@ -5,17 +5,17 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
               FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
               KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
-              SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, CMD.EXE,
-              TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
+              SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
+              OS2SM.DLL, CMD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
-              TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE et les commandes du
-              depot compilees avec OS2PC (-COS2).
+              TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE et les
+              commandes du depot compilees avec OS2PC (-COS2).
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
-              RMINFO.DLL et CONFIG.SYS (copies faites par
+              RMINFO.DLL, OS2SM.DLL et CONFIG.SYS (copies faites par
               KERNEL\BUILD.sh).
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
@@ -64,6 +64,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTPFS.PAS                     -> TESTPFS.EXE (essai de SPOOLCP.DLL)
   OS2PC DLL\RMINFO.PAS                      -> RMINFO.DLL (gestionnaire de ressources)
   OS2PC DLL\TESTRM.PAS                      -> TESTRM.EXE (essai de RMINFO.DLL)
+  OS2PC DLL\OS2SM.PAS                       -> OS2SM.DLL (liste des taches)
+  OS2PC DLL\TESTSM.PAS                      -> TESTSM.EXE (essai de OS2SM.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -96,16 +98,16 @@ Carte memoire
   00100000h          OS2KRNL (image PE)
   fin de l'image..4 Mo tas du noyau
   00400000h-007FFFFFh fenetre du processus courant (pagination)
-  00C00000h-00FFFFFFh DLL partagees (DOSCALLS.DLL a 00C00000h,
+  00800000h-00FFFFFFh DLL partagees (RMINFO.DLL a 00800000h, OS2SM.DLL
+                     a 00850000h, DOSCALLS.DLL a 00C00000h,
                      KBDCALLS.DLL a 00C80000h, MONCALLS.DLL a
                      00CB0000h, FKA.DLL a 00D00000h, NLS.DLL a
                      00D40000h, MSG.DLL a 00D80000h, NAMPIPES.DLL a
                      00DB0000h, HPFS.IFS a 00E00000h, QUECALLS.DLL a
-                     00E70000h, SPOOLCP.DLL a 00EA0000h, RMINFO.DLL a
-                     00ED0000h, VIOCALLS.DLL a
+                     00E70000h, SPOOLCP.DLL a 00EA0000h, VIOCALLS.DLL a
                      00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
                      00F80000h, SESMGR.DLL a 00FA0000h : directive
-                     {$IMAGEBASE} d'OS2PC)
+                     {$IMAGEBASE} d'OS2PC ; 32 modules au plus)
   01000000h et plus  memoire physique des processus (image + pile)
   haut de la memoire disque virtuel HPFS (/RAMDISK:n Ko)
 
@@ -284,6 +286,21 @@ OS2KRNL) avec les identificateurs PnP (PNP0303 pour le clavier...).
 RMConvertID convertit ces identificateurs ; RMSaveDetectedData ecrit les
 peripheriques detectes inscrits par les applications dans
 C:\RMDETECT.DAT. TESTRM LISTE affiche l'arbre.
+
+OS2SM.DLL
+---------
+Les 46 points d'entree de la gestion des sessions de l'interpreteur
+(ordinaux 1 a 45, donnee SHELLWINDOW a l'ordinal 103) : liste des taches
+(WinAddSwitchEntry, WinQuerySwitchList...), demarrage et arret des
+programmes (SheStartProgram, WinInstStartApp, WinEndProgram...), passage
+d'un programme a l'autre (WinSwitchToProgram ; WinProcessHotKey :
+Ctrl+Echap, Alt+Echap, Alt+Tab), titres, arret du systeme. Une entree
+designe une session de SESMGR.DLL : OS2SM s'y inscrit (OS2SMNOTIFY,
+ordinal 200) et suit le demarrage, la fin et le premier plan des
+sessions. Fichier C:\OS2SM.INI : RUN=programme parametres
+(StartSystemExecutables), FONT=fichier (ShlLoadPublicFonts), section
+[Bureau] ecrite par WinSave. Pas de Presentation Manager : les handles
+de fenetres sont conserves tels quels, PROG_PM est refuse.
 
 Imprimante
 ----------
