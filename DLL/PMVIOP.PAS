@@ -43,7 +43,11 @@ Library PMVIOP;
   "seamless" absentes), 87 (parametre), 170 (focus du clavier pris par un
   autre processus), 232 (pas d'evenement), 640 (delai depasse).
 
-  Points d'entree (73 ordinaux, ceux de l'original) :
+  Points d'entree : les 73 ordinaux de la liste d'OS/2, noms en
+  majuscules comme dans le PMVIOP.DLL d'origine (module LX surtout en 16
+  bits : 64 entrees, sans 44, 45, 50, 51 et 55, ajoutees par une version
+  plus recente ; ses entrees 102, 104, 107, 108 et 110 a 121 sont des
+  variables de son segment de donnees) :
      1 WinCreateConsole(hwndOwner, pszTitre, fl, phcon) : fl 1 visible,
        2 session (numero dans les bits 8 a 15), 4 clavier ouvert
      2 WinDestroyConsole(hcon)        3 WinSyncWithPS(hcon, hvps)
@@ -64,7 +68,9 @@ Library PMVIOP;
     22 WinConsoleGetPtrPos(hcon, pPos) 23 WinConsoleSetPtrPos(hcon, pPos)
     24 WinShieldAbort(hcon)          25 ShieldFrameProc (procedure)
     26 VioShieldWindowProc           27 LockVioPS(hcon) 28 UnlockVioPS
-    29 MarkingWindowProc             30 WinDefAVioWindowProc
+    29 MarkingWindowProc             30 WinDefAVioWindowProc (WM_SIZE :
+       taille de la fenetre gardee dans ses PS AVIO ; ne remplace pas
+       WinDefWindowProc)
     31 WinConsoleGetKbdHandle(hcon, phkbd)
     32 WinConsoleAttachMouseUser(hcon) 33 WinConsoleDetachMouseUser
     34 TaskMgrSubClassProc (procedure)  35 WinShieldPreThaw(hcon)
@@ -175,11 +181,13 @@ Function WinEmptyClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
 Function WinSetClipbrdData(Hab, Data, Fmt, Info : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryClipbrdData(Hab, Fmt : LongInt) : LongInt; External 'PMWIN';
 Function WinQuerySysValue(HD, Ix : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryWindowDC(H : LongInt) : LongInt; External 'PMWIN';
 
 { --- VIOCALLS.DLL --- }
 Function VioGetPSAddress(PPBuf, Hvps : LongInt) : LongInt; External 'VIOCALLS';
 Function VioQueryVbe(P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYVBE';
 Function VioGetMode(PMode, Hvio : LongInt) : LongInt; External 'VIOCALLS';
+Function VioAvioSize(Hdc, Cx, Cy : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOAVIOSIZE';
 
 { ==================================================================== }
 { Utilitaires                                                           }
@@ -402,6 +410,17 @@ Begin
   COrgC[I] := MaxI(0, MinI(COrgC[I], CCols[I] - CVisC[I]));
   If ((R0 <> COrgR[I]) Or (C0 <> COrgC[I])) And (CClient[I] <> 0) Then
     Dummy := WinInvalidateRect(CClient[I], 0, 0);
+End;
+
+{ nouvelle taille de la zone client (WM_SIZE) : cellules visibles }
+Procedure ConSize(I, Cx, Cy : LongInt);
+Begin
+  If (Cx <= 0) Or (Cy <= 0) Then Exit;
+  CVisC[I] := MaxI(1, MinI(CCols[I], Cx Div 8)); CVisR[I] := MaxI(1, MinI(CRows[I], Cy Div 16));
+  COrgR[I] := MaxI(0, MinI(COrgR[I], CRows[I] - CVisR[I]));
+  COrgC[I] := MaxI(0, MinI(COrgC[I], CCols[I] - CVisC[I]));
+  If CSnapR[I] >= 0 Then Follow(I, CSnapR[I], CSnapC[I]);
+  If CClient[I] <> 0 Then Dummy := WinInvalidateRect(CClient[I], 0, 0);
 End;
 
 { ==================================================================== }
@@ -676,6 +695,7 @@ Begin
 End;
 
 Function VioShieldWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; Forward;
+Function WinDefAVioWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; Forward;
 
 { marquage : glisser avec le bouton 1 choisit un rectangle de cellules }
 Function MarkingWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
@@ -750,6 +770,7 @@ Begin
   End;
   Case Msg Of
     WM_PAINT : PaintCon(I, H);
+    WM_SIZE : VioShieldWindowProc := WinDefAVioWindowProc(H, Msg, Mp1, Mp2);
     WM_TIMER : If Lo16(Mp1) = 1 Then RefreshCon(I);
     WM_CHAR :
       Begin
@@ -1329,12 +1350,24 @@ Begin
   UnlockVioPS := NO_ERROR;
 End;
 
-{ procedure par defaut des fenetres AVIO : celles de PMVIOP sont des
-  consoles, les autres vont a WinDefWindowProc }
+{ WinDefAVioWindowProc(hwnd, msg, mp1, mp2) : procedure AVIO par defaut.
+  Une application AVIO lui passe tous les WM_SIZE de la fenetre a
+  laquelle son espace de presentation AVIO est associe (VioAssociate
+  avec le DC de la fenetre, WinOpenWindowDC), avec les parametres recus :
+  la taille de la fenetre (mp2 : cx, cy) est gardee dans les PS associes
+  (VIOCALLS, VIOAVIOSIZE), qui sont redessines ; pour une console de
+  PMVIOP, les cellules visibles sont recalculees. Ce n'est pas un
+  remplacement de WinDefWindowProc, que l'application appelle comme
+  d'habitude : les autres messages ne sont pas traites (rend 0). }
 Function WinDefAVioWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var I, Hdc : LongInt;
 Begin
-  If ConOfClient(H) >= 0 Then WinDefAVioWindowProc := VioShieldWindowProc(H, Msg, Mp1, Mp2)
-  Else WinDefAVioWindowProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  WinDefAVioWindowProc := 0;
+  If Msg <> WM_SIZE Then Exit;
+  Hdc := WinQueryWindowDC(H);
+  If Hdc <> 0 Then Dummy := VioAvioSize(Hdc, Lo16(Mp2), Hi16(Mp2));
+  I := ConOfClient(H);
+  If I >= 0 Then ConSize(I, Lo16(Mp2), Hi16(Mp2));
 End;
 
 Function WinConsoleGetKbdHandle(Hcon, PHkbd : LongInt) : LongInt;
@@ -1461,7 +1494,8 @@ Begin
 End;
 
 { description : lignes, colonnes, ligne et colonne du curseur, etat,
-  session (-1), cadre, client, page de codes (9 x 4 octets) }
+  session (-1), cadre, client, page de codes, lignes et colonnes
+  visibles (11 x 4 octets) }
 Function QueryConsole(Hcon, PInfo : LongInt) : LongInt;
 Var I : LongInt; Inf : Array[0..7] Of LongInt;
 Begin
@@ -1476,7 +1510,7 @@ Begin
     End;
     WrL(PInfo, CRows[I]); WrL(PInfo + 4, CCols[I]); WrL(PInfo + 8, CCurR[I]); WrL(PInfo + 12, CCurC[I]);
     WrL(PInfo + 16, CStatus[I]); WrL(PInfo + 20, CSess[I]); WrL(PInfo + 24, CFrame[I]); WrL(PInfo + 28, CClient[I]);
-    WrL(PInfo + 32, CCp[I]);
+    WrL(PInfo + 32, CCp[I]); WrL(PInfo + 36, CVisR[I]); WrL(PInfo + 40, CVisC[I]);
     QueryConsole := NO_ERROR;
   End;
 End;
@@ -1767,79 +1801,79 @@ Begin
 End;
 
 Exports
-  WinCreateConsole Index 1 Name 'WinCreateConsole',
-  WinDestroyConsole Index 2 Name 'WinDestroyConsole',
-  WinSyncWithPS Index 3 Name 'WinSyncWithPS',
-  WinConsoleOpenKbd Index 4 Name 'WinConsoleOpenKbd',
-  WinConsoleCloseKbd Index 5 Name 'WinConsoleCloseKbd',
-  WinConsoleSetStatus Index 6 Name 'WinConsoleSetStatus',
-  WinConsoleGetStatus Index 7 Name 'WinConsoleGetStatus',
-  WinConsoleSetCP Index 8 Name 'WinConsoleSetCP',
-  WinConsoleGetCP Index 10 Name 'WinConsoleGetCP',
-  WinConsoleKbdXlate Index 11 Name 'WinConsoleKbdXlate',
-  WinConsoleSetCustXt Index 12 Name 'WinConsoleSetCustXt',
-  WinConsoleGetFocus Index 13 Name 'WinConsoleGetFocus',
-  WinConsoleFreeFocus Index 14 Name 'WinConsoleFreeFocus',
-  WinConsoleReadKeyEvent Index 15 Name 'WinConsoleReadKeyEvent',
-  WinConsoleFlushKeyEvents Index 16 Name 'WinConsoleFlushKeyEvents',
-  WinConsoleQueuedPointerEvents Index 17 Name 'WinConsoleQueuedPointerEvents',
-  WinConsoleReadPointerEvent Index 18 Name 'WinConsoleReadPointerEvent',
-  WinConsoleFlushPointerEvents Index 19 Name 'WinConsoleFlushPointerEvents',
-  WinConsoleGetPointerFilterMask Index 20 Name 'WinConsoleGetPointerFilterMask',
-  WinConsoleSetPointerFilterMask Index 21 Name 'WinConsoleSetPointerFilterMask',
-  WinConsoleGetPtrPos Index 22 Name 'WinConsoleGetPtrPos',
-  WinConsoleSetPtrPos Index 23 Name 'WinConsoleSetPtrPos',
-  WinShieldAbort Index 24 Name 'WinShieldAbort',
-  ShieldFrameProc Index 25 Name 'ShieldFrameProc',
-  VioShieldWindowProc Index 26 Name 'VioShieldWindowProc',
-  LockVioPS Index 27 Name 'LockVioPS',
-  UnlockVioPS Index 28 Name 'UnlockVioPS',
-  MarkingWindowProc Index 29 Name 'MarkingWindowProc',
-  WinDefAVioWindowProc Index 30 Name 'WinDefAVioWindowProc',
-  WinConsoleGetKbdHandle Index 31 Name 'WinConsoleGetKbdHandle',
-  WinConsoleAttachMouseUser Index 32 Name 'WinConsoleAttachMouseUser',
-  WinConsoleDetachMouseUser Index 33 Name 'WinConsoleDetachMouseUser',
-  TaskMgrSubClassProc Index 34 Name 'TaskMgrSubClassProc',
-  WinShieldPreThaw Index 35 Name 'WinShieldPreThaw',
-  WinInitShield Index 36 Name 'WinInitShield',
-  Mortician Index 37 Name 'Mortician',
-  UnlockSemaphores Index 39 Name 'UnlockSemaphores',
-  ClearData Index 40 Name 'ClearData',
-  QueryConsole Index 41 Name 'QueryConsole',
-  MakeVisible Index 42 Name 'MakeVisible',
-  GetPasteChar Index 43 Name 'GetPasteChar',
-  SeamlessCommonVDM Index 44 Name 'SeamlessCommonVDM',
-  SeamlessControlProc Index 45 Name 'SeamlessControlProc',
-  TerminateClipDDE Index 46 Name 'TerminateClipDDE',
-  VDMClipDDENotify Index 47 Name 'VDMClipDDENotify',
-  PM32ClipDDENotify Index 49 Name 'PM32ClipDDENotify',
-  Seamless32RegisterObject Index 50 Name 'Seamless32RegisterObject',
-  Seamless32ActivateWindow Index 51 Name 'Seamless32ActivateWindow',
-  NotifyAllVDMs Index 52 Name 'NotifyAllVDMs',
-  VDMSwapButtonNotify Index 53 Name 'VDMSwapButtonNotify',
-  Get32DisplayType Index 54 Name 'Get32DisplayType',
-  Seamless32RegisterAssocObj Index 55 Name 'Seamless32RegisterAssocObj',
-  VdmRegisterHook Index 56 Name 'VdmRegisterHook',
-  VdmDeregisterHook Index 57 Name 'VdmDeregisterHook',
-  ScreenGroupToFPConsole Index 101 Name 'ScreenGroupToFPConsole',
-  APFNVDMServ Index 102 Name 'APFNVDMServ',
-  GetSelAccess Index 103 Name 'GetSelAccess',
-  NPSZStrings Index 104 Name 'NPSZStrings',
-  KeyboardEvent Index 105 Name 'KeyboardEvent',
-  EstablishKbdEnvironment Index 106 Name 'EstablishKbdEnvironment',
-  HMyModuleHandle Index 107 Name 'HMyModuleHandle',
-  FSeamlessCaptured Index 108 Name 'FSeamlessCaptured',
-  HMQTaskmgr Index 110 Name 'HMQTaskmgr',
-  PCharXlateTblDefault Index 111 Name 'PCharXlateTblDefault',
-  HAPPSeamlessCommonVDM Index 112 Name 'HAPPSeamlessCommonVDM',
-  HAPPSeamlessCommonVDM31 Index 114 Name 'HAPPSeamlessCommonVDM31',
-  HAPPSeamlessCommonVDM31Enh Index 116 Name 'HAPPSeamlessCommonVDM31Enh',
-  FKbdHook Index 117 Name 'FKbdHook',
-  FMouHook Index 118 Name 'FMouHook',
-  SelCommonList Index 119 Name 'SelCommonList',
-  usCommonSegSize Index 120 Name 'usCommonSegSize',
-  HMODSeamless Index 121 Name 'HMODSeamless',
-  HFrameWindowFromConsole Index 122 Name 'HFrameWindowFromConsole';
+  WinCreateConsole Index 1 Name 'WINCREATECONSOLE',
+  WinDestroyConsole Index 2 Name 'WINDESTROYCONSOLE',
+  WinSyncWithPS Index 3 Name 'WINSYNCWITHPS',
+  WinConsoleOpenKbd Index 4 Name 'WINCONSOLEOPENKBD',
+  WinConsoleCloseKbd Index 5 Name 'WINCONSOLECLOSEKBD',
+  WinConsoleSetStatus Index 6 Name 'WINCONSOLESETSTATUS',
+  WinConsoleGetStatus Index 7 Name 'WINCONSOLEGETSTATUS',
+  WinConsoleSetCP Index 8 Name 'WINCONSOLESETCP',
+  WinConsoleGetCP Index 10 Name 'WINCONSOLEGETCP',
+  WinConsoleKbdXlate Index 11 Name 'WINCONSOLEKBDXLATE',
+  WinConsoleSetCustXt Index 12 Name 'WINCONSOLESETCUSTXT',
+  WinConsoleGetFocus Index 13 Name 'WINCONSOLEGETFOCUS',
+  WinConsoleFreeFocus Index 14 Name 'WINCONSOLEFREEFOCUS',
+  WinConsoleReadKeyEvent Index 15 Name 'WINCONSOLEREADKEYEVENT',
+  WinConsoleFlushKeyEvents Index 16 Name 'WINCONSOLEFLUSHKEYEVENTS',
+  WinConsoleQueuedPointerEvents Index 17 Name 'WINCONSOLEQUEUEDPOINTEREVENTS',
+  WinConsoleReadPointerEvent Index 18 Name 'WINCONSOLEREADPOINTEREVENT',
+  WinConsoleFlushPointerEvents Index 19 Name 'WINCONSOLEFLUSHPOINTEREVENTS',
+  WinConsoleGetPointerFilterMask Index 20 Name 'WINCONSOLEGETPOINTERFILTERMASK',
+  WinConsoleSetPointerFilterMask Index 21 Name 'WINCONSOLESETPOINTERFILTERMASK',
+  WinConsoleGetPtrPos Index 22 Name 'WINCONSOLEGETPTRPOS',
+  WinConsoleSetPtrPos Index 23 Name 'WINCONSOLESETPTRPOS',
+  WinShieldAbort Index 24 Name 'WINSHIELDABORT',
+  ShieldFrameProc Index 25 Name 'SHIELDFRAMEPROC',
+  VioShieldWindowProc Index 26 Name 'VIOSHIELDWINDOWPROC',
+  LockVioPS Index 27 Name 'LOCKVIOPS',
+  UnlockVioPS Index 28 Name 'UNLOCKVIOPS',
+  MarkingWindowProc Index 29 Name 'MARKINGWINDOWPROC',
+  WinDefAVioWindowProc Index 30 Name 'WINDEFAVIOWINDOWPROC',
+  WinConsoleGetKbdHandle Index 31 Name 'WINCONSOLEGETKBDHANDLE',
+  WinConsoleAttachMouseUser Index 32 Name 'WINCONSOLEATTACHMOUSEUSER',
+  WinConsoleDetachMouseUser Index 33 Name 'WINCONSOLEDETACHMOUSEUSER',
+  TaskMgrSubClassProc Index 34 Name 'TASKMGRSUBCLASSPROC',
+  WinShieldPreThaw Index 35 Name 'WINSHIELDPRETHAW',
+  WinInitShield Index 36 Name 'WININITSHIELD',
+  Mortician Index 37 Name 'MORTICIAN',
+  UnlockSemaphores Index 39 Name 'UNLOCKSEMAPHORES',
+  ClearData Index 40 Name 'CLEARDATA',
+  QueryConsole Index 41 Name 'QUERYCONSOLE',
+  MakeVisible Index 42 Name 'MAKEVISIBLE',
+  GetPasteChar Index 43 Name 'GETPASTECHAR',
+  SeamlessCommonVDM Index 44 Name 'SEAMLESSCOMMONVDM',
+  SeamlessControlProc Index 45 Name 'SEAMLESSCONTROLPROC',
+  TerminateClipDDE Index 46 Name 'TERMINATECLIPDDE',
+  VDMClipDDENotify Index 47 Name 'VDMCLIPDDENOTIFY',
+  PM32ClipDDENotify Index 49 Name 'PM32CLIPDDENOTIFY',
+  Seamless32RegisterObject Index 50 Name 'SEAMLESS32REGISTEROBJECT',
+  Seamless32ActivateWindow Index 51 Name 'SEAMLESS32ACTIVATEWINDOW',
+  NotifyAllVDMs Index 52 Name 'NOTIFYALLVDMS',
+  VDMSwapButtonNotify Index 53 Name 'VDMSWAPBUTTONNOTIFY',
+  Get32DisplayType Index 54 Name 'GET32DISPLAYTYPE',
+  Seamless32RegisterAssocObj Index 55 Name 'SEAMLESS32REGISTERASSOCOBJ',
+  VdmRegisterHook Index 56 Name 'VDMREGISTERHOOK',
+  VdmDeregisterHook Index 57 Name 'VDMDEREGISTERHOOK',
+  ScreenGroupToFPConsole Index 101 Name 'SCREENGROUPTOFPCONSOLE',
+  APFNVDMServ Index 102 Name 'APFNVDMSERV',
+  GetSelAccess Index 103 Name 'GETSELACCESS',
+  NPSZStrings Index 104 Name 'NPSZSTRINGS',
+  KeyboardEvent Index 105 Name 'KEYBOARDEVENT',
+  EstablishKbdEnvironment Index 106 Name 'ESTABLISHKBDENVIRONMENT',
+  HMyModuleHandle Index 107 Name 'HMYMODULEHANDLE',
+  FSeamlessCaptured Index 108 Name 'FSEAMLESSCAPTURED',
+  HMQTaskmgr Index 110 Name 'HMQTASKMGR',
+  PCharXlateTblDefault Index 111 Name 'PCHARXLATETBLDEFAULT',
+  HAPPSeamlessCommonVDM Index 112 Name 'HAPPSEAMLESSCOMMONVDM',
+  HAPPSeamlessCommonVDM31 Index 114 Name 'HAPPSEAMLESSCOMMONVDM31',
+  HAPPSeamlessCommonVDM31Enh Index 116 Name 'HAPPSEAMLESSCOMMONVDM31ENH',
+  FKbdHook Index 117 Name 'FKBDHOOK',
+  FMouHook Index 118 Name 'FMOUHOOK',
+  SelCommonList Index 119 Name 'SELCOMMONLIST',
+  usCommonSegSize Index 120 Name 'USCOMMONSEGSIZE',
+  HMODSeamless Index 121 Name 'HMODSEAMLESS',
+  HFrameWindowFromConsole Index 122 Name 'HFRAMEWINDOWFROMCONSOLE';
 
 Var
   SK : LongInt;

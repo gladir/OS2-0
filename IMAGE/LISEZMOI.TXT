@@ -525,7 +525,8 @@ PMVIOP.DLL et fenetres OS/2
 ---------------------------
 Bouclier VIO de PM : un ecran de caracteres (cellules caractere +
 attribut) montre dans une fenetre de PM ; 73 ordinaux (1 a 57, 101 a
-122 ; les donnees de l'original sont rendues par des fonctions). Objet
+122), noms en majuscules comme l'original (WINCREATECONSOLE...) ; les
+variables de l'original sont rendues par des fonctions. Objet
 "Fenetre OS/2" du bureau (et du dossier Systeme OS/2) : CMD.EXE dans
 une nouvelle session dont l'ecran est redessine dans une fenetre
 (KrnSesCtl 18 toutes les 120 ms : lignes changees et curseur) ; les
@@ -547,6 +548,12 @@ programmes de la session : KrnSesCtl 20).
   ScreenGroupToFPConsole, HFrameWindowFromConsole. Pas de WIN-OS/2 :
   SeamlessCommonVDM rend ERROR_NOT_SUPPORTED (50) ; Get32DisplayType
   rend 3 (VGA) ou 8 (VESA).
+  WinDefAVioWindowProc(hwnd, msg, mp1, mp2) : une application AVIO lui
+  passe tous les WM_SIZE de la fenetre a laquelle son PS AVIO est
+  associe (VioAssociate avec le DC de WinOpenWindowDC) : la taille est
+  gardee dans le PS (VIOCALLS : VIOAVIOSIZE 1004, VIOQUERYAVIOSIZE 1005)
+  qui est redessine dans la fenetre ; elle ne remplace pas
+  WinDefWindowProc (les autres messages ne sont pas traites, rend 0).
 
 Bureau (PMSHELL.EXE)
 --------------------

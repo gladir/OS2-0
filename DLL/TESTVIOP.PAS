@@ -51,92 +51,107 @@ Function WinCloseClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
 Function WinEmptyClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
 Function WinSetClipbrdData(Hab, Data, Fmt, Info : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryClipbrdData(Hab, Fmt : LongInt) : LongInt; External 'PMWIN';
+Function WinRegisterClass(Hab, PName, Proc, Style, Cb : LongInt) : LongInt; External 'PMWIN';
+Function WinCreateStdWindow(HPar, Style, PFl, PCls, PTitle, CStyle, Hmod, Id, PClient : LongInt) : LongInt; External 'PMWIN';
+Function WinDefWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMWIN';
+Function WinOpenWindowDC(H : LongInt) : LongInt; External 'PMWIN';
+Function WinBeginPaint(H, Hps, P : LongInt) : LongInt; External 'PMWIN';
+Function WinEndPaint(Hps : LongInt) : LongInt; External 'PMWIN';
+Function WinSetWindowPos(H, HB, X, Y, Cx, Cy, Fl : LongInt) : LongInt; External 'PMWIN';
+Function WinDestroyWindow(H : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryWindowRect(H, P : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryScreenText(Row, Col, N, P : LongInt) : LongInt; External 'PMWIN' Name 'WINQUERYSCREENTEXT';
 
 Function VioCreatePS(PHvps, Depth, Width, Format, Attrs, Reserved : LongInt) : LongInt; External 'VIOCALLS';
 Function VioDestroyPS(Hvps : LongInt) : LongInt; External 'VIOCALLS';
 Function VioWrtCharStrAtt(PStr, Cb, Row, Col, PAttr, Hvio : LongInt) : LongInt; External 'VIOCALLS';
+Function VioAssociate(Hdc, Hvps : LongInt) : LongInt; External 'VIOCALLS';
+Function VioSetOrg(Row, Col, Hvps : LongInt) : LongInt; External 'VIOCALLS';
+Function VioShowPS(Depth, Width, Ofs, Hvps : LongInt) : LongInt; External 'VIOCALLS';
+Function VioQueryAvioSize(Hvps, P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYAVIOSIZE';
 
-Function WinCreateConsole(Own, PTitle, Fl, PH : LongInt) : LongInt; External 'PMVIOP' Name 'WinCreateConsole';
-Function WinDestroyConsole(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinDestroyConsole';
-Function WinSyncWithPS(H, Hvps : LongInt) : LongInt; External 'PMVIOP' Name 'WinSyncWithPS';
-Function WinConsoleOpenKbd(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleOpenKbd';
-Function WinConsoleCloseKbd(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleCloseKbd';
-Function WinConsoleSetStatus(H, Fl : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleSetStatus';
-Function WinConsoleGetStatus(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleGetStatus';
-Function WinConsoleSetCP(H, Cp : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleSetCP';
-Function WinConsoleGetCP(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleGetCP';
-Function WinConsoleKbdXlate(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleKbdXlate';
-Function WinConsoleSetCustXt(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleSetCustXt';
-Function WinConsoleGetFocus(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleGetFocus';
-Function WinConsoleFreeFocus(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleFreeFocus';
-Function WinConsoleReadKeyEvent(H, P, W : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleReadKeyEvent';
-Function WinConsoleFlushKeyEvents(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleFlushKeyEvents';
-Function WinConsoleQueuedPointerEvents(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleQueuedPointerEvents';
-Function WinConsoleReadPointerEvent(H, P, W : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleReadPointerEvent';
-Function WinConsoleFlushPointerEvents(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleFlushPointerEvents';
-Function WinConsoleGetPointerFilterMask(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleGetPointerFilterMask';
-Function WinConsoleSetPointerFilterMask(H, Fl : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleSetPointerFilterMask';
-Function WinConsoleGetPtrPos(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleGetPtrPos';
-Function WinConsoleSetPtrPos(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleSetPtrPos';
-Function WinShieldAbort(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinShieldAbort';
-Function ShieldFrameProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'ShieldFrameProc';
-Function VioShieldWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'VioShieldWindowProc';
-Function LockVioPS(H : LongInt) : LongInt; External 'PMVIOP' Name 'LockVioPS';
-Function UnlockVioPS(H : LongInt) : LongInt; External 'PMVIOP' Name 'UnlockVioPS';
-Function MarkingWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'MarkingWindowProc';
-Function WinDefAVioWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'WinDefAVioWindowProc';
-Function WinConsoleGetKbdHandle(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleGetKbdHandle';
-Function WinConsoleAttachMouseUser(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleAttachMouseUser';
-Function WinConsoleDetachMouseUser(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinConsoleDetachMouseUser';
-Function TaskMgrSubClassProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'TaskMgrSubClassProc';
-Function WinShieldPreThaw(H : LongInt) : LongInt; External 'PMVIOP' Name 'WinShieldPreThaw';
-Function WinInitShield(Hab, Hmq : LongInt) : LongInt; External 'PMVIOP' Name 'WinInitShield';
-Function Mortician(Pid : LongInt) : LongInt; External 'PMVIOP' Name 'Mortician';
-Function UnlockSemaphores : LongInt; External 'PMVIOP' Name 'UnlockSemaphores';
-Function ClearData(H : LongInt) : LongInt; External 'PMVIOP' Name 'ClearData';
-Function QueryConsole(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'QueryConsole';
-Function MakeVisible(H : LongInt) : LongInt; External 'PMVIOP' Name 'MakeVisible';
-Function GetPasteChar(H : LongInt) : LongInt; External 'PMVIOP' Name 'GetPasteChar';
-Function SeamlessCommonVDM(P1, P2 : LongInt) : LongInt; External 'PMVIOP' Name 'SeamlessCommonVDM';
-Function SeamlessControlProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'SeamlessControlProc';
-Function TerminateClipDDE : LongInt; External 'PMVIOP' Name 'TerminateClipDDE';
-Function VDMClipDDENotify(Fmt : LongInt) : LongInt; External 'PMVIOP' Name 'VDMClipDDENotify';
-Function PM32ClipDDENotify(Fmt : LongInt) : LongInt; External 'PMVIOP' Name 'PM32ClipDDENotify';
-Function Seamless32RegisterObject(H, Obj : LongInt) : LongInt; External 'PMVIOP' Name 'Seamless32RegisterObject';
-Function Seamless32ActivateWindow(H : LongInt) : LongInt; External 'PMVIOP' Name 'Seamless32ActivateWindow';
-Function NotifyAllVDMs(Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'NotifyAllVDMs';
-Function VDMSwapButtonNotify(F : LongInt) : LongInt; External 'PMVIOP' Name 'VDMSwapButtonNotify';
-Function Get32DisplayType : LongInt; External 'PMVIOP' Name 'Get32DisplayType';
-Function Seamless32RegisterAssocObj(H, Obj : LongInt) : LongInt; External 'PMVIOP' Name 'Seamless32RegisterAssocObj';
-Function VdmRegisterHook(Pfn : LongInt) : LongInt; External 'PMVIOP' Name 'VdmRegisterHook';
-Function VdmDeregisterHook(Pfn : LongInt) : LongInt; External 'PMVIOP' Name 'VdmDeregisterHook';
-Function ScreenGroupToFPConsole(Sg : LongInt) : LongInt; External 'PMVIOP' Name 'ScreenGroupToFPConsole';
-Function APFNVDMServ : LongInt; External 'PMVIOP' Name 'APFNVDMServ';
-Function GetSelAccess(Sel : LongInt) : LongInt; External 'PMVIOP' Name 'GetSelAccess';
-Function NPSZStrings : LongInt; External 'PMVIOP' Name 'NPSZStrings';
-Function KeyboardEvent(H, Ch, Sc, St : LongInt) : LongInt; External 'PMVIOP' Name 'KeyboardEvent';
-Function EstablishKbdEnvironment(H : LongInt) : LongInt; External 'PMVIOP' Name 'EstablishKbdEnvironment';
-Function HMyModuleHandle : LongInt; External 'PMVIOP' Name 'HMyModuleHandle';
-Function FSeamlessCaptured : LongInt; External 'PMVIOP' Name 'FSeamlessCaptured';
-Function HMQTaskmgr : LongInt; External 'PMVIOP' Name 'HMQTaskmgr';
-Function PCharXlateTblDefault : LongInt; External 'PMVIOP' Name 'PCharXlateTblDefault';
-Function HAPPSeamlessCommonVDM : LongInt; External 'PMVIOP' Name 'HAPPSeamlessCommonVDM';
-Function HAPPSeamlessCommonVDM31 : LongInt; External 'PMVIOP' Name 'HAPPSeamlessCommonVDM31';
-Function HAPPSeamlessCommonVDM31Enh : LongInt; External 'PMVIOP' Name 'HAPPSeamlessCommonVDM31Enh';
-Function FKbdHook : LongInt; External 'PMVIOP' Name 'FKbdHook';
-Function FMouHook : LongInt; External 'PMVIOP' Name 'FMouHook';
-Function SelCommonList : LongInt; External 'PMVIOP' Name 'SelCommonList';
-Function usCommonSegSize : LongInt; External 'PMVIOP' Name 'usCommonSegSize';
-Function HMODSeamless : LongInt; External 'PMVIOP' Name 'HMODSeamless';
-Function HFrameWindowFromConsole(H : LongInt) : LongInt; External 'PMVIOP' Name 'HFrameWindowFromConsole';
+Function WinCreateConsole(Own, PTitle, Fl, PH : LongInt) : LongInt; External 'PMVIOP' Name 'WINCREATECONSOLE';
+Function WinDestroyConsole(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINDESTROYCONSOLE';
+Function WinSyncWithPS(H, Hvps : LongInt) : LongInt; External 'PMVIOP' Name 'WINSYNCWITHPS';
+Function WinConsoleOpenKbd(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEOPENKBD';
+Function WinConsoleCloseKbd(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLECLOSEKBD';
+Function WinConsoleSetStatus(H, Fl : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLESETSTATUS';
+Function WinConsoleGetStatus(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEGETSTATUS';
+Function WinConsoleSetCP(H, Cp : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLESETCP';
+Function WinConsoleGetCP(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEGETCP';
+Function WinConsoleKbdXlate(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEKBDXLATE';
+Function WinConsoleSetCustXt(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLESETCUSTXT';
+Function WinConsoleGetFocus(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEGETFOCUS';
+Function WinConsoleFreeFocus(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEFREEFOCUS';
+Function WinConsoleReadKeyEvent(H, P, W : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEREADKEYEVENT';
+Function WinConsoleFlushKeyEvents(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEFLUSHKEYEVENTS';
+Function WinConsoleQueuedPointerEvents(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEQUEUEDPOINTEREVENTS';
+Function WinConsoleReadPointerEvent(H, P, W : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEREADPOINTEREVENT';
+Function WinConsoleFlushPointerEvents(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEFLUSHPOINTEREVENTS';
+Function WinConsoleGetPointerFilterMask(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEGETPOINTERFILTERMASK';
+Function WinConsoleSetPointerFilterMask(H, Fl : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLESETPOINTERFILTERMASK';
+Function WinConsoleGetPtrPos(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEGETPTRPOS';
+Function WinConsoleSetPtrPos(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLESETPTRPOS';
+Function WinShieldAbort(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINSHIELDABORT';
+Function ShieldFrameProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'SHIELDFRAMEPROC';
+Function VioShieldWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'VIOSHIELDWINDOWPROC';
+Function LockVioPS(H : LongInt) : LongInt; External 'PMVIOP' Name 'LOCKVIOPS';
+Function UnlockVioPS(H : LongInt) : LongInt; External 'PMVIOP' Name 'UNLOCKVIOPS';
+Function MarkingWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'MARKINGWINDOWPROC';
+Function WinDefAVioWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'WINDEFAVIOWINDOWPROC';
+Function WinConsoleGetKbdHandle(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEGETKBDHANDLE';
+Function WinConsoleAttachMouseUser(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEATTACHMOUSEUSER';
+Function WinConsoleDetachMouseUser(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINCONSOLEDETACHMOUSEUSER';
+Function TaskMgrSubClassProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'TASKMGRSUBCLASSPROC';
+Function WinShieldPreThaw(H : LongInt) : LongInt; External 'PMVIOP' Name 'WINSHIELDPRETHAW';
+Function WinInitShield(Hab, Hmq : LongInt) : LongInt; External 'PMVIOP' Name 'WININITSHIELD';
+Function Mortician(Pid : LongInt) : LongInt; External 'PMVIOP' Name 'MORTICIAN';
+Function UnlockSemaphores : LongInt; External 'PMVIOP' Name 'UNLOCKSEMAPHORES';
+Function ClearData(H : LongInt) : LongInt; External 'PMVIOP' Name 'CLEARDATA';
+Function QueryConsole(H, P : LongInt) : LongInt; External 'PMVIOP' Name 'QUERYCONSOLE';
+Function MakeVisible(H : LongInt) : LongInt; External 'PMVIOP' Name 'MAKEVISIBLE';
+Function GetPasteChar(H : LongInt) : LongInt; External 'PMVIOP' Name 'GETPASTECHAR';
+Function SeamlessCommonVDM(P1, P2 : LongInt) : LongInt; External 'PMVIOP' Name 'SEAMLESSCOMMONVDM';
+Function SeamlessControlProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'SEAMLESSCONTROLPROC';
+Function TerminateClipDDE : LongInt; External 'PMVIOP' Name 'TERMINATECLIPDDE';
+Function VDMClipDDENotify(Fmt : LongInt) : LongInt; External 'PMVIOP' Name 'VDMCLIPDDENOTIFY';
+Function PM32ClipDDENotify(Fmt : LongInt) : LongInt; External 'PMVIOP' Name 'PM32CLIPDDENOTIFY';
+Function Seamless32RegisterObject(H, Obj : LongInt) : LongInt; External 'PMVIOP' Name 'SEAMLESS32REGISTEROBJECT';
+Function Seamless32ActivateWindow(H : LongInt) : LongInt; External 'PMVIOP' Name 'SEAMLESS32ACTIVATEWINDOW';
+Function NotifyAllVDMs(Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMVIOP' Name 'NOTIFYALLVDMS';
+Function VDMSwapButtonNotify(F : LongInt) : LongInt; External 'PMVIOP' Name 'VDMSWAPBUTTONNOTIFY';
+Function Get32DisplayType : LongInt; External 'PMVIOP' Name 'GET32DISPLAYTYPE';
+Function Seamless32RegisterAssocObj(H, Obj : LongInt) : LongInt; External 'PMVIOP' Name 'SEAMLESS32REGISTERASSOCOBJ';
+Function VdmRegisterHook(Pfn : LongInt) : LongInt; External 'PMVIOP' Name 'VDMREGISTERHOOK';
+Function VdmDeregisterHook(Pfn : LongInt) : LongInt; External 'PMVIOP' Name 'VDMDEREGISTERHOOK';
+Function ScreenGroupToFPConsole(Sg : LongInt) : LongInt; External 'PMVIOP' Name 'SCREENGROUPTOFPCONSOLE';
+Function APFNVDMServ : LongInt; External 'PMVIOP' Name 'APFNVDMSERV';
+Function GetSelAccess(Sel : LongInt) : LongInt; External 'PMVIOP' Name 'GETSELACCESS';
+Function NPSZStrings : LongInt; External 'PMVIOP' Name 'NPSZSTRINGS';
+Function KeyboardEvent(H, Ch, Sc, St : LongInt) : LongInt; External 'PMVIOP' Name 'KEYBOARDEVENT';
+Function EstablishKbdEnvironment(H : LongInt) : LongInt; External 'PMVIOP' Name 'ESTABLISHKBDENVIRONMENT';
+Function HMyModuleHandle : LongInt; External 'PMVIOP' Name 'HMYMODULEHANDLE';
+Function FSeamlessCaptured : LongInt; External 'PMVIOP' Name 'FSEAMLESSCAPTURED';
+Function HMQTaskmgr : LongInt; External 'PMVIOP' Name 'HMQTASKMGR';
+Function PCharXlateTblDefault : LongInt; External 'PMVIOP' Name 'PCHARXLATETBLDEFAULT';
+Function HAPPSeamlessCommonVDM : LongInt; External 'PMVIOP' Name 'HAPPSEAMLESSCOMMONVDM';
+Function HAPPSeamlessCommonVDM31 : LongInt; External 'PMVIOP' Name 'HAPPSEAMLESSCOMMONVDM31';
+Function HAPPSeamlessCommonVDM31Enh : LongInt; External 'PMVIOP' Name 'HAPPSEAMLESSCOMMONVDM31ENH';
+Function FKbdHook : LongInt; External 'PMVIOP' Name 'FKBDHOOK';
+Function FMouHook : LongInt; External 'PMVIOP' Name 'FMOUHOOK';
+Function SelCommonList : LongInt; External 'PMVIOP' Name 'SELCOMMONLIST';
+Function usCommonSegSize : LongInt; External 'PMVIOP' Name 'USCOMMONSEGSIZE';
+Function HMODSeamless : LongInt; External 'PMVIOP' Name 'HMODSEAMLESS';
+Function HFrameWindowFromConsole(H : LongInt) : LongInt; External 'PMVIOP' Name 'HFRAMEWINDOWFROMCONSOLE';
 
 Const
   NOrd = 73;
   Ords : Array[0..NOrd - 1] Of LongInt = (1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
     23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53,
     54, 55, 56, 57, 101, 102, 103, 104, 105, 106, 107, 108, 110, 111, 112, 114, 116, 117, 118, 119, 120, 121, 122);
-  HWND_DESKTOP = 1; QW_PARENT = 5;
+  HWND_DESKTOP = 1; HWND_TOP = 3; QW_PARENT = 5; WS_VISIBLE = $80000000;
+  FCF_TITLEBAR = 1; FCF_DLGBORDER = $200; WM_SIZE = $0007; WM_CLOSE = $0029; WM_PAINT = $0023;
+  SWP_SIZE = 1; SWP_MOVE = 2; SWP_ZORDER = 4; SWP_SHOW = 8;
   CON_VISIBLE = 1; CON_SESSION = 2; CON_KBD = 4;
   CS_FROZEN = 1; CS_MARKING = 2; CS_SELECTED = 4;
   WM_COMMAND = $0020; WM_MOUSEMOVE = $0070; WM_BUTTON1DOWN = $0071; WM_BUTTON1UP = $0072; WM_CHAR = $007A;
@@ -157,6 +172,8 @@ Var
   OutLen, ScrH, Cx, Cy : LongInt;
   T : String;
   Bo : Boolean;
+  Frame3, Client3, Hdc3, Hv3, NSize, AvioRet, Fl3 : LongInt;
+  Rc3 : Array[0..3] Of LongInt;
 
 Function RdL(A : LongInt) : LongInt;
 Type PLong = ^LongInt;
@@ -345,6 +362,41 @@ Begin
   Cell := (Col * 8 + 2) Or (((24 - Row) * 16 + 4) Shl 16);
 End;
 
+{ fenetre AVIO d'un programme : WM_PAINT redessine le PS (VioShowPS) ;
+  WM_SIZE passe a WinDefAVioWindowProc, puis (comme tout message) a
+  WinDefWindowProc }
+Function AvioProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Hp : LongInt;
+Begin
+  If Msg = WM_PAINT Then
+  Begin
+    Hp := WinBeginPaint(H, 0, 0);
+    If Hv3 <> 0 Then R2 := VioShowPS(25, 80, 0, Hv3);
+    R2 := WinEndPaint(Hp);
+    AvioProc := 0;
+    Exit;
+  End;
+  If Msg = WM_SIZE Then
+  Begin
+    Inc(NSize);
+    AvioRet := WinDefAVioWindowProc(H, Msg, Mp1, Mp2);
+  End;
+  AvioProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+End;
+
+{ texte de la ligne Row (cellules de 16 pels, hauteur Cy) d'une fenetre }
+Function WinText(C, Cy, Row, Col, Len : LongInt) : String;
+Var Pt : Array[0..1] Of LongInt; X, Y, K : LongInt; S : String;
+Begin
+  Pt[0] := 0; Pt[1] := 0;
+  R2 := WinMapWindowPoints(C, HWND_DESKTOP, LongInt(@Pt), 1);
+  X := Pt[0] + Col * 8; Y := Pt[1] + Cy - (Row + 1) * 16;
+  R2 := WinQueryScreenText((ScrH - Y - 16 + 8) Div 16, (X + 4) Div 8, Len, LongInt(@Buf));
+  S := '';
+  For K := 0 To Len - 1 Do S := S + Chr(Buf[K]);
+  WinText := S;
+End;
+
 Function HookFn(V : LongInt) : LongInt;
 Begin
   HookFn := V;
@@ -365,8 +417,8 @@ BEGIN
       If P <> 0 Then Inc(N);
   End;
   P := 0;
-  R2 := DosQueryProcAddr(Hmod, 0, Z('WinConsoleGetPointerFilterMask'), LongInt(@P));
-  Check('73 ordinaux de PMVIOP (' + IStr(N) + '), nom WinConsoleGetPointerFilterMask', (R = 0) And (N = NOrd) And
+  R2 := DosQueryProcAddr(Hmod, 0, Z('WINCONSOLEGETPOINTERFILTERMASK'), LongInt(@P));
+  Check('73 ordinaux de PMVIOP (' + IStr(N) + '), nom WINCONSOLEGETPOINTERFILTERMASK', (R = 0) And (N = NOrd) And
         (R2 = 0) And (P <> 0));
 
   { --- bouclier --- }
@@ -530,6 +582,53 @@ BEGIN
   Check('TaskMgrSubClassProc (commande 1F00h + rang : console montree)',
         TaskMgrSubClassProc(Frame, WM_COMMAND, $1F00 + (Hc - $56430001), 0) = 1);
   Check('MakeVisible', MakeVisible(Hc) = 0);
+
+  { --- WinDefAVioWindowProc : PS AVIO associe a la fenetre d'un programme --- }
+  R := WinRegisterClass(Hab, Z('TESTAVIO'), LongInt(@AvioProc), 0, 0);
+  Fl3 := FCF_TITLEBAR Or FCF_DLGBORDER; Client3 := 0; NSize := 0; AvioRet := 99; Hv3 := 0;
+  Frame3 := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Fl3), Z('TESTAVIO'), Z2('Fenetre AVIO'), 0, 0, 0,
+                               LongInt(@Client3));
+  Hdc3 := WinOpenWindowDC(Client3);
+  A := 0;
+  R2 := VioCreatePS(LongInt(@A), 25, 80, 0, 1, 0);
+  Hv3 := A;
+  Buf[0] := $1F;
+  PutZ(LongInt(@Name2), 'Texte AVIO');
+  A := VioWrtCharStrAtt(LongInt(@Name2), 10, 0, 0, LongInt(@Buf), Hv3);
+  PutZ(LongInt(@Name2), 'Ligne 3');
+  A := VioWrtCharStrAtt(LongInt(@Name2), 7, 2, 5, LongInt(@Buf), Hv3);
+  B := VioAssociate(Hdc3, Hv3);
+  NSize := 0;
+  A := WinSetWindowPos(Frame3, HWND_TOP, 60, 60, 300, 140, SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW);
+  Pump(300);
+  R2 := WinQueryWindowRect(Client3, LongInt(@Rc3));
+  A := VioQueryAvioSize(Hv3, LongInt(@Info2));
+  Check('WM_SIZE -> WinDefAVioWindowProc : taille gardee dans le PS (' + IStr(Info2[0]) + ' x ' + IStr(Info2[1]) +
+        ' pels, ' + IStr(Info2[2]) + ' lignes, ' + IStr(Info2[3]) + ' colonnes), rend 0', (R = 1) And (Frame3 <> 0) And
+        (Hdc3 <> 0) And (B = 0) And (NSize >= 1) And (AvioRet = 0) And (A = 0) And (Info2[0] = Rc3[2]) And
+        (Info2[1] = Rc3[3]) And (Info2[2] = Rc3[3] Div 16) And (Info2[3] = Rc3[2] Div 8));
+  T := WinText(Client3, Rc3[3], 0, 0, 10);
+  Check('PS AVIO dessine dans la fenetre (' + T + ', ' + WinText(Client3, Rc3[3], 2, 5, 7) + ')',
+        (T = 'Texte AVIO') And (WinText(Client3, Rc3[3], 2, 5, 7) = 'Ligne 3'));
+  PutZ(LongInt(@Name2), 'Ecrit');
+  A := VioWrtCharStrAtt(LongInt(@Name2), 5, 1, 2, LongInt(@Buf), Hv3);
+  Check('VioWrtCharStrAtt dans le PS associe : visible aussitot', (A = 0) And (WinText(Client3, Rc3[3], 1, 2, 5) = 'Ecrit'));
+  A := VioSetOrg(2, 5, Hv3);
+  Check('VioSetOrg (2, 5) : la fenetre montre la ligne 3 en haut', (A = 0) And
+        (WinText(Client3, Rc3[3], 0, 0, 7) = 'Ligne 3'));
+  A := WinDefAVioWindowProc(Client3, WM_CLOSE, 0, 0);
+  Check('WinDefAVioWindowProc ne remplace pas WinDefWindowProc (WM_CLOSE ignore)', (A = 0) And
+        (WinIsWindow(Hab, Frame3) <> 0));
+  A := VioAssociate(0, Hv3);
+  B := VioDestroyPS(Hv3);
+  Hv3 := 0;
+  R := WinDestroyWindow(Frame3);
+  Check('VioAssociate(0), VioDestroyPS, WinDestroyWindow', (A = 0) And (B = 0) And (R <> 0));
+  A := WinSetWindowPos(Frame, HWND_TOP, 0, 0, 40 * 8 + 8, 10 * 16 + 28, SWP_SIZE);
+  Pump(200);
+  R := QueryConsole(Hc, LongInt(@Info));
+  Check('console redimensionnee : WM_SIZE -> 10 lignes, 40 colonnes visibles', (R = 0) And (Info[9] = 10) And
+        (Info[10] = 40));
 
   { --- seamless, VDM --- }
   Check('SeamlessCommonVDM : ERROR_NOT_SUPPORTED, FSeamlessCaptured, HAPPSeamlessCommonVDM*, HMODSeamless',
