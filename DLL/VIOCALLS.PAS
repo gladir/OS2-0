@@ -281,6 +281,9 @@ Var
   { mode graphique : numero du mode VGA (0 : texte 80 x 25), largeur,
     hauteur, bits par pel, octets d'un plan }
   GrMode, GrW, GrH, GrBits, GrPlane : LongInt;   { mode du materiel }
+  GrLfb, GrPitch : LongInt;                { mode VESA : memoire lineaire, octets par ligne }
+  VesaN : LongInt;                         { modes VESA du BIOS (-1 : pas encore lus) }
+  VesaNo, VesaW, VesaH, VesaB, VesaPitch, VesaLfb : Array[0..95] Of LongInt;
   SesAddr, HookOk : LongInt;               { etat des sessions du noyau }
   SesGr : Array[0..15] Of LongInt;         { mode graphique de chaque session }
   PopGr     : LongInt;        { mode graphique a rendre apres VioEndPopup }
@@ -306,6 +309,7 @@ Function DosWrite(H, Buf, Cb, PActual : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetFilePtr(H, Dist, Method, PNew : LongInt) : LongInt; External 'DOSCALLS';
 Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
 Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
+Function KVid(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnVideo';
 
 { ==================================================================== }
 { Partie 3 - Utilitaires (memoire, chaines, ports)                     }
@@ -960,7 +964,9 @@ End;
 Procedure GrEnter(K : LongInt);
 Var I : LongInt;
 Begin
-  { la police courante est dans FontBuf (rechargee au retour au texte) }
+  { la police courante est dans FontBuf (rechargee au retour au texte) ;
+    un mode VESA est d'abord quitte par le BIOS }
+  If GrMode >= $10000 Then Dummy := KVid(4, 3, 0);
   VgaLoad(K);
   GrClear;
   If VgaModeB[K] = 8 Then Dac256
@@ -970,6 +976,7 @@ Begin
     OutB($3C4, 2); OutB($3C5, $0F);
   End;
   GrMode := VgaModeNo[K]; GrW := VgaModeW[K]; GrH := VgaModeH[K]; GrBits := VgaModeB[K];
+  GrLfb := 0; GrPitch := 0;
   SesGr[CurSesNo] := GrMode;
   If GrBits = 8 Then GrPlane := GrW * GrH Else GrPlane := (GrW Div 8) * GrH;
 End;
@@ -979,6 +986,8 @@ Procedure GrLeave;
 Var I, M : LongInt;
 Begin
   If GrMode = 0 Then Exit;
+  { mode VESA : le BIOS rend le mode texte (INT 10h, 03h) }
+  If GrMode >= $10000 Then Dummy := KVid(4, 3, 0);
   VgaLoad(0);
   If CellHeight <> 16 Then CrtcSet(9, (CrtcGet(9) And $E0) Or (CellHeight - 1));
   WriteFont(LongInt(@FontBuf), CellHeight);
@@ -987,9 +996,109 @@ Begin
   AcSet($11, Overscan);
   M := AcGet($10);
   If Blink = 0 Then AcSet($10, M Or 8) Else AcSet($10, M And Not 8);
-  GrMode := 0; GrW := 0; GrH := 0; GrBits := 0; GrPlane := 0;
+  GrMode := 0; GrW := 0; GrH := 0; GrBits := 0; GrPlane := 0; GrLfb := 0; GrPitch := 0;
   SesGr[CurSesNo] := 0;
   CursorApply;
+End;
+
+{ --- modes VESA (BIOS VBE, par le noyau : KrnVideo) ---
+  Un mode VESA est note $10000 + numero du mode VBE (SesGr, GrMode) ;
+  la memoire de l'ecran est lineaire (GrLfb, GrPitch octets par ligne),
+  8 bits par pel (palette de 256 couleurs, comme le mode 13h) ou 15, 16,
+  24, 32 bits (couleurs directes). }
+Procedure VesaLoad;
+Var I, N : LongInt; E : Array[0..12] Of LongInt;
+Begin
+  If VesaN >= 0 Then Exit;
+  VesaN := 0;
+  If KVid(0, 0, 0) = 0 Then Exit;
+  N := KVid(1, 0, 0);
+  For I := 0 To N - 1 Do
+    If (VesaN < 96) And (KVid(2, I, LongInt(@E)) <> 0) Then
+    Begin
+      VesaNo[VesaN] := E[0]; VesaW[VesaN] := E[1]; VesaH[VesaN] := E[2]; VesaB[VesaN] := E[3];
+      VesaPitch[VesaN] := E[4]; VesaLfb[VesaN] := E[5];
+      Inc(VesaN);
+    End;
+End;
+
+{ mode VESA de la resolution donnee (-1 : aucun) }
+Function VesaFind(W, H, Bits : LongInt) : LongInt;
+Var I, R : LongInt;
+Begin
+  VesaLoad;
+  R := -1;
+  For I := VesaN - 1 DownTo 0 Do
+    If (VesaW[I] = W) And (VesaH[I] = H) And (VesaB[I] = Bits) Then R := I;
+  VesaFind := R;
+End;
+
+Function VesaOf(Code : LongInt) : LongInt;
+Var I, R : LongInt;
+Begin
+  VesaLoad;
+  R := -1;
+  For I := 0 To VesaN - 1 Do
+    If VesaNo[I] + $10000 = Code Then R := I;
+  VesaOf := R;
+End;
+
+{ passer au mode VESA numero I de la table }
+Function VesaEnter(I : LongInt) : Boolean;
+Begin
+  VesaEnter := False;
+  If (I < 0) Or (I >= VesaN) Then Exit;
+  If KVid(3, VesaNo[I], 0) <> 0 Then Exit;
+  GrMode := $10000 + VesaNo[I]; GrW := VesaW[I]; GrH := VesaH[I]; GrBits := VesaB[I];
+  GrPitch := VesaPitch[I]; GrLfb := VesaLfb[I];
+  GrPlane := GrPitch * GrH;
+  SesGr[CurSesNo] := GrMode;
+  If GrBits = 8 Then Dac256;
+  VesaEnter := True;
+End;
+
+{ passer au mode graphique note Code (VGA ou VESA) }
+Procedure GrEnterCode(Code : LongInt);
+Var I : LongInt;
+Begin
+  If Code >= $10000 Then
+  Begin
+    If Not VesaEnter(VesaOf(Code)) Then GrEnter(5);
+  End
+  Else
+    For I := 1 To NVgaModes - 1 Do
+      If VgaModeNo[I] = Code Then GrEnter(I);
+End;
+
+{ VioQueryModes(i, p) : modes graphiques possibles (interne, ordinal
+  1002) ; p = 0 : nombre ; sinon 16 octets en p : largeur, hauteur, bits
+  par pel, genre (0 VGA, 1 VESA) ; le mode 0 est le VGA 640 x 480 x 16 }
+Function VioQueryModes(I, P : LongInt) : LongInt;
+Begin
+  VesaLoad;
+  If P = 0 Then
+  Begin
+    VioQueryModes := VesaN + 1;
+    Exit;
+  End;
+  VioQueryModes := 0;
+  If I = 0 Then
+  Begin
+    WrL(P, 640); WrL(P + 4, 480); WrL(P + 8, 4); WrL(P + 12, 0);
+    VioQueryModes := 1;
+  End
+  Else If (I > 0) And (I <= VesaN) Then
+  Begin
+    WrL(P, VesaW[I - 1]); WrL(P + 4, VesaH[I - 1]); WrL(P + 8, VesaB[I - 1]); WrL(P + 12, 1);
+    VioQueryModes := 1;
+  End;
+End;
+
+{ VioQueryVbe(p) : version du VBE, memoire (Ko) et constructeur (ASCIIZ)
+  en p (interne, ordinal 1003) ; 0 : pas de BIOS VESA }
+Function VioQueryVbe(P : LongInt) : LongInt;
+Begin
+  VioQueryVbe := KVid(5, 0, P);
 End;
 
 { Code d'erreur des fonctions du mode texte (ERROR_VIO_MODE en mode
@@ -1876,7 +1985,8 @@ Begin
     N := RdL(PPhys + 4);
     If A = 0 Then
     Begin
-      If GrMode <> 0 Then A := $000A0000 Else A := ScrBase;
+      If GrMode >= $10000 Then A := GrLfb
+      Else If GrMode <> 0 Then A := $000A0000 Else A := ScrBase;
       WrL(PPhys, A);
     End;
     If N = 0 Then
@@ -1886,7 +1996,8 @@ Begin
       Else N := ScrBytes;
       WrL(PPhys + 4, N);
     End;
-    If (A < $000A0000) Or (A + N > $000C0000) Or (N < 0) Then R := ERROR_VIO_INVALID_PARMS
+    If (GrMode >= $10000) And (A >= GrLfb) And (A + N <= GrLfb + GrPlane) And (N >= 0) Then WrW(PPhys + 8, 0)
+    Else If (A < $000A0000) Or (A + N > $000C0000) Or (N < 0) Then R := ERROR_VIO_INVALID_PARMS
     Else WrW(PPhys + 8, A Shr 4);
   End;
   VioGetPhysBuf := R;
@@ -1930,16 +2041,27 @@ Begin
         WrW(LongInt(@Scratch) + 4, GrW Div 8);
         If GrH = 200 Then WrW(LongInt(@Scratch) + 6, 25)
         Else If GrH = 350 Then WrW(LongInt(@Scratch) + 6, 25)
-        Else WrW(LongInt(@Scratch) + 6, 30);
+        Else WrW(LongInt(@Scratch) + 6, GrH Div 16);
         WrW(LongInt(@Scratch) + 8, GrW);
         WrW(LongInt(@Scratch) + 10, GrH);
         WrB(LongInt(@Scratch) + 12, 0);
         WrB(LongInt(@Scratch) + 13, 1);
-        WrL(LongInt(@Scratch) + 14, $000A0000);
-        WrL(LongInt(@Scratch) + 18, GrPlane);
-        If GrBits = 8 Then WrL(LongInt(@Scratch) + 22, GrPlane)
-        Else WrL(LongInt(@Scratch) + 22, GrPlane * 4);
-        WrL(LongInt(@Scratch) + 26, GrPlane);
+        If GrMode >= $10000 Then
+        Begin
+          { VESA : memoire lineaire ; partial_length = octets par ligne }
+          WrL(LongInt(@Scratch) + 14, GrLfb);
+          WrL(LongInt(@Scratch) + 18, GrPlane);
+          WrL(LongInt(@Scratch) + 22, GrPlane);
+          WrL(LongInt(@Scratch) + 26, GrPitch);
+        End
+        Else
+        Begin
+          WrL(LongInt(@Scratch) + 14, $000A0000);
+          WrL(LongInt(@Scratch) + 18, GrPlane);
+          If GrBits = 8 Then WrL(LongInt(@Scratch) + 22, GrPlane)
+          Else WrL(LongInt(@Scratch) + 22, GrPlane * 4);
+          WrL(LongInt(@Scratch) + 26, GrPlane);
+        End;
         If Cb > 34 Then Cb := 34;
         MoveB(LongInt(@Scratch), PMode, Cb);
         VioGetMode := R;
@@ -1974,20 +2096,26 @@ End;
     graphiques (fbType 03h) : 640 x 480 x 16 (mode VGA 12h, par defaut),
     640 x 480 x 2 (11h), 640 x 350 x 16 (10h), 640 x 200 x 16 (0Eh),
     320 x 200 x 16 (0Dh), 320 x 200 x 256 (13h) ; la resolution est
-    donnee par hres et vres (ou col x 8 et row x 8, 14 ou 16).
+    donnee par hres et vres (ou col x 8 et row x 8, 14 ou 16) ;
+    modes VESA du BIOS de la carte (VBE, par le noyau) : toute resolution
+    proposee par la carte (800 x 600, 1024 x 768, 1280 x 1024...) en 8
+    bits par pel (256 couleurs) ou 15, 16, 24, 32 bits (couleurs
+    directes) ; voir VIOQUERYMODES (ordinal 1002).
   En mode graphique, la memoire de l'ecran est en 000A0000h
   (VioGetPhysBuf) : plans de bits du VGA (mode 13h : un octet par pel) ;
+  en mode VESA, elle est lineaire : buf_addr (adresse physique),
+  buf_length, et partial_length = octets par ligne (VioGetMode) ;
   les fonctions du mode texte rendent ERROR_VIO_MODE. Le retour au mode
   texte recharge la police, la palette et efface l'ecran. }
 Function VioSetMode(PMode, Hvio : LongInt) : LongInt;
-Var R, Cb, I, Fb, Bits, Cols, Rows, W, H, K : LongInt;
+Var R, Cb, I, Fb, Bits, Cols, Rows, W, H, K, Kv : LongInt;
 Begin
   If Hooked(VB_SETMODE, 2, PMode, Hvio, 0, 0, 0, 0, 0) Then
   Begin
     VioSetMode := HookRet;
     Exit;
   End;
-  R := NO_ERROR; K := -1;
+  R := NO_ERROR; K := -1; Kv := -1;
   If Hvio <> 0 Then R := ERROR_VIO_INVALID_HANDLE
   Else If PMode = 0 Then R := ERROR_VIO_PTR
   Else
@@ -2021,7 +2149,12 @@ Begin
         End;
         For I := 1 To NVgaModes - 1 Do
           If (VgaModeW[I] = W) And (VgaModeH[I] = H) And (VgaModeB[I] = Bits) Then K := I;
-        If K < 0 Then R := ERROR_VIO_MODE;
+        { sinon un mode VESA (8, 15, 16, 24 ou 32 bits par pel) }
+        If K < 0 Then
+        Begin
+          Kv := VesaFind(W, H, Bits);
+          If Kv < 0 Then R := ERROR_VIO_MODE;
+        End;
       End
       Else If Bits > 4 Then R := ERROR_VIO_MODE
       Else If (Cols <> 0) And (Cols <> NCols) Then R := ERROR_VIO_MODE
@@ -2041,6 +2174,16 @@ Begin
   Begin
     SesGr[CurSesNo] := VgaModeNo[K];
     If Mine Then GrEnter(K);
+  End
+  Else If (R = NO_ERROR) And (Kv >= 0) Then
+  Begin
+    SesGr[CurSesNo] := $10000 + VesaNo[Kv];
+    If Mine Then
+      If Not VesaEnter(Kv) Then
+      Begin
+        SesGr[CurSesNo] := 0;
+        R := ERROR_VIO_MODE;
+      End;
   End
   Else If R = NO_ERROR Then
   Begin
@@ -2391,9 +2534,7 @@ Begin
     Begin
       { en mode graphique : la fenetre surgissante est en mode texte ; le
         mode graphique est rendu (efface) par VioEndPopup }
-      PopGr := 0;
-      For I := 1 To NVgaModes - 1 Do
-        If (GrMode <> 0) And (VgaModeNo[I] = GrMode) Then PopGr := I;
+      PopGr := GrMode;
       If PopGr > 0 Then
       Begin
         GrLeave;
@@ -2430,7 +2571,7 @@ Begin
     ScreenRestore(LongInt(@PopBuf), PopRow, PopCol, PopAttr);
     InPopup := False;
     PopPid := 0;
-    If PopGr > 0 Then GrEnter(PopGr);
+    If PopGr > 0 Then GrEnterCode(PopGr);
     PopGr := 0;
   End;
   VioEndPopup := R;
@@ -3477,7 +3618,8 @@ exports
   VioQueryConsole Index 68, VioRedrawSize Index 69, VioGlobalReg Index 70,
   XVioSetCAState Index 71, XVioCheckCharType Index 72, XVioDestroyCA Index 73,
   XVioCreateCA Index 74, VioCheckCharType Index 75, XVioGetCAState Index 76,
-  VioSessSwitch Name 'VIOSESSSWITCH' Index 1001;
+  VioSessSwitch Name 'VIOSESSSWITCH' Index 1001,
+  VioQueryModes Name 'VIOQUERYMODES' Index 1002, VioQueryVbe Name 'VIOQUERYVBE' Index 1003;
 
 Var
   InitI : LongInt;
@@ -3495,5 +3637,6 @@ BEGIN
   For InitI := 1 To MaxPS Do PS[InitI].Used := False;
   For InitI := 1 To MaxCA Do CAs[InitI].Used := False;
   For InitI := 0 To MaxLvb - 1 Do Lvbs[InitI].Addr := 0;
+  VesaN := -1;
   HwCapture;
 END.

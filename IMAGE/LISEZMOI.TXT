@@ -551,6 +551,24 @@ attend une touche. PMWIN.DLL : WINSUSPENDSCREEN
 (C:\ ou D:\) est execute avant le bureau. Arret : confirmation,
 DosShutdown, puis Ctrl+Alt+Suppr pour redemarrer.
 
+Ecran VESA et parametres du systeme
+-----------------------------------
+Le noyau appelle le BIOS VESA (VBE) de la carte en mode reel (INT 10h ;
+KERNEL\BIOSCALL.ASM) : il affiche au demarrage la version du VBE, la
+memoire video et le nombre de modes utilisables. VIOCALLS.DLL passe
+dans ces modes (VioSetMode : 800 x 600, 1024 x 768, 1280 x 1024... en
+256 couleurs ou 15, 16, 24, 32 bits par pel, memoire lineaire) et PMWIN
+et PMGPI y dessinent. Resolution du bureau :
+  SET PMRESOLUTION=1024x768x32   dans CONFIG.SYS (largeur x hauteur x
+                                 bits par pel), ou
+  carnet "Systeme - Parametres" (Systeme OS/2, Configuration du
+  systeme, Systeme ; ou menu du bureau, Parametres du systeme...).
+Onglets du carnet : Ecran (resolution appliquee tout de suite puis
+gardee si confirmee : OS2.INI, PM_Display, RESOLUTION ; Capacites),
+Confirmations, Titre (objet de meme nom), Fenetre (objet deja ouvert),
+Entree (double clic, boutons inverses), Logo, General (couleur du
+bureau). Clic sur un onglet, ou PgSuiv/PgPrec : autre onglet.
+
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
 Le LaunchPad d'OS/2 Warp 3 (source LAUNCHPAD.PAS) est lance par

@@ -36,6 +36,10 @@ Program OS2KRNL;
     Partie 12 - Couche API (DOSCALLS) utilisee par le runtime de OS2PC
     Partie 13 - Chargeur de programmes PE et processus
     Partie 14 - Demarrage du systeme : CONFIG.SYS et CMD.EXE
+    Video     - appel du BIOS en mode reel (KERNEL/BIOSCALL.ASM, recopie
+                en 0000:7000) et modes VESA du BIOS VBE : KrnVideo
+                (liste des modes a memoire lineaire, passage a un mode
+                VESA ou a un mode du BIOS), utilise par VIOCALLS.DLL
 
   Couche API : le runtime genere par OS2PC (WriteLn, ReadLn, unites Crt
   et Dos, fichiers...) appelle des fonctions de style Win32 (WriteFile,
@@ -6063,6 +6067,202 @@ Begin
   End;
 End;
 
+{ ==================================================================== }
+{ Video : appel du BIOS en mode reel, modes VESA (VBE)                 }
+{ ==================================================================== }
+{ BiosCode : KERNEL/BIOSCALL.ASM assemble (nasm -f bin), recopie en
+  0000:7000 ; bloc de parametres en 0000:7E00 (voir BIOSCALL.ASM) ;
+  tampons du VBE : 0000:8000 (VbeInfoBlock, 512 octets) et 0000:8200
+  (ModeInfoBlock, 256 octets). La memoire basse au-dessous de 80000h
+  n'est plus utilisee apres le demarrage (OS2LDR). }
+Const
+  BiosCodeLen = 490;
+  BiosCode : Array[0..BiosCodeLen - 1] Of Byte = (
+    $60, $9C, $FA, $89, $25, $D8, $71, $00, $00, $0F, $01, $05, $CC, $71, $00, $00,
+    $0F, $01, $0D, $D2, $71, $00, $00, $0F, $20, $C0, $A3, $DC, $71, $00, $00, $0F,
+    $20, $D8, $A3, $E0, $71, $00, $00, $0F, $20, $E0, $A3, $E4, $71, $00, $00, $A0,
+    $20, $7E, $00, $00, $A2, $CD, $70, $00, $00, $0F, $01, $15, $C0, $71, $00, $00,
+    $EA, $47, $70, $00, $00, $18, $00, $B8, $20, $00, $8E, $D8, $8E, $C0, $8E, $E0,
+    $8E, $E8, $8E, $D0, $0F, $20, $C0, $66, $25, $FE, $FF, $FF, $7F, $0F, $22, $C0,
+    $EA, $65, $70, $00, $00, $31, $C0, $8E, $D8, $8E, $C0, $8E, $E0, $8E, $E8, $8E,
+    $D0, $BC, $F0, $6F, $0F, $01, $1E, $C6, $71, $E4, $21, $A2, $E8, $71, $E4, $A1,
+    $A2, $E9, $71, $B0, $11, $E6, $20, $E6, $A0, $B0, $08, $E6, $21, $B0, $70, $E6,
+    $A1, $B0, $04, $E6, $21, $B0, $02, $E6, $A1, $B0, $01, $E6, $21, $E6, $A1, $B0,
+    $FF, $E6, $21, $E6, $A1, $66, $A1, $00, $7E, $66, $8B, $1E, $04, $7E, $66, $8B,
+    $0E, $08, $7E, $66, $8B, $16, $0C, $7E, $66, $8B, $36, $10, $7E, $66, $8B, $3E,
+    $14, $7E, $FF, $36, $1A, $7E, $FF, $36, $18, $7E, $07, $1F, $CD, $10, $1E, $50,
+    $31, $C0, $8E, $D8, $58, $66, $A3, $00, $7E, $66, $89, $1E, $04, $7E, $66, $89,
+    $0E, $08, $7E, $66, $89, $16, $0C, $7E, $66, $89, $36, $10, $7E, $66, $89, $3E,
+    $14, $7E, $8C, $06, $18, $7E, $8F, $06, $1A, $7E, $66, $9C, $66, $8F, $06, $1C,
+    $7E, $FA, $B0, $11, $E6, $20, $E6, $A0, $B0, $20, $E6, $21, $B0, $28, $E6, $A1,
+    $B0, $04, $E6, $21, $B0, $02, $E6, $A1, $B0, $01, $E6, $21, $E6, $A1, $A0, $E8,
+    $71, $E6, $21, $A0, $E9, $71, $E6, $A1, $0F, $01, $16, $C0, $71, $0F, $20, $C0,
+    $66, $83, $C8, $01, $0F, $22, $C0, $66, $EA, $3F, $71, $00, $00, $08, $00, $66,
+    $B8, $10, $00, $8E, $D8, $8E, $C0, $8E, $E0, $8E, $E8, $8E, $D0, $A1, $E0, $71,
+    $00, $00, $0F, $22, $D8, $A1, $E4, $71, $00, $00, $0F, $22, $E0, $A1, $DC, $71,
+    $00, $00, $0F, $22, $C0, $EB, $00, $0F, $01, $15, $CC, $71, $00, $00, $0F, $01,
+    $1D, $D2, $71, $00, $00, $EA, $7C, $71, $00, $00, $08, $00, $66, $B8, $10, $00,
+    $8E, $D8, $8E, $C0, $8E, $E0, $8E, $E8, $8E, $D0, $8B, $25, $D8, $71, $00, $00,
+    $9D, $61, $C3, $90, $90, $90, $90, $90, $00, $00, $00, $00, $00, $00, $00, $00,
+    $FF, $FF, $00, $00, $00, $9A, $CF, $00, $FF, $FF, $00, $00, $00, $92, $CF, $00,
+    $FF, $FF, $00, $00, $00, $9A, $00, $00, $FF, $FF, $00, $00, $00, $92, $00, $00,
+    $27, $00, $98, $71, $00, $00, $FF, $03, $00, $00, $00, $00, $00, $00, $00, $00,
+    $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,
+    $00, $00, $00, $00, $00, $00, $00, $00, $00, $00);
+  BiosAt = $7000;
+  BiosParm = $7E00;
+  VbeMax = 96;
+
+Var
+  BiosReady : Boolean;
+  VbeScanned : Boolean;
+  VbeVer, VbeMemKb, VbeCount : LongInt;
+  VbeOem : String[79];
+  VmNo, VmW, VmH, VmBpp, VmPitch, VmLfb, VmModel : Array[0..VbeMax - 1] Of LongInt;
+  VmRPos, VmRSize, VmGPos, VmGSize, VmBPos, VmBSize : Array[0..VbeMax - 1] Of LongInt;
+
+{ INT N du BIOS avec les registres du bloc 0000:7E00 }
+Procedure BiosInt(N : LongInt);
+Var I : LongInt;
+Begin
+  If Not BiosReady Then
+  Begin
+    For I := 0 To BiosCodeLen - 1 Do Mem[0:BiosAt + I] := BiosCode[I];
+    BiosReady := True;
+  End;
+  Mem[0:BiosParm + $20] := N;
+  asm
+    mov eax,7000h
+    call eax
+  end;
+End;
+
+Procedure BiosRegs(RAx, RBx, RCx, RDx, RSi, RDi, REs : LongInt);
+Begin
+  MemL[0:BiosParm] := RAx; MemL[0:BiosParm + 4] := RBx; MemL[0:BiosParm + 8] := RCx;
+  MemL[0:BiosParm + 12] := RDx; MemL[0:BiosParm + 16] := RSi; MemL[0:BiosParm + 20] := RDi;
+  MemW[0:BiosParm + $18] := REs; MemW[0:BiosParm + $1A] := 0;
+End;
+
+{ adresse lineaire d'un pointeur long (segment:deplacement) }
+Function FarLin(P : LongInt) : LongInt;
+Begin
+  FarLin := ((P Shr 16) And $FFFF) * 16 + (P And $FFFF);
+End;
+
+{ Releve des modes VESA utilisables : graphiques, memoire lineaire,
+  640 x 480 au moins, 8 bits (palette) ou 15/16/24/32 bits (couleurs
+  directes) }
+Procedure VbeScan;
+Var I, N, M, A, Attr, Bpp, Model, L : LongInt; List : Array[0..255] Of LongInt; S : String;
+Begin
+  If VbeScanned Then Exit;
+  VbeScanned := True;
+  VbeVer := 0; VbeCount := 0; VbeMemKb := 0; VbeOem := '';
+  For I := 0 To 511 Do Mem[0:$8000 + I] := 0;
+  Mem[0:$8000] := Ord('V'); Mem[0:$8001] := Ord('B'); Mem[0:$8002] := Ord('E'); Mem[0:$8003] := Ord('2');
+  BiosRegs($4F00, 0, 0, 0, 0, 0, $0800);
+  BiosInt($10);
+  If (MemL[0:BiosParm] And $FFFF) <> $004F Then Exit;
+  If (Mem[0:$8000] <> Ord('V')) Or (Mem[0:$8001] <> Ord('E')) Or (Mem[0:$8002] <> Ord('S')) Or
+     (Mem[0:$8003] <> Ord('A')) Then Exit;
+  VbeVer := MemW[0:$8004];
+  VbeMemKb := MemW[0:$8012] * 64;
+  A := FarLin(MemL[0:$8006]);
+  S := '';
+  If (A > 0) And (A < $100000) Then
+    While (Length(S) < 79) And (Mem[0:A + Length(S)] <> 0) Do S := S + Chr(Mem[0:A + Length(S)]);
+  VbeOem := S;
+  A := FarLin(MemL[0:$800E]);
+  N := 0;
+  If (A > 0) And (A < $100000) Then
+    While (N < 256) And (MemW[0:A + N * 2] <> $FFFF) Do
+    Begin
+      List[N] := MemW[0:A + N * 2];
+      Inc(N);
+    End;
+  For I := 0 To N - 1 Do
+    If VbeCount < VbeMax Then
+    Begin
+      M := List[I];
+      For L := 0 To 255 Do Mem[0:$8200 + L] := 0;
+      BiosRegs($4F01, 0, M, 0, 0, 0, $0820);
+      BiosInt($10);
+      If (MemL[0:BiosParm] And $FFFF) = $004F Then
+      Begin
+        Attr := MemW[0:$8200];
+        Bpp := Mem[0:$8219]; Model := Mem[0:$821B];
+        If (Bpp = 16) And (Mem[0:$8221] = 5) Then Bpp := 15;
+        If ((Attr And $91) = $91) And (MemL[0:$8228] <> 0) And (MemW[0:$8212] >= 640) And (MemW[0:$8214] >= 480) And
+           (((Model = 4) And (Bpp = 8)) Or ((Model = 6) And ((Bpp = 15) Or (Bpp = 16) Or (Bpp = 24) Or (Bpp = 32)))) Then
+        Begin
+          L := VbeCount;
+          VmNo[L] := M; VmW[L] := MemW[0:$8212]; VmH[L] := MemW[0:$8214]; VmBpp[L] := Bpp; VmModel[L] := Model;
+          VmPitch[L] := MemW[0:$8210];
+          If (VbeVer >= $0300) And (MemW[0:$8232] <> 0) Then VmPitch[L] := MemW[0:$8232];
+          VmLfb[L] := MemL[0:$8228];
+          VmRSize[L] := Mem[0:$821F]; VmRPos[L] := Mem[0:$8220];
+          VmGSize[L] := Mem[0:$8221]; VmGPos[L] := Mem[0:$8222];
+          VmBSize[L] := Mem[0:$8223]; VmBPos[L] := Mem[0:$8224];
+          Inc(VbeCount);
+        End;
+      End;
+    End;
+End;
+
+{ KrnVideo(op, p1, p2) : carte video (VIOCALLS.DLL)
+    0 : version du VBE (0 : pas de VESA)    1 : nombre de modes utilisables
+    2 : mode p1 -> 52 octets en p2 : numero, largeur, hauteur, bits par
+        pel, octets par ligne, adresse de la memoire lineaire, modele,
+        position et taille des champs rouge, vert, bleu
+    3 : passer au mode VESA p1 (memoire lineaire) ; 0 si reussi
+    4 : passer au mode p1 du BIOS (INT 10h, AH = 0 ; 03h : texte)
+    5 : informations : version, memoire (Ko), constructeur (ASCIIZ) en p2 }
+Function KrnVideo(Op, P1, P2 : LongInt) : LongInt;
+Begin
+  KrnVideo := 0;
+  Case Op Of
+    0 : Begin
+          VbeScan;
+          KrnVideo := VbeVer;
+        End;
+    1 : Begin
+          VbeScan;
+          KrnVideo := VbeCount;
+        End;
+    2 : Begin
+          VbeScan;
+          If (P1 >= 0) And (P1 < VbeCount) And (P2 <> 0) Then
+          Begin
+            MemL[0:P2] := VmNo[P1]; MemL[0:P2 + 4] := VmW[P1]; MemL[0:P2 + 8] := VmH[P1];
+            MemL[0:P2 + 12] := VmBpp[P1]; MemL[0:P2 + 16] := VmPitch[P1]; MemL[0:P2 + 20] := VmLfb[P1];
+            MemL[0:P2 + 24] := VmModel[P1];
+            MemL[0:P2 + 28] := VmRPos[P1]; MemL[0:P2 + 32] := VmRSize[P1];
+            MemL[0:P2 + 36] := VmGPos[P1]; MemL[0:P2 + 40] := VmGSize[P1];
+            MemL[0:P2 + 44] := VmBPos[P1]; MemL[0:P2 + 48] := VmBSize[P1];
+            KrnVideo := 1;
+          End;
+        End;
+    3 : Begin
+          VbeScan;
+          BiosRegs($4F02, (P1 And $1FF) Or $4000, 0, 0, 0, 0, 0);
+          BiosInt($10);
+          If (MemL[0:BiosParm] And $FFFF) <> $004F Then KrnVideo := 1;
+        End;
+    4 : Begin
+          BiosRegs(P1 And $FF, 0, 0, 0, 0, 0, 0);
+          BiosInt($10);
+        End;
+    5 : If P2 <> 0 Then
+        Begin
+          VbeScan;
+          MemL[0:P2] := VbeVer; MemL[0:P2 + 4] := VbeMemKb;
+          PutPStr(P2 + 8, VbeOem, 80);
+          KrnVideo := VbeVer;
+        End;
+  End;
+End;
+
 { KrnSesCtl(op, p1, p2) : sessions (SESMGR.DLL, PMWIN.DLL, VIOCALLS.DLL)
     0 session au premier plan     1 session de l'appelant
     2 compteur des bascules       3 mettre la session p1 au premier plan
@@ -6555,6 +6755,11 @@ Begin
   TextAttr := $07;
   ConPutLn('Memoire : ' + IntStr(MemTotalKb) + ' Ko, tas du noyau : ' +
            IntStr((HeapEnd - HeapStart) Div 1024) + ' Ko, pagination active.');
+  { carte video : modes VESA releves par le BIOS (INT 10h, 4F00h/4F01h) }
+  If KrnVideo(0, 0, 0) <> 0 Then
+    ConPutLn('Video : VESA (VBE ' + IntStr(VbeVer Shr 8) + '.' + IntStr(VbeVer And 255) + ', ' + IntStr(VbeMemKb) +
+             ' Ko, ' + IntStr(VbeCount) + ' modes graphiques utilisables) ' + VbeOem + '.')
+  Else ConPutLn('Video : VGA (pas de BIOS VESA).');
 End;
 
 Var

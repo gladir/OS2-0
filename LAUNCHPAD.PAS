@@ -1890,6 +1890,18 @@ Begin
     WM_TIMER :
       If Lo16(Mp1) = 1 Then
       Begin
+        { resolution de l'ecran changee (carnet Systeme - Parametres) :
+          la barre reste en bas au centre, ou dans l'ecran }
+        X := WinQuerySysValue(HWND_DESKTOP, 20); Y := WinQuerySysValue(HWND_DESKTOP, 21);
+        If (X > 0) And (Y > 0) And ((X <> ScrW) Or (Y <> ScrH)) Then
+        Begin
+          CloseDrawer;
+          HideTip;
+          If BarY <= 8 Then BarX := (X - BarW) Div 2;
+          ScrW := X; ScrH := Y;
+          SizeBar;
+          SaveBarPos;
+        End;
         { bulle d'aide : la souris reste sur le meme bouton }
         Pt[0] := 0; Pt[1] := 0;
         Dummy := WinQueryPointerPos(HWND_DESKTOP, LongInt(@Pt));
