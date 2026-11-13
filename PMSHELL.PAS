@@ -13,44 +13,64 @@ Program PMSHELL;
 
 { Compilation : OS2PC PMSHELL.PAS   (produit PMSHELL.EXE)
 
-  PMSHELL est le bureau d'OS/2-0. Le noyau le lance a la place de
-  CMD.EXE quand CONFIG.SYS contient PROTSHELL=C:\PMSHELL.EXE (et le
-  relance s'il se termine). Il affiche le bureau en mode graphique
-  (640 x 480 x 16 couleurs, PMWIN.DLL) et s'utilise a la souris et au
-  clavier :
+  PMSHELL est le bureau d'OS/2-0 (Workplace Shell). Le noyau le lance a
+  la place de CMD.EXE quand CONFIG.SYS contient PROTSHELL=C:\PMSHELL.EXE
+  (et le relance s'il se termine). Il affiche le bureau en mode graphique
+  (640 x 480 x 16 couleurs, PMWIN.DLL), s'utilise a la souris et au
+  clavier, et lance le LaunchPad (C:\LAUNCHPD.EXE, sauf si OS2.INI
+  contient PMSHELL, LAUNCHPAD = 0).
 
   Bureau : objets Systeme OS/2, Lecteurs, Invite de commandes OS/2,
-  Liste des fenetres et Arret. Les icones du bureau se deplacent a la
-  souris (position gardee dans OS2.INI, application PMSHELL).
-  Dossiers : Systeme OS/2 (invite de commandes, lecteurs, liste des
-  fenetres, informations sur le systeme, aide, arret), Lecteurs (une
-  icone par unite : C: CD-ROM, D: disque virtuel HPFS...), et les
+  Liste des fenetres, Modeles, Broyeur et Arret, puis le contenu du
+  repertoire du bureau (C:\DESKTOP, ou D:\DESKTOP quand C: est le CD-ROM : les
+  objets crees ou deposes sur le bureau) et les
+  raccourcis du bureau. Les icones du bureau se deplacent a la souris
+  (position gardee dans OS2.INI, application PMSHELL).
+  Dossiers : Systeme OS/2, Lecteurs (une icone par unite), Modeles, et les
   repertoires (sous-repertoires, programmes .EXE, fichiers de commandes
   .CMD/.BAT, fichiers de donnees). Un dossier deja ouvert est active au
-  lieu d'etre ouvert une seconde fois.
+  lieu d'etre ouvert une seconde fois. Il n'y a pas de limite au nombre
+  de fenetres ni au nombre d'objets d'un dossier (tables qui grandissent).
+
+  Glisser-deposer (bouton 2, ou bouton 1 dans un dossier) : un objet
+  depose sur un dossier ou sur la fenetre d'un dossier y est deplace
+  (copie si Ctrl est enfonce ; copie aussi d'une unite a une autre) ;
+  depose sur le Broyeur il est supprime (apres confirmation) ; depose sur
+  un programme, celui-ci est lance avec le fichier en parametre ; depose
+  sur le LaunchPad il y est ajoute. Raccourcis (shadows) : menu
+  contextuel, Creer un raccourci (sur le bureau), ou deposer avec Ctrl+Maj ;
+  un raccourci (etiquette en bleu) ouvre son objet, le supprimer ne
+  supprime que le raccourci (OS2.INI, PMSHELL_RACCOURCIS). Modeles :
+  dossier, fichier texte, fichier de commandes ; ouvrir un modele (ou le
+  deposer sur un dossier) cree un nouvel objet.
 
   Souris : clic (bouton 1) : selection ; double clic : ouvrir ; bouton 2 :
-  menu contextuel de l'objet ou du fond ; glisser une icone du bureau la
-  deplace.
+  menu contextuel de l'objet ou du fond.
   Clavier : fleches, Debut, Fin : selection ; Entree : ouvrir ;
   Maj+F10 : menu contextuel ; Ctrl+Echap : liste des fenetres ; F5 :
-  actualiser ; Retour arriere : dossier parent ; Suppr : supprimer le
-  fichier choisi (apres confirmation) ; F1 : aide ; lettre : objet
+  actualiser ; Retour arriere : dossier parent ; Suppr : supprimer
+  l'objet choisi (apres confirmation) ; F1 : aide ; lettre : objet
   suivant qui commence par cette lettre ; Alt+F4 : fermer la fenetre
   (sur le bureau : arret du systeme) ; Echap : fermer la visionneuse ou
   la liste des fenetres.
 
   Programmes : un objet programme (.EXE), un fichier de commandes (par
   COMSPEC /C) ou l'invite de commandes (COMSPEC) est lance par
-  DosExecPgm, dans le repertoire de son dossier. Le noyau d'OS/2-0
-  execute un programme a la fois : pendant ce temps le bureau est cache
-  et l'ecran est prete au programme (WINSUSPENDSCREEN de PMWIN : mode
-  texte 80 x 25 ; un programme de PM reprend le mode graphique) ; a la
-  fin du programme le bureau revient (WINRESUMESCREEN). Apres un
-  programme en mode texte autre que l'invite de commandes, PMSHELL
-  attend une touche pour laisser lire ce qu'il a affiche.
+  DosExecPgm dans une nouvelle session plein ecran, dans le repertoire de
+  son dossier ; le bureau continue de s'executer (OS/2-0 est multitache).
+  Ctrl+Echap revient au bureau, Alt+Echap passe a la session suivante, et
+  la liste des fenetres montre les sessions. Un programme de PM rejoint
+  la session de Presentation Manager. Apres un programme en mode texte
+  autre que l'invite de commandes, le noyau attend une touche avant de
+  fermer la session.
   Fichiers de donnees : visionneuse (texte du fichier dans une liste).
   STARTUP.CMD (C:\ ou D:\) est execute au demarrage, avant le bureau.
+
+  Demandes des autres programmes (LaunchPad) : le programme ecrit la
+  demande dans OS2.INI (PMSHELL, REQn) et envoie WM_USER + 1 (mp1 = n) a
+  la fenetre du bureau (PMSHELL, HWND) : OPEN chemin, DRIVES, SYS, TEMPL,
+  CMD, RUN programme, BATCH fichier, VIEW fichier, WINLIST, HELP, INFO,
+  SHUTDOWN.
 
   Arret : apres confirmation, les fichiers sont ecrits (DosShutdown) et
   l'ecran indique que l'ordinateur peut etre eteint ; Ctrl+Alt+Suppr
@@ -61,7 +81,8 @@ Const
   WM_CREATE = $0001; WM_DESTROY = $0002; WM_SIZE = $0007; WM_ACTIVATE = $000D;
   WM_SETFOCUS = $000F; WM_COMMAND = $0020; WM_SYSCOMMAND = $0021; WM_PAINT = $0023; WM_CLOSE = $0029; WM_CONTROL = $0030;
   WM_VSCROLL = $0031; WM_MOUSEMOVE = $0070; WM_BUTTON1DOWN = $0071; WM_BUTTON1UP = $0072;
-  WM_BUTTON1DBLCLK = $0073; WM_BUTTON2DOWN = $0074; WM_BUTTON2CLICK = $0416; WM_CHAR = $007A;
+  WM_BUTTON1DBLCLK = $0073; WM_BUTTON2DOWN = $0074; WM_BUTTON2UP = $0075; WM_BUTTON2CLICK = $0416;
+  WM_CHAR = $007A; WM_REQUEST = $1001;
   SC_CLOSE = $8004;
   { styles et fenetres }
   WS_VISIBLE = $80000000; WS_MINIMIZED = $01000000;
@@ -91,26 +112,49 @@ Const
   DeskRgb = $008080;
   DRO_FILL = 1; DRO_OUTLINE = 2;
   { vues et objets }
-  MaxView = 24; MaxItem = 600; CW = 112; CH = 80;
+  CW = 112; CH = 80;
   VK_DESK = 0; VK_SYS = 1; VK_DRIVES = 2; VK_DIR = 3; VK_VIEWER = 4; VK_LIST = 5;
   IC_FOLDER = 0; IC_SYSTEM = 1; IC_DRIVES = 2; IC_PROGRAM = 3; IC_CMD = 4; IC_BATCH = 5; IC_FILE = 6;
   IC_CDROM = 7; IC_DISK = 8; IC_SHUTDOWN = 9; IC_WINLIST = 10; IC_INFO = 11; IC_HELP = 12;
+  IC_TEMPL = 13; IC_SHRED = 14;
   OB_SYS = 1; OB_DRIVES = 2; OB_CMD = 3; OB_SHUTDOWN = 4; OB_WINLIST = 5; OB_INFO = 6; OB_HELP = 7;
-  OB_DIR = 8; OB_EXE = 9; OB_BATCH = 10; OB_DATA = 11;
+  OB_DIR = 8; OB_EXE = 9; OB_BATCH = 10; OB_DATA = 11; OB_TEMPLATES = 12; OB_SHRED = 13;
+  OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16;
+  VK_TEMPL = 6;
+  ShadowApp = 'PMSHELL_RACCOURCIS';
   { commandes des menus }
   CM_OPEN = 100; CM_REFRESH = 101; CM_ARRANGE = 102; CM_WINLIST = 103; CM_INFO = 104; CM_SHUTDOWN = 105;
   CM_HELP = 106; CM_PROPS = 107; CM_DELETE = 108; CM_CLOSE = 109; CM_PARENT = 110; CM_CMDHERE = 111;
+  CM_SHADOW = 112; CM_CREATE = 113;
+
+Type
+  { objet d'une vue (icone) }
+  TItem = Record
+    Use, View, Icon, Obj, X, Top, Size, Shadow : LongInt;
+    Name : String[47];
+    Path : String[127];
+  End;
+  PItem = ^TItem;
+  { vue : bureau, dossier, visionneuse, liste des fenetres }
+  TView = Record
+    Use, Kind, Frame, Client, Sel, Top, Max, List, Hidden, Stamp : LongInt;
+    Path, Title : String[127];
+  End;
+  PView = ^TView;
+  { entree d'un repertoire avant le tri : cle "0nom" (repertoire) ou
+    "1nom" (fichier), taille }
+  TEnt = Record
+    Size : LongInt;
+    Key : String[48];
+  End;
+  PEnt = ^TEnt;
 
 Var
   Hab, Hmq, Desk, MenuH, Creating, ScrW, ScrH, Dummy, I : LongInt;
   { vues }
-  VUse, VKind, VFrame, VClient, VSel, VTop, VMax, VList, VHidden, VStamp : Array[0..MaxView - 1] Of LongInt;
-  Stamp : LongInt;
-  VPath, VTitle : Array[0..MaxView - 1] Of String[127];
+  ViewBuf, ViewCap, Stamp : LongInt;   { vues : table qui grandit }
   { objets }
-  IUse, IView, IIcon, IObj, IX, ITop, ISize : Array[0..MaxItem - 1] Of LongInt;
-  IName : Array[0..MaxItem - 1] Of String[47];
-  IPath : Array[0..MaxItem - 1] Of String[127];
+  ItemBuf, ItemCap : LongInt;          { objets : table qui grandit }
   { glisser }
   DragItem, DragX0, DragY0, DragIX, DragITop, Dragging, MenuView, MenuItem : LongInt;
   { tampons }
@@ -119,12 +163,14 @@ Var
   MenuLen, MenuCnt : LongInt;
   FindBuf : Array[0..4095] Of Byte;
   FileBuf : Array[0..4095] Of Byte;
-  SortN : Array[0..299] Of String[47];
-  SortA : Array[0..299] Of LongInt;
+  EntBuf, EntCap : LongInt;            { entrees d'un repertoire (tri) }
+  { glisser-deposer entre les vues }
+  DSrc, DBtn, DActive, DX0, DY0, NoMenu : LongInt;
   Qmsg : Array[0..7] Of LongInt;
   I2 : LongInt;
   WlSess : Array[0..31] Of LongInt;   { liste des fenetres : sessions }
   WlViews, WlNS : LongInt;
+  DeskDir : String[40];               { repertoire du bureau (C:\DESKTOP ou D:\DESKTOP) }
 
 { --- DOSCALLS.DLL --- }
 Function DosExecPgm(PObj, CbObj, Flags, PArg, PEnv, PRes, PName : LongInt) : LongInt; External 'DOSCALLS';
@@ -143,6 +189,11 @@ Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetCurrentDir(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetDefaultDisk(Disk : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSleep(Ms : LongInt) : LongInt; External 'DOSCALLS';
+Function DosCopy(PSrc, PDst, Opt : LongInt) : LongInt; External 'DOSCALLS';
+Function DosMove(POld, PNew : LongInt) : LongInt; External 'DOSCALLS';
+Function DosCreateDir(PName, PEa : LongInt) : LongInt; External 'DOSCALLS';
+Function DosDeleteDir(PName : LongInt) : LongInt; External 'DOSCALLS';
+Function DosWrite(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS';
 Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
 
 { --- PMWIN.DLL --- }
@@ -172,9 +223,12 @@ Function WinMessageBox(HPar, HOwn, PText, PCap, Id, Fl : LongInt) : LongInt; Ext
 Function WinCreateMenu(HPar, P : LongInt) : LongInt; External 'PMWIN';
 Function WinPopupMenu(HPar, HOwn, HMenu, X, Y, Id, Fs : LongInt) : LongInt; External 'PMWIN';
 Function WinSendMsg(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMWIN';
+Function WinPostMsg(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMWIN';
 Function WinWindowFromID(HPar, Id : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryWindow(H, Cmd : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryWindowULong(H, Ix : LongInt) : LongInt; External 'PMWIN';
+Function WinMapWindowPoints(HFrom, HTo, P, N : LongInt) : LongInt; External 'PMWIN';
+Function WinWindowFromPoint(HPar, P, Ch : LongInt) : LongInt; External 'PMWIN';
 Function WinSetWindowULong(H, Ix, V : LongInt) : LongInt; External 'PMWIN';
 Function WinQuerySysValue(HD, Ix : LongInt) : LongInt; External 'PMWIN';
 Function WinSetSysColors(HD, O, F, C1, N, P : LongInt) : LongInt; External 'PMWIN';
@@ -192,6 +246,7 @@ Function GpiLine(Hps, P : LongInt) : LongInt; External 'PMGPI';
 { --- PMMERGE.DLL (profil de l'utilisateur) --- }
 Function PrfQueryProfileString(H, A, K, Df, B, M : LongInt) : LongInt; External 'PMMERGE';
 Function PrfWriteProfileString(H, A, K, D : LongInt) : LongInt; External 'PMMERGE';
+Function PrfQueryProfileSize(H, A, K, P : LongInt) : LongInt; External 'PMMERGE';
 
 { --- VIOCALLS.DLL, KBDCALLS.DLL (ecran d'arret) --- }
 Function VioWrtCharStrAtt(PStr, Cb, Row, Col, PAttr, Hvio : LongInt) : LongInt; External 'VIOCALLS';
@@ -360,20 +415,76 @@ Begin
   Dummy := WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z(Text), Z2(Cap), 0, Style Or MB_MOVEABLE);
 End;
 
+Function PrfStr(App, Key : String) : String;
+Var B : Array[0..299] Of Byte;
+Begin
+  B[0] := 0;
+  Dummy := PrfQueryProfileString(-1, Z(App), Z2(Key), 0, LongInt(@B), 290);
+  PrfStr := GetZ(LongInt(@B));
+End;
+
+Procedure PrfSet(App, Key, Value : String);
+Var B : Array[0..299] Of Byte;
+Begin
+  PutZ(LongInt(@B), Value);
+  If Value = '' Then Dummy := PrfWriteProfileString(-1, Z(App), Z2(Key), 0)
+  Else Dummy := PrfWriteProfileString(-1, Z(App), Z2(Key), LongInt(@B));
+End;
+
+Function PrfInt(App, Key : String) : LongInt;
+Var V, C : LongInt;
+Begin
+  Val(PrfStr(App, Key), V, C);
+  If C <> 0 Then V := 0;
+  PrfInt := V;
+End;
+
 { ==================================================================== }
-{ Objets et vues                                                        }
+{ Objets et vues : tables d'enregistrements qui doublent quand elles     }
+{ sont pleines (pas de limite fixe)                                     }
 { ==================================================================== }
+
+Function It(K : LongInt) : PItem;
+Begin
+  It := Pointer(ItemBuf + K * SizeOf(TItem));
+End;
+
+Function Vw(V : LongInt) : PView;
+Begin
+  Vw := Pointer(ViewBuf + V * SizeOf(TView));
+End;
+
+{ agrandir une table : nouveau bloc (mis a zero), copie, ancien rendu }
+Procedure Grow(Var Buf, Cap : LongInt; Sz : LongInt);
+Var P : Pointer; N, K : LongInt;
+Begin
+  If Cap <= 0 Then N := 64 Else N := Cap * 2;
+  GetMem(P, N * Sz);
+  For K := 0 To N * Sz - 1 Do WrB(LongInt(P) + K, 0);
+  If Buf <> 0 Then
+  Begin
+    For K := 0 To Cap * Sz - 1 Do WrB(LongInt(P) + K, RdB(Buf + K));
+    FreeMem(Pointer(Buf), Cap * Sz);
+  End;
+  Buf := LongInt(P);
+  Cap := N;
+End;
 
 Function NewItem(V, Icon, Obj : LongInt; Name, Path : String) : LongInt;
 Var K, F : LongInt;
 Begin
   F := -1;
-  For K := MaxItem - 1 DownTo 0 Do
-    If IUse[K] = 0 Then F := K;
+  For K := ItemCap - 1 DownTo 0 Do
+    If It(K)^.Use = 0 Then F := K;
+  If F < 0 Then
+  Begin
+    F := ItemCap;
+    Grow(ItemBuf, ItemCap, SizeOf(TItem));
+  End;
   If F >= 0 Then
   Begin
-    IUse[F] := 1; IView[F] := V; IIcon[F] := Icon; IObj[F] := Obj; IName[F] := Name; IPath[F] := Path;
-    IX[F] := 0; ITop[F] := 0; ISize[F] := 0;
+    It(F)^.Use := 1; It(F)^.View := V; It(F)^.Icon := Icon; It(F)^.Obj := Obj; It(F)^.Name := Name; It(F)^.Path := Path;
+    It(F)^.X := 0; It(F)^.Top := 0; It(F)^.Size := 0; It(F)^.Shadow := 0;
   End;
   NewItem := F;
 End;
@@ -381,17 +492,17 @@ End;
 Procedure ClearItems(V : LongInt);
 Var K : LongInt;
 Begin
-  For K := 0 To MaxItem - 1 Do
-    If (IUse[K] <> 0) And (IView[K] = V) Then IUse[K] := 0;
-  VSel[V] := -1;
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then It(K)^.Use := 0;
+  Vw(V)^.Sel := -1;
 End;
 
 Function ViewOf(Hwnd : LongInt) : LongInt;
 Var K, R : LongInt;
 Begin
   R := -1;
-  For K := 0 To MaxView - 1 Do
-    If (VUse[K] <> 0) And ((VClient[K] = Hwnd) Or (VFrame[K] = Hwnd)) Then R := K;
+  For K := 0 To ViewCap - 1 Do
+    If (Vw(K)^.Use <> 0) And ((Vw(K)^.Client = Hwnd) Or (Vw(K)^.Frame = Hwnd)) Then R := K;
   ViewOf := R;
 End;
 
@@ -399,7 +510,7 @@ Function ClientH(V : LongInt) : LongInt;
 Var Rc : Array[0..3] Of LongInt;
 Begin
   Rc[3] := 0;
-  Dummy := WinQueryWindowRect(VClient[V], LongInt(@Rc));
+  Dummy := WinQueryWindowRect(Vw(V)^.Client, LongInt(@Rc));
   ClientH := Rc[3];
 End;
 
@@ -407,7 +518,7 @@ Function ClientW(V : LongInt) : LongInt;
 Var Rc : Array[0..3] Of LongInt;
 Begin
   Rc[2] := 0;
-  Dummy := WinQueryWindowRect(VClient[V], LongInt(@Rc));
+  Dummy := WinQueryWindowRect(Vw(V)^.Client, LongInt(@Rc));
   ClientW := Rc[2];
 End;
 
@@ -415,25 +526,25 @@ End;
 Procedure CellRect(K : LongInt; Var X1, Y1, X2, Y2 : LongInt);
 Var V : LongInt;
 Begin
-  V := IView[K];
-  X1 := IX[K]; X2 := IX[K] + CW;
-  Y2 := ClientH(V) - (ITop[K] - VTop[V]);
+  V := It(K)^.View;
+  X1 := It(K)^.X; X2 := It(K)^.X + CW;
+  Y2 := ClientH(V) - (It(K)^.Top - Vw(V)^.Top);
   Y1 := Y2 - CH;
 End;
 
 Procedure InvalItem(K : LongInt);
 Var Rc : Array[0..3] Of LongInt;
 Begin
-  If (K < 0) Or (IUse[K] = 0) Then Exit;
+  If (K < 0) Or (It(K)^.Use = 0) Then Exit;
   CellRect(K, Rc[0], Rc[1], Rc[2], Rc[3]);
-  Dummy := WinInvalidateRect(VClient[IView[K]], LongInt(@Rc), 1);
+  Dummy := WinInvalidateRect(Vw(It(K)^.View)^.Client, LongInt(@Rc), 1);
 End;
 
 Procedure SelectItem(V, K : LongInt);
 Begin
-  If VSel[V] = K Then Exit;
-  InvalItem(VSel[V]);
-  VSel[V] := K;
+  If Vw(V)^.Sel = K Then Exit;
+  InvalItem(Vw(V)^.Sel);
+  Vw(V)^.Sel := K;
   InvalItem(K);
 End;
 
@@ -441,8 +552,8 @@ Function HitItem(V, X, Y : LongInt) : LongInt;
 Var K, R, X1, Y1, X2, Y2 : LongInt;
 Begin
   R := -1;
-  For K := 0 To MaxItem - 1 Do
-    If (IUse[K] <> 0) And (IView[K] = V) Then
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
     Begin
       CellRect(K, X1, Y1, X2, Y2);
       If (X >= X1 + 8) And (X < X2 - 8) And (Y >= Y1 + 4) And (Y < Y2 - 2) Then R := K;
@@ -455,7 +566,7 @@ Procedure LoadPos(K : LongInt);
 Var B : Array[0..63] Of Byte; S : String; P, X, Y, C : LongInt;
 Begin
   B[0] := 0;
-  Dummy := PrfQueryProfileString(-1, Z('PMSHELL'), Z2('POS ' + IName[K]), 0, LongInt(@B), 60);
+  Dummy := PrfQueryProfileString(-1, Z('PMSHELL'), Z2('POS ' + It(K)^.Name), 0, LongInt(@B), 60);
   S := GetZ(LongInt(@B));
   P := Pos(',', S);
   If P > 1 Then
@@ -464,7 +575,7 @@ Begin
     If C = 0 Then Val(Copy(S, P + 1, 20), Y, C);
     If (C = 0) And (X >= 0) And (X < ScrW - 16) And (Y >= 0) And (Y < ScrH - 16) Then
     Begin
-      IX[K] := X; ITop[K] := Y;
+      It(K)^.X := X; It(K)^.Top := Y;
     End;
   End;
 End;
@@ -472,8 +583,8 @@ End;
 Procedure SavePos(K : LongInt);
 Var B : Array[0..63] Of Byte;
 Begin
-  PutZ(LongInt(@B), IStr(IX[K]) + ',' + IStr(ITop[K]));
-  Dummy := PrfWriteProfileString(-1, Z('PMSHELL'), Z2('POS ' + IName[K]), LongInt(@B));
+  PutZ(LongInt(@B), IStr(It(K)^.X) + ',' + IStr(It(K)^.Top));
+  Dummy := PrfWriteProfileString(-1, Z('PMSHELL'), Z2('POS ' + It(K)^.Name), LongInt(@B));
 End;
 
 { disposition : colonnes (bureau) ou lignes (dossier) }
@@ -482,14 +593,14 @@ Var K, N, Cols, Rows, W, H : LongInt;
 Begin
   W := ClientW(V); H := ClientH(V);
   N := 0; Rows := 0;
-  If VKind[V] = VK_DESK Then
+  If Vw(V)^.Kind = VK_DESK Then
   Begin
     Rows := MaxI(1, (H - 8) Div CH);
-    For K := 0 To MaxItem - 1 Do
-      If (IUse[K] <> 0) And (IView[K] = V) Then
+    For K := 0 To ItemCap - 1 Do
+      If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
       Begin
-        IX[K] := 8 + (N Div Rows) * CW;
-        ITop[K] := 8 + (N Mod Rows) * CH;
+        It(K)^.X := 8 + (N Div Rows) * CW;
+        It(K)^.Top := 8 + (N Mod Rows) * CH;
         LoadPos(K);
         Inc(N);
       End;
@@ -497,48 +608,76 @@ Begin
   Else
   Begin
     Cols := MaxI(1, (W - 8) Div CW);
-    For K := 0 To MaxItem - 1 Do
-      If (IUse[K] <> 0) And (IView[K] = V) Then
+    For K := 0 To ItemCap - 1 Do
+      If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
       Begin
-        IX[K] := 8 + (N Mod Cols) * CW;
-        ITop[K] := 8 + (N Div Cols) * CH;
+        It(K)^.X := 8 + (N Mod Cols) * CW;
+        It(K)^.Top := 8 + (N Div Cols) * CH;
         Inc(N);
       End;
-    VMax[V] := 8 + ((N + Cols - 1) Div Cols) * CH;
+    Vw(V)^.Max := 8 + ((N + Cols - 1) Div Cols) * CH;
   End;
 End;
 
 Procedure UpdScroll(V : LongInt);
 Var Sb, H, M : LongInt;
 Begin
-  If VKind[V] = VK_DESK Then Exit;
-  Sb := WinWindowFromID(VFrame[V], FID_VERTSCROLL);
+  If Vw(V)^.Kind = VK_DESK Then Exit;
+  Sb := WinWindowFromID(Vw(V)^.Frame, FID_VERTSCROLL);
   If Sb = 0 Then Exit;
   H := ClientH(V);
-  M := MaxI(0, VMax[V] - H);
-  If VTop[V] > M Then VTop[V] := M;
-  If VTop[V] < 0 Then VTop[V] := 0;
-  Dummy := WinSendMsg(Sb, SBM_SETSCROLLBAR, VTop[V], Mk2(0, M));
-  Dummy := WinSendMsg(Sb, SBM_SETTHUMBSIZE, Mk2(H, MaxI(H, VMax[V])), 0);
+  M := MaxI(0, Vw(V)^.Max - H);
+  If Vw(V)^.Top > M Then Vw(V)^.Top := M;
+  If Vw(V)^.Top < 0 Then Vw(V)^.Top := 0;
+  Dummy := WinSendMsg(Sb, SBM_SETSCROLLBAR, Vw(V)^.Top, Mk2(0, M));
+  Dummy := WinSendMsg(Sb, SBM_SETTHUMBSIZE, Mk2(H, MaxI(H, Vw(V)^.Max)), 0);
 End;
 
 { faire voir l'objet K (defilement) }
 Procedure ShowItem(K : LongInt);
 Var V, H : LongInt;
 Begin
-  V := IView[K];
-  If VKind[V] = VK_DESK Then Exit;
+  V := It(K)^.View;
+  If Vw(V)^.Kind = VK_DESK Then Exit;
   H := ClientH(V);
-  If ITop[K] < VTop[V] Then VTop[V] := MaxI(0, ITop[K] - 8)
-  Else If ITop[K] + CH > VTop[V] + H Then VTop[V] := ITop[K] + CH + 8 - H
+  If It(K)^.Top < Vw(V)^.Top Then Vw(V)^.Top := MaxI(0, It(K)^.Top - 8)
+  Else If It(K)^.Top + CH > Vw(V)^.Top + H Then Vw(V)^.Top := It(K)^.Top + CH + 8 - H
   Else Exit;
   UpdScroll(V);
-  Dummy := WinInvalidateRect(VClient[V], 0, 1);
+  Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
 End;
 
 { contenu d'un dossier }
+Function Ent(K : LongInt) : PEnt;
+Begin
+  Ent := Pointer(EntBuf + K * SizeOf(TEnt));
+End;
+
+{ type de l'objet d'apres le nom du fichier }
+Procedure FileKind(S : String; IsDir : Boolean; Var Icon, Obj : LongInt);
+Var E : String;
+Begin
+  E := ExtOf(S);
+  If IsDir Then
+  Begin
+    Icon := IC_FOLDER; Obj := OB_DIR;
+  End
+  Else If (E = 'EXE') Or (E = 'COM') Then
+  Begin
+    Icon := IC_PROGRAM; Obj := OB_EXE;
+  End
+  Else If (E = 'CMD') Or (E = 'BAT') Then
+  Begin
+    Icon := IC_BATCH; Obj := OB_BATCH;
+  End
+  Else
+  Begin
+    Icon := IC_FILE; Obj := OB_DATA;
+  End;
+End;
+
 Procedure AddSorted(V : LongInt; Dir : String);
-Var H, N, A, Cnt, Rc, K, J, T, Icon, Obj, Off : LongInt; S, E, Ts : String;
+Var H, N, A, Cnt, Rc, K, J, T, Icon, Obj, Off : LongInt; S, Ts : String;
 Begin
   Cnt := 0;
   H := -1; N := 1;
@@ -551,12 +690,13 @@ Begin
       A := RdL(LongInt(@FindBuf) + Off + 24);
       S := '';
       For K := 0 To RdB(LongInt(@FindBuf) + Off + 28) - 1 Do S := S + Chr(RdB(LongInt(@FindBuf) + Off + 29 + K));
-      If (S <> '.') And (S <> '..') And (Cnt < 300) Then
+      If (S <> '.') And (S <> '..') Then
       Begin
+        If Cnt >= EntCap Then Grow(EntBuf, EntCap, SizeOf(TEnt));
         { repertoires d'abord (cle "0nom"), puis fichiers ("1nom") }
-        If (A And $10) <> 0 Then SortN[Cnt] := '0' + S Else SortN[Cnt] := '1' + S;
-        SortA[Cnt] := RdL(LongInt(@FindBuf) + Off + 16);
-        If (A And $10) <> 0 Then SortA[Cnt] := -1;
+        If (A And $10) <> 0 Then Ent(Cnt)^.Key := '0' + S Else Ent(Cnt)^.Key := '1' + S;
+        Ent(Cnt)^.Size := RdL(LongInt(@FindBuf) + Off + 16);
+        If (A And $10) <> 0 Then Ent(Cnt)^.Size := -1;
         Inc(Cnt);
       End;
       Dec(N);
@@ -570,37 +710,170 @@ Begin
   { tri par insertion }
   For K := 1 To Cnt - 1 Do
   Begin
-    Ts := SortN[K]; T := SortA[K]; J := K - 1;
-    While (J >= 0) And (UpStr(SortN[J]) > UpStr(Ts)) Do
+    Ts := Ent(K)^.Key; T := Ent(K)^.Size; J := K - 1;
+    While (J >= 0) And (UpStr(Ent(J)^.Key) > UpStr(Ts)) Do
     Begin
-      SortN[J + 1] := SortN[J]; SortA[J + 1] := SortA[J];
+      Ent(J + 1)^.Key := Ent(J)^.Key; Ent(J + 1)^.Size := Ent(J)^.Size;
       Dec(J);
     End;
-    SortN[J + 1] := Ts; SortA[J + 1] := T;
+    Ent(J + 1)^.Key := Ts; Ent(J + 1)^.Size := T;
   End;
   For K := 0 To Cnt - 1 Do
   Begin
-    S := Copy(SortN[K], 2, 255);
-    E := ExtOf(S);
-    If SortN[K][1] = '0' Then
-    Begin
-      Icon := IC_FOLDER; Obj := OB_DIR;
-    End
-    Else If (E = 'EXE') Or (E = 'COM') Then
-    Begin
-      Icon := IC_PROGRAM; Obj := OB_EXE;
-    End
-    Else If (E = 'CMD') Or (E = 'BAT') Then
-    Begin
-      Icon := IC_BATCH; Obj := OB_BATCH;
-    End
-    Else
-    Begin
-      Icon := IC_FILE; Obj := OB_DATA;
-    End;
+    S := Copy(Ent(K)^.Key, 2, 255);
+    FileKind(S, Ent(K)^.Key[1] = '0', Icon, Obj);
     If Obj = OB_DIR Then J := NewItem(V, Icon, Obj, S, Dir + S + '\')
     Else J := NewItem(V, Icon, Obj, S, Dir + S);
-    If J >= 0 Then ISize[J] := SortA[K];
+    If J >= 0 Then It(J)^.Size := Ent(K)^.Size;
+  End;
+End;
+
+{ --- Raccourcis (shadows) : OS2.INI, application PMSHELL_RACCOURCIS ;
+  cle = conteneur (BUREAU ou chemin du dossier) + '|' + nom, valeur =
+  cible (chemin d'un fichier ou d'un dossier, ou *n : objet du systeme
+  n) --- }
+
+{ icone et objet d'un objet du systeme }
+Procedure SysObjKind(Obj : LongInt; Var Icon : LongInt);
+Begin
+  Case Obj Of
+    OB_SYS : Icon := IC_SYSTEM;
+    OB_DRIVES : Icon := IC_DRIVES;
+    OB_CMD : Icon := IC_CMD;
+    OB_SHUTDOWN : Icon := IC_SHUTDOWN;
+    OB_WINLIST : Icon := IC_WINLIST;
+    OB_INFO : Icon := IC_INFO;
+    OB_HELP : Icon := IC_HELP;
+    OB_TEMPLATES : Icon := IC_TEMPL;
+    OB_SHRED : Icon := IC_SHRED;
+  Else
+    Icon := IC_FILE;
+  End;
+End;
+
+Procedure AddShadows(V : LongInt; Cont : String);
+Var Sz, P, K, J, Icon, Obj, C : LongInt; Buf : Pointer; S, Tg, Nm : String; B : Array[0..259] Of Byte;
+Begin
+  Sz := 0;
+  If PrfQueryProfileSize(-1, Z(ShadowApp), 0, LongInt(@Sz)) = 0 Then Exit;
+  If Sz <= 0 Then Exit;
+  GetMem(Buf, Sz + 2);
+  P := LongInt(Buf);
+  WrB(P, 0);
+  Dummy := PrfQueryProfileString(-1, Z(ShadowApp), 0, 0, P, Sz + 1);
+  K := 0;
+  While (K < Sz) And (RdB(P + K) <> 0) Do
+  Begin
+    S := GetZ(P + K);
+    K := K + Length(S) + 1;
+    J := Pos('|', S);
+    If (J > 1) And (UpStr(Copy(S, 1, J - 1)) = UpStr(Cont)) Then
+    Begin
+      Nm := Copy(S, J + 1, 255);
+      B[0] := 0;
+      Dummy := PrfQueryProfileString(-1, Z(ShadowApp), Z2(S), 0, LongInt(@B), 256);
+      Tg := GetZ(LongInt(@B));
+      If (Length(Tg) > 1) And (Tg[1] = '*') Then
+      Begin
+        Val(Copy(Tg, 2, 10), Obj, C);
+        SysObjKind(Obj, Icon);
+        Tg := '';
+      End
+      Else FileKind(Tg, (Length(Tg) > 0) And (Tg[Length(Tg)] = '\'), Icon, Obj);
+      { racine d'une unite : icone de l'unite }
+      If (Length(Tg) = 3) And (Tg[2] = ':') Then
+      Begin
+        If Pos('CD-ROM', UpStr(Nm)) > 0 Then Icon := IC_CDROM Else Icon := IC_DISK;
+      End;
+      J := NewItem(V, Icon, Obj, Nm, Tg);
+      If J >= 0 Then It(J)^.Shadow := 1;
+    End;
+  End;
+  FreeMem(Buf, Sz + 2);
+End;
+
+{ conteneur des raccourcis d'une vue ou d'un repertoire }
+Function ContOf(Dir : String) : String;
+Begin
+  If UpStr(Dir) = DeskDir Then ContOf := 'BUREAU' Else ContOf := UpStr(Dir);
+End;
+
+Function ShadowExists(Cont, Nm : String) : Boolean;
+Var B : Array[0..63] Of Byte;
+Begin
+  B[0] := 0;
+  Dummy := PrfQueryProfileString(-1, Z(ShadowApp), Z2(Cont + '|' + Nm), 0, LongInt(@B), 60);
+  ShadowExists := B[0] <> 0;
+End;
+
+Procedure MakeShadow(Cont, Nm, Target : String);
+Var N : LongInt; S : String; B : Array[0..259] Of Byte;
+Begin
+  S := Nm; N := 2;
+  While ShadowExists(Cont, S) Do
+  Begin
+    S := Nm + ' ' + IStr(N);
+    Inc(N);
+  End;
+  PutZ(LongInt(@B), Target);
+  Dummy := PrfWriteProfileString(-1, Z(ShadowApp), Z2(Cont + '|' + S), LongInt(@B));
+End;
+
+Procedure DelShadow(Cont, Nm : String);
+Begin
+  Dummy := PrfWriteProfileString(-1, Z(ShadowApp), Z2(Cont + '|' + Nm), 0);
+End;
+
+{ cible d'un objet pour un raccourci }
+Function TargetOf(K : LongInt) : String;
+Begin
+  If It(K)^.Path <> '' Then TargetOf := It(K)^.Path Else TargetOf := '*' + IStr(It(K)^.Obj);
+End;
+
+{ --- Modeles : un nouvel objet dans le repertoire Dir --- }
+Function UniqueName(Dir, Base, Ext : String) : String;
+Var N : LongInt; S : String;
+Begin
+  S := Base + Ext; N := 2;
+  While FileExists(Dir + S) Do
+  Begin
+    S := Base + IStr(N) + Ext;
+    Inc(N);
+  End;
+  UniqueName := S;
+End;
+
+Function CreateFromTemplate(Obj : LongInt; Dir : String) : Boolean;
+Var S, Txt : String; H, A, W : LongInt;
+Begin
+  CreateFromTemplate := False;
+  Dummy := DosCreateDir(Z(Copy(Dir, 1, Length(Dir) - 1)), 0);
+  Case Obj Of
+    OB_TPLDIR :
+      Begin
+        S := UniqueName(Dir, 'Dossier', '');
+        CreateFromTemplate := DosCreateDir(Z(Dir + S), 0) = 0;
+      End;
+    OB_TPLDATA, OB_TPLCMD :
+      Begin
+        If Obj = OB_TPLDATA Then
+        Begin
+          S := UniqueName(Dir, 'Donnees', '.TXT'); Txt := '';
+        End
+        Else
+        Begin
+          S := UniqueName(Dir, 'Commandes', '.CMD');
+          Txt := '@ECHO OFF' + #13#10 + 'REM Fichier de commandes cree par le bureau' + #13#10;
+        End;
+        H := 0; A := 0;
+        If DosOpen(Z(Dir + S), LongInt(@H), LongInt(@A), 0, 0, $12, $41, 0) = 0 Then
+        Begin
+          W := 0;
+          If Txt <> '' Then Dummy := DosWrite(H, Z2(Txt), Length(Txt), LongInt(@W));
+          Dummy := DosClose(H);
+          CreateFromTemplate := True;
+        End;
+      End;
   End;
 End;
 
@@ -608,14 +881,25 @@ Procedure Populate(V : LongInt);
 Var D, L, K : LongInt;
 Begin
   ClearItems(V);
-  Case VKind[V] Of
+  Case Vw(V)^.Kind Of
     VK_DESK :
       Begin
         Dummy := NewItem(V, IC_SYSTEM, OB_SYS, 'Systeme OS/2', '');
         Dummy := NewItem(V, IC_DRIVES, OB_DRIVES, 'Lecteurs', '');
         Dummy := NewItem(V, IC_CMD, OB_CMD, 'Invite de commandes OS/2', '');
         Dummy := NewItem(V, IC_WINLIST, OB_WINLIST, 'Liste des fenetres', '');
+        Dummy := NewItem(V, IC_TEMPL, OB_TEMPLATES, 'Modeles', '');
+        Dummy := NewItem(V, IC_SHRED, OB_SHRED, 'Broyeur', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
+        { fichiers et dossiers du repertoire du bureau, puis raccourcis }
+        AddSorted(V, DeskDir);
+        AddShadows(V, 'BUREAU');
+      End;
+    VK_TEMPL :
+      Begin
+        Dummy := NewItem(V, IC_FOLDER, OB_TPLDIR, 'Dossier', '');
+        Dummy := NewItem(V, IC_FILE, OB_TPLDATA, 'Fichier de donnees', '');
+        Dummy := NewItem(V, IC_BATCH, OB_TPLCMD, 'Fichier de commandes', '');
       End;
     VK_SYS :
       Begin
@@ -638,10 +922,14 @@ Begin
             Else Dummy := NewItem(V, IC_DISK, OB_DIR, 'Lecteur ' + Chr(65 + K), Chr(65 + K) + ':\');
           End;
       End;
-    VK_DIR : AddSorted(V, VPath[V]);
+    VK_DIR :
+      Begin
+        AddSorted(V, Vw(V)^.Path);
+        AddShadows(V, UpStr(Vw(V)^.Path));
+      End;
   End;
   Layout(V);
-  If VKind[V] <> VK_DESK Then UpdScroll(V);
+  If Vw(V)^.Kind <> VK_DESK Then UpdScroll(V);
 End;
 
 { ==================================================================== }
@@ -759,6 +1047,22 @@ Begin
         FBox(Hps, X + 12, Y + 16, X + 29, Y + 18, CLR_DARKBLUE, CLR_DARKBLUE);
         FBox(Hps, X + 13, Y + 4, X + 28, Y + 14, CLR_WHITE, CLR_WHITE);
       End;
+    IC_TEMPL :
+      Begin
+        IconFolder(Hps, X, Y, CLR_YELLOW);
+        FBox(Hps, X + 8, Y + 6, X + 23, Y + 19, CLR_WHITE, CLR_DARKGRAY);
+        GLn(Hps, X + 10, Y + 15, X + 21, Y + 15, CLR_DARKGRAY);
+        GLn(Hps, X + 10, Y + 11, X + 21, Y + 11, CLR_DARKGRAY);
+      End;
+    IC_SHRED :
+      Begin
+        FBox(Hps, X + 6, Y + 18, X + 25, Y + 28, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 9, Y + 25, X + 22, Y + 26, CLR_BLACK, DRO_FILL);
+        GLn(Hps, X + 9, Y + 4, X + 9, Y + 17, CLR_DARKGRAY);
+        GLn(Hps, X + 13, Y + 2, X + 13, Y + 17, CLR_DARKGRAY);
+        GLn(Hps, X + 17, Y + 5, X + 17, Y + 17, CLR_DARKGRAY);
+        GLn(Hps, X + 21, Y + 3, X + 21, Y + 17, CLR_DARKGRAY);
+      End;
     IC_INFO, IC_HELP :
       Begin
         FBox(Hps, X + 4, Y + 4, X + 27, Y + 27, CLR_BLUE, CLR_DARKBLUE);
@@ -794,11 +1098,16 @@ End;
 Procedure DrawItem(Hps, K, Fg, Bg : LongInt);
 Var X1, Y1, X2, Y2, V : LongInt; L1, L2 : String; Sel : Boolean;
 Begin
-  V := IView[K];
+  V := It(K)^.View;
   CellRect(K, X1, Y1, X2, Y2);
-  Sel := VSel[V] = K;
-  DrawIcon(Hps, IIcon[K], X1 + (CW - 32) Div 2, Y2 - 36);
-  SplitLabel(IName[K], L1, L2);
+  Sel := Vw(V)^.Sel = K;
+  DrawIcon(Hps, It(K)^.Icon, X1 + (CW - 32) Div 2, Y2 - 36);
+  SplitLabel(It(K)^.Name, L1, L2);
+  { raccourci : titre en couleur (bleu, jaune sur le bureau) }
+  If It(K)^.Shadow <> 0 Then
+  Begin
+    If Vw(V)^.Kind = VK_DESK Then Fg := CLR_YELLOW Else Fg := CLR_BLUE;
+  End;
   If Sel Then
   Begin
     Fg := CLR_WHITE; Bg := CLR_DARKBLUE;
@@ -810,9 +1119,9 @@ End;
 Procedure PaintView(V : LongInt);
 Var Hps, K, X1, Y1, X2, Y2, Fg, Bg : LongInt; Rc : Array[0..3] Of LongInt;
 Begin
-  Hps := WinBeginPaint(VClient[V], 0, LongInt(@Rc));
+  Hps := WinBeginPaint(Vw(V)^.Client, 0, LongInt(@Rc));
   If Hps = 0 Then Exit;
-  If VKind[V] = VK_DESK Then
+  If Vw(V)^.Kind = VK_DESK Then
   Begin
     Bg := DeskRgb; Fg := CLR_WHITE;
   End
@@ -821,10 +1130,10 @@ Begin
     Bg := CLR_WHITE; Fg := CLR_BLACK;
   End;
   Dummy := WinFillRect(Hps, LongInt(@Rc), Bg);
-  If VKind[V] = VK_DESK Then
+  If Vw(V)^.Kind = VK_DESK Then
     GText(Hps, ScrW - 26 * 8, 4, 'OS/2-0  Workplace Shell', CLR_PALEGRAY, Bg);
-  For K := 0 To MaxItem - 1 Do
-    If (IUse[K] <> 0) And (IView[K] = V) Then
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
     Begin
       CellRect(K, X1, Y1, X2, Y2);
       If (X2 > Rc[0]) And (X1 < Rc[2]) And (Y2 > Rc[1]) And (Y1 < Rc[3]) Then DrawItem(Hps, K, Fg, Bg);
@@ -860,7 +1169,7 @@ Begin
   WrW(LongInt(@MenuTpl), MenuLen); WrW(LongInt(@MenuTpl) + 2, 0); WrW(LongInt(@MenuTpl) + 4, MenuCnt);
   If MenuH <> 0 Then Dummy := WinDestroyWindow(MenuH);
   MenuH := WinCreateMenu(HWND_DESKTOP, LongInt(@MenuTpl));
-  If MenuH <> 0 Then Dummy := WinPopupMenu(VClient[V], VClient[V], MenuH, X, Y, First, 0);
+  If MenuH <> 0 Then Dummy := WinPopupMenu(Vw(V)^.Client, Vw(V)^.Client, MenuH, X, Y, First, 0);
 End;
 
 Procedure ContextMenu(V, K, X, Y : LongInt);
@@ -870,14 +1179,16 @@ Begin
   If K >= 0 Then
   Begin
     MenuAdd(CM_OPEN, '~Ouvrir');
+    If (It(K)^.Obj >= OB_TPLDIR) And (It(K)^.Obj <= OB_TPLCMD) Then MenuAdd(CM_CREATE, '~Creer un autre')
+    Else MenuAdd(CM_SHADOW, '~Creer un raccourci');
     MenuAdd(CM_PROPS, '~Proprietes');
-    If (IObj[K] = OB_EXE) Or (IObj[K] = OB_BATCH) Or (IObj[K] = OB_DATA) Then
+    If Deletable(K) Then
     Begin
       MenuAdd(0, '');
       MenuAdd(CM_DELETE, '~Supprimer...');
     End;
   End
-  Else If VKind[V] = VK_DESK Then
+  Else If Vw(V)^.Kind = VK_DESK Then
   Begin
     MenuAdd(CM_REFRESH, '~Actualiser');
     MenuAdd(CM_ARRANGE, '~Reorganiser');
@@ -891,7 +1202,7 @@ Begin
   Else
   Begin
     MenuAdd(CM_REFRESH, '~Actualiser');
-    If VKind[V] = VK_DIR Then
+    If Vw(V)^.Kind = VK_DIR Then
     Begin
       MenuAdd(CM_PARENT, '~Dossier parent');
       MenuAdd(CM_CMDHERE, '~Invite de commandes ici');
@@ -910,12 +1221,17 @@ Function NewView(Kind : LongInt; Path, Title : String) : LongInt;
 Var K, F : LongInt;
 Begin
   F := -1;
-  For K := MaxView - 1 DownTo 0 Do
-    If VUse[K] = 0 Then F := K;
+  For K := ViewCap - 1 DownTo 0 Do
+    If Vw(K)^.Use = 0 Then F := K;
+  If F < 0 Then
+  Begin
+    F := ViewCap;
+    Grow(ViewBuf, ViewCap, SizeOf(TView));
+  End;
   If F >= 0 Then
   Begin
-    VUse[F] := 1; VKind[F] := Kind; VPath[F] := Path; VTitle[F] := Title; VSel[F] := -1; VTop[F] := 0;
-    VMax[F] := 0; VFrame[F] := 0; VClient[F] := 0; VList[F] := 0; VHidden[F] := 0;
+    Vw(F)^.Use := 1; Vw(F)^.Kind := Kind; Vw(F)^.Path := Path; Vw(F)^.Title := Title; Vw(F)^.Sel := -1; Vw(F)^.Top := 0;
+    Vw(F)^.Max := 0; Vw(F)^.Frame := 0; Vw(F)^.Client := 0; Vw(F)^.List := 0; Vw(F)^.Hidden := 0;
   End;
   NewView := F;
 End;
@@ -925,21 +1241,21 @@ Procedure ActivateLast;
 Var K, B : LongInt;
 Begin
   B := -1;
-  For K := 0 To MaxView - 1 Do
-    If (VUse[K] <> 0) And (VFrame[K] <> 0) Then
-      If (WinQueryWindowULong(VFrame[K], QWL_STYLE) And WS_MINIMIZED) = 0 Then
-        If (B < 0) Or (VStamp[K] > VStamp[B]) Then B := K;
-  If B >= 0 Then Dummy := WinSetActiveWindow(HWND_DESKTOP, VFrame[B])
+  For K := 0 To ViewCap - 1 Do
+    If (Vw(K)^.Use <> 0) And (Vw(K)^.Frame <> 0) Then
+      If (WinQueryWindowULong(Vw(K)^.Frame, QWL_STYLE) And WS_MINIMIZED) = 0 Then
+        If (B < 0) Or (Vw(K)^.Stamp > Vw(B)^.Stamp) Then B := K;
+  If B >= 0 Then Dummy := WinSetActiveWindow(HWND_DESKTOP, Vw(B)^.Frame)
   Else If Desk <> 0 Then Dummy := WinSetFocus(HWND_DESKTOP, Desk);
 End;
 
 Procedure CloseView(V : LongInt);
 Begin
-  If (V < 0) Or (VUse[V] = 0) Or (VKind[V] = VK_DESK) Then Exit;
+  If (V < 0) Or (Vw(V)^.Use = 0) Or (Vw(V)^.Kind = VK_DESK) Then Exit;
   ClearItems(V);
-  VUse[V] := 0;
-  If VFrame[V] <> 0 Then Dummy := WinDestroyWindow(VFrame[V]);
-  VFrame[V] := 0; VClient[V] := 0;
+  Vw(V)^.Use := 0;
+  If Vw(V)^.Frame <> 0 Then Dummy := WinDestroyWindow(Vw(V)^.Frame);
+  Vw(V)^.Frame := 0; Vw(V)^.Client := 0;
   ActivateLast;
 End;
 
@@ -949,17 +1265,17 @@ Begin
   Flags := Fl;
   Creating := V;
   Cl := 0;
-  Fr := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Flags), Z(Cls), Z2(VTitle[V]), 0, 0, 0, LongInt(@Cl));
+  Fr := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Flags), Z(Cls), Z2(Vw(V)^.Title), 0, 0, 0, LongInt(@Cl));
   Creating := -1;
   If (Fr = 0) Or (Cl = 0) Then
   Begin
-    VUse[V] := 0;
+    Vw(V)^.Use := 0;
     OpenFrame := False;
     Exit;
   End;
-  VFrame[V] := Fr; VClient[V] := Cl;
+  Vw(V)^.Frame := Fr; Vw(V)^.Client := Cl;
   Inc(Stamp);
-  VStamp[V] := Stamp;
+  Vw(V)^.Stamp := Stamp;
   Dummy := WinSetWindowPos(Fr, HWND_TOP, X, Y, W, H, SWP_SIZE Or SWP_MOVE Or SWP_SHOW Or SWP_ZORDER Or SWP_ACTIVATE);
   Dummy := WinSetActiveWindow(HWND_DESKTOP, Fr);
   OpenFrame := True;
@@ -969,31 +1285,31 @@ Function FindView(Kind : LongInt; Path : String) : LongInt;
 Var K, R : LongInt;
 Begin
   R := -1;
-  For K := 0 To MaxView - 1 Do
-    If (VUse[K] <> 0) And (VKind[K] = Kind) And (UpStr(VPath[K]) = UpStr(Path)) Then R := K;
+  For K := 0 To ViewCap - 1 Do
+    If (Vw(K)^.Use <> 0) And (Vw(K)^.Kind = Kind) And (UpStr(Vw(K)^.Path) = UpStr(Path)) Then R := K;
   FindView := R;
 End;
 
 Procedure ActivateView(V : LongInt);
 Begin
   Inc(Stamp);
-  VStamp[V] := Stamp;
-  If VFrame[V] = 0 Then
+  Vw(V)^.Stamp := Stamp;
+  If Vw(V)^.Frame = 0 Then
   Begin
-    Dummy := WinSetFocus(HWND_DESKTOP, VClient[V]);
+    Dummy := WinSetFocus(HWND_DESKTOP, Vw(V)^.Client);
     Exit;
   End;
-  If (WinQueryWindowULong(VFrame[V], QWL_STYLE) And WS_MINIMIZED) <> 0 Then
-    Dummy := WinSetWindowPos(VFrame[V], HWND_TOP, 0, 0, 0, 0, SWP_RESTORE Or SWP_ZORDER Or SWP_ACTIVATE);
-  Dummy := WinSetActiveWindow(HWND_DESKTOP, VFrame[V]);
+  If (WinQueryWindowULong(Vw(V)^.Frame, QWL_STYLE) And WS_MINIMIZED) <> 0 Then
+    Dummy := WinSetWindowPos(Vw(V)^.Frame, HWND_TOP, 0, 0, 0, 0, SWP_RESTORE Or SWP_ZORDER Or SWP_ACTIVATE);
+  Dummy := WinSetActiveWindow(HWND_DESKTOP, Vw(V)^.Frame);
 End;
 
 Function NViews : LongInt;
 Var K, N : LongInt;
 Begin
   N := 0;
-  For K := 0 To MaxView - 1 Do
-    If (VUse[K] <> 0) And (VKind[K] <> VK_DESK) Then Inc(N);
+  For K := 0 To ViewCap - 1 Do
+    If (Vw(K)^.Use <> 0) And (Vw(K)^.Kind <> VK_DESK) Then Inc(N);
   NViews := N;
 End;
 
@@ -1018,9 +1334,9 @@ Begin
   Begin
     Populate(V);
     { premier objet choisi (clavier) }
-    For N := MaxItem - 1 DownTo 0 Do
-      If (IUse[N] <> 0) And (IView[N] = V) Then VSel[V] := N;
-    Dummy := WinInvalidateRect(VClient[V], 0, 1);
+    For N := ItemCap - 1 DownTo 0 Do
+      If (It(N)^.Use <> 0) And (It(N)^.View = V) Then Vw(V)^.Sel := N;
+    Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
   End;
 End;
 
@@ -1042,7 +1358,7 @@ Begin
   If DosOpen(Z(Path), LongInt(@H), LongInt(@A), 0, 0, 1, $40, 0) <> 0 Then
   Begin
     PutZ(LongInt(@B), '(fichier illisible)');
-    Dummy := WinSendMsg(VList[V], LM_INSERTITEM, -1, LongInt(@B));
+    Dummy := WinSendMsg(Vw(V)^.List, LM_INSERTITEM, -1, LongInt(@B));
     Exit;
   End;
   LineS := ''; NLines := 0;
@@ -1057,7 +1373,7 @@ Begin
         If NLines < 2000 Then
         Begin
           PutZ(LongInt(@B), LineS);
-          Dummy := WinSendMsg(VList[V], LM_INSERTITEM, -1, LongInt(@B));
+          Dummy := WinSendMsg(Vw(V)^.List, LM_INSERTITEM, -1, LongInt(@B));
         End;
         Inc(NLines);
         LineS := '';
@@ -1074,39 +1390,39 @@ Begin
   If (LineS <> '') And (NLines < 2000) Then
   Begin
     PutZ(LongInt(@B), LineS);
-    Dummy := WinSendMsg(VList[V], LM_INSERTITEM, -1, LongInt(@B));
+    Dummy := WinSendMsg(Vw(V)^.List, LM_INSERTITEM, -1, LongInt(@B));
   End;
   Dummy := DosClose(H);
-  Dummy := WinSendMsg(VList[V], LM_SELECTITEM, 0, 1);
-  Dummy := WinSetFocus(HWND_DESKTOP, VList[V]);
+  Dummy := WinSendMsg(Vw(V)^.List, LM_SELECTITEM, 0, 1);
+  Dummy := WinSetFocus(HWND_DESKTOP, Vw(V)^.List);
 End;
 
 { liste des fenetres (Ctrl+Echap) }
 Procedure FillWinList(V : LongInt);
 Var K : LongInt; B : Array[0..259] Of Byte; Info : Array[0..15] Of LongInt;
 Begin
-  Dummy := WinSendMsg(VList[V], LM_DELETEALL, 0, 0);
+  Dummy := WinSendMsg(Vw(V)^.List, LM_DELETEALL, 0, 0);
   PutZ(LongInt(@B), 'Bureau');
-  Dummy := WinSendMsg(VList[V], LM_INSERTITEM, -1, LongInt(@B));
-  For K := 0 To MaxView - 1 Do
-    If (VUse[K] <> 0) And (VKind[K] <> VK_DESK) And (VKind[K] <> VK_LIST) Then
+  Dummy := WinSendMsg(Vw(V)^.List, LM_INSERTITEM, -1, LongInt(@B));
+  For K := 0 To ViewCap - 1 Do
+    If (Vw(K)^.Use <> 0) And (Vw(K)^.Kind <> VK_DESK) And (Vw(K)^.Kind <> VK_LIST) Then
     Begin
-      PutZ(LongInt(@B), VTitle[K]);
-      Dummy := WinSendMsg(VList[V], LM_INSERTITEM, -1, LongInt(@B));
+      PutZ(LongInt(@B), Vw(K)^.Title);
+      Dummy := WinSendMsg(Vw(V)^.List, LM_INSERTITEM, -1, LongInt(@B));
     End;
   { sessions en mode texte (programmes lances, plein ecran) }
-  WlViews := WinSendMsg(VList[V], LM_QUERYITEMCOUNT, 0, 0);
+  WlViews := WinSendMsg(Vw(V)^.List, LM_QUERYITEMCOUNT, 0, 0);
   WlNS := 0;
   For K := 0 To 15 Do
     If (WlNS < 32) And (KSes(7, K, LongInt(@Info)) = 1) Then
       If (Info[3] > 0) And (Info[2] = 0) And (K <> KSes(10, 0, 0)) Then
       Begin
         PutZ(LongInt(@B), GetZ(LongInt(@Info) + 16) + ' (plein ecran)');
-        Dummy := WinSendMsg(VList[V], LM_INSERTITEM, -1, LongInt(@B));
+        Dummy := WinSendMsg(Vw(V)^.List, LM_INSERTITEM, -1, LongInt(@B));
         WlSess[WlNS] := K;
         Inc(WlNS);
       End;
-  Dummy := WinSendMsg(VList[V], LM_SELECTITEM, 0, 1);
+  Dummy := WinSendMsg(Vw(V)^.List, LM_SELECTITEM, 0, 1);
 End;
 
 Procedure OpenWinList;
@@ -1122,13 +1438,13 @@ Begin
   End
   Else ActivateView(V);
   FillWinList(V);
-  Dummy := WinSetFocus(HWND_DESKTOP, VList[V]);
+  Dummy := WinSetFocus(HWND_DESKTOP, Vw(V)^.List);
 End;
 
 Procedure WinListChoose(V : LongInt);
 Var Sel, K, N, T : LongInt;
 Begin
-  Sel := WinSendMsg(VList[V], LM_QUERYSELECTION, -1, 0);
+  Sel := WinSendMsg(Vw(V)^.List, LM_QUERYSELECTION, -1, 0);
   T := -1;
   If (Sel >= WlViews) And (Sel - WlViews < WlNS) Then
   Begin
@@ -1141,8 +1457,8 @@ Begin
   Else If Sel > 0 Then
   Begin
     N := 0;
-    For K := 0 To MaxView - 1 Do
-      If (VUse[K] <> 0) And (VKind[K] <> VK_DESK) And (VKind[K] <> VK_LIST) Then
+    For K := 0 To ViewCap - 1 Do
+      If (Vw(K)^.Use <> 0) And (Vw(K)^.Kind <> VK_DESK) And (Vw(K)^.Kind <> VK_LIST) Then
       Begin
         Inc(N);
         If N = Sel Then T := K;
@@ -1163,13 +1479,13 @@ Var K : LongInt;
 Begin
   If MenuH <> 0 Then Dummy := WinDestroyWindow(MenuH);
   MenuH := 0;
-  For K := 0 To MaxView - 1 Do
-    If VUse[K] <> 0 Then
+  For K := 0 To ViewCap - 1 Do
+    If Vw(K)^.Use <> 0 Then
     Begin
-      If VFrame[K] <> 0 Then
+      If Vw(K)^.Frame <> 0 Then
       Begin
-        VHidden[K] := WinIsWindowVisible(VFrame[K]);
-        If VHidden[K] <> 0 Then Dummy := WinShowWindow(VFrame[K], 0);
+        Vw(K)^.Hidden := WinIsWindowVisible(Vw(K)^.Frame);
+        If Vw(K)^.Hidden <> 0 Then Dummy := WinShowWindow(Vw(K)^.Frame, 0);
       End;
     End;
   If Desk <> 0 Then Dummy := WinShowWindow(Desk, 0);
@@ -1187,8 +1503,8 @@ Var K : LongInt;
 Begin
   SetDeskColor;
   If Desk <> 0 Then Dummy := WinShowWindow(Desk, 1);
-  For K := 0 To MaxView - 1 Do
-    If (VUse[K] <> 0) And (VFrame[K] <> 0) And (VHidden[K] <> 0) Then Dummy := WinShowWindow(VFrame[K], 1);
+  For K := 0 To ViewCap - 1 Do
+    If (Vw(K)^.Use <> 0) And (Vw(K)^.Frame <> 0) And (Vw(K)^.Hidden <> 0) Then Dummy := WinShowWindow(Vw(K)^.Frame, 1);
   If (Act <> 0) And (ViewOf(Act) >= 0) Then Dummy := WinSetActiveWindow(HWND_DESKTOP, Act)
   Else If Desk <> 0 Then Dummy := WinSetFocus(HWND_DESKTOP, Desk);
   Dummy := WinInvalidateRect(HWND_DESKTOP, 0, 1);
@@ -1279,8 +1595,8 @@ Var Ki : Array[0..15] Of Byte; S : String; At : Byte; K : LongInt;
 Begin
   If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('L''arret du systeme ferme toutes les fenetres. Voulez-vous ' +
                    'arreter le systeme ?'), Z2('Arret'), 0, MB_OKCANCEL Or MB_QUERY Or MB_MOVEABLE) <> MBID_OK Then Exit;
-  For K := 0 To MaxView - 1 Do
-    If (VUse[K] <> 0) And (VKind[K] <> VK_DESK) Then CloseView(K);
+  For K := 0 To ViewCap - 1 Do
+    If (Vw(K)^.Use <> 0) And (Vw(K)^.Kind <> VK_DESK) Then CloseView(K);
   Dummy := DosShutdown(0);
   HideAll;
   Dummy := WinSuspendScreen;
@@ -1303,12 +1619,12 @@ End;
 Procedure Props(K : LongInt);
 Var T : String;
 Begin
-  T := IName[K];
-  Case IObj[K] Of
-    OB_DIR : T := T + ' : dossier ' + IPath[K] + '.';
-    OB_EXE : T := T + ' : programme ' + IPath[K] + ' (' + IStr(ISize[K]) + ' octets).';
-    OB_BATCH : T := T + ' : fichier de commandes ' + IPath[K] + ' (' + IStr(ISize[K]) + ' octets).';
-    OB_DATA : T := T + ' : fichier de donnees ' + IPath[K] + ' (' + IStr(ISize[K]) + ' octets).';
+  T := It(K)^.Name;
+  Case It(K)^.Obj Of
+    OB_DIR : T := T + ' : dossier ' + It(K)^.Path + '.';
+    OB_EXE : T := T + ' : programme ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
+    OB_BATCH : T := T + ' : fichier de commandes ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
+    OB_DATA : T := T + ' : fichier de donnees ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
     OB_CMD : T := T + ' : ' + Comspec + ' (plein ecran).';
   Else
     T := T + ' : objet du systeme.';
@@ -1324,52 +1640,245 @@ Begin
   DirOf := Copy(S, 1, K);
 End;
 
+{ actualiser les vues qui montrent le repertoire Dir (et le bureau pour
+  C:\DESKTOP et les raccourcis) }
+Procedure RefreshDir(Dir : String);
+Var V : LongInt;
+Begin
+  Dir := UpStr(Dir);
+  For V := 0 To ViewCap - 1 Do
+    If Vw(V)^.Use <> 0 Then
+      If ((Vw(V)^.Kind = VK_DIR) And (UpStr(Vw(V)^.Path) = Dir)) Or
+         ((Vw(V)^.Kind = VK_DESK) And ((Dir = DeskDir) Or (Dir = ''))) Then
+      Begin
+        Populate(V);
+        Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
+      End;
+End;
+
+{ deposer l'objet S dans la vue TV (sur l'objet TK, ou -1) ; Kc : touches
+  (Ctrl : copier, Ctrl+Maj : raccourci, sinon deplacer) }
+Procedure DoDrop(S, TV, TK, Kc : LongInt);
+Var Dest, Src, Nm, SrcDir : String; R : LongInt; Copy2 : Boolean;
+Begin
+  If (S < 0) Or (TV < 0) Or (TK = S) Then Exit;
+  Dest := '';
+  If TK >= 0 Then
+  Begin
+    If It(TK)^.Obj = OB_SHRED Then
+    Begin
+      SrcDir := DirOf(It(S)^.Path);
+      If DoDelete(S, True) Then
+      Begin
+        RefreshDir(SrcDir);
+        RefreshDir('');
+        If It(S)^.Use <> 0 Then Refresh(It(S)^.View);
+      End;
+      Exit;
+    End;
+    If It(TK)^.Obj = OB_DIR Then Dest := It(TK)^.Path;
+  End;
+  If Dest = '' Then
+  Begin
+    If Vw(TV)^.Kind = VK_DESK Then Dest := DeskDir
+    Else If Vw(TV)^.Kind = VK_DIR Then Dest := Vw(TV)^.Path
+    Else
+    Begin
+      ShowMsg('Impossible de deposer un objet ici.', 'Bureau', MB_OK Or MB_WARNING);
+      Exit;
+    End;
+  End;
+  If Dest[Length(Dest)] <> '\' Then Dest := Dest + '\';
+  { modele : un nouvel objet }
+  If (It(S)^.Obj >= OB_TPLDIR) And (It(S)^.Obj <= OB_TPLCMD) Then
+  Begin
+    If CreateFromTemplate(It(S)^.Obj, Dest) Then RefreshDir(Dest)
+    Else ShowMsg('Impossible de creer l''objet dans ' + Dest + '.', 'Modeles', MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  { objet du systeme, raccourci, ou Ctrl+Maj : raccourci }
+  If (It(S)^.Path = '') Or (It(S)^.Shadow <> 0) Or ((Kc And (KC_CTRL Or KC_SHIFT)) = (KC_CTRL Or KC_SHIFT)) Then
+  Begin
+    MakeShadow(ContOf(Dest), It(S)^.Name, TargetOf(S));
+    { un raccourci deplace (sans Ctrl) quitte son ancien dossier }
+    If (It(S)^.Shadow <> 0) And ((Kc And KC_CTRL) = 0) Then
+    Begin
+      If Vw(It(S)^.View)^.Kind = VK_DESK Then DelShadow('BUREAU', It(S)^.Name)
+      Else DelShadow(UpStr(Vw(It(S)^.View)^.Path), It(S)^.Name);
+      Refresh(It(S)^.View);
+    End;
+    RefreshDir(Dest);
+    Exit;
+  End;
+  { fichier ou dossier : deplacer (meme unite) ou copier (Ctrl, autre unite) }
+  Src := It(S)^.Path;
+  If Src[Length(Src)] = '\' Then Src := Copy(Src, 1, Length(Src) - 1);
+  If Length(Src) <= 2 Then
+  Begin
+    ShowMsg('Une unite ne peut etre ni deplacee ni copiee ; Ctrl+Maj cree un raccourci.', 'Bureau',
+            MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  Nm := Src;
+  While Pos('\', Nm) > 0 Do Delete(Nm, 1, Pos('\', Nm));
+  SrcDir := DirOf(Src);
+  If UpStr(SrcDir) = UpStr(Dest) Then Exit;
+  If (Length(UpStr(Dest)) > Length(UpStr(Src))) And (Copy(UpStr(Dest), 1, Length(Src) + 1) = UpStr(Src) + '\') Then
+  Begin
+    ShowMsg('Un dossier ne peut pas etre depose dans lui-meme.', 'Bureau', MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  Copy2 := ((Kc And KC_CTRL) <> 0) Or (UpCase(Src[1]) <> UpCase(Dest[1]));
+  If Copy2 Then R := DosCopy(Z(Src), Z2(Dest + Nm), 0)
+  Else R := DosMove(Z(Src), Z2(Dest + Nm));
+  If R <> 0 Then
+  Begin
+    If Copy2 Then ShowMsg('Copie impossible de ' + Src + ' vers ' + Dest + ' (erreur ' + IStr(R) + ').', 'Bureau',
+                          MB_OK Or MB_ERROR)
+    Else ShowMsg('Deplacement impossible de ' + Src + ' vers ' + Dest + ' (erreur ' + IStr(R) + ').', 'Bureau',
+                 MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  RefreshDir(Dest);
+  If Not Copy2 Then RefreshDir(SrcDir);
+End;
+
+{ fin d'un glisser : vue et objet sous le point (ecran) X, Y }
+Procedure DropAt(X, Y, Kc : LongInt);
+Var Pt : Array[0..1] Of LongInt; Hw, TV, TK, N, Lp : LongInt;
+Begin
+  Pt[0] := X; Pt[1] := Y;
+  Hw := WinWindowFromPoint(HWND_DESKTOP, LongInt(@Pt), 1);
+  { depot sur le LaunchPad : il ajoute l'objet }
+  Lp := PrfInt('LAUNCHPAD', 'HWND');
+  If (Lp <> 0) And (Hw = Lp) And (DSrc >= 0) Then
+  Begin
+    PrfSet('LAUNCHPAD', 'DEPOT', TargetOf(DSrc));
+    PrfSet('LAUNCHPAD', 'DEPOTNOM', It(DSrc)^.Name);
+    Dummy := WinPostMsg(Lp, WM_REQUEST, X, Y);
+    Exit;
+  End;
+  TV := -1; N := 0;
+  While (Hw > 1) And (TV < 0) And (N < 16) Do
+  Begin
+    TV := ViewOf(Hw);
+    If TV < 0 Then Hw := WinQueryWindow(Hw, QW_PARENT);
+    Inc(N);
+  End;
+  { fond de l'ecran : la fenetre du bureau }
+  If (TV < 0) And (Hw <= 1) And (Desk <> 0) Then TV := ViewOf(Desk);
+  If TV < 0 Then Exit;
+  Pt[0] := X; Pt[1] := Y;
+  Dummy := WinMapWindowPoints(HWND_DESKTOP, Vw(TV)^.Client, LongInt(@Pt), 1);
+  TK := HitItem(TV, Pt[0], Pt[1]);
+  DoDrop(DSrc, TV, TK, Kc);
+End;
+
 Procedure OpenItem(K : LongInt);
 Var V : LongInt; P : String;
 Begin
-  If (K < 0) Or (IUse[K] = 0) Then Exit;
-  V := IView[K];
-  Case IObj[K] Of
+  If (K < 0) Or (It(K)^.Use = 0) Then Exit;
+  V := It(K)^.View;
+  Case It(K)^.Obj Of
     OB_SYS : OpenFolder(VK_SYS, '', 'Systeme OS/2');
     OB_DRIVES : OpenFolder(VK_DRIVES, '', 'Lecteurs');
     OB_CMD :
       Begin
-        If VKind[V] = VK_DIR Then P := VPath[V] Else P := '';
+        If Vw(V)^.Kind = VK_DIR Then P := Vw(V)^.Path Else P := '';
         RunProgram(Comspec, '', P, False);
       End;
     OB_SHUTDOWN : Shutdown;
     OB_WINLIST : OpenWinList;
     OB_INFO : SysInfo;
     OB_HELP : Help;
-    OB_DIR : OpenFolder(VK_DIR, IPath[K], IPath[K]);
-    OB_EXE : RunProgram(IPath[K], '', DirOf(IPath[K]), True);
-    OB_BATCH : RunProgram(Comspec, '/C ' + IPath[K], DirOf(IPath[K]), True);
-    OB_DATA : OpenViewer(IPath[K]);
+    OB_DIR : OpenFolder(VK_DIR, It(K)^.Path, It(K)^.Path);
+    OB_EXE : RunProgram(It(K)^.Path, '', DirOf(It(K)^.Path), True);
+    OB_BATCH : RunProgram(Comspec, '/C ' + It(K)^.Path, DirOf(It(K)^.Path), True);
+    OB_DATA : OpenViewer(It(K)^.Path);
+    OB_TEMPLATES : OpenFolder(VK_TEMPL, '', 'Modeles');
+    OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
+                       MB_OK Or MB_INFORMATION);
+    OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
+      If CreateFromTemplate(It(K)^.Obj, DeskDir) Then RefreshDir(DeskDir);
   End;
 End;
 
-Procedure DeleteItem(K : LongInt);
-Var V : LongInt;
+{ un repertoire et son contenu }
+Function RemoveTree(Dir : String) : LongInt;
+Var H, N, Rc, A, K : LongInt; S : String; Fb : Array[0..299] Of Byte;
 Begin
-  If (K < 0) Or ((IObj[K] <> OB_EXE) And (IObj[K] <> OB_BATCH) And (IObj[K] <> OB_DATA)) Then Exit;
-  If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('Supprimer le fichier ' + IPath[K] + ' ?'), Z2('Supprimer'), 0,
-                   MB_YESNO Or MB_WARNING Or MB_MOVEABLE) <> MBID_YES Then Exit;
-  V := IView[K];
-  If DosDelete(Z(IPath[K])) <> 0 Then
-    ShowMsg('Le fichier ' + IPath[K] + ' ne peut pas etre supprime (unite en lecture seule ?).', 'Supprimer',
-        MB_OK Or MB_ERROR)
-  Else
+  If Dir[Length(Dir)] <> '\' Then Dir := Dir + '\';
+  H := -1; N := 1;
+  Rc := DosFindFirst(Z(Dir + '*.*'), LongInt(@H), $37, LongInt(@Fb), 300, LongInt(@N), 1);
+  While (Rc = 0) And (N > 0) Do
+  Begin
+    A := RdL(LongInt(@Fb) + 24);
+    S := '';
+    For K := 0 To Fb[28] - 1 Do S := S + Chr(Fb[29 + K]);
+    If (S <> '.') And (S <> '..') Then
+    Begin
+      If (A And $10) <> 0 Then Dummy := RemoveTree(Dir + S)
+      Else Dummy := DosDelete(Z(Dir + S));
+    End;
+    N := 1;
+    Rc := DosFindNext(H, LongInt(@Fb), 300, LongInt(@N));
+  End;
+  If H <> -1 Then Dummy := DosFindClose(H);
+  RemoveTree := DosDeleteDir(Z(Copy(Dir, 1, Length(Dir) - 1)));
+End;
+
+{ l'objet K peut-il etre supprime ? (raccourci, fichier, dossier sauf la
+  racine d'une unite) }
+Function Deletable(K : LongInt) : Boolean;
+Begin
+  Deletable := (It(K)^.Shadow <> 0) Or (It(K)^.Obj = OB_EXE) Or (It(K)^.Obj = OB_BATCH) Or
+               (It(K)^.Obj = OB_DATA) Or ((It(K)^.Obj = OB_DIR) And (Length(It(K)^.Path) > 3));
+End;
+
+{ supprimer l'objet K (Ask : confirmation) ; rend TRUE si fait }
+Function DoDelete(K : LongInt; Ask : Boolean) : Boolean;
+Var V, R : LongInt; T, Nm : String;
+Begin
+  DoDelete := False;
+  If (K < 0) Or Not Deletable(K) Then Exit;
+  V := It(K)^.View;
+  If It(K)^.Shadow <> 0 Then T := 'le raccourci ' + It(K)^.Name
+  Else If It(K)^.Obj = OB_DIR Then T := 'le dossier ' + It(K)^.Path + ' et son contenu'
+  Else T := 'le fichier ' + It(K)^.Path;
+  If Ask Then
+    If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('Supprimer ' + T + ' ?'), Z2('Supprimer'), 0,
+                     MB_YESNO Or MB_WARNING Or MB_MOVEABLE) <> MBID_YES Then Exit;
+  If It(K)^.Shadow <> 0 Then
+  Begin
+    If Vw(V)^.Kind = VK_DESK Then DelShadow('BUREAU', It(K)^.Name) Else DelShadow(UpStr(Vw(V)^.Path), It(K)^.Name);
+    R := 0;
+  End
+  Else If It(K)^.Obj = OB_DIR Then R := RemoveTree(It(K)^.Path)
+  Else R := DosDelete(Z(It(K)^.Path));
+  If R <> 0 Then
+    ShowMsg('Impossible de supprimer ' + T + ' (unite en lecture seule ?).', 'Supprimer', MB_OK Or MB_ERROR)
+  Else DoDelete := True;
+End;
+
+Procedure DeleteItem(K : LongInt);
+Var V : LongInt; P : String;
+Begin
+  If K < 0 Then Exit;
+  V := It(K)^.View;
+  P := DirOf(It(K)^.Path);
+  If DoDelete(K, True) Then
   Begin
     Populate(V);
-    Dummy := WinInvalidateRect(VClient[V], 0, 1);
+    Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
+    If P <> '' Then RefreshDir(P);
   End;
 End;
 
 Procedure ParentFolder(V : LongInt);
 Var P : String; K : LongInt;
 Begin
-  If VKind[V] <> VK_DIR Then Exit;
-  P := VPath[V];
+  If Vw(V)^.Kind <> VK_DIR Then Exit;
+  P := Vw(V)^.Path;
   If Length(P) <= 3 Then
   Begin
     OpenFolder(VK_DRIVES, '', 'Lecteurs');
@@ -1383,17 +1892,17 @@ End;
 
 Procedure Refresh(V : LongInt);
 Begin
-  If VKind[V] = VK_DESK Then Layout(V) Else Populate(V);
-  Dummy := WinInvalidateRect(VClient[V], 0, 1);
+  If Vw(V)^.Kind = VK_DESK Then Layout(V) Else Populate(V);
+  Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
 End;
 
 Procedure Arrange(V : LongInt);
 Var K : LongInt; B : Array[0..3] Of Byte;
 Begin
   B[0] := 0;
-  For K := 0 To MaxItem - 1 Do
-    If (IUse[K] <> 0) And (IView[K] = V) Then
-      Dummy := PrfWriteProfileString(-1, Z('PMSHELL'), Z2('POS ' + IName[K]), 0);
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
+      Dummy := PrfWriteProfileString(-1, Z('PMSHELL'), Z2('POS ' + It(K)^.Name), 0);
   Refresh(V);
 End;
 
@@ -1401,7 +1910,7 @@ Procedure Command(V, Cmd : LongInt);
 Var K : LongInt;
 Begin
   K := MenuItem;
-  If (K >= 0) And ((IUse[K] = 0) Or (IView[K] <> V)) Then K := -1;
+  If (K >= 0) And ((It(K)^.Use = 0) Or (It(K)^.View <> V)) Then K := -1;
   Case Cmd Of
     CM_OPEN : OpenItem(K);
     CM_PROPS : If K >= 0 Then Props(K);
@@ -1414,7 +1923,18 @@ Begin
     CM_SHUTDOWN : Shutdown;
     CM_CLOSE : CloseView(V);
     CM_PARENT : ParentFolder(V);
-    CM_CMDHERE : RunProgram(Comspec, '', VPath[V], False);
+    CM_CMDHERE : RunProgram(Comspec, '', Vw(V)^.Path, False);
+    CM_SHADOW :
+      If K >= 0 Then
+      Begin
+        MakeShadow('BUREAU', It(K)^.Name, TargetOf(K));
+        RefreshDir(DeskDir);
+      End;
+    CM_CREATE :
+      If K >= 0 Then
+      Begin
+        If CreateFromTemplate(It(K)^.Obj, DeskDir) Then RefreshDir(DeskDir);
+      End;
   End;
 End;
 
@@ -1422,20 +1942,20 @@ End;
 Procedure MoveSel(V, Dx, Dy : LongInt);
 Var K, B, Best, Cx, Cy, X, Y, D : LongInt;
 Begin
-  If (VSel[V] < 0) Or (IUse[VSel[V]] = 0) Then
+  If (Vw(V)^.Sel < 0) Or (It(Vw(V)^.Sel)^.Use = 0) Then
   Begin
     B := -1;
-    For K := MaxItem - 1 DownTo 0 Do
-      If (IUse[K] <> 0) And (IView[K] = V) Then B := K;
+    For K := ItemCap - 1 DownTo 0 Do
+      If (It(K)^.Use <> 0) And (It(K)^.View = V) Then B := K;
     If B >= 0 Then SelectItem(V, B);
     Exit;
   End;
-  Cx := IX[VSel[V]]; Cy := ITop[VSel[V]];
+  Cx := It(Vw(V)^.Sel)^.X; Cy := It(Vw(V)^.Sel)^.Top;
   B := -1; Best := $7FFFFFFF;
-  For K := 0 To MaxItem - 1 Do
-    If (IUse[K] <> 0) And (IView[K] = V) And (K <> VSel[V]) Then
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) And (K <> Vw(V)^.Sel) Then
     Begin
-      X := IX[K] - Cx; Y := ITop[K] - Cy;
+      X := It(K)^.X - Cx; Y := It(K)^.Top - Cy;
       If ((Dx > 0) And (X > 8)) Or ((Dx < 0) And (X < -8)) Or ((Dy > 0) And (Y > 8)) Or ((Dy < 0) And (Y < -8)) Then
       Begin
         If Dx <> 0 Then D := AbsI(X) + 3 * AbsI(Y) Else D := AbsI(Y) + 3 * AbsI(X);
@@ -1456,8 +1976,8 @@ Procedure SelEdge(V : LongInt; Last : Boolean);
 Var K, B : LongInt;
 Begin
   B := -1;
-  For K := 0 To MaxItem - 1 Do
-    If (IUse[K] <> 0) And (IView[K] = V) Then
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
       If Last Or (B < 0) Then B := K;
   If B >= 0 Then
   Begin
@@ -1469,13 +1989,13 @@ End;
 Procedure SelLetter(V, Ch : LongInt);
 Var K, Start, B, J : LongInt;
 Begin
-  Start := VSel[V];
+  Start := Vw(V)^.Sel;
   B := -1;
-  For J := 1 To MaxItem Do
+  For J := 1 To ItemCap Do
   Begin
-    K := (Start + J + MaxItem) Mod MaxItem;
-    If (B < 0) And (IUse[K] <> 0) And (IView[K] = V) And (Length(IName[K]) > 0) Then
-      If UpCase(IName[K][1]) = UpCase(Chr(Ch)) Then B := K;
+    K := (Start + J + ItemCap) Mod ItemCap;
+    If (B < 0) And (It(K)^.Use <> 0) And (It(K)^.View = V) And (Length(It(K)^.Name) > 0) Then
+      If UpCase(It(K)^.Name[1]) = UpCase(Chr(Ch)) Then B := K;
   End;
   If B >= 0 Then
   Begin
@@ -1504,10 +2024,10 @@ Begin
     End;
     If (Vk = VK_F10) And ((Fs And KC_SHIFT) <> 0) Then
     Begin
-      If (VSel[V] >= 0) And (IUse[VSel[V]] <> 0) Then
+      If (Vw(V)^.Sel >= 0) And (It(Vw(V)^.Sel)^.Use <> 0) Then
       Begin
-        CellRect(VSel[V], X1, Y1, X2, Y2);
-        ContextMenu(V, VSel[V], X1 + 40, Y1 + 20);
+        CellRect(Vw(V)^.Sel, X1, Y1, X2, Y2);
+        ContextMenu(V, Vw(V)^.Sel, X1 + 40, Y1 + 20);
       End
       Else ContextMenu(V, -1, 40, ClientH(V) - 40);
       Exit;
@@ -1519,24 +2039,24 @@ Begin
       VK_DOWN : MoveSel(V, 0, 1);
       VK_HOME : SelEdge(V, False);
       VK_END : SelEdge(V, True);
-      VK_ENTER, VK_NEWLINE : OpenItem(VSel[V]);
+      VK_ENTER, VK_NEWLINE : OpenItem(Vw(V)^.Sel);
       VK_F1 : Help;
       VK_F5 : Refresh(V);
-      VK_DELETE : DeleteItem(VSel[V]);
+      VK_DELETE : DeleteItem(Vw(V)^.Sel);
       VK_BACKSPACE : ParentFolder(V);
       VK_PAGEUP :
-        If VKind[V] <> VK_DESK Then
+        If Vw(V)^.Kind <> VK_DESK Then
         Begin
-          VTop[V] := VTop[V] - ClientH(V);
+          Vw(V)^.Top := Vw(V)^.Top - ClientH(V);
           UpdScroll(V);
-          Dummy := WinInvalidateRect(VClient[V], 0, 1);
+          Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
         End;
       VK_PAGEDOWN :
-        If VKind[V] <> VK_DESK Then
+        If Vw(V)^.Kind <> VK_DESK Then
         Begin
-          VTop[V] := VTop[V] + ClientH(V);
+          Vw(V)^.Top := Vw(V)^.Top + ClientH(V);
           UpdScroll(V);
-          Dummy := WinInvalidateRect(VClient[V], 0, 1);
+          Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
         End;
     Else
       Done := False;
@@ -1551,14 +2071,48 @@ Begin
   ViewKey := False;
 End;
 
+{ demande d'un autre programme (LaunchPad) : OS2.INI, PMSHELL, REQn }
+Procedure DoRequest(N : LongInt);
+Var S, Verb, Arg : String; P : LongInt;
+Begin
+  S := PrfStr('PMSHELL', 'REQ' + IStr(N));
+  PrfSet('PMSHELL', 'REQ' + IStr(N), '');
+  If S = '' Then Exit;
+  P := Pos(' ', S);
+  If P > 0 Then
+  Begin
+    Verb := UpStr(Copy(S, 1, P - 1)); Arg := Copy(S, P + 1, 255);
+  End
+  Else
+  Begin
+    Verb := UpStr(S); Arg := '';
+  End;
+  If Verb = 'OPEN' Then
+  Begin
+    If (Arg <> '') And (Arg[Length(Arg)] <> '\') Then Arg := Arg + '\';
+    OpenFolder(VK_DIR, Arg, Arg);
+  End
+  Else If Verb = 'DRIVES' Then OpenFolder(VK_DRIVES, '', 'Lecteurs')
+  Else If Verb = 'SYS' Then OpenFolder(VK_SYS, '', 'Systeme OS/2')
+  Else If Verb = 'TEMPL' Then OpenFolder(VK_TEMPL, '', 'Modeles')
+  Else If Verb = 'CMD' Then RunProgram(Comspec, '', Arg, False)
+  Else If Verb = 'RUN' Then RunProgram(Arg, '', DirOf(Arg), True)
+  Else If Verb = 'BATCH' Then RunProgram(Comspec, '/C ' + Arg, DirOf(Arg), True)
+  Else If Verb = 'VIEW' Then OpenViewer(Arg)
+  Else If Verb = 'WINLIST' Then OpenWinList
+  Else If Verb = 'HELP' Then Help
+  Else If Verb = 'INFO' Then SysInfo
+  Else If Verb = 'SHUTDOWN' Then Shutdown;
+End;
+
 Function ViewProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
-Var V, K, X, Y, Dx, Dy, Sc : LongInt;
+Var V, K, X, Y, Dx, Dy, Sc, Hw : LongInt; Pt : Array[0..1] Of LongInt;
 Begin
   ViewProc := 0;
   V := ViewOf(H);
   If (V < 0) And (Msg = WM_CREATE) And (Creating >= 0) Then
   Begin
-    VClient[Creating] := H;
+    Vw(Creating)^.Client := H;
     V := Creating;
   End;
   If V < 0 Then
@@ -1571,11 +2125,11 @@ Begin
       If Lo16(Mp2) <> 0 Then
       Begin
         Inc(Stamp);
-        VStamp[V] := Stamp;
+        Vw(V)^.Stamp := Stamp;
       End;
     WM_PAINT : PaintView(V);
     WM_SIZE :
-      If VKind[V] <> VK_DESK Then
+      If Vw(V)^.Kind <> VK_DESK Then
       Begin
         Layout(V);
         UpdScroll(V);
@@ -1583,25 +2137,34 @@ Begin
       End;
     WM_ACTIVATE :
       { le bureau reste sous les autres fenetres }
-      If (VKind[V] = VK_DESK) And (Lo16(Mp1) <> 0) Then
+      If (Vw(V)^.Kind = VK_DESK) And (Lo16(Mp1) <> 0) Then
         Dummy := WinSetWindowPos(H, HWND_BOTTOM, 0, 0, 0, 0, SWP_ZORDER);
     WM_BUTTON1DOWN :
       Begin
-        If VKind[V] = VK_DESK Then Dummy := WinSetFocus(HWND_DESKTOP, H)
+        If Vw(V)^.Kind = VK_DESK Then Dummy := WinSetFocus(HWND_DESKTOP, H)
         Else ViewProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
         X := S16(Mp1); Y := S16(Mp1 Shr 16);
         K := HitItem(V, X, Y);
         SelectItem(V, K);
-        If (K >= 0) And (VKind[V] = VK_DESK) Then
+        If (K >= 0) And (Vw(V)^.Kind = VK_DESK) Then
         Begin
-          DragItem := K; DragX0 := X; DragY0 := Y; DragIX := IX[K]; DragITop := ITop[K]; Dragging := 0;
+          DragItem := K; DragX0 := X; DragY0 := Y; DragIX := It(K)^.X; DragITop := It(K)^.Top; Dragging := 0;
+          Dummy := WinSetCapture(HWND_DESKTOP, H);
+        End
+        Else If K >= 0 Then
+        Begin
+          { dossier : glisser avec le bouton 1 }
+          DSrc := K; DActive := 1;
+          Pt[0] := X; Pt[1] := Y;
+          Dummy := WinMapWindowPoints(H, HWND_DESKTOP, LongInt(@Pt), 1);
+          DX0 := Pt[0]; DY0 := Pt[1];
           Dummy := WinSetCapture(HWND_DESKTOP, H);
         End;
         ViewProc := 1;
       End;
     WM_MOUSEMOVE :
       Begin
-        If (DragItem >= 0) And (IView[DragItem] = V) Then
+        If (DragItem >= 0) And (It(DragItem)^.View = V) Then
         Begin
           X := S16(Mp1); Y := S16(Mp1 Shr 16);
           Dx := X - DragX0; Dy := Y - DragY0;
@@ -1609,8 +2172,8 @@ Begin
           If Dragging <> 0 Then
           Begin
             InvalItem(DragItem);
-            IX[DragItem] := MaxI(0, MinI(ScrW - CW, DragIX + Dx));
-            ITop[DragItem] := MaxI(0, MinI(ScrH - CH, DragITop - Dy));
+            It(DragItem)^.X := MaxI(0, MinI(ScrW - CW, DragIX + Dx));
+            It(DragItem)^.Top := MaxI(0, MinI(ScrH - CH, DragITop - Dy));
             InvalItem(DragItem);
           End;
         End;
@@ -1621,8 +2184,33 @@ Begin
         If DragItem >= 0 Then
         Begin
           Dummy := WinSetCapture(HWND_DESKTOP, 0);
-          If Dragging <> 0 Then SavePos(DragItem);
-          DragItem := -1; Dragging := 0;
+          K := DragItem;
+          DragItem := -1;
+          If Dragging <> 0 Then
+          Begin
+            { lache hors du bureau (sur un dossier) : glisser-deposer }
+            Pt[0] := S16(Mp1); Pt[1] := S16(Mp1 Shr 16);
+            Dummy := WinMapWindowPoints(H, HWND_DESKTOP, LongInt(@Pt), 1);
+            Hw := WinWindowFromPoint(HWND_DESKTOP, LongInt(@Pt), 1);
+            If (Hw <> 0) And (Hw <> H) And (ViewOf(Hw) <> V) Then
+            Begin
+              It(K)^.X := DragIX; It(K)^.Top := DragITop;
+              Dummy := WinInvalidateRect(H, 0, 1);
+              DSrc := K;
+              DropAt(Pt[0], Pt[1], Hi16(Mp2));
+            End
+            Else SavePos(K);
+          End;
+          Dragging := 0;
+        End
+        Else If DActive <> 0 Then
+        Begin
+          Dummy := WinSetCapture(HWND_DESKTOP, 0);
+          DActive := 0;
+          Pt[0] := S16(Mp1); Pt[1] := S16(Mp1 Shr 16);
+          Dummy := WinMapWindowPoints(H, HWND_DESKTOP, LongInt(@Pt), 1);
+          If (AbsI(Pt[0] - DX0) + AbsI(Pt[1] - DY0) > 4) And (DSrc >= 0) Then DropAt(Pt[0], Pt[1], Hi16(Mp2));
+          DSrc := -1;
         End;
         ViewProc := 1;
       End;
@@ -1638,19 +2226,53 @@ Begin
       End;
     WM_BUTTON2DOWN :
       Begin
-        If VKind[V] = VK_DESK Then Dummy := WinSetFocus(HWND_DESKTOP, H)
+        If Vw(V)^.Kind = VK_DESK Then Dummy := WinSetFocus(HWND_DESKTOP, H)
         Else Dummy := WinDefWindowProc(H, Msg, Mp1, Mp2);
+        { glisser avec le bouton 2 (comme le Workplace Shell) }
+        X := S16(Mp1); Y := S16(Mp1 Shr 16);
+        K := HitItem(V, X, Y);
+        NoMenu := 0;
+        If K >= 0 Then
+        Begin
+          DSrc := K; DActive := 2;
+          Pt[0] := X; Pt[1] := Y;
+          Dummy := WinMapWindowPoints(H, HWND_DESKTOP, LongInt(@Pt), 1);
+          DX0 := Pt[0]; DY0 := Pt[1];
+          Dummy := WinSetCapture(HWND_DESKTOP, H);
+        End;
+        ViewProc := 1;
+      End;
+    WM_BUTTON2UP :
+      Begin
+        If DActive = 2 Then
+        Begin
+          Dummy := WinSetCapture(HWND_DESKTOP, 0);
+          DActive := 0;
+          Pt[0] := S16(Mp1); Pt[1] := S16(Mp1 Shr 16);
+          Dummy := WinMapWindowPoints(H, HWND_DESKTOP, LongInt(@Pt), 1);
+          If (AbsI(Pt[0] - DX0) + AbsI(Pt[1] - DY0) > 4) And (DSrc >= 0) Then
+          Begin
+            NoMenu := 1;
+            DropAt(Pt[0], Pt[1], Hi16(Mp2));
+          End;
+          DSrc := -1;
+        End;
         ViewProc := 1;
       End;
     WM_BUTTON2CLICK :
       Begin
-        X := S16(Mp1); Y := S16(Mp1 Shr 16);
-        K := HitItem(V, X, Y);
-        If K >= 0 Then SelectItem(V, K);
-        ContextMenu(V, K, X, Y);
+        If NoMenu = 0 Then
+        Begin
+          X := S16(Mp1); Y := S16(Mp1 Shr 16);
+          K := HitItem(V, X, Y);
+          If K >= 0 Then SelectItem(V, K);
+          ContextMenu(V, K, X, Y);
+        End;
+        NoMenu := 0;
         ViewProc := 1;
       End;
     WM_COMMAND : Command(V, Lo16(Mp1));
+    WM_REQUEST : If Vw(V)^.Kind = VK_DESK Then DoRequest(Mp1);
     WM_CHAR :
       If ViewKey(V, Mp1, Mp2) Then ViewProc := 1
       Else ViewProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
@@ -1658,20 +2280,20 @@ Begin
       Begin
         Sc := Hi16(Mp2);
         Case Sc Of
-          SB_LINEUP : VTop[V] := VTop[V] - 16;
-          SB_LINEDOWN : VTop[V] := VTop[V] + 16;
-          SB_PAGEUP : VTop[V] := VTop[V] - ClientH(V);
-          SB_PAGEDOWN : VTop[V] := VTop[V] + ClientH(V);
-          SB_SLIDERTRACK, SB_SLIDERPOSITION : VTop[V] := S16(Mp2);
+          SB_LINEUP : Vw(V)^.Top := Vw(V)^.Top - 16;
+          SB_LINEDOWN : Vw(V)^.Top := Vw(V)^.Top + 16;
+          SB_PAGEUP : Vw(V)^.Top := Vw(V)^.Top - ClientH(V);
+          SB_PAGEDOWN : Vw(V)^.Top := Vw(V)^.Top + ClientH(V);
+          SB_SLIDERTRACK, SB_SLIDERPOSITION : Vw(V)^.Top := S16(Mp2);
         End;
         UpdScroll(V);
         Dummy := WinInvalidateRect(H, 0, 1);
       End;
     WM_SYSCOMMAND :
-      If (VKind[V] = VK_DESK) And (Lo16(Mp1) = SC_CLOSE) Then Shutdown
+      If (Vw(V)^.Kind = VK_DESK) And (Lo16(Mp1) = SC_CLOSE) Then Shutdown
       Else ViewProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
     WM_CLOSE :
-      If VKind[V] = VK_DESK Then Shutdown Else CloseView(V);
+      If Vw(V)^.Kind = VK_DESK Then Shutdown Else CloseView(V);
   Else
     ViewProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
   End;
@@ -1686,8 +2308,8 @@ Begin
   If (V < 0) And (Msg = WM_CREATE) And (Creating >= 0) Then
   Begin
     V := Creating;
-    VClient[V] := H;
-    VList[V] := WinCreateWindow(H, WC_LISTBOX, 0, WS_VISIBLE, 0, 0, 100, 100, H, HWND_TOP, 1, 0, 0);
+    Vw(V)^.Client := H;
+    Vw(V)^.List := WinCreateWindow(H, WC_LISTBOX, 0, WS_VISIBLE, 0, 0, 100, 100, H, HWND_TOP, 1, 0, 0);
     Exit;
   End;
   If V < 0 Then
@@ -1697,16 +2319,16 @@ Begin
   End;
   Case Msg Of
     WM_SIZE :
-      If VList[V] <> 0 Then
-        Dummy := WinSetWindowPos(VList[V], 0, 0, 0, Lo16(Mp2), Hi16(Mp2), SWP_SIZE Or SWP_MOVE);
+      If Vw(V)^.List <> 0 Then
+        Dummy := WinSetWindowPos(Vw(V)^.List, 0, 0, 0, Lo16(Mp2), Hi16(Mp2), SWP_SIZE Or SWP_MOVE);
     WM_CONTROL :
-      If (Hi16(Mp1) = LN_ENTER) And (VKind[V] = VK_LIST) Then WinListChoose(V);
+      If (Hi16(Mp1) = LN_ENTER) And (Vw(V)^.Kind = VK_LIST) Then WinListChoose(V);
     WM_CHAR :
       Begin
         Fs := Lo16(Mp1); Vk := Hi16(Mp2);
         If ((Fs And KC_KEYUP) = 0) And ((Fs And KC_VIRTUALKEY) <> 0) And (Vk = VK_ESC) Then CloseView(V)
         Else If ((Fs And KC_KEYUP) = 0) And ((Fs And KC_VIRTUALKEY) <> 0) And
-                ((Vk = VK_ENTER) Or (Vk = VK_NEWLINE)) And (VKind[V] = VK_LIST) Then WinListChoose(V)
+                ((Vk = VK_ENTER) Or (Vk = VK_NEWLINE)) And (Vw(V)^.Kind = VK_LIST) Then WinListChoose(V)
         Else ListProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
       End;
     WM_CLOSE : CloseView(V);
@@ -1720,6 +2342,22 @@ End;
 { Programme principal                                                   }
 { ==================================================================== }
 
+{ LaunchPad : programme de PM lance en arriere-plan dans la session de
+  Presentation Manager (il s'execute en meme temps que le bureau) }
+Procedure StartLaunchPad;
+Var Res : Array[0..1] Of LongInt; P : String;
+Begin
+  If PrfStr('PMSHELL', 'LAUNCHPAD') = '0' Then Exit;
+  P := 'C:\LAUNCHPD.EXE';
+  If Not FileExists(P) Then Exit;
+  PutZ(LongInt(@ArgBuf), P);
+  WrB(LongInt(@ArgBuf) + Length(P) + 1, 0);
+  WrB(LongInt(@ArgBuf) + Length(P) + 2, 0);
+  PutZ(LongInt(@NameZ2), P);
+  Res[0] := 0; Res[1] := 0;
+  Dummy := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
+End;
+
 Procedure StartupCmd;
 Var S : String;
 Begin
@@ -1731,8 +2369,18 @@ End;
 
 BEGIN
   Creating := -1; MenuH := 0; Desk := 0; DragItem := -1; Dragging := 0; MenuItem := -1; MenuView := 0;
-  For I := 0 To MaxView - 1 Do VUse[I] := 0;
-  For I := 0 To MaxItem - 1 Do IUse[I] := 0;
+  ItemBuf := 0; ItemCap := 0; ViewBuf := 0; ViewCap := 0; EntBuf := 0; EntCap := 0;
+  DSrc := -1; DActive := 0; NoMenu := 0;
+  { bureau : C:\DESKTOP, ou D:\DESKTOP si C: est en lecture seule (CD-ROM) }
+  Dummy := DosCreateDir(Z('C:\DESKTOP'), 0);
+  If FileExists('C:\DESKTOP') Then DeskDir := 'C:\DESKTOP\'
+  Else
+  Begin
+    Dummy := DosCreateDir(Z('D:\DESKTOP'), 0);
+    DeskDir := 'D:\DESKTOP\';
+  End;
+  Grow(ItemBuf, ItemCap, SizeOf(TItem));
+  Grow(ViewBuf, ViewCap, SizeOf(TView));
   Hab := WinInitialize(0);
   Hmq := WinCreateMsgQueue(Hab, 64);
   If Hmq = 0 Then
@@ -1754,13 +2402,15 @@ BEGIN
   Creating := I;
   Desk := WinCreateWindow(HWND_DESKTOP, Z('WPDesktop'), Z2('Bureau'), WS_VISIBLE, 0, 0, ScrW, ScrH, 0, HWND_BOTTOM, 1, 0, 0);
   Creating := -1;
-  VClient[I] := Desk; VFrame[I] := 0;
+  Vw(I)^.Client := Desk; Vw(I)^.Frame := 0;
   Populate(I);
-  VSel[I] := -1;
-  For I2 := 0 To MaxItem - 1 Do
-    If (IUse[I2] <> 0) And (IView[I2] = I) And (VSel[I] < 0) Then VSel[I] := I2;
+  Vw(I)^.Sel := -1;
+  For I2 := 0 To ItemCap - 1 Do
+    If (It(I2)^.Use <> 0) And (It(I2)^.View = I) And (Vw(I)^.Sel < 0) Then Vw(I)^.Sel := I2;
   Dummy := WinSetFocus(HWND_DESKTOP, Desk);
   Dummy := WinInvalidateRect(HWND_DESKTOP, 0, 1);
+  PrfSet('PMSHELL', 'HWND', IStr(Desk));
+  StartLaunchPad;
   { boucle des messages (WM_QUIT est ignore : le bureau ne se termine pas) }
   Repeat
     If WinGetMsg(Hab, LongInt(@Qmsg), 0, 0, 0) <> 0 Then Dummy := WinDispatchMsg(Hab, LongInt(@Qmsg));

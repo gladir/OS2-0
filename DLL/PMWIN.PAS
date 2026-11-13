@@ -211,14 +211,14 @@ Const
   SEVERITY_ERROR = 4;
 
   { limites }
-  MaxWin = 256;
-  MaxCls = 64;
-  MaxQ = 16;
-  MaxHab = 16;
-  MaxPS = 32;
+  MaxWin = 1024;
+  MaxCls = 128;
+  MaxQ = 64;
+  MaxHab = 64;
+  MaxPS = 128;
   MaxItem = 1024;
   ItemSlot = 64;
-  MaxTimer = 32;
+  MaxTimer = 128;
   MaxHook = 32;
   MaxAtom = 512;
   AtomSlot = 64;
@@ -231,6 +231,7 @@ Const
   MaxClip = 16;
   MaxEnum = 16;
   MaxLib = 16;
+  KeyPendMax = 16;
   ArenaSize = 262144;
 
   { classes du systeme (WC_* = FFFF00nnh) }
@@ -262,6 +263,8 @@ Var
   HabPid, HabErr, HabQ, HabMou : Array[0..MaxHab - 1] Of LongInt;
   QPid, QHab, QSize, QBuf, QHead, QCount, QCp, QStat, QLockIn, QAccel, QProc : Array[0..MaxQ - 1] Of LongInt;
   QPosX, QPosY, QTime, QQuit, QMou, QLastDown, QDownWin, QDownTime : Array[0..MaxQ - 1] Of LongInt;
+  KpN : Array[0..MaxQ - 1] Of LongInt;                              { touches en attente }
+  KpT, KpFs, KpCh, KpVk, KpSc : Array[0..MaxQ * 16 - 1] Of LongInt;
   { --- etat global --- }
   FocusWin, ActiveWin, CaptureWin, SysModalWin, LockUpdWin, VisLock : LongInt;
   PhysInput, ShuttingDown, NoShutdown, SemCount, FsrCount, InSend : LongInt;
@@ -1659,7 +1662,7 @@ Procedure ScreenStart; Forward;
 
 Function HwOf(I : LongInt) : LongInt;
 Begin
-  If I < 0 Then HwOf := 0 Else HwOf := HwBit Or ((WGen[I] And $7FFFFF) Shl 8) Or I;
+  If I < 0 Then HwOf := 0 Else HwOf := HwBit Or ((WGen[I] And $1FFFFF) Shl 10) Or I;
 End;
 
 { Rang d'une fenetre ; -1 si le handle est invalide }
@@ -1671,7 +1674,7 @@ Begin
   Else If H = HWND_OBJECT Then R := 1
   Else If (H And HwBit) <> 0 Then
   Begin
-    I := H And $FF;
+    I := H And $3FF;
     If (WUse[I] <> 0) And (HwOf(I) = H) Then R := I;
   End;
   WIdx := R;
@@ -3002,6 +3005,24 @@ Begin
   End;
 End;
 
+{ La fenetre I va etre dessinee dans le rectangle ecran donne : le
+  dessin n'est pas decoupe par les fenetres placees au-dessus ; celles
+  des autres processus (qui ne sont pas redessinees dans l'ordre de ce
+  processus) sont donc a redessiner apres elle }
+Procedure InvalAboveOthers(I, X1, Y1, X2, Y2 : LongInt);
+Var K, J : LongInt; Found : Boolean;
+Begin
+  If (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  BuildPOrd;
+  Found := False;
+  For K := 0 To PCnt - 1 Do
+  Begin
+    J := POrd[K];
+    If Found And (J > 1) And (WPid[J] <> MyPid) Then AddUpd(J, X1, Y1, X2, Y2);
+    If J = I Then Found := True;
+  End;
+End;
+
 Procedure InvalWin(I : LongInt);
 Var X1, Y1, X2, Y2 : LongInt;
 Begin
@@ -3223,6 +3244,7 @@ Begin
     X2 := X1; Y2 := Y1;
   End;
   WUpd[I] := 0;
+  InvalAboveOthers(I, X1, Y1, X2, Y2);
   PsX1[K] := X1; PsY1[K] := Y1; PsX2[K] := X2; PsY2[K] := Y2;
   If PRcl <> 0 Then
   Begin
@@ -3415,6 +3437,7 @@ Begin
     PsUse[K] := 0;
   End;
   WUpd[0] := 0;
+  InvalAboveOthers(0, WUx1[0], WUy1[0], WUx2[0], WUy2[0]);
 End;
 
 { Premiere fenetre a dessiner de la file Q (-1 : aucune) }
@@ -4536,6 +4559,7 @@ Begin
     SetErr(PMERR_HEAP_OUT_OF_MEMORY);
     Exit;
   End;
+  KpN[F] := 0;
   QPid[F] := MyPid; QHab[F] := Hab; QSize[F] := N; QHead[F] := 0; QCount[F] := 0;
   QCp[F] := 850; QStat[F] := 0; QLockIn[F] := 0; QAccel[F] := 0; QProc[F] := 0;
   QQuit[F] := 0; QMou[F] := 0; QLastDown[F] := 0; QDownWin[F] := -1; QDownTime[F] := 0;
@@ -5420,9 +5444,60 @@ Begin
   End;
 End;
 
-Procedure KeyInput(Q : LongInt);
-Var Ki : Array[0..15] Of Byte; Ch, Sc, St, Fs, Vk, T, F, N : LongInt;
+{ Remettre la touche a la fenetre T (file Q du processus qui l'a lue,
+  qui est aussi celui de T) }
+Procedure KeyDeliver(Q, T, Fs, Ch, Vk, Sc : LongInt);
+Var F : LongInt;
 Begin
+  If T >= 0 Then
+  Begin
+    WrL(LongInt(@GMsg), HwOf(T)); WrL(LongInt(@GMsg) + 4, WM_CHAR);
+    WrL(LongInt(@GMsg) + 8, Fs Or (1 Shl 16) Or ((Sc And 255) Shl 24));
+    WrL(LongInt(@GMsg) + 12, Mk2(Ch, Vk));
+    WrL(LongInt(@GMsg) + 16, KGetTickCount); WrL(LongInt(@GMsg) + 20, MouseX); WrL(LongInt(@GMsg) + 24, MouseY);
+    If Not HookBool3(1, QHab[Q], LongInt(@GMsg), 1) Then
+    Begin
+      CallHooks3(3, QHab[Q], LongInt(@GMsg), 0);    { HK_JOURNALRECORD }
+      F := TopFrame(T);
+      If (F > 1) And (WS5[F] <> 0) And (AcIdx(WS5[F]) >= 0) Then Dummy := LongInt(AccelMatch(AcData[AcIdx(WS5[F])], LongInt(@GMsg), HwOf(F)));
+      If (RdL(LongInt(@GMsg) + 4) = WM_CHAR) And (QAccel[Q] <> 0) And (AcIdx(QAccel[Q]) >= 0) And (F > 1) Then
+        Dummy := LongInt(AccelMatch(AcData[AcIdx(QAccel[Q])], LongInt(@GMsg), HwOf(F)));
+      If RdL(LongInt(@GMsg) + 4) = WM_CHAR Then Dummy := LongInt(SysAccel(LongInt(@GMsg), F));
+      Dummy := LongInt(QPut(Q, RdL(LongInt(@GMsg)), RdL(LongInt(@GMsg) + 4), RdL(LongInt(@GMsg) + 8),
+                            RdL(LongInt(@GMsg) + 12)));
+    End;
+  End;
+End;
+
+{ touche pour la file Q d'un autre processus de PM }
+Procedure KeyPend(Q, T, Fs, Ch, Vk, Sc : LongInt);
+Var K : LongInt;
+Begin
+  If KpN[Q] >= KeyPendMax Then Exit;
+  K := Q * KeyPendMax + KpN[Q];
+  KpT[K] := T; KpFs[K] := Fs; KpCh[K] := Ch; KpVk[K] := Vk; KpSc[K] := Sc;
+  Inc(KpN[Q]);
+End;
+
+Procedure KeyInput(Q : LongInt);
+Var Ki : Array[0..15] Of Byte; Ch, Sc, St, Fs, Vk, T, N, K : LongInt;
+Begin
+  { touches lues par un autre processus pour une fenetre de celui-ci }
+  K := 0;
+  While (KpN[Q] > 0) And (K < KeyPendMax) Do
+  Begin
+    T := KpT[Q * KeyPendMax];
+    Fs := KpFs[Q * KeyPendMax]; Ch := KpCh[Q * KeyPendMax]; Vk := KpVk[Q * KeyPendMax]; Sc := KpSc[Q * KeyPendMax];
+    For N := 1 To KpN[Q] - 1 Do
+    Begin
+      KpT[Q * KeyPendMax + N - 1] := KpT[Q * KeyPendMax + N]; KpFs[Q * KeyPendMax + N - 1] := KpFs[Q * KeyPendMax + N];
+      KpCh[Q * KeyPendMax + N - 1] := KpCh[Q * KeyPendMax + N]; KpVk[Q * KeyPendMax + N - 1] := KpVk[Q * KeyPendMax + N];
+      KpSc[Q * KeyPendMax + N - 1] := KpSc[Q * KeyPendMax + N];
+    End;
+    Dec(KpN[Q]);
+    If (T > 1) And (WUse[T] <> 0) And (WHmq[T] = Q) Then KeyDeliver(Q, T, Fs, Ch, Vk, Sc);
+    Inc(K);
+  End;
   N := 0;
   While N < 8 Do
   Begin
@@ -5460,26 +5535,17 @@ Begin
     If (St And 8) <> 0 Then KeyState[VK_ALT] := $80 Else KeyState[VK_ALT] := 0;
     { destinataire : fenetre du focus, sinon cadre actif }
     T := -1;
-    If (FocusWin > 1) And (WUse[FocusWin] <> 0) And (WHmq[FocusWin] = Q) Then T := FocusWin
-    Else If (ActiveWin > 1) And (WUse[ActiveWin] <> 0) And (WHmq[ActiveWin] = Q) Then T := ActiveWin;
-    If T >= 0 Then
+    If (FocusWin > 1) And (WUse[FocusWin] <> 0) And (WHmq[FocusWin] >= 0) Then T := FocusWin
+    Else If (ActiveWin > 1) And (WUse[ActiveWin] <> 0) And (WHmq[ActiveWin] >= 0) Then T := ActiveWin;
+    { fenetre d'un autre processus de PM : la touche lui est remise par
+      son propre processus (crochets, accelerateurs, procedures) }
+    If (T > 1) And (WHmq[T] <> Q) And (QPid[WHmq[T]] <> 0) Then
     Begin
-      WrL(LongInt(@GMsg), HwOf(T)); WrL(LongInt(@GMsg) + 4, WM_CHAR);
-      WrL(LongInt(@GMsg) + 8, Fs Or (1 Shl 16) Or ((Sc And 255) Shl 24));
-      WrL(LongInt(@GMsg) + 12, Mk2(Ch, Vk));
-      WrL(LongInt(@GMsg) + 16, KGetTickCount); WrL(LongInt(@GMsg) + 20, MouseX); WrL(LongInt(@GMsg) + 24, MouseY);
-      If Not HookBool3(1, QHab[Q], LongInt(@GMsg), 1) Then
-      Begin
-        CallHooks3(3, QHab[Q], LongInt(@GMsg), 0);    { HK_JOURNALRECORD }
-        F := TopFrame(T);
-        If (F > 1) And (WS5[F] <> 0) And (AcIdx(WS5[F]) >= 0) Then Dummy := LongInt(AccelMatch(AcData[AcIdx(WS5[F])], LongInt(@GMsg), HwOf(F)));
-        If (RdL(LongInt(@GMsg) + 4) = WM_CHAR) And (QAccel[Q] <> 0) And (AcIdx(QAccel[Q]) >= 0) And (F > 1) Then
-          Dummy := LongInt(AccelMatch(AcData[AcIdx(QAccel[Q])], LongInt(@GMsg), HwOf(F)));
-        If RdL(LongInt(@GMsg) + 4) = WM_CHAR Then Dummy := LongInt(SysAccel(LongInt(@GMsg), F));
-        Dummy := LongInt(QPut(Q, RdL(LongInt(@GMsg)), RdL(LongInt(@GMsg) + 4), RdL(LongInt(@GMsg) + 8),
-                              RdL(LongInt(@GMsg) + 12)));
-      End;
+      KeyPend(WHmq[T], T, Fs, Ch, Vk, Sc);
+      Continue;
     End;
+    If (T > 1) And (WHmq[T] <> Q) Then T := -1;
+    KeyDeliver(Q, T, Fs, Ch, Vk, Sc);
   End;
 End;
 
@@ -5499,15 +5565,18 @@ End;
 
 Procedure MouseMsg(Q, T, Msg, Kc : LongInt);
 Begin
-  If (T > 1) And (WUse[T] <> 0) And (WHmq[T] = Q) And Not Disabled(T) Then
+  { la fenetre peut appartenir a un autre processus de PM : message pose
+    dans sa propre file }
+  If (T > 1) And (WUse[T] <> 0) And (WHmq[T] >= 0) And Not Disabled(T) Then
   Begin
+    If QPid[WHmq[T]] = 0 Then Exit;
     If (Msg = WM_MOUSEMOVE) And ((WInt0[T] And 1) <> 0) Then Exit;
-    Dummy := LongInt(QPut(Q, HwOf(T), Msg, Mk2(MouseX - AbsX(T), MouseY - AbsY(T)), Mk2(0, Kc)));
+    Dummy := LongInt(QPut(WHmq[T], HwOf(T), Msg, Mk2(MouseX - AbsX(T), MouseY - AbsY(T)), Mk2(0, Kc)));
   End;
 End;
 
 Procedure MouseInput(Q : LongInt);
-Var Ev : Array[0..11] Of Byte; Wait, H, Fs, Btn, T, N, Kc, K, Bit, Dn, Up, Dbl : LongInt;
+Var Ev : Array[0..11] Of Byte; Wait, H, Fs, Btn, T, N, Kc, K, Bit, Dn, Up, Dbl, TQ : LongInt;
 Begin
   If QMou[Q] = 0 Then
   Begin
@@ -5541,6 +5610,9 @@ Begin
     If (Fs And $60) <> 0 Then Btn := Btn Or 4;
     If CaptureWin > 1 Then T := CaptureWin Else T := WinAtAbs(0, MouseX, MouseY, True);
     If (SysModalWin > 1) And (T > 1) And (T <> SysModalWin) And Not IsChildOf(T, SysModalWin) Then T := -1;
+    { file de la fenetre visee (double clic) }
+    TQ := Q;
+    If (T > 1) And (WUse[T] <> 0) And (WHmq[T] >= 0) Then TQ := WHmq[T];
     Kc := 0;
     If KeyState[VK_SHIFT] <> 0 Then Kc := Kc Or KC_SHIFT;
     If KeyState[VK_CTRL] <> 0 Then Kc := Kc Or KC_CTRL;
@@ -5563,15 +5635,15 @@ Begin
       End;
       If ((Btn And Bit) <> 0) And ((MouseBtn And Bit) = 0) Then
       Begin
-        If (QDownWin[Q] = T) And (QLastDown[Q] = Bit) And (KGetTickCount - QDownTime[Q] < SysVal[1]) Then
+        If (QDownWin[TQ] = T) And (QLastDown[TQ] = Bit) And (KGetTickCount - QDownTime[TQ] < SysVal[1]) Then
           MouseMsg(Q, T, Dbl, Kc)
         Else MouseMsg(Q, T, Dn, Kc);
-        QDownWin[Q] := T; QLastDown[Q] := Bit; QDownTime[Q] := KGetTickCount;
+        QDownWin[TQ] := T; QLastDown[TQ] := Bit; QDownTime[TQ] := KGetTickCount;
       End;
       If ((Btn And Bit) = 0) And ((MouseBtn And Bit) <> 0) Then
       Begin
         MouseMsg(Q, T, Up, Kc);
-        If (T = QDownWin[Q]) And (T > 1) Then
+        If (T = QDownWin[TQ]) And (T > 1) Then
         Begin
           If K = 0 Then MouseMsg(Q, T, WM_BUTTON1CLICK, Kc)
           Else If K = 1 Then MouseMsg(Q, T, WM_BUTTON2CLICK, Kc)

@@ -8,7 +8,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
-              PMSPL.DLL, CMD.EXE, PMSHELL.EXE,
+              PMSPL.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
@@ -48,6 +48,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC -COS2KRNL KERNEL\OS2KRNL.PAS        -> OS2KRNL
   OS2PC CMD.PAS                             -> CMD.EXE (et les commandes)
   OS2PC PMSHELL.PAS                         -> PMSHELL.EXE (le bureau, Workplace Shell)
+  OS2PC LAUNCHPAD.PAS LAUNCHPD.EXE          -> LAUNCHPD.EXE (le LaunchPad)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
   OS2PC DLL\FKA.PAS                         -> FKA.DLL (touches de fonction)
@@ -523,23 +524,47 @@ Bureau (PMSHELL.EXE)
 PMSHELL.EXE (Workplace Shell) est lance au demarrage
 (PROTSHELL=C:\PMSHELL.EXE). Bureau en 640 x 480 x 16 couleurs avec les
 objets Systeme OS/2, Lecteurs, Invite de commandes OS/2, Liste des
-fenetres et Arret ; dossiers Systeme OS/2, Lecteurs et repertoires
-(programmes, fichiers de commandes, fichiers de donnees ; visionneuse de
-texte).
+fenetres, Modeles, Broyeur et Arret, puis le contenu de C:\DESKTOP (ou
+D:\DESKTOP si C: est en lecture seule) et les raccourcis ; dossiers
+Systeme OS/2, Lecteurs, Modeles et repertoires (programmes, fichiers de
+commandes, fichiers de donnees ; visionneuse de texte). Pas de limite
+au nombre de fenetres ni d'objets par dossier.
   Souris : clic = choisir, double clic = ouvrir, bouton 2 = menu
   contextuel ; les icones du bureau se deplacent (position dans OS2.INI).
+  Glisser-deposer (bouton 2, ou bouton 1 dans un dossier) : sur un
+  dossier = deplacer (Ctrl = copier) ; sur le Broyeur = supprimer ; sur
+  le LaunchPad = l'y ajouter ; Ctrl+Maj = creer un raccourci.
+  Raccourcis (shadows) : menu "Creer un raccourci" ; Modeles : Dossier,
+  Fichier de donnees, Fichier de commandes (ouvrir = creer un objet).
   Clavier : fleches, Debut, Fin, lettre = choisir ; Entree = ouvrir ;
   Maj+F10 = menu ; Ctrl+Echap = liste des fenetres ; F5 = actualiser ;
   Retour arriere = dossier parent ; Suppr = supprimer ; F1 = aide ;
   Alt+F4 = fermer (sur le bureau : arret) ; Echap = fermer la
   visionneuse ou la liste.
 Un programme lance (DosExecPgm, dans le repertoire de son dossier)
-prend l'ecran (mode texte ; mode graphique pour un programme de PM) ; a
-sa fin le bureau revient (apres une touche pour un programme en mode
-texte autre que l'invite de commandes). PMWIN.DLL : WINSUSPENDSCREEN
+s'execute dans sa propre session plein ecran pendant que le bureau
+continue (Ctrl+Echap : retour au bureau ; Alt+Echap : session
+suivante) ; un programme de PM rejoint la session de PM. A la fin d'un
+programme en mode texte autre que l'invite de commandes, le noyau
+attend une touche. PMWIN.DLL : WINSUSPENDSCREEN
 (1004), WINRESUMESCREEN (1005), WINQUERYSCREENTAKEN (1006). STARTUP.CMD
 (C:\ ou D:\) est execute avant le bureau. Arret : confirmation,
 DosShutdown, puis Ctrl+Alt+Suppr pour redemarrer.
+
+LaunchPad (LAUNCHPD.EXE)
+------------------------
+Le LaunchPad d'OS/2 Warp 3 (source LAUNCHPAD.PAS) est lance par
+PMSHELL au demarrage (OS2.INI, PMSHELL, LAUNCHPAD = 0 : ne pas le
+lancer). Barre en bas de l'ecran (deplacable) :
+  Verrouiller (mot de passe facultatif : menu contextuel), Rechercher
+  (fichiers de toutes les unites, masque avec * et ?), Arret, Liste des
+  fenetres ; objets Lecteur C:, Invite de commandes OS/2, Aide,
+  Imprimante (file d'attente du spouleur, impression d'un fichier).
+  La fleche au-dessus d'un objet ouvre son tiroir (autres unites,
+  Systeme OS/2, Modeles, informations sur le systeme...).
+  Deposer un objet du bureau sur la barre l'ajoute (sur un bouton : dans
+  son tiroir) ; bouton 2 : ajouter, retirer, mot de passe, fermer.
+  La souris immobile sur un bouton affiche son nom.
 
 Imprimante
 ----------

@@ -11069,6 +11069,7 @@ End;
 Procedure ParsePrimaryInner(PI : Integer);
 Var
   Up     : TString;
+  GmCast : Boolean;    { GetMem(Pointer(V), n) }
   Lbl    : TString;
   SI     : Integer;
   LI     : Integer;
@@ -12382,8 +12383,15 @@ Begin
       Inc(EP);
       If EPMatch('(') Then
       Begin
+        { GetMem(Pointer(V), n) : transtypage de la variable, sans effet }
+        GmCast := (Not EPAtEnd) And (TokenPool[EP].Kind = TK_IDENT) And
+                  (StrUpperCase(TokenPool[EP].Val) = 'POINTER') And
+                  (EP + 1 < EPEnd) And (TokenPool[EP + 1].Kind = TK_PUNCT) And
+                  (TokenPool[EP + 1].Val = '(');
+        If GmCast Then Inc(EP, 2);
         If ParseLValueAddrW32(PI, LI) Then
         Begin
+          If GmCast Then EPMatch(')');
           EmitInstr('PUSH EAX');          { adresse de la variable pointeur }
           EPMatch(',');
           ParseExpr(PI);   { taille dans EAX }
@@ -22558,6 +22566,55 @@ End;
 { GOTO, WITH, labels numeriques.                                }
 { ------------------------------------------------------------ }
 
+{ ------------------------------------------------------------ }
+{ FuncDerefAssignW32 : instruction F(args)^.champ := expr        }
+{ (la fonction F rend un pointeur ; son appel vient d etre       }
+{ compile : EAX = valeur du pointeur). Rend False si l appel     }
+{ n est pas suivi de ^ (simple appel de fonction).               }
+{ ------------------------------------------------------------ }
+
+Function FuncDerefAssignW32(PI : Integer; Const Up : TString) : Boolean;
+Var
+  LI, T : Integer;
+Begin
+  FuncDerefAssignW32 := False;
+  If EPAtEnd Then Exit;
+  If Not ((TokenPool[EP].Kind = TK_OP) And (TokenPool[EP].Val = '^')) Then Exit;
+  FuncDerefAssignW32 := True;
+  Inc(EP);
+  { type pointe : type de retour de la fonction (pointeur) }
+  T := -1;
+  LI := 0;
+  While (LI < ProcCount) And (ProcTab[LI].Name <> Up) Do
+    Inc(LI);
+  If LI < ProcCount Then
+  Begin
+    T := ProcTab[LI].RetTypeIdx;
+    If (T >= 0) And (T < TypeCount) And (TypeTab[T].Kind = TYK_POINTER) Then
+      T := TypeTab[T].BaseTypeIdx
+    Else If (T >= 0) And (T < TypeCount) And (TypeTab[T].Kind = TYK_PCHAR) Then
+      T := TY_IDX_CHAR
+    Else
+      T := -1;
+  End;
+  { EAX = adresse de la variable pointee ; suffixes .champ [index] ^ }
+  ParseLValueSuffixW32(PI, T);
+  If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_OP) And
+     (TokenPool[EP].Val = ':=') Then
+  Begin
+    Inc(EP);
+    EmitInstr('PUSH EAX');
+    WantCharLit := (T = TY_IDX_CHAR);
+    ParseExpr(PI);
+    WantCharLit := False;
+    GenRangeCheckAssign(T);
+    EmitInstr('POP EBX');
+    GenStoreToAddr(T);
+  End
+  Else
+    FatalError('":=" attendu apres ' + Up + '(...)^');
+End;
+
 Procedure ParseStmt(PI : Integer);
 Var
   Up    : TString;
@@ -22573,6 +22630,7 @@ Var
   FSize   : LongInt;
   ElemSz  : Integer;
   WI      : Integer;
+  FDeref  : Boolean;     { F(args)^... := expr }
 Begin
   If EPAtEnd Then Exit;
   If Opts.DebugMode And Opts.Verbose Then
@@ -27961,7 +28019,10 @@ Begin
           If TypeIsReal(LastVarTypeIdx) Then EmitInstr('FSTP ST(0)');
         End
         Else
+        Begin
           ParseFuncCall(PI, Up);
+          FDeref := FuncDerefAssignW32(PI, Up);
+        End;
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
            (TokenPool[EP].Val = ';') Then
           Inc(EP);
@@ -27972,6 +28033,7 @@ Begin
       If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '(') Then
       Begin
         ParseFuncCall(PI, Up);
+        FDeref := FuncDerefAssignW32(PI, Up);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
            (TokenPool[EP].Val = ';') Then
           Inc(EP);
