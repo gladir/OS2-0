@@ -83,6 +83,14 @@ Program PMSHELL;
   ouvert : fenetre existante ou nouvelle), Entree (delai du double clic,
   boutons inverses), Logo (au demarrage), General (couleur du bureau).
   Les reglages sont dans OS2.INI (application PMSHELL).
+  Carnet "Souris - Parametres" (objet Souris) : Minutage (curseurs du
+  double clic, avec zone d'essai, et de la vitesse de deplacement :
+  MouSetScaleFact, MouSetThreshold), Configuration (droitier, gaucher),
+  Affectations (liste des fenetres : bouton 3 ou double clic du bouton 1
+  sur le bureau ; menus : bouton 2 ou Maj + bouton 1 ; glisser : bouton
+  2 ou bouton 1), Pointeurs (taille, couleurs : WINSETPOINTERSTYLE de
+  PMWIN), Comete (pointeur comete), General (titre). Un seul carnet de
+  parametres est ouvert a la fois.
 
   Arret : apres confirmation, les fichiers sont ecrits (DosShutdown) et
   l'ecran indique que l'ordinateur peut etre eteint ; Ctrl+Alt+Suppr
@@ -138,7 +146,8 @@ Const
   WS_GROUP = $00010000; WS_TABSTOP = $00020000;
   BM_QUERYCHECK = $0124; BM_SETCHECK = $0125; BN_CLICKED = 1; LN_SELECT = 1;
   SV_SWAPBUTTON = 0; SV_DBLCLKTIME = 1;
-  NbTabs = 7;
+  NbTabs = 7;              { carnet Systeme ; carnet Souris : 6 onglets }
+  WC_ENTRYFIELD = $FFFF0006; ES_AUTOSCROLL = 4; ES_MARGIN = 8; WM_BUTTON3CLICK = $0419;
   ShadowApp = 'PMSHELL_RACCOURCIS';
   { commandes des menus }
   CM_OPEN = 100; CM_REFRESH = 101; CM_ARRANGE = 102; CM_WINLIST = 103; CM_INFO = 104; CM_SHUTDOWN = 105;
@@ -192,6 +201,15 @@ Var
   DeskColor : LongInt;                     { couleur du fond du bureau (RVB) }
   CfgConf : Array[0..2] Of LongInt;        { confirmer : dossier, objet, arret }
   CfgTitle, CfgWin, CfgLogo, CfgDbl, CfgSwap, CfgClr : LongInt;
+  { souris : vitesse (0 a 8), correspondances, pointeur, comete }
+  CfgSpeed, CfgMapList, CfgMapMenu, CfgMapDrag, CfgPtrBig, CfgPtrInv, CfgComet, CfgCometLen : LongInt;
+  MouseTitle : String[40];
+  MouH : LongInt;                          { handle de MOUCALLS (echelle, seuils) }
+  { carnet : genre (0 Systeme, 1 Souris), curseurs dessines, cadres }
+  NbKind, SlN, SlDrag, GbN, TestOn, UndoDbl, UndoSpeed : LongInt;
+  SlX, SlY, SlW, SlCnt, SlVal, SlId : Array[0..3] Of LongInt;
+  GbX, GbY, GbW, GbH : Array[0..3] Of LongInt;
+  GbS : Array[0..3] Of String[32];
   { carnet des parametres }
   NbClient, NbTab, NbN, NbModeN, LogoH : LongInt;
   NbCtl : Array[0..31] Of LongInt;
@@ -248,6 +266,7 @@ Function WinSetFocus(HDesk, H : LongInt) : LongInt; External 'PMWIN';
 Function WinSetActiveWindow(HDesk, H : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryActiveWindow(HDesk : LongInt) : LongInt; External 'PMWIN';
 Function WinSetCapture(HDesk, H : LongInt) : LongInt; External 'PMWIN';
+Function WinSetWindowText(H, P : LongInt) : LongInt; External 'PMWIN';
 Function WinMessageBox(HPar, HOwn, PText, PCap, Id, Fl : LongInt) : LongInt; External 'PMWIN';
 Function WinCreateMenu(HPar, P : LongInt) : LongInt; External 'PMWIN';
 Function WinPopupMenu(HPar, HOwn, HMenu, X, Y, Id, Fs : LongInt) : LongInt; External 'PMWIN';
@@ -273,6 +292,11 @@ Function WinStopTimer(Hab, H, Id : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryWindowText(H, Cch, P : LongInt) : LongInt; External 'PMWIN';
 Function VioQueryModes(I, P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYMODES';
 Function VioQueryVbe(P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYVBE';
+Function WinSetPointerStyle(Size, Inv, Comet : LongInt) : LongInt; External 'PMWIN' Name 'WINSETPOINTERSTYLE';
+Function MouOpen(PDrv, PHmou : LongInt) : LongInt; External 'MOUCALLS';
+Function MouSetScaleFact(PScale, Hmou : LongInt) : LongInt; External 'MOUCALLS';
+Function MouSetThreshold(PThr, Hmou : LongInt) : LongInt; External 'MOUCALLS';
+Function MouGetNumButtons(PCount, Hmou : LongInt) : LongInt; External 'MOUCALLS';
 
 { --- PMGPI.DLL --- }
 Function GpiSetColor(Hps, C : LongInt) : LongInt; External 'PMGPI';
@@ -964,7 +988,7 @@ Begin
     VK_SETUP :
       Begin
         Dummy := NewItem(V, IC_SCREEN, OB_SYSSET, 'Systeme', '');
-        Dummy := NewItem(V, IC_MOUSE, OB_MOUSE, 'Souris', '');
+        Dummy := NewItem(V, IC_MOUSE, OB_MOUSE, MouseTitle, '');
         Dummy := NewItem(V, IC_PALETTE, OB_COLORS, 'Couleurs du bureau', '');
       End;
     VK_DRIVES :
@@ -1873,6 +1897,7 @@ Begin
 End;
 
 Procedure OpenNotebook(Tab : LongInt); Forward;
+Procedure OpenNb(Kind, Tab : LongInt); Forward;
 
 Procedure OpenItem(K : LongInt);
 Var V : LongInt; P : String;
@@ -1898,7 +1923,7 @@ Begin
     OB_TEMPLATES : OpenFolder(VK_TEMPL, '', 'Modeles');
     OB_SETUP : OpenFolder(VK_SETUP, '', 'Configuration du systeme');
     OB_SYSSET : OpenNotebook(0);
-    OB_MOUSE : OpenNotebook(4);
+    OB_MOUSE : OpenNb(1, 0);
     OB_COLORS : OpenNotebook(6);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
@@ -2231,6 +2256,17 @@ Const
   ClrRgbTab : Array[0..15] Of LongInt = ($008080, $000080, $008000, $800000, $800080, $808000, $C0C0C0, $808080,
                                          $0000FF, $00FF00, $00FFFF, $FF0000, $FF00FF, $FFFF00, $FFFFFF, $000000);
   DblTab : Array[0..4] Of LongInt = (200, 300, 500, 700, 1000);
+  { carnet Souris : double clic (lent -> rapide), echelle de MOUCALLS
+    (mickeys par 8 pels : petit = rapide) }
+  DblSlide : Array[0..8] Of LongInt = (1000, 850, 700, 600, 500, 420, 350, 280, 200);
+  SpeedCs : Array[0..8] Of LongInt = (16, 12, 10, 8, 6, 5, 4, 3, 2);
+  MouTabName : Array[0..5] Of String[16] = ('Minutage', 'Configuration', 'Affectations', 'Pointeurs', 'Comete',
+                                            'General');
+  { fleche du pointeur (apercu) }
+  PvB : Array[0..15] Of LongInt = ($8000, $C000, $A000, $9000, $8800, $8400, $8200, $8100,
+                                   $8080, $83C0, $9200, $A900, $C900, $8480, $0480, $0300);
+  PvW : Array[0..15] Of LongInt = ($0000, $0000, $4000, $6000, $7000, $7800, $7C00, $7E00,
+                                   $7F00, $7C00, $6C00, $4600, $0600, $0300, $0300, $0000);
 
 Function PrfNum(Key : String; Df : LongInt) : LongInt;
 Var V, C : LongInt; S : String;
@@ -2241,12 +2277,37 @@ Begin
   PrfNum := V;
 End;
 
+{ souris : echelle et acceleration de MOUCALLS (vitesse de deplacement) }
+Procedure ApplyMouse;
+Var Sc : Array[0..3] Of Byte; Th : Array[0..9] Of Byte; Cs : LongInt;
+Begin
+  If MouH = 0 Then Dummy := MouOpen(0, LongInt(@MouH));
+  If MouH = 0 Then Exit;
+  If (CfgSpeed < 0) Or (CfgSpeed > 8) Then CfgSpeed := 3;
+  Cs := SpeedCs[CfgSpeed];
+  WrW(LongInt(@Sc), Cs * 2); WrW(LongInt(@Sc) + 2, Cs);
+  Dummy := MouSetScaleFact(LongInt(@Sc), MouH);
+  WrW(LongInt(@Th), 10); WrW(LongInt(@Th) + 2, 4); WrW(LongInt(@Th) + 4, 1); WrW(LongInt(@Th) + 6, 12);
+  If CfgSpeed >= 6 Then WrW(LongInt(@Th) + 8, 2) Else WrW(LongInt(@Th) + 8, 1);
+  Dummy := MouSetThreshold(LongInt(@Th), MouH);
+End;
+
+{ pointeur : taille, couleurs, comete (PMWIN, WINSETPOINTERSTYLE) }
+Procedure ApplyPointer;
+Var L : LongInt;
+Begin
+  If CfgComet <> 0 Then L := MaxI(1, MinI(6, CfgCometLen)) Else L := 0;
+  Dummy := WinSetPointerStyle(1 + CfgPtrBig, CfgPtrInv, L);
+End;
+
 Procedure ApplySettings;
 Begin
   If (CfgClr < 0) Or (CfgClr > 15) Then CfgClr := 0;
   DeskColor := ClrRgbTab[CfgClr];
   Dummy := WinSetSysValue(HWND_DESKTOP, SV_DBLCLKTIME, CfgDbl);
   Dummy := WinSetSysValue(HWND_DESKTOP, SV_SWAPBUTTON, CfgSwap);
+  ApplyMouse;
+  ApplyPointer;
 End;
 
 Procedure LoadSettings;
@@ -2254,6 +2315,11 @@ Begin
   CfgConf[0] := PrfNum('CONF_DOSSIER', 1); CfgConf[1] := PrfNum('CONF_OBJET', 1); CfgConf[2] := PrfNum('CONF_ARRET', 1);
   CfgTitle := PrfNum('TITRE', 0); CfgWin := PrfNum('FENETRE', 0); CfgLogo := PrfNum('LOGO', 0);
   CfgDbl := PrfNum('DOUBLECLIC', 500); CfgSwap := PrfNum('GAUCHER', 0); CfgClr := PrfNum('COULEUR', 0);
+  CfgSpeed := PrfNum('VITESSE', 3); CfgMapList := PrfNum('MAP_LISTE', 0); CfgMapMenu := PrfNum('MAP_MENU', 0);
+  CfgMapDrag := PrfNum('MAP_GLISSER', 0); CfgPtrBig := PrfNum('PTR_GRAND', 0); CfgPtrInv := PrfNum('PTR_INVERSE', 0);
+  CfgComet := PrfNum('COMETE', 0); CfgCometLen := PrfNum('COMETE_LONG', 4);
+  MouseTitle := PrfStr('PMSHELL', 'TITRE_SOURIS');
+  If MouseTitle = '' Then MouseTitle := 'Souris';
   ApplySettings;
 End;
 
@@ -2264,6 +2330,11 @@ Begin
   PrfSet('PMSHELL', 'FENETRE', IStr(CfgWin)); PrfSet('PMSHELL', 'LOGO', IStr(CfgLogo));
   PrfSet('PMSHELL', 'DOUBLECLIC', IStr(CfgDbl)); PrfSet('PMSHELL', 'GAUCHER', IStr(CfgSwap));
   PrfSet('PMSHELL', 'COULEUR', IStr(CfgClr));
+  PrfSet('PMSHELL', 'VITESSE', IStr(CfgSpeed)); PrfSet('PMSHELL', 'MAP_LISTE', IStr(CfgMapList));
+  PrfSet('PMSHELL', 'MAP_MENU', IStr(CfgMapMenu)); PrfSet('PMSHELL', 'MAP_GLISSER', IStr(CfgMapDrag));
+  PrfSet('PMSHELL', 'PTR_GRAND', IStr(CfgPtrBig)); PrfSet('PMSHELL', 'PTR_INVERSE', IStr(CfgPtrInv));
+  PrfSet('PMSHELL', 'COMETE', IStr(CfgComet)); PrfSet('PMSHELL', 'COMETE_LONG', IStr(CfgCometLen));
+  PrfSet('PMSHELL', 'TITRE_SOURIS', MouseTitle);
 End;
 
 { nombre de couleurs d'un mode (texte du carnet) }
@@ -2360,8 +2431,10 @@ Function NbAdd(Cls, Style, X, YTop, W, Hh, Id : LongInt; Text : String) : LongIn
 Var R : Array[0..3] Of LongInt; Hw : LongInt;
 Begin
   Dummy := WinQueryWindowRect(NbClient, LongInt(@R));
+  { HWND_BOTTOM : les controles restent dans l'ordre de creation (groupes
+    de boutons radio, comme dans un dialogue) }
   Hw := WinCreateWindow(NbClient, Cls, Z(Text), WS_VISIBLE Or Style, 40 + X, R[3] - 18 - YTop - Hh, W, Hh, NbClient,
-                        HWND_TOP, Id, 0, 0);
+                        HWND_BOTTOM, Id, 0, 0);
   If NbN < 32 Then
   Begin
     NbCtl[NbN] := Hw;
@@ -2414,6 +2487,233 @@ Begin
   NbN := 0;
 End;
 
+{ onglets du carnet courant }
+Function TabCnt : LongInt;
+Begin
+  If NbKind = 1 Then TabCnt := 6 Else TabCnt := NbTabs;
+End;
+
+Function TabName(K : LongInt) : String;
+Begin
+  If NbKind = 1 Then TabName := MouTabName[K] Else TabName := NbTabName[K];
+End;
+
+{ --- carnet Souris : curseurs (sliders), cadres, zone d'essai --- }
+Procedure SlAdd(Id, X, YTop, W, Cnt, Val : LongInt);
+Begin
+  If SlN >= 4 Then Exit;
+  SlId[SlN] := Id; SlX[SlN] := X; SlY[SlN] := YTop; SlW[SlN] := W; SlCnt[SlN] := Cnt;
+  SlVal[SlN] := MaxI(0, MinI(Cnt - 1, Val));
+  Inc(SlN);
+End;
+
+Procedure GbAdd(X, YTop, W, Hh : LongInt; S : String);
+Begin
+  If GbN >= 4 Then Exit;
+  GbX[GbN] := X; GbY[GbN] := YTop; GbW[GbN] := W; GbH[GbN] := Hh; GbS[GbN] := S;
+  Inc(GbN);
+End;
+
+{ position (client) de la graduation V du curseur K ; Yc : axe }
+Function SlPos(K, V : LongInt) : LongInt;
+Begin
+  SlPos := 40 + SlX[K] + 4 + (V * (SlW[K] - 8)) Div MaxI(1, SlCnt[K] - 1);
+End;
+
+Function SlAxis(K, H : LongInt) : LongInt;
+Begin
+  SlAxis := H - 18 - SlY[K] - 8;
+End;
+
+Procedure SlPaint(Hps, K, H : LongInt);
+Var X1, X2, Yc, I, Tx : LongInt;
+Begin
+  X1 := 40 + SlX[K]; X2 := X1 + SlW[K]; Yc := SlAxis(K, H);
+  FBox(Hps, X1, Yc - 2, X2, Yc + 2, CLR_WHITE, CLR_DARKGRAY);
+  For I := 0 To SlCnt[K] - 1 Do
+  Begin
+    Tx := SlPos(K, I);
+    GLn(Hps, Tx, Yc - 12, Tx, Yc - 8, CLR_BLACK);
+  End;
+  Tx := SlPos(K, SlVal[K]);
+  FBox(Hps, Tx - 4, Yc - 8, Tx + 4, Yc + 8, CLR_PALEGRAY, CLR_BLACK);
+  GLn(Hps, Tx - 3, Yc + 7, Tx + 3, Yc + 7, CLR_WHITE);
+  GLn(Hps, Tx - 3, Yc - 7, Tx - 3, Yc + 7, CLR_WHITE);
+  GLn(Hps, Tx, Yc - 4, Tx, Yc + 4, CLR_DARKGRAY);
+  { fleches }
+  FBox(Hps, X2 + 6, Yc - 6, X2 + 18, Yc + 6, CLR_PALEGRAY, CLR_BLACK);
+  FBox(Hps, X2 + 19, Yc - 6, X2 + 31, Yc + 6, CLR_PALEGRAY, CLR_BLACK);
+  For I := 0 To 3 Do
+  Begin
+    GLn(Hps, X2 + 10 + I, Yc - I, X2 + 10 + I, Yc + I, CLR_BLACK);
+    GLn(Hps, X2 + 27 - I, Yc - I, X2 + 27 - I, Yc + I, CLR_BLACK);
+  End;
+End;
+
+{ zone d'essai du double clic (coordonnees du client) }
+Procedure TestRect(H : LongInt; Var X1, Y1, X2, Y2 : LongInt);
+Begin
+  X1 := 40 + 240; X2 := X1 + 80; Y2 := H - 18 - 34; Y1 := Y2 - 70;
+End;
+
+{ fleche du pointeur, taille 1 ou 2, en (X, Y haut) : segments
+  horizontaux de meme couleur }
+Procedure PtrPreview(Hps, X, Y, K : LongInt);
+Var R, C, N, Cur, Run, Col, Rr, Yy : LongInt;
+Begin
+  For R := 0 To 15 Do
+  Begin
+    Cur := -1; Run := 0;
+    For C := 0 To 16 Do
+    Begin
+      Col := -1;
+      If C < 16 Then
+      Begin
+        N := $8000 Shr C;
+        If (PvB[R] And N) <> 0 Then
+        Begin
+          If CfgPtrInv = 0 Then Col := CLR_BLACK Else Col := CLR_WHITE;
+        End
+        Else If (PvW[R] And N) <> 0 Then
+        Begin
+          If CfgPtrInv = 0 Then Col := CLR_WHITE Else Col := CLR_BLACK;
+        End;
+      End;
+      If Col <> Cur Then
+      Begin
+        If Cur <> -1 Then
+          For Rr := 0 To K - 1 Do
+          Begin
+            Yy := Y - R * K - Rr - 1;
+            GLn(Hps, X + Run * K, Yy, X + C * K - 1, Yy, Cur);
+          End;
+        Cur := Col; Run := C;
+      End;
+    End;
+  End;
+End;
+
+{ dessins propres aux pages du carnet Souris }
+Procedure MousePaint(Hps, W, H : LongInt);
+Var K, X1, Y1, X2, Y2, Yt : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  For K := 0 To GbN - 1 Do
+  Begin
+    X1 := 40 + GbX[K]; X2 := X1 + GbW[K]; Y2 := H - 18 - GbY[K] - 8; Y1 := Y2 - GbH[K];
+    GBox(Hps, X1, Y1, X2, Y2, CLR_DARKGRAY, DRO_OUTLINE);
+    GBox(Hps, X1 + 1, Y1 - 1, X2 + 1, Y2 - 1, CLR_WHITE, DRO_OUTLINE);
+    GText(Hps, X1 + 8, Y2 - 8, GbS[K], CLR_DARKBLUE, CLR_PALEGRAY);
+  End;
+  For K := 0 To SlN - 1 Do SlPaint(Hps, K, H);
+  Case NbTab Of
+    0 :
+      Begin
+        TestRect(H, X1, Y1, X2, Y2);
+        GText(Hps, X1 + 6, Y2 + 2, 'Essai ici', CLR_DARKBLUE, CLR_PALEGRAY);
+        If TestOn <> 0 Then FBox(Hps, X1, Y1, X2, Y2, CLR_DARKCYAN, CLR_BLACK)
+        Else FBox(Hps, X1, Y1, X2, Y2, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X1 + 2, Y1 + 2, X2 - 2, Y2 - 2, CLR_WHITE, DRO_OUTLINE);
+        If TestOn <> 0 Then GText(Hps, X1 + 11, Y1 + 28, 'Reussi', CLR_WHITE, CLR_DARKCYAN);
+      End;
+    1 :
+      Begin
+        { souris : boutons 1 et 2 selon la main }
+        X1 := 40 + 230; Yt := H - 18 - 40;
+        FBox(Hps, X1, Yt - 110, X1 + 80, Yt, CLR_WHITE, CLR_BLACK);
+        FBox(Hps, X1 + 4, Yt - 40, X1 + 38, Yt - 4, CLR_PALEGRAY, CLR_BLACK);
+        FBox(Hps, X1 + 42, Yt - 40, X1 + 76, Yt - 4, CLR_PALEGRAY, CLR_BLACK);
+        GLn(Hps, X1 + 40, Yt, X1 + 40, Yt + 16, CLR_BLACK);
+        If CfgSwap = 0 Then
+        Begin
+          GText(Hps, X1 + 17, Yt - 30, '1', CLR_BLACK, CLR_PALEGRAY); GText(Hps, X1 + 55, Yt - 30, '2', CLR_BLACK, CLR_PALEGRAY);
+        End
+        Else
+        Begin
+          GText(Hps, X1 + 17, Yt - 30, '2', CLR_BLACK, CLR_PALEGRAY); GText(Hps, X1 + 55, Yt - 30, '1', CLR_BLACK, CLR_PALEGRAY);
+        End;
+      End;
+    3 :
+      Begin
+        GText(Hps, 40 + 220, H - 18 - 36, 'Apercu :', CLR_DARKBLUE, CLR_PALEGRAY);
+        Rc[0] := 40 + 220; Rc[1] := H - 18 - 130; Rc[2] := 40 + 320; Rc[3] := H - 18 - 40;
+        Dummy := WinFillRect(Hps, LongInt(@Rc), DeskColor);
+        GBox(Hps, Rc[0], Rc[1], Rc[2], Rc[3], CLR_BLACK, DRO_OUTLINE);
+        PtrPreview(Hps, 40 + 250, H - 18 - 60, 1 + CfgPtrBig);
+      End;
+  End;
+End;
+
+Procedure MouseBuild;
+Var B, Hw, K_Dbl : LongInt;
+Begin
+  Case NbTab Of
+    0 :
+      Begin
+        GbAdd(0, 0, 334, 120, 'Double clic');
+        K_Dbl := 4;
+        For B := 0 To 8 Do
+          If DblSlide[B] >= CfgDbl Then K_Dbl := B;
+        SlAdd(400, 10, 40, 180, 9, K_Dbl);
+        NbText(10, 70, 60, 'Lent'); NbText(150, 70, 60, 'Rapide');
+        GbAdd(0, 140, 260, 90, 'Vitesse de deplacement');
+        SlAdd(401, 10, 180, 180, 9, CfgSpeed);
+        NbText(10, 210, 60, 'Lent'); NbText(150, 210, 60, 'Rapide');
+        Dummy := NbButton(0, 262, 80, 470, 'Annuler');
+        Dummy := NbButton(86, 262, 90, 471, 'Par defaut');
+        Dummy := NbButton(182, 262, 70, 472, 'Aide');
+      End;
+    1 :
+      Begin
+        NbText(0, 0, 330, 'Configuration des boutons :');
+        Dummy := NbCheck(10, 28, 200, 420, 'droitier', CfgSwap = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 52, 200, 421, 'gaucher', CfgSwap <> 0, BS_AUTORADIOBUTTON);
+        NbText(0, 160, 220, 'Bouton 1 : choisir, ouvrir');
+        NbText(0, 180, 220, 'Bouton 2 : menus, glisser');
+      End;
+    2 :
+      Begin
+        NbText(0, 0, 330, 'Liste des fenetres :');
+        Dummy := NbCheck(10, 20, 320, 410, 'clic du bouton 3 (milieu)', CfgMapList = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 42, 320, 411, 'double clic du bouton 1 sur le bureau', CfgMapList = 1, BS_AUTORADIOBUTTON);
+        Dummy := NbCheck(10, 64, 320, 412, 'aucun', CfgMapList = 2, BS_AUTORADIOBUTTON);
+        NbText(0, 96, 330, 'Menus contextuels :');
+        Dummy := NbCheck(10, 116, 320, 413, 'clic du bouton 2', CfgMapMenu = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 138, 320, 414, 'Maj + clic du bouton 1', CfgMapMenu <> 0, BS_AUTORADIOBUTTON);
+        NbText(0, 170, 330, 'Glisser-deposer :');
+        Dummy := NbCheck(10, 190, 320, 415, 'bouton 2 (et bouton 1)', CfgMapDrag = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 212, 320, 416, 'bouton 1 seulement', CfgMapDrag <> 0, BS_AUTORADIOBUTTON);
+      End;
+    3 :
+      Begin
+        NbText(0, 0, 200, 'Taille du pointeur :');
+        Dummy := NbCheck(10, 20, 200, 450, 'normale (16 x 16)', CfgPtrBig = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 42, 200, 451, 'grande (32 x 32)', CfgPtrBig <> 0, BS_AUTORADIOBUTTON);
+        NbText(0, 76, 200, 'Couleurs :');
+        Dummy := NbCheck(10, 96, 200, 452, 'blanc, bord noir', CfgPtrInv = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 118, 200, 453, 'noir, bord blanc', CfgPtrInv <> 0, BS_AUTORADIOBUTTON);
+      End;
+    4 :
+      Begin
+        Dummy := NbCheck(0, 0, 320, 430, 'Pointeur comete (trainee du pointeur)', CfgComet <> 0, BS_AUTOCHECKBOX);
+        GbAdd(0, 40, 260, 90, 'Longueur de la trainee');
+        SlAdd(440, 10, 80, 150, 6, CfgCometLen - 1);
+        NbText(10, 110, 60, 'Courte'); NbText(130, 110, 60, 'Longue');
+      End;
+    5 :
+      Begin
+        NbText(0, 0, 330, 'Titre de l''objet :');
+        Hw := NbAdd(WC_ENTRYFIELD, WS_TABSTOP Or ES_AUTOSCROLL Or ES_MARGIN, 0, 22, 220, 20, 460, MouseTitle);
+        Dummy := NbButton(230, 21, 90, 461, 'Appliquer');
+        B := 0;
+        If MouH = 0 Then Dummy := MouOpen(0, LongInt(@MouH));
+        If MouH <> 0 Then Dummy := MouGetNumButtons(LongInt(@B), MouH);
+        If B > 0 Then NbText(0, 70, 330, 'Souris PS/2 a ' + IStr(B And $FFFF) + ' boutons.')
+        Else NbText(0, 70, 330, 'Pas de souris.');
+        NbText(0, 94, 330, 'Double clic : ' + IStr(CfgDbl) + ' ms ; vitesse ' + IStr(CfgSpeed + 1) + ' sur 9.');
+      End;
+  End;
+End;
+
 { selection courante de la liste des resolutions }
 Procedure NbSelectMode(W, H, B : LongInt);
 Var K, Lb : LongInt;
@@ -2427,7 +2727,13 @@ Procedure NbBuild;
 Var Lb, K, Sel : LongInt; M : Array[0..3] Of LongInt; Vb : Array[0..31] Of LongInt; S : String;
 Begin
   NbClear;
-  NbLblN := 0;
+  NbLblN := 0; SlN := 0; GbN := 0; SlDrag := -1;
+  If NbKind = 1 Then
+  Begin
+    MouseBuild;
+    Dummy := WinInvalidateRect(NbClient, 0, 1);
+    Exit;
+  End;
   Case NbTab Of
     0 :
       Begin
@@ -2509,7 +2815,7 @@ End;
 
 Procedure NbSelect(T : LongInt);
 Begin
-  If (T < 0) Or (T >= NbTabs) Or (T = NbTab) Then Exit;
+  If (T < 0) Or (T >= TabCnt) Or (T = NbTab) Then Exit;
   NbTab := T;
   NbBuild;
 End;
@@ -2541,7 +2847,7 @@ Begin
     K := K + 16;
   End;
   { onglets }
-  For K := 0 To NbTabs - 1 Do
+  For K := 0 To TabCnt - 1 Do
   Begin
     TabRect(K, Rc[2], Rc[3], X1, Y1, X2, Y2);
     If K = NbTab Then
@@ -2551,9 +2857,10 @@ Begin
     End
     Else FBox(Hps, X1, Y1, X2, Y2, CLR_PALEGRAY, CLR_DARKGRAY);
     GLn(Hps, X1 + 1, Y2 - 1, X2 - 1, Y2 - 1, CLR_WHITE);
-    GText(Hps, X1 + 6, Y1 + 4, NbTabName[K], CLR_BLACK, CLR_PALEGRAY);
+    GText(Hps, X1 + 6, Y1 + 4, TabName(K), CLR_BLACK, CLR_PALEGRAY);
   End;
-  GText(Hps, Pr - 210, 8, NbTabName[NbTab] + ' - Page 1 sur 1', CLR_BLACK, CLR_PALEGRAY);
+  GText(Hps, Pr - 210, 8, TabName(NbTab) + ' - Page 1 sur 1', CLR_BLACK, CLR_PALEGRAY);
+  If NbKind = 1 Then MousePaint(Hps, Rc[2], Rc[3]);
   { textes de la page }
   For K := 0 To NbLblN - 1 Do
     GText(Hps, 40 + NbLblX[K], Rc[3] - 18 - NbLblY[K] - 16, NbLblS[K], CLR_DARKBLUE, CLR_PALEGRAY);
@@ -2608,6 +2915,40 @@ Begin
         Else CfgLogo := 0;
         SaveSettings;
       End;
+    { carnet Souris }
+    420, 421 :
+      Begin
+        If NbChecked(421) Then CfgSwap := 1 Else CfgSwap := 0;
+        ApplySettings; SaveSettings;
+        Dummy := WinInvalidateRect(NbClient, 0, 1);
+      End;
+    410, 411, 412 :
+      Begin
+        If NbChecked(411) Then CfgMapList := 1 Else If NbChecked(412) Then CfgMapList := 2 Else CfgMapList := 0;
+        SaveSettings;
+      End;
+    413, 414 :
+      Begin
+        If NbChecked(414) Then CfgMapMenu := 1 Else CfgMapMenu := 0;
+        SaveSettings;
+      End;
+    415, 416 :
+      Begin
+        If NbChecked(416) Then CfgMapDrag := 1 Else CfgMapDrag := 0;
+        SaveSettings;
+      End;
+    450, 451, 452, 453 :
+      Begin
+        If NbChecked(451) Then CfgPtrBig := 1 Else CfgPtrBig := 0;
+        If NbChecked(453) Then CfgPtrInv := 1 Else CfgPtrInv := 0;
+        ApplyPointer; SaveSettings;
+        Dummy := WinInvalidateRect(NbClient, 0, 1);
+      End;
+    430 :
+      Begin
+        If NbChecked(430) Then CfgComet := 1 Else CfgComet := 0;
+        ApplyPointer; SaveSettings;
+      End;
     370 : If (Code = LN_SELECT) Or (Code = LN_ENTER) Then
           Begin
             Sel := WinSendMsg(WinWindowFromID(NbClient, 370), LM_QUERYSELECTION, -1, 0);
@@ -2635,6 +2976,40 @@ Begin
         NbSelectMode(M[0], M[1], M[2]);
       End;
     312 : NbSelectMode(640, 480, 4);
+    470, 471 :
+      Begin
+        If Id = 470 Then
+        Begin
+          CfgDbl := UndoDbl; CfgSpeed := UndoSpeed;
+        End
+        Else
+        Begin
+          CfgDbl := 500; CfgSpeed := 3;
+        End;
+        ApplySettings; SaveSettings;
+        NbBuild;
+      End;
+    472 : ShowMsg('Double clic : faites glisser le curseur, puis double-cliquez dans la zone d''essai (elle change ' +
+                  'de couleur si le double clic est reconnu). Vitesse de deplacement : distance parcourue par le ' +
+                  'pointeur pour un meme mouvement de la souris.', 'Aide - Souris', MB_OK Or MB_INFORMATION);
+    461 :
+      Begin
+        Vb[0] := 0;
+        Dummy := WinQueryWindowText(WinWindowFromID(NbClient, 460), 40, LongInt(@Vb));
+        S := GetZ(LongInt(@Vb));
+        If S <> '' Then
+        Begin
+          MouseTitle := S;
+          SaveSettings;
+          Dummy := WinSetWindowText(WinQueryWindow(NbClient, QW_PARENT), Z(MouseTitle + ' - Parametres'));
+          Sel := FindView(VK_SETUP, '');
+          If Sel >= 0 Then
+          Begin
+            Populate(Sel);
+            Dummy := WinInvalidateRect(Vw(Sel)^.Client, 0, 1);
+          End;
+        End;
+      End;
     313 :
       Begin
         Vb[0] := 0;
@@ -2645,6 +3020,67 @@ Begin
         Else S := 'Carte VGA sans BIOS VESA : 640 x 480 x 16 couleurs.';
         ShowMsg(S, 'Capacites de l''ecran', MB_OK Or MB_INFORMATION);
       End;
+  End;
+End;
+
+{ valeur choisie sur le curseur K }
+Procedure SlCommit(K : LongInt);
+Begin
+  Case SlId[K] Of
+    400 : CfgDbl := DblSlide[SlVal[K]];
+    401 : CfgSpeed := SlVal[K];
+    440 : CfgCometLen := SlVal[K] + 1;
+  End;
+  ApplySettings; SaveSettings;
+End;
+
+Procedure SlSet(K, V : LongInt; Commit : Boolean);
+Begin
+  V := MaxI(0, MinI(SlCnt[K] - 1, V));
+  If V <> SlVal[K] Then
+  Begin
+    SlVal[K] := V;
+    Dummy := WinInvalidateRect(NbClient, 0, 1);
+  End;
+  If Commit Then SlCommit(K);
+End;
+
+{ graduation la plus proche de x (client) sur le curseur K }
+Function SlFromX(K, X : LongInt) : LongInt;
+Var X1 : LongInt;
+Begin
+  X1 := 40 + SlX[K] + 4;
+  SlFromX := ((X - X1) * (SlCnt[K] - 1) + (SlW[K] - 8) Div 2) Div MaxI(1, SlW[K] - 8);
+End;
+
+{ clic sur un curseur (vrai si traite) }
+Function SlClick(X, Y, H : LongInt) : Boolean;
+Var K, X1, X2, Yc : LongInt;
+Begin
+  SlClick := False;
+  For K := 0 To SlN - 1 Do
+  Begin
+    X1 := 40 + SlX[K]; X2 := X1 + SlW[K]; Yc := SlAxis(K, H);
+    If (Y >= Yc - 12) And (Y <= Yc + 12) Then
+    Begin
+      If (X >= X1 - 4) And (X <= X2 + 4) Then
+      Begin
+        SlDrag := K;
+        SlSet(K, SlFromX(K, X), False);
+        Dummy := WinSetCapture(HWND_DESKTOP, NbClient);
+        SlClick := True;
+      End
+      Else If (X >= X2 + 6) And (X <= X2 + 18) Then
+      Begin
+        SlSet(K, SlVal[K] - 1, True);
+        SlClick := True;
+      End
+      Else If (X >= X2 + 19) And (X <= X2 + 31) Then
+      Begin
+        SlSet(K, SlVal[K] + 1, True);
+        SlClick := True;
+      End;
+    End;
   End;
 End;
 
@@ -2667,10 +3103,43 @@ Begin
         NotebookProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
         X := S16(Mp1); Y := S16(Mp1 Shr 16);
         Dummy := WinQueryWindowRect(H, LongInt(@Rc));
-        For K := 0 To NbTabs - 1 Do
+        If SlClick(X, Y, Rc[3]) Then
+        Begin
+          NotebookProc := 1;
+          Exit;
+        End;
+        For K := 0 To TabCnt - 1 Do
         Begin
           TabRect(K, Rc[2], Rc[3], X1, Y1, X2, Y2);
           If (X >= X1) And (X < X2) And (Y >= Y1) And (Y < Y2) Then NbSelect(K);
+        End;
+        NotebookProc := 1;
+      End;
+    WM_MOUSEMOVE :
+      Begin
+        If (SlDrag >= 0) And (SlDrag < SlN) Then SlSet(SlDrag, SlFromX(SlDrag, S16(Mp1)), False);
+        NotebookProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+      End;
+    WM_BUTTON1UP :
+      Begin
+        If (SlDrag >= 0) And (SlDrag < SlN) Then
+        Begin
+          Dummy := WinSetCapture(HWND_DESKTOP, 0);
+          SlSet(SlDrag, SlFromX(SlDrag, S16(Mp1)), True);
+        End;
+        SlDrag := -1;
+        NotebookProc := 1;
+      End;
+    WM_BUTTON1DBLCLK :
+      Begin
+        { zone d'essai du double clic }
+        X := S16(Mp1); Y := S16(Mp1 Shr 16);
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        TestRect(Rc[3], X1, Y1, X2, Y2);
+        If (NbKind = 1) And (NbTab = 0) And (X >= X1) And (X < X2) And (Y >= Y1) And (Y < Y2) Then
+        Begin
+          TestOn := 1 - TestOn;
+          Dummy := WinInvalidateRect(H, 0, 1);
         End;
         NotebookProc := 1;
       End;
@@ -2680,9 +3149,9 @@ Begin
       Begin
         Fs := Lo16(Mp1); Vk := Hi16(Mp2);
         If ((Fs And KC_KEYUP) = 0) And ((Fs And KC_VIRTUALKEY) <> 0) And (Vk = VK_PAGEDOWN) Then
-          NbSelect((NbTab + 1) Mod NbTabs)
+          NbSelect((NbTab + 1) Mod TabCnt)
         Else If ((Fs And KC_KEYUP) = 0) And ((Fs And KC_VIRTUALKEY) <> 0) And (Vk = VK_PAGEUP) Then
-          NbSelect((NbTab + NbTabs - 1) Mod NbTabs)
+          NbSelect((NbTab + TabCnt - 1) Mod TabCnt)
         Else If ((Fs And KC_KEYUP) = 0) And ((Fs And KC_VIRTUALKEY) <> 0) And (Vk = VK_ESC) And (V >= 0) Then
           CloseView(V)
         Else NotebookProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
@@ -2702,22 +3171,33 @@ Begin
   End;
 End;
 
-Procedure OpenNotebook(Tab : LongInt);
-Var V : LongInt;
+{ carnet Kind (0 : Systeme, 1 : Souris) ; un seul carnet ouvert a la fois }
+Procedure OpenNb(Kind, Tab : LongInt);
+Var V : LongInt; P, T : String;
 Begin
-  V := FindView(VK_NOTE, '');
+  If Kind = 1 Then P := 'SOURIS' Else P := '';
+  V := FindView(VK_NOTE, P);
   If V >= 0 Then
   Begin
     ActivateView(V);
     NbSelect(Tab);
     Exit;
   End;
-  V := NewView(VK_NOTE, '', 'Systeme - Parametres');
+  If Kind = 1 Then V := FindView(VK_NOTE, '') Else V := FindView(VK_NOTE, 'SOURIS');
+  If V >= 0 Then CloseView(V);
+  If Kind = 1 Then T := MouseTitle + ' - Parametres' Else T := 'Systeme - Parametres';
+  V := NewView(VK_NOTE, P, T);
   If V < 0 Then Exit;
-  NbTab := Tab; NbN := 0;
+  NbKind := Kind; NbTab := Tab; NbN := 0; SlN := 0; GbN := 0; SlDrag := -1; TestOn := 0;
+  UndoDbl := CfgDbl; UndoSpeed := CfgSpeed;
   If Not OpenFrame(V, 'WPNotebook', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON, MaxI(0, (ScrW - 500) Div 2),
                    MaxI(0, (ScrH - 440) Div 2), 500, 440) Then Exit;
   If NbN = 0 Then NbBuild;
+End;
+
+Procedure OpenNotebook(Tab : LongInt);
+Begin
+  OpenNb(0, Tab);
 End;
 
 { --- logo du demarrage --- }
@@ -2801,6 +3281,13 @@ Begin
         X := S16(Mp1); Y := S16(Mp1 Shr 16);
         K := HitItem(V, X, Y);
         SelectItem(V, K);
+        { correspondances (carnet Souris) : Maj + clic du bouton 1 = menu }
+        If (CfgMapMenu <> 0) And ((Hi16(Mp2) And KC_SHIFT) <> 0) Then
+        Begin
+          ContextMenu(V, K, X, Y);
+          ViewProc := 1;
+          Exit;
+        End;
         If (K >= 0) And (Vw(V)^.Kind = VK_DESK) Then
         Begin
           DragItem := K; DragX0 := X; DragY0 := Y; DragIX := It(K)^.X; DragITop := It(K)^.Top; Dragging := 0;
@@ -2876,7 +3363,8 @@ Begin
         Dummy := WinSetCapture(HWND_DESKTOP, 0);
         K := HitItem(V, X, Y);
         SelectItem(V, K);
-        If K >= 0 Then OpenItem(K);
+        If K >= 0 Then OpenItem(K)
+        Else If (CfgMapList = 1) And (Vw(V)^.Kind = VK_DESK) Then OpenWinList;
         ViewProc := 1;
       End;
     WM_BUTTON2DOWN :
@@ -2887,7 +3375,8 @@ Begin
         X := S16(Mp1); Y := S16(Mp1 Shr 16);
         K := HitItem(V, X, Y);
         NoMenu := 0;
-        If K >= 0 Then
+        { correspondances : glisser avec le bouton 1 seulement }
+        If (K >= 0) And (CfgMapDrag = 0) Then
         Begin
           DSrc := K; DActive := 2;
           Pt[0] := X; Pt[1] := Y;
@@ -2914,9 +3403,15 @@ Begin
         End;
         ViewProc := 1;
       End;
+    WM_BUTTON3CLICK :
+      Begin
+        { correspondances : liste des fenetres }
+        If CfgMapList = 0 Then OpenWinList;
+        ViewProc := 1;
+      End;
     WM_BUTTON2CLICK :
       Begin
-        If NoMenu = 0 Then
+        If (NoMenu = 0) And (CfgMapMenu = 0) Then
         Begin
           X := S16(Mp1); Y := S16(Mp1 Shr 16);
           K := HitItem(V, X, Y);
