@@ -947,6 +947,9 @@ Begin
       KbdState := KbdState And Not (B Shl 8);
   End;
   KbdSyncFlags;
+  { Ctrl+Alt+Suppr : redemarrage (impulsion de remise a zero du
+    controleur du clavier) }
+  If (Up = 0) And (Sc = $53) And ((KbdState And $000C) = $000C) Then Port[$64] := $FE;
   If (Sc = 0) Or (KbdState <> Old) Or (Sc = $54) Then
   Begin
     { touche d'etat : signalee seulement en mode de rapport }
@@ -5731,7 +5734,8 @@ BEGIN
   EnvSet('PROMPT', '$i[$p]');
   EnvSet('OS2_SHELL', 'C:\CMD.EXE');
   ReadConfigSys;
-  EnvSet('COMSPEC', ShellPath);
+  { COMSPEC : celui de CONFIG.SYS (SET COMSPEC=), sinon le PROTSHELL }
+  If EnvFind('COMSPEC') = 0 Then EnvSet('COMSPEC', ShellPath);
   { bibliotheque DOSCALLS.DLL (API Dos* d'OS/2), si elle est presente }
   If FindLibrary('DOSCALLS.DLL') <> '' Then
   Begin

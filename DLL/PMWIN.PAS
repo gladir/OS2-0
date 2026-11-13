@@ -52,7 +52,12 @@ Library PMWIN;
   (ordinal 1001, interne) decrit un HPS pour PMGPI.DLL, WINQUERYSCREENTEXT
   (1002, interne) rend le texte ecrit a l'ecran (programmes d'essai) et
   WINHIDEOVERLAYS (1003, interne) retire le pointeur et le curseur avant
-  un dessin direct de PMGPI.DLL.
+  un dessin direct de PMGPI.DLL. Pour le bureau (PMSHELL.EXE) :
+  WINSUSPENDSCREEN (1004) prete l'ecran a un programme lance (mode texte ;
+  un programme de PM lance pendant ce temps reprend le mode graphique a
+  sa premiere file de messages et le rend a sa fin), WINRESUMESCREEN
+  (1005) rend l'ecran a PM et WINQUERYSCREENTAKEN (1006) dit si un
+  programme de PM a pris l'ecran entre les deux.
 
   Handles : HAB 00010001h..., HMQ 00510001h..., HWND 8000xxyyh (HWND_DESKTOP
   1 et HWND_OBJECT 2 acceptes), HPS 5053xxxxh, HDC 4443xxxxh, HPOINTER
@@ -306,6 +311,7 @@ Var
 
 Var
   GMode : LongInt;                        { 1 : ecran graphique }
+  Susp, SuspPid, SuspTook : LongInt;      { ecran prete a un programme (WINSUSPENDSCREEN) }
   ScrCols, ScrRows, ScrCX, ScrCY : LongInt;
   GCx1, GCy1, GCx2, GCy2 : LongInt;       { decoupage (pels de l'ecran, x2 et y2 exclus) }
   GFont : Array[0..4095] Of Byte;         { police 8 x 16 }
@@ -4502,7 +4508,10 @@ Begin
   First := True;
   For I := 0 To MaxQ - 1 Do
     If (I <> F) And (QPid[I] <> 0) Then First := False;
-  If First Then ScreenStart;
+  { premiere file, ou premiere file d'un programme lance par l'interpreteur
+    pendant que l'ecran lui est prete }
+  If (Susp <> 0) And (MyPid <> SuspPid) Then SuspTook := 1;
+  If First Or ((Susp <> 0) And (MyPid <> SuspPid)) Then ScreenStart;
   WinCreateMsgQueue := $00510001 + F;
 End;
 
@@ -11974,7 +11983,7 @@ Begin
   { dernier programme de PM : ecran rendu au mode texte }
   Others := False;
   For C := 0 To MaxQ - 1 Do
-    If (QPid[C] <> 0) And Alive(QPid[C]) Then Others := True;
+    If (QPid[C] <> 0) And Alive(QPid[C]) And Not ((Susp <> 0) And (QPid[C] = SuspPid)) Then Others := True;
   If Not Others Then
   Begin
     If GMode <> 0 Then GLeave
@@ -12222,6 +12231,58 @@ Begin
   CursorWin := 0;
   ShowHwCursor;
   InvalScreen(0, 0, ScrCX, ScrCY);
+End;
+
+{ WINSUSPENDSCREEN (ordinal 1004, interne : PMSHELL.EXE) : l'ecran est
+  prete a un programme lance (DosExecPgm) : mode texte 80 x 25 ; un
+  programme de PM lance pendant ce temps reprend l'ecran graphique a sa
+  premiere file de messages et le rend au mode texte a sa fin ; BOOL }
+Function WinSuspendScreen : LongInt;
+Var R, C : LongInt;
+Begin
+  Susp := 1; SuspPid := MyPid; SuspTook := 0;
+  If GMode <> 0 Then GLeave
+  Else
+    For R := 0 To ScrRows - 1 Do
+      For C := 0 To ScrCols - 1 Do PutCell(C, R, 32, 7);
+  CaptureWin := 0;
+  WrW(LongInt(@NameZ2), 14); WrW(LongInt(@NameZ2) + 2, 14); WrW(LongInt(@NameZ2) + 4, 15); WrW(LongInt(@NameZ2) + 6, 0);
+  Dummy := VioSetCurType(LongInt(@NameZ2), 0);
+  Dummy := VioSetCurPos(0, 0, 0);
+  WinSuspendScreen := 1;
+End;
+
+{ WINRESUMESCREEN (ordinal 1005, interne : PMSHELL.EXE) : l'ecran revient
+  a PM (mode graphique, tout est redessine) ; les evenements de la souris
+  recus pendant le programme sont oublies ; BOOL }
+Function WinResumeScreen : LongInt;
+Var Q, N, Wait : LongInt; Ev : Array[0..11] Of Byte;
+Begin
+  Susp := 0; SuspPid := 0;
+  CleanupDead;
+  ScreenStart;
+  Q := CurQ;
+  If (Q >= 0) And (QMou[Q] <> 0) Then
+  Begin
+    N := 0;
+    Repeat
+      Wait := 0;
+      MemZero(LongInt(@Ev), 12);
+      If MouReadEventQue(LongInt(@Ev), LongInt(@Wait), QMou[Q]) <> 0 Then N := 999;
+      If (RdW(LongInt(@Ev)) = 0) And (RdL(LongInt(@Ev) + 2) = 0) Then N := 999;
+      Inc(N);
+    Until N >= 64;
+  End;
+  MouseBtn := 0;
+  CaptureWin := 0;
+  WinResumeScreen := 1;
+End;
+
+{ WINQUERYSCREENTAKEN (ordinal 1006, interne : PMSHELL.EXE) : 1 si un
+  programme de PM a pris l'ecran depuis WINSUSPENDSCREEN }
+Function WinQueryScreenTaken : LongInt;
+Begin
+  WinQueryScreenTaken := SuspTook;
 End;
 
 { ==================================================================== }
@@ -14192,7 +14253,10 @@ exports
   WinSysClassProc Index 1000 Name 'WINSYSCLASSPROC',
   WinQueryPSInfo Index 1001 Name 'WINQUERYPSINFO',
   WinQueryScreenText Index 1002 Name 'WINQUERYSCREENTEXT',
-  WinHideOverlays Index 1003 Name 'WINHIDEOVERLAYS';
+  WinHideOverlays Index 1003 Name 'WINHIDEOVERLAYS',
+  WinSuspendScreen Index 1004 Name 'WINSUSPENDSCREEN',
+  WinResumeScreen Index 1005 Name 'WINRESUMESCREEN',
+  WinQueryScreenTaken Index 1006 Name 'WINQUERYSCREENTAKEN';
 
 Var
   InitI : LongInt;

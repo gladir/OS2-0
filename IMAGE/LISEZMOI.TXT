@@ -8,7 +8,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
-              PMSPL.DLL, CMD.EXE,
+              PMSPL.DLL, CMD.EXE, PMSHELL.EXE,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
@@ -47,6 +47,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC -COS2LDR  KERNEL\OS2LDR.PAS         -> OS2LDR
   OS2PC -COS2KRNL KERNEL\OS2KRNL.PAS        -> OS2KRNL
   OS2PC CMD.PAS                             -> CMD.EXE (et les commandes)
+  OS2PC PMSHELL.PAS                         -> PMSHELL.EXE (le bureau, Workplace Shell)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
   OS2PC DLL\FKA.PAS                         -> FKA.DLL (touches de fonction)
@@ -113,8 +114,9 @@ Demarrage
    charge DOSCALLS.DLL, puis les pilotes IFS (IFS=) : il cherche les
    disques durs IDE, cree le disque virtuel (/RAMDISK) et monte les
    volumes reconnus (D:, E:...). Il lance enfin le processeur de
-   commandes (PROTSHELL, C:\CMD.EXE par defaut). A la fin de CMD
-   (EXIT), il est relance.
+   commandes (PROTSHELL : C:\PMSHELL.EXE, le bureau, sur le CD-ROM ;
+   C:\CMD.EXE par defaut). S'il se termine, il est relance.
+   Ctrl+Alt+Suppr redemarre l'ordinateur a tout moment.
 
 Carte memoire
 -------------
@@ -151,7 +153,11 @@ Carte memoire
 
 CONFIG.SYS
 ----------
-  PROTSHELL=C:\CMD.EXE     processeur de commandes
+  PROTSHELL=C:\PMSHELL.EXE processeur de commandes (le bureau ; mettre
+                           C:\CMD.EXE pour demarrer sur la ligne de
+                           commande)
+  SET COMSPEC=C:\CMD.EXE   interpreteur des commandes (gardee telle
+                           quelle ; sinon, celle du PROTSHELL)
   LIBPATH=C:\;             repertoires des DLL
   IFS=C:\HPFS.IFS ...      pilote de systeme de fichiers installable ;
                            parametres : /CACHE:n (Ko d'antememoire des
@@ -511,6 +517,29 @@ PM_Q_STD des appels de la GPI sur un DC. Prt* : acces a l'imprimante
 PrtDevIOCtl categorie 5). SplMessageBox : boite de message (MBID_RETRY
 apres MSGTIMEOUT secondes, 180 par defaut). SplRing3 : appel d'une
 fonction. Un DC OD_QUEUED de PMGPI.DLL est un travail de PMSPL.
+
+Bureau (PMSHELL.EXE)
+--------------------
+PMSHELL.EXE (Workplace Shell) est lance au demarrage
+(PROTSHELL=C:\PMSHELL.EXE). Bureau en 640 x 480 x 16 couleurs avec les
+objets Systeme OS/2, Lecteurs, Invite de commandes OS/2, Liste des
+fenetres et Arret ; dossiers Systeme OS/2, Lecteurs et repertoires
+(programmes, fichiers de commandes, fichiers de donnees ; visionneuse de
+texte).
+  Souris : clic = choisir, double clic = ouvrir, bouton 2 = menu
+  contextuel ; les icones du bureau se deplacent (position dans OS2.INI).
+  Clavier : fleches, Debut, Fin, lettre = choisir ; Entree = ouvrir ;
+  Maj+F10 = menu ; Ctrl+Echap = liste des fenetres ; F5 = actualiser ;
+  Retour arriere = dossier parent ; Suppr = supprimer ; F1 = aide ;
+  Alt+F4 = fermer (sur le bureau : arret) ; Echap = fermer la
+  visionneuse ou la liste.
+Un programme lance (DosExecPgm, dans le repertoire de son dossier)
+prend l'ecran (mode texte ; mode graphique pour un programme de PM) ; a
+sa fin le bureau revient (apres une touche pour un programme en mode
+texte autre que l'invite de commandes). PMWIN.DLL : WINSUSPENDSCREEN
+(1004), WINRESUMESCREEN (1005), WINQUERYSCREENTAKEN (1006). STARTUP.CMD
+(C:\ ou D:\) est execute avant le bureau. Arret : confirmation,
+DosShutdown, puis Ctrl+Alt+Suppr pour redemarrer.
 
 Imprimante
 ----------
