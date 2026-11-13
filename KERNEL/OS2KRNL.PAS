@@ -99,9 +99,13 @@ Const
   HFileBase     = $100;
   HFindBase     = $200;
   HProcBase     = $300;
-  MaxFiles      = 32;
-  MaxFinds      = 16;
-  MaxProcs      = 8;
+  MaxFiles      = 128;
+  MaxFinds      = 64;
+  MaxProcs      = 64;
+  MaxTasks      = 128;         { taches (fils d'execution) ; la 0 est le noyau }
+  MaxPBlk       = 192;         { blocs de memoire physique des processus }
+  HThreadBase   = $400;        { handles de fils (CreateProcessA) }
+  ThreadStackMin = $00010000;  { pile minimale d'un fil (64 Ko) }
   MaxRamFiles   = 128;
 
   { Codes d'erreur (GetLastError, compatibles DOS/Win32) }
@@ -211,6 +215,11 @@ Type
     Serial    : LongInt;     { identificateur de processus (PID) unique }
     StdOutH   : LongInt;     { sortie standard redirigee (0 : console) }
     CurDir    : String[127];
+    MemLive   : Boolean;     { memoire physique pas encore rendue }
+    HandleOpen : Boolean;    { handle du processus ouvert (code de sortie) }
+    NoPreempt : Boolean;     { pas de preemption (programme de PM) }
+    NextTid   : LongInt;     { prochain identificateur de fil }
+    Sess      : LongInt;     { session (ecran et clavier) }
   End;
 
 Var
@@ -254,7 +263,6 @@ Var
   { Memoire }
   HeapStart, HeapEnd : LongInt;
   MemTotalKb       : LongInt;
-  PhysNext         : LongInt;       { prochaine memoire physique des processus }
   PhysTop          : LongInt;
 
   { Pagination }
@@ -289,6 +297,15 @@ Var
   ExcFilter        : LongInt;
   LibPath          : String;        { LIBPATH= de CONFIG.SYS }
   NextSerial       : LongInt;       { prochain PID }
+
+  { Taches (multitache) : la tache 0 est le noyau ; chaque processus a son
+    fil 1 et ses fils crees par KrnTaskCtl }
+  TkUsed           : Array[0..MaxTasks - 1] Of LongInt;   { 0 libre, 1 active, 2 morte }
+  TkProc, TkEsp, TkStack, TkLastErr, TkTid, TkFn, TkArg : Array[0..MaxTasks - 1] Of LongInt;
+  CurTask, NTasks, IdleStreak, SliceStart, SwSave, SwNew, TmpIntEbp : LongInt;
+  { memoire physique des processus : blocs tries par adresse }
+  PBase, PSize     : Array[0..MaxPBlk - 1] Of LongInt;
+  PCount           : LongInt;
 
 { ==================================================================== }
 { Partie 2 - Utilitaires                                               }
@@ -703,10 +720,26 @@ End;
 { Partie 5 - Minuterie, horloge temps reel, haut-parleur               }
 { ==================================================================== }
 
+Procedure Preempt; Forward;
+Procedure Yield; Forward;
+
+{ Minuterie : a la fin de la tranche (30 ms), une tache interrompue dans le
+  code de son programme (fenetre 00400000h-007FFFFFh) cede la place ; le
+  noyau et les DLL ne sont jamais interrompus (donnees globales). }
 Procedure IrqTimer;
 Begin
   Inc(Ticks);
   Port[$20] := $20;
+  IdleStreak := 0;
+  If (NTasks > 1) And (CurTask > 0) And (Ticks - SliceStart >= 3) Then
+  Begin
+    asm
+      mov eax,ebp
+      mov TmpIntEbp,eax
+    end;
+    If (MemL[0:TmpIntEbp + 36] >= ProcWinBase) And (MemL[0:TmpIntEbp + 36] < ProcWinBase + ProcWinSize) Then
+      Preempt;
+  End;
 End;
 
 { PIT canal 0 a 100 Hz }
@@ -717,12 +750,28 @@ Begin
   Port[$40] := 11932 Shr 8;
 End;
 
+{ Attente : les autres taches s'executent ; quand toutes attendent depuis
+  la derniere interruption, le processeur s'arrete jusqu'a la suivante }
 Procedure Idle;
 Begin
-  asm
-    sti
-    hlt
-  end;
+  If NTasks > 1 Then
+  Begin
+    Inc(IdleStreak);
+    If IdleStreak > NTasks * 2 Then
+    Begin
+      IdleStreak := 0;
+      asm
+        sti
+        hlt
+      end;
+    End
+    Else Yield;
+  End
+  Else
+    asm
+      sti
+      hlt
+    end;
 End;
 
 { Attendre Ms millisecondes }
@@ -3550,9 +3599,12 @@ Begin
   End;
   If (H >= HProcBase) And (H < HProcBase + MaxProcs) Then
   Begin
-    If Not Procs[H - HProcBase].Running Then Procs[H - HProcBase].Used := False;
+    Procs[H - HProcBase].HandleOpen := False;
+    If Not Procs[H - HProcBase].Running And Not Procs[H - HProcBase].MemLive Then
+      Procs[H - HProcBase].Used := False;
     Exit;
   End;
+  If (H >= HThreadBase) And (H < HThreadBase + MaxProcs) Then Exit;
   If (H = HStdIn) Or (H = HStdOut) Or (H = HStdErr) Then Exit;
   LastError := ErrInvalidHandle;
   CloseHandle := 0;
@@ -5018,30 +5070,19 @@ Begin
     KFree(Buf);
     Exit;
   End;
-  Phys := PhysNext;
-  If Phys + PhysSize > PhysTop Then
-  Begin
-    LastError := ErrNotEnoughMem;
-    KFree(Buf);
-    Exit;
-  End;
   Pid := -1;
-  For I := 0 To MaxProcs - 1 Do
-    If Not Procs[I].Used Then
-    Begin
-      Pid := I;
-      Break;
-    End;
-  If Pid < 0 Then
-    For I := 0 To MaxProcs - 1 Do
-      If Not Procs[I].Running And (I <> CurProc) Then
-      Begin
-        Pid := I;
-        Break;
-      End;
+  For I := MaxProcs - 1 DownTo 0 Do
+    If Not Procs[I].Used Then Pid := I;
   If Pid < 0 Then
   Begin
     LastError := 164;   { plus de processus }
+    KFree(Buf);
+    Exit;
+  End;
+  Phys := PAlloc(PhysSize);
+  If Phys = 0 Then
+  Begin
+    LastError := ErrNotEnoughMem;
     KFree(Buf);
     Exit;
   End;
@@ -5078,6 +5119,7 @@ Begin
         If V < 0 Then
         Begin
           ConPutLn('SYS0191: importation par ordinal non prise en charge.');
+          PFree(Phys);
           Exit;
         End;
         Nm := PStr(Phys + V + 2);
@@ -5087,6 +5129,7 @@ Begin
           ConPutLn('SYS0191: ' + Nm + ' introuvable dans ' +
                    PStr(Phys + MemL[0:Desc + 12]) + ' (' + Path + ').');
           LastError := 127;
+          PFree(Phys);
           Exit;
         End;
         MemL[0:Phys + Iat + J * 4] := Adr;
@@ -5119,50 +5162,262 @@ Begin
   Procs[Pid].StdOutH := 0;
   If CurProc >= 0 Then Procs[Pid].StdOutH := Procs[CurProc].StdOutH;
   Procs[Pid].CurDir := CurDir;
+  Procs[Pid].MemLive := True;
+  Procs[Pid].HandleOpen := False;
+  Procs[Pid].NoPreempt := False;
+  Procs[Pid].NextTid := 2;
+  Procs[Pid].Sess := 0;
+  If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
   ProcEntry[Pid] := ProcWinBase + Entry;
   ProcStack[Pid] := Phys + PhysSize - 16;
-  PhysNext := (Phys + PhysSize + 4095) And Not 4095;
   LastError := 0;
   LoadProgram := Pid;
 End;
 
-{ Demarrer le point d'entree sur la pile du processus. ExitProcess (ou
-  une exception) revient ici par KillCurrentProcess. }
-Procedure RunEntry(Entry, StackTop : LongInt);
+{ --- Memoire physique des processus (blocs tries par adresse) --- }
+Function PAlloc(Size : LongInt) : LongInt;
+Var I, J, Cand : LongInt;
 Begin
-  asm
-    pushad
-    mov TmpEsp,esp
-  end;
-  Procs[CurProc].SavedEsp := TmpEsp;
-  asm
-    mov eax,Entry
-    mov ecx,StackTop
-    mov esp,ecx
-    sti
-    call eax
-  end;
-  KillCurrentProcess(0);
+  PAlloc := 0;
+  Size := (Size + 4095) And Not 4095;
+  If (Size <= 0) Or (PCount >= MaxPBlk) Then Exit;
+  Cand := PhysProcBase;
+  I := 0;
+  While I < PCount Do
+  Begin
+    If Cand + Size <= PBase[I] Then Break;
+    If PBase[I] + PSize[I] > Cand Then Cand := (PBase[I] + PSize[I] + 4095) And Not 4095;
+    Inc(I);
+  End;
+  If Cand + Size > PhysTop Then Exit;
+  For J := PCount DownTo I + 1 Do
+  Begin
+    PBase[J] := PBase[J - 1]; PSize[J] := PSize[J - 1];
+  End;
+  PBase[I] := Cand; PSize[I] := Size;
+  Inc(PCount);
+  PAlloc := Cand;
 End;
 
-{ Executer un processus charge jusqu'a sa fin ; rend son code de sortie }
-Function RunProcess(Pid : LongInt) : LongInt;
+Procedure PFree(Base : LongInt);
+Var I, J : LongInt;
+Begin
+  For I := 0 To PCount - 1 Do
+    If PBase[I] = Base Then
+    Begin
+      For J := I To PCount - 2 Do
+      Begin
+        PBase[J] := PBase[J + 1]; PSize[J] := PSize[J + 1];
+      End;
+      Dec(PCount);
+      Exit;
+    End;
+End;
+
+Function PhysFree : LongInt;
+Var I, T : LongInt;
+Begin
+  T := PhysTop - PhysProcBase;
+  For I := 0 To PCount - 1 Do T := T - PSize[I];
+  PhysFree := T;
+End;
+
+{ --- Taches --- }
+
+{ Changer de pile : les registres et les drapeaux sont sauves sur la pile
+  de la tache courante (ESP dans SwSave^), puis ceux de la tache dont la
+  pile est SwNew sont repris ; on revient dans la tache reprise, a la
+  sortie de son propre appel a CtxSwitch. }
+Procedure CtxSwitch;
+Begin
+  asm
+    pushfd
+    cli
+    pushad
+    mov eax,SwSave
+    mov [eax],esp
+    mov eax,SwNew
+    mov esp,eax
+    popad
+    popfd
+  end;
+End;
+
+Function NextTask : LongInt;
+Var I, T : LongInt;
+Begin
+  NextTask := CurTask;
+  For I := 1 To MaxTasks Do
+  Begin
+    T := (CurTask + I) Mod MaxTasks;
+    If TkUsed[T] = 1 Then
+    Begin
+      NextTask := T;
+      Exit;
+    End;
+  End;
+End;
+
+{ Passer a la tache N (interruptions masquees par l'appelant) }
+Procedure SwitchTo(N : LongInt);
+Begin
+  If (N = CurTask) Or (N < 0) Then Exit;
+  TkLastErr[CurTask] := LastError;
+  If TkProc[N] <> TkProc[CurTask] Then MapWindow(TkProc[N]);
+  SwSave := LongInt(@TkEsp) + CurTask * 4;
+  SwNew := TkEsp[N];
+  CurTask := N;
+  CurProc := TkProc[N];
+  LastError := TkLastErr[N];
+  SliceStart := Ticks;
+  CtxSwitch;
+End;
+
+{ Rendre la memoire des taches et des processus termines }
+Procedure Reap;
+Var T, P, K : LongInt; Alive : Boolean;
+Begin
+  For T := 1 To MaxTasks - 1 Do
+    If (TkUsed[T] = 2) And (T <> CurTask) Then
+    Begin
+      If TkStack[T] <> 0 Then PFree(TkStack[T]);
+      TkStack[T] := 0;
+      TkUsed[T] := 0;
+    End;
+  For P := 0 To MaxProcs - 1 Do
+    If Procs[P].Used And Not Procs[P].Running And Procs[P].MemLive Then
+    Begin
+      Alive := False;
+      For K := 0 To MaxTasks - 1 Do
+        If (TkUsed[K] <> 0) And (TkProc[K] = P) Then Alive := True;
+      If Not Alive Then
+      Begin
+        PFree(Procs[P].PhysBase);
+        KFree(Procs[P].PtAlloc);
+        Procs[P].MemLive := False;
+        If Not Procs[P].HandleOpen Then Procs[P].Used := False;
+      End;
+    End;
+End;
+
+{ Ceder le processeur (attente cooperative) }
+Procedure Yield;
+Begin
+  asm
+    cli
+  end;
+  Reap;
+  SwitchTo(NextTask);
+  asm
+    sti
+  end;
+End;
+
+{ Preemption par la minuterie (interruptions masquees) }
+Procedure Preempt;
+Begin
+  If (CurProc >= 0) And Procs[CurProc].NoPreempt Then Exit;
+  SwitchTo(NextTask);
+End;
+
+Procedure EndThread(Code : LongInt); Forward;
+
+{ Premiere execution d'une tache : fil 1 d'un processus (point d'entree du
+  programme) ou fil cree par KrnTaskCtl (fonction _System (argument)) }
+Procedure TaskStart;
+Var F, A, R : LongInt;
+Begin
+  asm
+    sti
+  end;
+  F := TkFn[CurTask]; A := TkArg[CurTask];
+  If TkTid[CurTask] = 1 Then
+  Begin
+    asm
+      mov eax,F
+      call eax
+    end;
+    KillCurrentProcess(0);
+  End;
+  R := 0;
+  asm
+    mov eax,A
+    push eax
+    mov eax,F
+    call eax
+    add esp,4
+    mov R,eax
+  end;
+  EndThread(R);
+End;
+
+{ Nouvelle tache du processus Proc ; pile dont le sommet est StackTop
+  (bloc physique StackBlk a rendre a la fin, 0 pour la pile du processus) }
+Function NewTask(Proc, Fn, Arg, StackTop, StackBlk, Tid : LongInt) : LongInt;
+Var T, S, F, E, K : LongInt;
+Begin
+  NewTask := -1;
+  T := -1;
+  For K := MaxTasks - 1 DownTo 1 Do
+    If TkUsed[K] = 0 Then T := K;
+  If T < 0 Then Exit;
+  S := StackTop And Not 15;
+  MemL[0:S - 4] := LongInt(@TaskStart);
+  MemL[0:S - 8] := 0;
+  F := S - 8;
+  E := F - 36;
+  For K := 0 To 8 Do MemL[0:E + K * 4] := 0;
+  MemL[0:E + 8] := F;          { EBP repris par POPAD }
+  MemL[0:E + 32] := $202;      { EFLAGS : IF }
+  TkEsp[T] := E;
+  TkProc[T] := Proc; TkStack[T] := StackBlk; TkLastErr[T] := 0; TkTid[T] := Tid;
+  TkFn[T] := Fn; TkArg[T] := Arg;
+  asm
+    cli
+  end;
+  TkUsed[T] := 1;
+  Inc(NTasks);
+  asm
+    sti
+  end;
+  NewTask := T;
+End;
+
+{ Demarrer le fil 1 d'un processus charge }
+Function StartProcess(Pid : LongInt) : Boolean;
+Var Ok : Boolean;
 Begin
   Procs[Pid].Running := True;
-  Procs[Pid].Parent := CurProc;
-  CurProc := Pid;
-  MapWindow(Pid);
-  RunEntry(ProcEntry[Pid], ProcStack[Pid]);
-  RunProcess := Procs[Pid].ExitCode;
+  Procs[Pid].NextTid := 2;
+  Ok := NewTask(Pid, ProcEntry[Pid], 0, ProcStack[Pid], 0, 1) >= 0;
+  If Not Ok Then Procs[Pid].Running := False;
+  StartProcess := Ok;
 End;
 
+{ Fin de la tache courante (sans retour) }
+Procedure EndThread(Code : LongInt);
+Var K : LongInt; Others : Boolean;
+Begin
+  Others := False;
+  For K := 1 To MaxTasks - 1 Do
+    If (K <> CurTask) And (TkUsed[K] = 1) And (TkProc[K] = CurProc) Then Others := True;
+  If (Not Others) Or (TkTid[CurTask] = 1) Then KillCurrentProcess(Code);
+  asm
+    cli
+  end;
+  TkUsed[CurTask] := 2;
+  Dec(NTasks);
+  SwitchTo(NextTask);
+End;
+
+{ Fin du processus courant : ses ressources sont rendues, ses fils
+  arretes ; la tache passe la main et ne reprend jamais. }
 Procedure KillCurrentProcess(Code : LongInt);
 Var Pid, I : LongInt;
 Begin
   Pid := CurProc;
   If Pid < 0 Then Exit;
   Procs[Pid].ExitCode := Code;
-  Procs[Pid].Running := False;
   KbdMode := 0;
   MonProcessExit(Procs[Pid].Serial);
   IfsProcessExit(Pid);
@@ -5178,31 +5433,27 @@ Begin
       MemW[0:VideoBase + I * 2] := $0720;
     ConRows := ScrRows;
     ConRowsOwner := -2;
-  NBlk := 0;
-  NIfs := 0;
-  NIfsLines := 0;
-  RamDiskKb := 0;
-  For I := 0 To 25 Do
-  Begin
-    IfsVols[I].Mounted := False;
-    IfsVols[I].Blk := -1;
-  End;
   End;
   KFree(Procs[Pid].CmdBuf);
-  KFree(Procs[Pid].PtAlloc);
-  PhysNext := Procs[Pid].PhysBase;
-  CurProc := Procs[Pid].Parent;
-  MapWindow(CurProc);
+  Procs[Pid].CmdBuf := 0;
   LineReady := False;
-  TmpEsp := Procs[Pid].SavedEsp;
   asm
-    mov eax,TmpEsp
-    mov esp,eax
-    popad
-    sti
-    mov esp,ebp
-    pop ebp
-    ret
+    cli
+  end;
+  Procs[Pid].Running := False;
+  For I := 1 To MaxTasks - 1 Do
+    If (TkUsed[I] = 1) And (TkProc[I] = Pid) Then
+    Begin
+      TkUsed[I] := 2;
+      Dec(NTasks);
+    End;
+  SwitchTo(NextTask);
+  { jamais atteint }
+  asm
+    cli
+  @h:
+    hlt
+    jmp @h
   end;
 End;
 
@@ -5248,26 +5499,227 @@ Begin
   If PInfo <> 0 Then
   Begin
     MemL[0:PInfo] := HProcBase + Pid;
-    MemL[0:PInfo + 4] := HProcBase + Pid;
+    MemL[0:PInfo + 4] := HThreadBase + Pid;
     MemL[0:PInfo + 8] := Procs[Pid].Serial;
     MemL[0:PInfo + 12] := 1;
   End;
-  { execution synchrone (comme DosExecPgm EXEC_SYNC) }
-  RunProcess(Pid);
+  { le processus s'execute en parallele ; WaitForSingleObject attend sa fin }
+  Procs[Pid].HandleOpen := True;
+  If Not StartProcess(Pid) Then
+  Begin
+    Procs[Pid].HandleOpen := False;
+    LastError := 164;
+    Exit;
+  End;
   CreateProcessA := 1;
 End;
 
+{ Attendre la fin d'un processus (handle de CreateProcessA) ; Ms -1 :
+  sans limite. Rend 0 (termine) ou 258 (delai ecoule). }
 Function WaitForSingleObject(H, Ms : LongInt) : LongInt;
+Var P, T0 : LongInt;
 Begin
   WaitForSingleObject := 0;
+  If (H < HProcBase) Or (H >= HProcBase + MaxProcs) Then Exit;
+  P := H - HProcBase;
+  T0 := Ticks;
+  While Procs[P].Used And Procs[P].Running Do
+  Begin
+    If (Ms <> -1) And ((Ticks - T0) * 10 >= Ms) Then
+    Begin
+      WaitForSingleObject := 258;
+      Exit;
+    End;
+    Idle;
+  End;
 End;
 
 Function GetExitCodeProcess(H, PCode : LongInt) : LongInt;
 Begin
   GetExitCodeProcess := 0;
   If (H < HProcBase) Or (H >= HProcBase + MaxProcs) Then Exit;
-  If PCode <> 0 Then MemL[0:PCode] := Procs[H - HProcBase].ExitCode;
+  If PCode <> 0 Then
+  Begin
+    If Procs[H - HProcBase].Running Then MemL[0:PCode] := 259     { STILL_ACTIVE }
+    Else MemL[0:PCode] := Procs[H - HProcBase].ExitCode;
+  End;
   GetExitCodeProcess := 1;
+End;
+
+{ KrnTaskCtl(op, p1, p2, p3) : taches et processus (DOSCALLS.DLL)
+    0 ceder le processeur
+    1 creer un fil : p1 fonction _System (argument), p2 argument, p3
+      taille de la pile ; rend l'identificateur du fil (0 : erreur)
+    2 attendre la fin du processus de PID p1 (p2 delai en ms, -1 sans
+      limite) : 0 termine, 258 delai ecoule, -1 inconnu
+    3 etat du processus de PID p1 : 1 en cours, 0 termine (p2^ : code de
+      sortie), -1 inconnu
+    4 preemption du processus courant permise (p1 = 0) ou non (p1 = 1)
+    5 arreter le processus de PID p1 (code p2)
+    6 identificateur du fil courant
+    7 attendre la fin du fil p1 du processus (p2 delai) : 0 ou 258
+    8 terminer le fil courant (code p1)
+    9 etat du fil p1 du processus : 1 actif, 0 termine
+   10 nombre de taches actives
+   11 PID du parent du processus de PID p1
+   12 nombre de taches qui peuvent encore agir pour l'appelant (autres
+      fils du processus, autres processus qui ne sont pas ses ancetres)
+   13 arreter le fil p1 du processus (pas le fil courant)
+   14 identificateur du prochain fil cree (p1) }
+Function ProcBySerial(S : LongInt) : LongInt;
+Var I, R : LongInt;
+Begin
+  R := -1;
+  For I := 0 To MaxProcs - 1 Do
+    If Procs[I].Used And (Procs[I].Serial = S) Then R := I;
+  ProcBySerial := R;
+End;
+
+Function TaskOfTid(Tid : LongInt) : LongInt;
+Var K, R : LongInt;
+Begin
+  R := -1;
+  For K := 1 To MaxTasks - 1 Do
+    If (TkUsed[K] = 1) And (TkProc[K] = CurProc) And (TkTid[K] = Tid) Then R := K;
+  TaskOfTid := R;
+End;
+
+Procedure KillOther(P, Code : LongInt);
+Var K : LongInt;
+Begin
+  For K := 0 To MaxFiles - 1 Do
+    If Files[K].Used And (Files[K].Owner = P) Then Files[K].Used := False;
+  For K := 0 To MaxFinds - 1 Do
+    If Finds[K].Used And (Finds[K].Owner = P) Then Finds[K].Used := False;
+  MonProcessExit(Procs[P].Serial);
+  KFreeOwner(P);
+  asm
+    cli
+  end;
+  Procs[P].ExitCode := Code;
+  Procs[P].Running := False;
+  For K := 1 To MaxTasks - 1 Do
+    If (TkUsed[K] = 1) And (TkProc[K] = P) Then
+    Begin
+      TkUsed[K] := 2;
+      Dec(NTasks);
+    End;
+  asm
+    sti
+  end;
+End;
+
+Function KrnTaskCtl(Op, P1, P2, P3 : LongInt) : LongInt;
+Var P, S, Sz, T0, K : LongInt;
+Begin
+  KrnTaskCtl := 0;
+  Case Op Of
+    0 : Yield;
+    1 : If CurProc >= 0 Then
+        Begin
+          Sz := P3;
+          If Sz < ThreadStackMin Then Sz := ThreadStackMin;
+          Sz := (Sz + 4095) And Not 4095;
+          S := PAlloc(Sz);
+          If S <> 0 Then
+          Begin
+            K := NewTask(CurProc, P1, P2, S + Sz - 16, S, Procs[CurProc].NextTid);
+            If K < 0 Then PFree(S)
+            Else
+            Begin
+              KrnTaskCtl := Procs[CurProc].NextTid;
+              Inc(Procs[CurProc].NextTid);
+            End;
+          End;
+        End;
+    2 : Begin
+          P := ProcBySerial(P1);
+          If P < 0 Then
+          Begin
+            KrnTaskCtl := -1;
+            Exit;
+          End;
+          T0 := Ticks;
+          While Procs[P].Used And Procs[P].Running And (Procs[P].Serial = P1) Do
+          Begin
+            If (P2 <> -1) And ((Ticks - T0) * 10 >= P2) Then
+            Begin
+              KrnTaskCtl := 258;
+              Exit;
+            End;
+            Idle;
+          End;
+        End;
+    3 : Begin
+          P := ProcBySerial(P1);
+          If P < 0 Then KrnTaskCtl := -1
+          Else If Procs[P].Running Then KrnTaskCtl := 1
+          Else If P2 <> 0 Then MemL[0:P2] := Procs[P].ExitCode;
+        End;
+    4 : If CurProc >= 0 Then Procs[CurProc].NoPreempt := P1 <> 0;
+    5 : Begin
+          P := ProcBySerial(P1);
+          If (P < 0) Or Not Procs[P].Running Then KrnTaskCtl := -1
+          Else If P = CurProc Then KillCurrentProcess(P2)
+          Else KillOther(P, P2);
+        End;
+    6 : If CurTask > 0 Then KrnTaskCtl := TkTid[CurTask] Else KrnTaskCtl := 1;
+    7 : Begin
+          T0 := Ticks;
+          While TaskOfTid(P1) >= 0 Do
+          Begin
+            If (P2 <> -1) And ((Ticks - T0) * 10 >= P2) Then
+            Begin
+              KrnTaskCtl := 258;
+              Exit;
+            End;
+            Idle;
+          End;
+        End;
+    8 : EndThread(P1);
+    9 : If TaskOfTid(P1) >= 0 Then KrnTaskCtl := 1;
+   10 : KrnTaskCtl := NTasks;
+   11 : Begin
+          P := ProcBySerial(P1);
+          If (P >= 0) And (Procs[P].Parent >= 0) Then KrnTaskCtl := Procs[Procs[P].Parent].Serial
+          Else If P >= 0 Then KrnTaskCtl := 1;
+        End;
+   12 : Begin
+          S := 0;
+          For K := 1 To MaxTasks - 1 Do
+            If (TkUsed[K] = 1) And (K <> CurTask) Then
+            Begin
+              { les ancetres de l'appelant attendent sa fin }
+              P := CurProc; Sz := 0;
+              If TkProc[K] <> CurProc Then
+              Begin
+                While (P >= 0) And (Sz = 0) Do
+                Begin
+                  P := Procs[P].Parent;
+                  If P = TkProc[K] Then Sz := 1;
+                End;
+              End;
+              If Sz = 0 Then Inc(S);
+            End;
+          KrnTaskCtl := S;
+        End;
+   13 : Begin
+          K := TaskOfTid(P1);
+          If (K > 0) And (K <> CurTask) Then
+          Begin
+            asm
+              cli
+            end;
+            TkUsed[K] := 2;
+            Dec(NTasks);
+            asm
+              sti
+            end;
+          End
+          Else KrnTaskCtl := -1;
+        End;
+   14 : If (CurProc >= 0) And (P1 > 1) Then Procs[CurProc].NextTid := P1;
+  End;
 End;
 
 
@@ -5405,7 +5857,7 @@ End;
 Procedure GlobalMemoryStatus(P : LongInt);
 Var Free : LongInt;
 Begin
-  Free := HeapFreeBytes + (PhysTop - PhysNext);
+  Free := HeapFreeBytes + PhysFree;
   MemL[0:P] := 32;
   MemL[0:P + 4] := 100 - (Free Div 1024) * 100 Div MemTotalKb;
   MemL[0:P + 8] := MemTotalKb * 1024;
@@ -5424,7 +5876,7 @@ End;
 
 Function GetCurrentThreadId : LongInt;
 Begin
-  GetCurrentThreadId := 1;
+  If CurTask > 0 Then GetCurrentThreadId := TkTid[CurTask] Else GetCurrentThreadId := 1;
 End;
 
 Function KrnGetParentPid : LongInt;
@@ -5704,7 +6156,11 @@ BEGIN
   KSize := MemL[0:BootInfo + $20];
   MemTotalKb := MemL[0:BootInfo + $14] + 1024;
   PhysTop := MemTotalKb * 1024;
-  PhysNext := PhysProcBase;
+  PCount := 0;
+  { tache 0 : le noyau }
+  For I := 0 To MaxTasks - 1 Do TkUsed[I] := 0;
+  TkUsed[0] := 1; TkProc[0] := -1; TkTid[0] := 1; TkStack[0] := 0;
+  CurTask := 0; NTasks := 1; IdleStreak := 0; SliceStart := 0;
   HeapInit(KBase + KSize + 65536, ProcWinBase);
   Mods := Nil;
   ModCap := 0;
@@ -5772,8 +6228,17 @@ BEGIN
       KLog('SYS1041: Impossible de charger ' + P2 + ' (erreur ' + IntStr(LastError) + ').');
       ExitProcess(1);
     End;
-    Code := RunProcess(Pid);
-    Procs[Pid].Used := False;
+    Procs[Pid].HandleOpen := True;
+    Procs[Pid].Parent := -1;
+    If Not StartProcess(Pid) Then
+    Begin
+      KLog('SYS1041: Impossible de demarrer ' + P2 + '.');
+      ExitProcess(1);
+    End;
+    While Procs[Pid].Running Do Idle;
+    Code := Procs[Pid].ExitCode;
+    Procs[Pid].HandleOpen := False;
+    Yield;
     Inc(Runs);
     KLog('');
     KLog('Le processeur de commandes s''est termine (code ' + IntStr(Code) + ') ; relance...');
