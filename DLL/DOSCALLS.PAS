@@ -30,12 +30,14 @@ Library DOSCALLS;
   CreateFileA, FindFirstFileA, CreateProcessA, HeapAlloc...) importee
   sous les noms K* (partie 2).
 
-  Le noyau OS2KRNL execute un processus a la fois (le parent attend la
-  fin de l'enfant) et un seul processus leger : DosCreateThread execute
-  le processus leger jusqu'a sa fin (ou le garde suspendu jusqu'a
-  DosResumeThread), les minuteries sont verifiees a chaque attente, et
-  une attente qui ne pourrait jamais etre satisfaite rend ERROR_TIMEOUT
-  ou ERROR_INTERRUPT au lieu de bloquer le systeme.
+  Le noyau OS2KRNL est multitache : les processus et leurs fils
+  s'executent en parallele (KrnTaskCtl). DosExecPgm EXEC_SYNC attend la
+  fin de l'enfant, EXEC_ASYNC/EXEC_ASYNCRESULT la laissent a DosWaitChild,
+  EXEC_BACKGROUND le detache ; DosCreateThread cree une tache du noyau
+  (point d'entree ThrEntry32, qui appelle la fonction du fil) ; les
+  minuteries sont verifiees a chaque attente ; une attente qu'aucune
+  autre tache ne peut plus satisfaire rend ERROR_TIMEOUT ou
+  ERROR_INTERRUPT au lieu de bloquer le systeme.
 
   Organisation :
     Partie 1  - Constantes et types
@@ -358,6 +360,8 @@ Function KGetEnvironmentStringsA : LongInt; External 'DOSCALLS' Name 'GetEnviron
 Function KGetEnvironmentVariableA(PName, Buf, Size : LongInt) : LongInt; External 'DOSCALLS' Name 'GetEnvironmentVariableA';
 Function KCreateProcessA(App, Cmd, PA, TA, Inh, Flags, Env, Dir, SI, PI : LongInt) : LongInt; External 'DOSCALLS' Name 'CreateProcessA';
 Function KGetExitCodeProcess(H, PCode : LongInt) : LongInt; External 'DOSCALLS' Name 'GetExitCodeProcess';
+Function KWaitForSingleObject(H, Ms : LongInt) : LongInt; External 'DOSCALLS' Name 'WaitForSingleObject';
+Function KTaskCtl(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
 Procedure KExitProcess(Code : LongInt); External 'DOSCALLS' Name 'ExitProcess';
 Function KHeapAlloc(Heap, Flags, Size : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapAlloc';
 Function KHeapFree(Heap, Flags, A : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapFree';
@@ -4537,7 +4541,9 @@ End;
 Function TimerPendingFor(HSem : LongInt) : Boolean;
 Var I : LongInt;
 Begin
-  TimerPendingFor := False;
+  { une autre tache (autre processus, ou autre fil) peut encore liberer le
+    semaphore : l'attente continue }
+  TimerPendingFor := KTaskCtl(12, 0, 0, 0) > 0;
   For I := 0 To MaxTimers - 1 Do
     If Timers[I].Used And (Timers[I].Sem = HSem) Then TimerPendingFor := True;
 End;
@@ -4736,6 +4742,7 @@ Type
     Code   : LongInt;
     Prio   : LongInt;
     Waited : Boolean;
+    Stack  : LongInt;           { taille de la pile demandee }
   End;
   TChild = Record
     Used      : Boolean;
@@ -4744,6 +4751,7 @@ Type
     Term      : LongInt;        { codeTerminate }
     Res       : LongInt;        { codeResult }
     Collected : Boolean;
+    H         : LongInt;        { handle du processus (0 : resultat connu) }
   End;
 
 Var
@@ -4753,6 +4761,8 @@ Var
   StampCnt   : LongInt;
   NextTid    : LongInt;
   CurThread  : LongInt;         { 1 = processus leger principal }
+  ThrEntryAdr : LongInt;        { point d'entree exporte ThrEntry32 }
+  Dummy      : LongInt;
   ThrEsp     : Array[0..15] Of LongInt;
   ThrDepth   : LongInt;
   ThrRet     : LongInt;
@@ -4761,8 +4771,7 @@ Var
 
 Function CurTid : LongInt;
 Begin
-  If CurThread < 1 Then CurThread := 1;
-  CurTid := CurThread;
+  CurTid := KTaskCtl(6, 0, 0, 0);
 End;
 
 { Construire TIB, TIB2, PIB et la ligne de commande au format OS/2
@@ -4939,6 +4948,7 @@ Begin
   Childs[J].Term := Term;
   Childs[J].Res := Res;
   Childs[J].Collected := False;
+  Childs[J].H := 0;
   NewChild := J;
 End;
 
@@ -4989,19 +4999,28 @@ Begin
     Exit;
   End;
   Code := 0;
-  A := KGetExitCodeProcess(ProcInfo[0], LongInt(@Code));
-  A := KCloseHandle(ProcInfo[0]);
-  If Code = -1 Then Term := TC_TRAP Else Term := TC_EXIT;
   If Flags = EXEC_SYNC Then
   Begin
+    { l'enfant s'execute en parallele : attendre sa fin }
+    A := KWaitForSingleObject(ProcInfo[0], -1);
+    A := KGetExitCodeProcess(ProcInfo[0], LongInt(@Code));
+    A := KCloseHandle(ProcInfo[0]);
+    If Code = -1 Then Term := TC_TRAP Else Term := TC_EXIT;
     PokeL(PRes, Term);
     PokeL(PRes + 4, Code);
   End
   Else
   Begin
+    { asynchrone : le resultat est garde pour DosWaitChild ; EXEC_BACKGROUND
+      (detache) n'en garde pas }
     PokeL(PRes, ProcInfo[2]);
     PokeL(PRes + 4, 0);
-    NewChild(MyPid, ProcInfo[2], Term, Code);
+    If Flags = EXEC_BACKGROUND Then A := KCloseHandle(ProcInfo[0])
+    Else
+    Begin
+      A := NewChild(MyPid, ProcInfo[2], TC_EXIT, 0);
+      Childs[A].H := ProcInfo[0];
+    End;
   End;
   DosExecPgm := NO_ERROR;
 End;
@@ -5013,7 +5032,7 @@ End;
 
 { Attendre la fin d'un enfant asynchrone (deja termine dans OS/2-0) }
 Function DosWaitChild(Action, Option, PRes, PPid, Pid : LongInt) : LongInt;
-Var I, Me : LongInt;
+Var I, Me, Code, A : LongInt; Found, Done : Boolean;
 Begin
   If (Action <> DCWA_PROCESS) And (Action <> DCWA_PROCESSTREE) Then
   Begin
@@ -5021,19 +5040,50 @@ Begin
     Exit;
   End;
   Me := MyPid;
-  For I := 0 To MaxChild - 1 Do
-    If Childs[I].Used And Not Childs[I].Collected And (Childs[I].Parent = Me) And
-       ((Pid = 0) Or (Childs[I].Pid = Pid)) Then
+  Repeat
+    Found := False;
+    For I := 0 To MaxChild - 1 Do
+      If Childs[I].Used And Not Childs[I].Collected And (Childs[I].Parent = Me) And
+         ((Pid = 0) Or (Childs[I].Pid = Pid)) Then
+      Begin
+        Found := True;
+        Done := True;
+        If Childs[I].H <> 0 Then
+        Begin
+          Code := 259;
+          A := KGetExitCodeProcess(Childs[I].H, LongInt(@Code));
+          If Code = 259 Then Done := False
+          Else
+          Begin
+            A := KCloseHandle(Childs[I].H);
+            Childs[I].H := 0;
+            Childs[I].Res := Code;
+            If Code = -1 Then Childs[I].Term := TC_TRAP Else Childs[I].Term := TC_EXIT;
+          End;
+        End;
+        If Done Then
+        Begin
+          PokeL(PRes, Childs[I].Term);
+          PokeL(PRes + 4, Childs[I].Res);
+          PokeL(PPid, Childs[I].Pid);
+          Childs[I].Collected := True;
+          DosWaitChild := NO_ERROR;
+          Exit;
+        End;
+      End;
+    If Not Found Then
     Begin
-      PokeL(PRes, Childs[I].Term);
-      PokeL(PRes + 4, Childs[I].Res);
-      PokeL(PPid, Childs[I].Pid);
-      Childs[I].Collected := True;
-      DosWaitChild := NO_ERROR;
+      If Pid <> 0 Then DosWaitChild := ERROR_INVALID_PROCID
+      Else DosWaitChild := ERROR_WAIT_NO_CHILDREN;
       Exit;
     End;
-  If Pid <> 0 Then DosWaitChild := ERROR_INVALID_PROCID
-  Else DosWaitChild := ERROR_WAIT_NO_CHILDREN;
+    If Option = DCWW_NOWAIT Then
+    Begin
+      DosWaitChild := ERROR_CHILD_NOT_COMPLETE;
+      Exit;
+    End;
+    KSleep(10);
+  Until False;
 End;
 
 Function DosCwait(Action, Option, PRes, PPid, Pid : LongInt) : LongInt;
@@ -5145,10 +5195,10 @@ End;
   retour de la fonction) }
 Function DosExit(Action, Code : LongInt) : LongInt;
 Begin
-  If (Action = EXIT_THREAD) And (ThrDepth > 0) Then
+  If (Action = EXIT_THREAD) And (CurTid > 1) Then
   Begin
-    ThrRet := Code;
-    ThreadLongJmp;
+    ThrDone(CurTid, Code);
+    Dummy := KTaskCtl(8, Code, 0, 0);
   End;
   ExitProcessNow(Code);
   DosExit := NO_ERROR;
@@ -5162,7 +5212,8 @@ Begin
     Exit;
   End;
   If Pid = MyPid Then ExitProcessNow(1);
-  DosKillProcess := ERROR_INVALID_PROCID;
+  If KTaskCtl(5, Pid, -2, 0) <> 0 Then DosKillProcess := ERROR_INVALID_PROCID
+  Else DosKillProcess := NO_ERROR;
 End;
 
 { --- Processus legers --- }
@@ -5185,17 +5236,53 @@ Begin
   end;
 End;
 
-Procedure StartThread(T : LongInt);
-Var SaveTid : LongInt;
+{ debut d'un fil (tache du noyau) : appele par le noyau (convention
+  _System, point d'entree exporte ThrEntry32) avec l'indice de Thr }
+Function ThrEntry32(T : LongInt) : LongInt;
+Var R : LongInt;
 Begin
-  If ThrDepth >= 15 Then Exit;
-  SaveTid := CurThread;
-  CurThread := Thr[T].Tid;
   Thr[T].State := 1;
-  ThreadCore(Thr[T].Fn, Thr[T].Param);
+  R := CallPtr1(Thr[T].Fn, Thr[T].Param);
   Thr[T].State := 2;
-  Thr[T].Code := ThrRet;
-  CurThread := SaveTid;
+  Thr[T].Code := R;
+  ThrEntry32 := R;
+End;
+
+Procedure ThrDone(Tid, Code : LongInt);
+Var I, Pid : LongInt;
+Begin
+  Pid := MyPid;
+  For I := 0 To MaxThr - 1 Do
+    If Thr[I].Used And (Thr[I].Pid = Pid) And (Thr[I].Tid = Tid) Then
+    Begin
+      Thr[I].State := 2;
+      Thr[I].Code := Code;
+    End;
+End;
+
+{ demarrer le fil T : une tache du noyau execute ThrEntry32(T) }
+Procedure StartThread(T : LongInt);
+Var H, A, Tid : LongInt;
+Begin
+  If ThrEntryAdr = 0 Then
+  Begin
+    H := KGetModuleHandleA(Z('DOSCALLS', 1));
+    ThrEntryAdr := KGetProcAddress(H, Z('ThrEntry32', 1));
+  End;
+  Thr[T].State := 1;
+  Tid := 0;
+  A := Thr[T].Stack;
+  If A < 65536 Then A := 65536;
+  If ThrEntryAdr <> 0 Then
+  Begin
+    Dummy := KTaskCtl(14, Thr[T].Tid, 0, 0);
+    Tid := KTaskCtl(1, ThrEntryAdr, T, A);
+  End;
+  If Tid = 0 Then
+  Begin
+    { pas de tache : execution immediate (comme avant) }
+    A := ThrEntry32(T);
+  End
 End;
 
 Function ThrFind(Tid : LongInt) : LongInt;
@@ -5236,6 +5323,7 @@ Begin
   Thr[T].Code := 0;
   Thr[T].Prio := $0200;
   Thr[T].Waited := False;
+  Thr[T].Stack := CbStack;
   PokeL(PTid, Thr[T].Tid);
   If (Flags And CREATE_SUSPENDED) = 0 Then StartThread(T);
   DosCreateThread := NO_ERROR;
@@ -5297,6 +5385,7 @@ Begin
     DosKillThread := ERROR_INVALID_THREADID;
     Exit;
   End;
+  Dummy := KTaskCtl(13, Tid, 0, 0);
   Thr[T].State := 2;
   Thr[T].Code := -1;
   DosKillThread := NO_ERROR;
@@ -5333,8 +5422,9 @@ Begin
       DosWaitThread := ERROR_THREAD_NOT_TERMINATED;
       Exit;
     End;
-    { attente : un processus leger suspendu est execute jusqu'a sa fin }
+    { attente : un fil suspendu est d'abord demarre }
     If Thr[T].State = 0 Then StartThread(T);
+    While Thr[T].State <> 2 Do KSleep(10);
   End;
   Thr[T].Waited := True;
   PokeL(PTid, Thr[T].Tid);
@@ -7301,6 +7391,7 @@ End;
 { ==================================================================== }
 
 exports
+  ThrEntry32,
   DosAcknowledgeSignalException, DosAddMuxWaitSem, DosAliasMem,
   DosAllocHuge, DosAllocMem, DosAllocSeg, DosAllocSharedMem,
   DosAllocShrSeg, DosAllocThreadLocalMemory, DosAsyncTimer, DosBeep,

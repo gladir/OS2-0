@@ -263,9 +263,9 @@ BEGIN
 
   { --- processus legers et programmes --- }
   ThreadHits := 0;
-  Check('DosCreateThread', (DosCreateThread(LongInt(@Tid), LongInt(@ThreadFn), 5, 0, 8192) = 0) And
-        (ThreadHits = 5));
-  Check('DosWaitThread', DosWaitThread(LongInt(@Tid), 0) = 0);
+  { le fil s'execute en parallele : son effet est verifie apres DosWaitThread }
+  Check('DosCreateThread', DosCreateThread(LongInt(@Tid), LongInt(@ThreadFn), 5, 0, 8192) = 0);
+  Check('DosWaitThread (fil termine, ThreadHits = 5)', (DosWaitThread(LongInt(@Tid), 0) = 0) And (ThreadHits = 5));
   FillChar(Buf, 64, 0);
   I := Z('C:\TREE.EXE', 0);
   Check('DosExecPgm TREE.EXE', DosExecPgm(LongInt(@Buf2), 64, 0, 0, 0, LongInt(@Res), I) = 0);

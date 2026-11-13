@@ -7,13 +7,15 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
-              PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, CMD.EXE,
+              PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
+              PMSPL.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
               TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE,
               TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE,
-              TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE et les
+              TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE,
+              TESTSPL.EXE et les
               commandes du depot
               compilees avec
               OS2PC (-COS2).
@@ -22,7 +24,8 @@ SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
               RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL,
-              PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL et
+              PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL,
+              PMSHAPI.DLL, PMSPL.DLL et
               CONFIG.SYS (copies
               faites par
               KERNEL\BUILD.sh).
@@ -44,6 +47,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC -COS2LDR  KERNEL\OS2LDR.PAS         -> OS2LDR
   OS2PC -COS2KRNL KERNEL\OS2KRNL.PAS        -> OS2KRNL
   OS2PC CMD.PAS                             -> CMD.EXE (et les commandes)
+  OS2PC PMSHELL.PAS                         -> PMSHELL.EXE (le bureau, Workplace Shell)
+  OS2PC LAUNCHPAD.PAS LAUNCHPD.EXE          -> LAUNCHPD.EXE (le LaunchPad)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
   OS2PC DLL\FKA.PAS                         -> FKA.DLL (touches de fonction)
@@ -89,6 +94,10 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTMRG.PAS                     -> TESTMRG.EXE (essai de PMMERGE.DLL)
   OS2PC DLL\PMPIC.PAS                       -> PMPIC.DLL (impression et conversion d'images)
   OS2PC DLL\TESTPIC.PAS                     -> TESTPIC.EXE (essai de PMPIC.DLL)
+  OS2PC DLL\PMSHAPI.PAS                     -> PMSHAPI.DLL (interface de l'interpreteur de PM)
+  OS2PC DLL\TESTSHA.PAS                     -> TESTSHA.EXE (essai de PMSHAPI.DLL)
+  OS2PC DLL\PMSPL.PAS                       -> PMSPL.DLL (tampon d'impression de PM)
+  OS2PC DLL\TESTSPL.PAS                     -> TESTSPL.EXE (essai de PMSPL.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -106,8 +115,9 @@ Demarrage
    charge DOSCALLS.DLL, puis les pilotes IFS (IFS=) : il cherche les
    disques durs IDE, cree le disque virtuel (/RAMDISK) et monte les
    volumes reconnus (D:, E:...). Il lance enfin le processeur de
-   commandes (PROTSHELL, C:\CMD.EXE par defaut). A la fin de CMD
-   (EXIT), il est relance.
+   commandes (PROTSHELL : C:\PMSHELL.EXE, le bureau, sur le CD-ROM ;
+   C:\CMD.EXE par defaut). S'il se termine, il est relance.
+   Ctrl+Alt+Suppr redemarre l'ordinateur a tout moment.
 
 Carte memoire
 -------------
@@ -132,8 +142,8 @@ Carte memoire
                      00F00000h, MOUCALLS.DLL a 00F40000h, TESTVIOR.DLL a
                      00F80000h, SESMGR.DLL a 00FA0000h, LIBUNI.DLL a
                      00900000h, PMDRAG.DLL a 00A00000h, PMWIN.DLL a
-                     00B00000h, PMGPI.DLL, PMMERGE.DLL et PMPIC.DLL a
-                     00800000h :
+                     00B00000h, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL,
+                     PMSHAPI.DLL et PMSPL.DLL a 00800000h :
                      directive
                      {$IMAGEBASE} d'OS2PC) ; si la place est prise,
                      le noyau reloge la DLL (section .reloc) a la
@@ -144,7 +154,11 @@ Carte memoire
 
 CONFIG.SYS
 ----------
-  PROTSHELL=C:\CMD.EXE     processeur de commandes
+  PROTSHELL=C:\PMSHELL.EXE processeur de commandes (le bureau ; mettre
+                           C:\CMD.EXE pour demarrer sur la ligne de
+                           commande)
+  SET COMSPEC=C:\CMD.EXE   interpreteur des commandes (gardee telle
+                           quelle ; sinon, celle du PROTSHELL)
   LIBPATH=C:\;             repertoires des DLL
   IFS=C:\HPFS.IFS ...      pilote de systeme de fichiers installable ;
                            parametres : /CACHE:n (Ko d'antememoire des
@@ -426,8 +440,11 @@ donnees de limites, metafichiers (en-tete OS20MF01). Cibles : bitmap en
 memoire (OD_MEMORY), ecran graphique (OD_DIRECT : 640 x 480 x 16 et les
 autres modes de VioSetMode), espaces de presentation de PMWIN (ecran
 graphique de PM ; avec PMMODE=TEXTE, 640 x 400 pels sur 80 x 25
-cellules : couleur du fond des cellules, texte dans les cellules) et
-metafichier (OD_METAFILE). Les
+cellules : couleur du fond des cellules, texte dans les cellules),
+metafichier (OD_METAFILE) et tampon d'impression (OD_QUEUED : travail
+de PMSPL.DLL ; DEVESC_STARTDOC, DEVESC_ENDDOC, DEVESC_ABORTDOC,
+DEVESC_RAWDATA ; en PM_Q_STD les appels sont enregistres puis
+imprimes par PicPrint). Les
 elements des segments et des metafichiers sont des appels Gpi*
 enregistres (pas d'ordres GOCA) ; codes PMERR_* approches ; l'ordinal
 541 se nomme GPISETPATTERNSET comme dans la liste fournie (GpiSetPattern
@@ -462,6 +479,93 @@ cette conversion. Le fichier PIF est lu comme une suite d'ordres GDF/GOCA
 (16 bits, octet fort d'abord, texte EBCDIC) ; les ordres inconnus sont
 sautes.
 
+PMSHAPI.DLL
+-----------
+Interface de l'interpreteur de PM d'OS/2 1.x a Warp 3 (144 ordinaux, 1 a
+213) : profils (Prf*, WinQueryProfile*, WinWriteProfile*), programmes et
+groupes (PrfAddProgram, WinAddProgram, WinCreateGroup...), liste des
+taches et demarrage des programmes (WinAddSwitchEntry,
+WinQuerySwitchList, WinStartApp, WinHAPPfromPID...), entrees internes
+(ShePI*, Shp*, SheSystemShutdown, ShellWindow...). Comme sous Warp 4,
+chaque fonction appelle par son nom celle de PMMERGE.DLL : memes
+profils, memes programmes, meme liste des taches. Un nom present deux
+fois (ordinal 16 bits et 32 bits) est exporte en MAJUSCULES a l'ordinal
+le plus bas (PRFQUERYPROFILEINT 32, PrfQueryProfileInt 114).
+SheSetProfileHook(pfn) installe le crochet des profils du processus,
+appele (fl = HINI, pszApp, pszKey) apres chaque ecriture faite par
+PMSHAPI ; SheProfileHook(fl, pszApp, pszKey) l'appelle.
+
+PMSPL.DLL
+---------
+Tampon d'impression (spouleur) de PM : 44 ordinaux (1 a 90, noms en
+majuscules). Files d'attente et imprimantes dans OS2SYS.INI
+(PM_SPOOLER : DIR, QUEUE, PRINTER, MSGTIMEOUT ; PM_SPOOLER_QUEUE,
+PM_SPOOLER_PRINTER et leurs _DESCR) ; par defaut PRINTER1 (LPT1) et la
+file LPT1Q. Travaux : SplQmOpen, SplQmStartDoc, SplQmWrite, SplQmEndDoc
+(numero), SplQmClose, SplQmAbortDoc, SplQmAbort ; fichiers de spoule
+C:\SPOOL\file\nnnnn.SPL ; impression des que le travail est complet si
+la file et le travail ne sont pas retenus (PMPRINT : separateur, COP=n
+copies ; PM_Q_RAW tel quel, PM_Q_STD par PicPrint de PMPIC.DLL).
+Gestion : SplQmList*/SplQmQuery* (PRQINFO3/6, niveau 4, PRJINFO2/3,
+PRDINFO3), retenue et liberation des files et des travaux, annulation,
+reprise, copie, mise en tete, priorite (1 a 99, PRTY=n), etat,
+parametres du processeur, SplQmWriteFile (un fichier devient un
+travail), SplQmCreateQueue (pszPrinters : imprimante, port ou
+nom=port ; port PRN, LPTn, COMn, NUL ou fichier), SplQmDestroyQueue,
+listes des files et des ports paralleles. SplStd* : enregistrement
+PM_Q_STD des appels de la GPI sur un DC. Prt* : acces a l'imprimante
+(travail PM_Q_RAW si une file sert le port, sinon ouverture directe ;
+PrtDevIOCtl categorie 5). SplMessageBox : boite de message (MBID_RETRY
+apres MSGTIMEOUT secondes, 180 par defaut). SplRing3 : appel d'une
+fonction. Un DC OD_QUEUED de PMGPI.DLL est un travail de PMSPL.
+
+Bureau (PMSHELL.EXE)
+--------------------
+PMSHELL.EXE (Workplace Shell) est lance au demarrage
+(PROTSHELL=C:\PMSHELL.EXE). Bureau en 640 x 480 x 16 couleurs avec les
+objets Systeme OS/2, Lecteurs, Invite de commandes OS/2, Liste des
+fenetres, Modeles, Broyeur et Arret, puis le contenu de C:\DESKTOP (ou
+D:\DESKTOP si C: est en lecture seule) et les raccourcis ; dossiers
+Systeme OS/2, Lecteurs, Modeles et repertoires (programmes, fichiers de
+commandes, fichiers de donnees ; visionneuse de texte). Pas de limite
+au nombre de fenetres ni d'objets par dossier.
+  Souris : clic = choisir, double clic = ouvrir, bouton 2 = menu
+  contextuel ; les icones du bureau se deplacent (position dans OS2.INI).
+  Glisser-deposer (bouton 2, ou bouton 1 dans un dossier) : sur un
+  dossier = deplacer (Ctrl = copier) ; sur le Broyeur = supprimer ; sur
+  le LaunchPad = l'y ajouter ; Ctrl+Maj = creer un raccourci.
+  Raccourcis (shadows) : menu "Creer un raccourci" ; Modeles : Dossier,
+  Fichier de donnees, Fichier de commandes (ouvrir = creer un objet).
+  Clavier : fleches, Debut, Fin, lettre = choisir ; Entree = ouvrir ;
+  Maj+F10 = menu ; Ctrl+Echap = liste des fenetres ; F5 = actualiser ;
+  Retour arriere = dossier parent ; Suppr = supprimer ; F1 = aide ;
+  Alt+F4 = fermer (sur le bureau : arret) ; Echap = fermer la
+  visionneuse ou la liste.
+Un programme lance (DosExecPgm, dans le repertoire de son dossier)
+s'execute dans sa propre session plein ecran pendant que le bureau
+continue (Ctrl+Echap : retour au bureau ; Alt+Echap : session
+suivante) ; un programme de PM rejoint la session de PM. A la fin d'un
+programme en mode texte autre que l'invite de commandes, le noyau
+attend une touche. PMWIN.DLL : WINSUSPENDSCREEN
+(1004), WINRESUMESCREEN (1005), WINQUERYSCREENTAKEN (1006). STARTUP.CMD
+(C:\ ou D:\) est execute avant le bureau. Arret : confirmation,
+DosShutdown, puis Ctrl+Alt+Suppr pour redemarrer.
+
+LaunchPad (LAUNCHPD.EXE)
+------------------------
+Le LaunchPad d'OS/2 Warp 3 (source LAUNCHPAD.PAS) est lance par
+PMSHELL au demarrage (OS2.INI, PMSHELL, LAUNCHPAD = 0 : ne pas le
+lancer). Barre en bas de l'ecran (deplacable) :
+  Verrouiller (mot de passe facultatif : menu contextuel), Rechercher
+  (fichiers de toutes les unites, masque avec * et ?), Arret, Liste des
+  fenetres ; objets Lecteur C:, Invite de commandes OS/2, Aide,
+  Imprimante (file d'attente du spouleur, impression d'un fichier).
+  La fleche au-dessus d'un objet ouvre son tiroir (autres unites,
+  Systeme OS/2, Modeles, informations sur le systeme...).
+  Deposer un objet du bureau sur la barre l'ajoute (sur un bouton : dans
+  son tiroir) ; bouton 2 : ajouter, retirer, mot de passe, fermer.
+  La souris immobile sur un bouton affiche son nom.
+
 Imprimante
 ----------
 PRN et LPT1 a LPT3 ecrivent sur le port parallele (adresses du BIOS) ;
@@ -487,18 +591,27 @@ Limites
   rendent ERROR_LOCK_VIOLATION ou ERROR_TIMEOUT) ; un disque dur non
   formate n'est pas monte (seul le disque virtuel est formate au
   demarrage) ; disques IDE en mode PIO 28 bits, sans interruption.
-- Les programmes s'executent en anneau 0, un a la fois (le parent attend
-  la fin de l'enfant, comme DosExecPgm synchrone).
+- Les programmes s'executent en anneau 0. Le noyau est multitache : les
+  processus et leurs fils s'executent en parallele ; la minuterie
+  interrompt toutes les 30 ms une tache qui execute le code de son
+  programme (le noyau et les DLL ne sont pas interrompus, et un programme
+  de PM cede la main en attendant ses messages). Sessions : chaque
+  session a son ecran (tampon de 32 Ko, projete en 000B8000h par la
+  pagination quand elle n'est pas au premier plan), sa console et son
+  clavier ; Alt+Echap passe a la session suivante, Ctrl+Echap revient a
+  Presentation Manager ; les programmes de PM partagent la session de PM
+  (ecran graphique) et leur sortie standard reste dans la console de la
+  session ou ils ont ete lances.
 - Clavier americain (QWERTY), ecran texte 80 x 25 ; un programme peut
   reserver les lignes du bas (SetConsoleScreenBufferSize, utilise par
   FKA.DLL pour la zone des touches de fonction).
 - Une exception d'un programme affiche "Runtime error N" (filtre du
   runtime) ou l'ecran SYS3175/TRAP et rend la main a CMD ; les
   gestionnaires DosSetExceptionHandler sont appeles avant.
-- DOSCALLS.DLL : un seul processus leger s'execute (DosCreateThread
-  execute la fonction jusqu'a sa fin), les minuteries sont verifiees a
-  chaque attente, et une attente qui ne pourrait jamais etre satisfaite
-  rend ERROR_TIMEOUT ou ERROR_INTERRUPT. Les fonctions de rappel
+- DOSCALLS.DLL : DosCreateThread cree un vrai fil (tache du noyau) ; les
+  minuteries sont verifiees a chaque attente, et une attente qu'aucune
+  autre tache ne peut plus satisfaire rend ERROR_TIMEOUT ou
+  ERROR_INTERRUPT. Les fonctions de rappel
   (gestionnaires d'exceptions...) suivent la convention _System : avec
   OS2PC, une fonction de rappel a plusieurs parametres les declare dans
   l'ordre inverse.

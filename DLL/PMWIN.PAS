@@ -52,7 +52,12 @@ Library PMWIN;
   (ordinal 1001, interne) decrit un HPS pour PMGPI.DLL, WINQUERYSCREENTEXT
   (1002, interne) rend le texte ecrit a l'ecran (programmes d'essai) et
   WINHIDEOVERLAYS (1003, interne) retire le pointeur et le curseur avant
-  un dessin direct de PMGPI.DLL.
+  un dessin direct de PMGPI.DLL. Pour le bureau (PMSHELL.EXE) :
+  WINSUSPENDSCREEN (1004) prete l'ecran a un programme lance (mode texte ;
+  un programme de PM lance pendant ce temps reprend le mode graphique a
+  sa premiere file de messages et le rend a sa fin), WINRESUMESCREEN
+  (1005) rend l'ecran a PM et WINQUERYSCREENTAKEN (1006) dit si un
+  programme de PM a pris l'ecran entre les deux.
 
   Handles : HAB 00010001h..., HMQ 00510001h..., HWND 8000xxyyh (HWND_DESKTOP
   1 et HWND_OBJECT 2 acceptes), HPS 5053xxxxh, HDC 4443xxxxh, HPOINTER
@@ -206,14 +211,14 @@ Const
   SEVERITY_ERROR = 4;
 
   { limites }
-  MaxWin = 256;
-  MaxCls = 64;
-  MaxQ = 16;
-  MaxHab = 16;
-  MaxPS = 32;
+  MaxWin = 1024;
+  MaxCls = 128;
+  MaxQ = 64;
+  MaxHab = 64;
+  MaxPS = 128;
   MaxItem = 1024;
   ItemSlot = 64;
-  MaxTimer = 32;
+  MaxTimer = 128;
   MaxHook = 32;
   MaxAtom = 512;
   AtomSlot = 64;
@@ -226,6 +231,7 @@ Const
   MaxClip = 16;
   MaxEnum = 16;
   MaxLib = 16;
+  KeyPendMax = 16;
   ArenaSize = 262144;
 
   { classes du systeme (WC_* = FFFF00nnh) }
@@ -257,6 +263,8 @@ Var
   HabPid, HabErr, HabQ, HabMou : Array[0..MaxHab - 1] Of LongInt;
   QPid, QHab, QSize, QBuf, QHead, QCount, QCp, QStat, QLockIn, QAccel, QProc : Array[0..MaxQ - 1] Of LongInt;
   QPosX, QPosY, QTime, QQuit, QMou, QLastDown, QDownWin, QDownTime : Array[0..MaxQ - 1] Of LongInt;
+  KpN : Array[0..MaxQ - 1] Of LongInt;                              { touches en attente }
+  KpT, KpFs, KpCh, KpVk, KpSc : Array[0..MaxQ * 16 - 1] Of LongInt;
   { --- etat global --- }
   FocusWin, ActiveWin, CaptureWin, SysModalWin, LockUpdWin, VisLock : LongInt;
   PhysInput, ShuttingDown, NoShutdown, SemCount, FsrCount, InSend : LongInt;
@@ -306,6 +314,8 @@ Var
 
 Var
   GMode : LongInt;                        { 1 : ecran graphique }
+  Susp, SuspPid, SuspTook : LongInt;      { ecran prete a un programme (WINSUSPENDSCREEN) }
+  SesAddr, PmEpoch : LongInt;              { sessions du noyau (KrnSesCtl 15) }
   ScrCols, ScrRows, ScrCX, ScrCY : LongInt;
   GCx1, GCy1, GCx2, GCy2 : LongInt;       { decoupage (pels de l'ecran, x2 et y2 exclus) }
   GFont : Array[0..4095] Of Byte;         { police 8 x 16 }
@@ -344,6 +354,8 @@ Function DcMuxSemWait(PI, PL, T : LongInt) : LongInt; External 'DOSCALLS' Name '
 Function DcWrite(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS' Name 'DosWrite';
 Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
+Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
+Function KTask(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
 Function KGetTickCount : LongInt; External 'DOSCALLS' Name 'GetTickCount';
 Function KbdCharIn(PInfo, Wait, H : LongInt) : LongInt; External 'KBDCALLS' Name 'KbdCharIn';
 Function MouOpen(PDrv, PH : LongInt) : LongInt; External 'MOUCALLS' Name 'MouOpen';
@@ -943,8 +955,40 @@ Const
                                     $7F00, $7C00, $6C00, $4600, $0600, $0300, $0300, $0000);
 
 { --- ports du VGA --- }
+{ l'ecran est-il a la session de l'appelant ? (session de PM au premier
+  plan, ou bascule en cours) }
+Function GMine : Boolean;
+Type PLong = ^LongInt;
+Var Q : PLong; F, C, S : LongInt;
+Begin
+  If SesAddr = 0 Then SesAddr := KSes(15, 0, 0);
+  If SesAddr = 0 Then
+  Begin
+    GMine := True;
+    Exit;
+  End;
+  Q := Pointer(SesAddr); F := Q^;
+  Q := Pointer(SesAddr + 4); C := Q^;
+  Q := Pointer(SesAddr + 12); S := Q^;
+  GMine := (F = C) Or (S <> 0);
+End;
+
+Function SesEpoch : LongInt;
+Type PLong = ^LongInt;
+Var Q : PLong;
+Begin
+  If SesAddr = 0 Then SesAddr := KSes(15, 0, 0);
+  If SesAddr = 0 Then SesEpoch := 0
+  Else
+  Begin
+    Q := Pointer(SesAddr + 8);
+    SesEpoch := Q^;
+  End;
+End;
+
 Procedure GOut(P, V : LongInt);
 Begin
+  If Not GMine Then Exit;
   asm
     mov edx,P
     mov eax,V
@@ -1618,7 +1662,7 @@ Procedure ScreenStart; Forward;
 
 Function HwOf(I : LongInt) : LongInt;
 Begin
-  If I < 0 Then HwOf := 0 Else HwOf := HwBit Or ((WGen[I] And $7FFFFF) Shl 8) Or I;
+  If I < 0 Then HwOf := 0 Else HwOf := HwBit Or ((WGen[I] And $1FFFFF) Shl 10) Or I;
 End;
 
 { Rang d'une fenetre ; -1 si le handle est invalide }
@@ -1630,7 +1674,7 @@ Begin
   Else If H = HWND_OBJECT Then R := 1
   Else If (H And HwBit) <> 0 Then
   Begin
-    I := H And $FF;
+    I := H And $3FF;
     If (WUse[I] <> 0) And (HwOf(I) = H) Then R := I;
   End;
   WIdx := R;
@@ -2961,6 +3005,24 @@ Begin
   End;
 End;
 
+{ La fenetre I va etre dessinee dans le rectangle ecran donne : le
+  dessin n'est pas decoupe par les fenetres placees au-dessus ; celles
+  des autres processus (qui ne sont pas redessinees dans l'ordre de ce
+  processus) sont donc a redessiner apres elle }
+Procedure InvalAboveOthers(I, X1, Y1, X2, Y2 : LongInt);
+Var K, J : LongInt; Found : Boolean;
+Begin
+  If (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  BuildPOrd;
+  Found := False;
+  For K := 0 To PCnt - 1 Do
+  Begin
+    J := POrd[K];
+    If Found And (J > 1) And (WPid[J] <> MyPid) Then AddUpd(J, X1, Y1, X2, Y2);
+    If J = I Then Found := True;
+  End;
+End;
+
 Procedure InvalWin(I : LongInt);
 Var X1, Y1, X2, Y2 : LongInt;
 Begin
@@ -3182,6 +3244,7 @@ Begin
     X2 := X1; Y2 := Y1;
   End;
   WUpd[I] := 0;
+  InvalAboveOthers(I, X1, Y1, X2, Y2);
   PsX1[K] := X1; PsY1[K] := Y1; PsX2[K] := X2; PsY2[K] := Y2;
   If PRcl <> 0 Then
   Begin
@@ -3374,6 +3437,7 @@ Begin
     PsUse[K] := 0;
   End;
   WUpd[0] := 0;
+  InvalAboveOthers(0, WUx1[0], WUy1[0], WUx2[0], WUy2[0]);
 End;
 
 { Premiere fenetre a dessiner de la file Q (-1 : aucune) }
@@ -4495,6 +4559,7 @@ Begin
     SetErr(PMERR_HEAP_OUT_OF_MEMORY);
     Exit;
   End;
+  KpN[F] := 0;
   QPid[F] := MyPid; QHab[F] := Hab; QSize[F] := N; QHead[F] := 0; QCount[F] := 0;
   QCp[F] := 850; QStat[F] := 0; QLockIn[F] := 0; QAccel[F] := 0; QProc[F] := 0;
   QQuit[F] := 0; QMou[F] := 0; QLastDown[F] := 0; QDownWin[F] := -1; QDownTime[F] := 0;
@@ -4502,7 +4567,16 @@ Begin
   First := True;
   For I := 0 To MaxQ - 1 Do
     If (I <> F) And (QPid[I] <> 0) Then First := False;
-  If First Then ScreenStart;
+  { premiere file, ou premiere file d'un programme lance par l'interpreteur
+    pendant que l'ecran lui est prete }
+  If (Susp <> 0) And (MyPid <> SuspPid) Then SuspTook := 1;
+  { le programme rejoint la session de Presentation Manager (premier plan) }
+  Dummy := KSes(5, 0, 0);
+  { un programme de PM n'est pas preempte (ses procedures de fenetre sont
+    appelees depuis PMWIN) : il cede la main en attendant ses messages }
+  Dummy := KTask(4, 1, 0, 0);
+  If First Or ((Susp <> 0) And (MyPid <> SuspPid)) Then ScreenStart;
+  PmEpoch := SesEpoch;
   WinCreateMsgQueue := $00510001 + F;
 End;
 
@@ -5370,9 +5444,60 @@ Begin
   End;
 End;
 
-Procedure KeyInput(Q : LongInt);
-Var Ki : Array[0..15] Of Byte; Ch, Sc, St, Fs, Vk, T, F, N : LongInt;
+{ Remettre la touche a la fenetre T (file Q du processus qui l'a lue,
+  qui est aussi celui de T) }
+Procedure KeyDeliver(Q, T, Fs, Ch, Vk, Sc : LongInt);
+Var F : LongInt;
 Begin
+  If T >= 0 Then
+  Begin
+    WrL(LongInt(@GMsg), HwOf(T)); WrL(LongInt(@GMsg) + 4, WM_CHAR);
+    WrL(LongInt(@GMsg) + 8, Fs Or (1 Shl 16) Or ((Sc And 255) Shl 24));
+    WrL(LongInt(@GMsg) + 12, Mk2(Ch, Vk));
+    WrL(LongInt(@GMsg) + 16, KGetTickCount); WrL(LongInt(@GMsg) + 20, MouseX); WrL(LongInt(@GMsg) + 24, MouseY);
+    If Not HookBool3(1, QHab[Q], LongInt(@GMsg), 1) Then
+    Begin
+      CallHooks3(3, QHab[Q], LongInt(@GMsg), 0);    { HK_JOURNALRECORD }
+      F := TopFrame(T);
+      If (F > 1) And (WS5[F] <> 0) And (AcIdx(WS5[F]) >= 0) Then Dummy := LongInt(AccelMatch(AcData[AcIdx(WS5[F])], LongInt(@GMsg), HwOf(F)));
+      If (RdL(LongInt(@GMsg) + 4) = WM_CHAR) And (QAccel[Q] <> 0) And (AcIdx(QAccel[Q]) >= 0) And (F > 1) Then
+        Dummy := LongInt(AccelMatch(AcData[AcIdx(QAccel[Q])], LongInt(@GMsg), HwOf(F)));
+      If RdL(LongInt(@GMsg) + 4) = WM_CHAR Then Dummy := LongInt(SysAccel(LongInt(@GMsg), F));
+      Dummy := LongInt(QPut(Q, RdL(LongInt(@GMsg)), RdL(LongInt(@GMsg) + 4), RdL(LongInt(@GMsg) + 8),
+                            RdL(LongInt(@GMsg) + 12)));
+    End;
+  End;
+End;
+
+{ touche pour la file Q d'un autre processus de PM }
+Procedure KeyPend(Q, T, Fs, Ch, Vk, Sc : LongInt);
+Var K : LongInt;
+Begin
+  If KpN[Q] >= KeyPendMax Then Exit;
+  K := Q * KeyPendMax + KpN[Q];
+  KpT[K] := T; KpFs[K] := Fs; KpCh[K] := Ch; KpVk[K] := Vk; KpSc[K] := Sc;
+  Inc(KpN[Q]);
+End;
+
+Procedure KeyInput(Q : LongInt);
+Var Ki : Array[0..15] Of Byte; Ch, Sc, St, Fs, Vk, T, N, K : LongInt;
+Begin
+  { touches lues par un autre processus pour une fenetre de celui-ci }
+  K := 0;
+  While (KpN[Q] > 0) And (K < KeyPendMax) Do
+  Begin
+    T := KpT[Q * KeyPendMax];
+    Fs := KpFs[Q * KeyPendMax]; Ch := KpCh[Q * KeyPendMax]; Vk := KpVk[Q * KeyPendMax]; Sc := KpSc[Q * KeyPendMax];
+    For N := 1 To KpN[Q] - 1 Do
+    Begin
+      KpT[Q * KeyPendMax + N - 1] := KpT[Q * KeyPendMax + N]; KpFs[Q * KeyPendMax + N - 1] := KpFs[Q * KeyPendMax + N];
+      KpCh[Q * KeyPendMax + N - 1] := KpCh[Q * KeyPendMax + N]; KpVk[Q * KeyPendMax + N - 1] := KpVk[Q * KeyPendMax + N];
+      KpSc[Q * KeyPendMax + N - 1] := KpSc[Q * KeyPendMax + N];
+    End;
+    Dec(KpN[Q]);
+    If (T > 1) And (WUse[T] <> 0) And (WHmq[T] = Q) Then KeyDeliver(Q, T, Fs, Ch, Vk, Sc);
+    Inc(K);
+  End;
   N := 0;
   While N < 8 Do
   Begin
@@ -5410,26 +5535,17 @@ Begin
     If (St And 8) <> 0 Then KeyState[VK_ALT] := $80 Else KeyState[VK_ALT] := 0;
     { destinataire : fenetre du focus, sinon cadre actif }
     T := -1;
-    If (FocusWin > 1) And (WUse[FocusWin] <> 0) And (WHmq[FocusWin] = Q) Then T := FocusWin
-    Else If (ActiveWin > 1) And (WUse[ActiveWin] <> 0) And (WHmq[ActiveWin] = Q) Then T := ActiveWin;
-    If T >= 0 Then
+    If (FocusWin > 1) And (WUse[FocusWin] <> 0) And (WHmq[FocusWin] >= 0) Then T := FocusWin
+    Else If (ActiveWin > 1) And (WUse[ActiveWin] <> 0) And (WHmq[ActiveWin] >= 0) Then T := ActiveWin;
+    { fenetre d'un autre processus de PM : la touche lui est remise par
+      son propre processus (crochets, accelerateurs, procedures) }
+    If (T > 1) And (WHmq[T] <> Q) And (QPid[WHmq[T]] <> 0) Then
     Begin
-      WrL(LongInt(@GMsg), HwOf(T)); WrL(LongInt(@GMsg) + 4, WM_CHAR);
-      WrL(LongInt(@GMsg) + 8, Fs Or (1 Shl 16) Or ((Sc And 255) Shl 24));
-      WrL(LongInt(@GMsg) + 12, Mk2(Ch, Vk));
-      WrL(LongInt(@GMsg) + 16, KGetTickCount); WrL(LongInt(@GMsg) + 20, MouseX); WrL(LongInt(@GMsg) + 24, MouseY);
-      If Not HookBool3(1, QHab[Q], LongInt(@GMsg), 1) Then
-      Begin
-        CallHooks3(3, QHab[Q], LongInt(@GMsg), 0);    { HK_JOURNALRECORD }
-        F := TopFrame(T);
-        If (F > 1) And (WS5[F] <> 0) And (AcIdx(WS5[F]) >= 0) Then Dummy := LongInt(AccelMatch(AcData[AcIdx(WS5[F])], LongInt(@GMsg), HwOf(F)));
-        If (RdL(LongInt(@GMsg) + 4) = WM_CHAR) And (QAccel[Q] <> 0) And (AcIdx(QAccel[Q]) >= 0) And (F > 1) Then
-          Dummy := LongInt(AccelMatch(AcData[AcIdx(QAccel[Q])], LongInt(@GMsg), HwOf(F)));
-        If RdL(LongInt(@GMsg) + 4) = WM_CHAR Then Dummy := LongInt(SysAccel(LongInt(@GMsg), F));
-        Dummy := LongInt(QPut(Q, RdL(LongInt(@GMsg)), RdL(LongInt(@GMsg) + 4), RdL(LongInt(@GMsg) + 8),
-                              RdL(LongInt(@GMsg) + 12)));
-      End;
+      KeyPend(WHmq[T], T, Fs, Ch, Vk, Sc);
+      Continue;
     End;
+    If (T > 1) And (WHmq[T] <> Q) Then T := -1;
+    KeyDeliver(Q, T, Fs, Ch, Vk, Sc);
   End;
 End;
 
@@ -5449,15 +5565,18 @@ End;
 
 Procedure MouseMsg(Q, T, Msg, Kc : LongInt);
 Begin
-  If (T > 1) And (WUse[T] <> 0) And (WHmq[T] = Q) And Not Disabled(T) Then
+  { la fenetre peut appartenir a un autre processus de PM : message pose
+    dans sa propre file }
+  If (T > 1) And (WUse[T] <> 0) And (WHmq[T] >= 0) And Not Disabled(T) Then
   Begin
+    If QPid[WHmq[T]] = 0 Then Exit;
     If (Msg = WM_MOUSEMOVE) And ((WInt0[T] And 1) <> 0) Then Exit;
-    Dummy := LongInt(QPut(Q, HwOf(T), Msg, Mk2(MouseX - AbsX(T), MouseY - AbsY(T)), Mk2(0, Kc)));
+    Dummy := LongInt(QPut(WHmq[T], HwOf(T), Msg, Mk2(MouseX - AbsX(T), MouseY - AbsY(T)), Mk2(0, Kc)));
   End;
 End;
 
 Procedure MouseInput(Q : LongInt);
-Var Ev : Array[0..11] Of Byte; Wait, H, Fs, Btn, T, N, Kc, K, Bit, Dn, Up, Dbl : LongInt;
+Var Ev : Array[0..11] Of Byte; Wait, H, Fs, Btn, T, N, Kc, K, Bit, Dn, Up, Dbl, TQ : LongInt;
 Begin
   If QMou[Q] = 0 Then
   Begin
@@ -5491,6 +5610,9 @@ Begin
     If (Fs And $60) <> 0 Then Btn := Btn Or 4;
     If CaptureWin > 1 Then T := CaptureWin Else T := WinAtAbs(0, MouseX, MouseY, True);
     If (SysModalWin > 1) And (T > 1) And (T <> SysModalWin) And Not IsChildOf(T, SysModalWin) Then T := -1;
+    { file de la fenetre visee (double clic) }
+    TQ := Q;
+    If (T > 1) And (WUse[T] <> 0) And (WHmq[T] >= 0) Then TQ := WHmq[T];
     Kc := 0;
     If KeyState[VK_SHIFT] <> 0 Then Kc := Kc Or KC_SHIFT;
     If KeyState[VK_CTRL] <> 0 Then Kc := Kc Or KC_CTRL;
@@ -5513,15 +5635,15 @@ Begin
       End;
       If ((Btn And Bit) <> 0) And ((MouseBtn And Bit) = 0) Then
       Begin
-        If (QDownWin[Q] = T) And (QLastDown[Q] = Bit) And (KGetTickCount - QDownTime[Q] < SysVal[1]) Then
+        If (QDownWin[TQ] = T) And (QLastDown[TQ] = Bit) And (KGetTickCount - QDownTime[TQ] < SysVal[1]) Then
           MouseMsg(Q, T, Dbl, Kc)
         Else MouseMsg(Q, T, Dn, Kc);
-        QDownWin[Q] := T; QLastDown[Q] := Bit; QDownTime[Q] := KGetTickCount;
+        QDownWin[TQ] := T; QLastDown[TQ] := Bit; QDownTime[TQ] := KGetTickCount;
       End;
       If ((Btn And Bit) = 0) And ((MouseBtn And Bit) <> 0) Then
       Begin
         MouseMsg(Q, T, Up, Kc);
-        If (T = QDownWin[Q]) And (T > 1) Then
+        If (T = QDownWin[TQ]) And (T > 1) Then
         Begin
           If K = 0 Then MouseMsg(Q, T, WM_BUTTON1CLICK, Kc)
           Else If K = 1 Then MouseMsg(Q, T, WM_BUTTON2CLICK, Kc)
@@ -5580,6 +5702,12 @@ Var Got : Boolean; W, K, T : LongInt;
 Begin
   Got := False;
   Repeat
+    { la session de PM revient au premier plan : ecran graphique redessine }
+    If SesEpoch <> PmEpoch Then
+    Begin
+      PmEpoch := SesEpoch;
+      If GMine Then ScreenStart;
+    End;
     PollInput(Q);
     GShow(Q);
     Got := QTake(Q, HF, First, Last, Remove, P);
@@ -11974,7 +12102,7 @@ Begin
   { dernier programme de PM : ecran rendu au mode texte }
   Others := False;
   For C := 0 To MaxQ - 1 Do
-    If (QPid[C] <> 0) And Alive(QPid[C]) Then Others := True;
+    If (QPid[C] <> 0) And Alive(QPid[C]) And Not ((Susp <> 0) And (QPid[C] = SuspPid)) Then Others := True;
   If Not Others Then
   Begin
     If GMode <> 0 Then GLeave
@@ -12222,6 +12350,58 @@ Begin
   CursorWin := 0;
   ShowHwCursor;
   InvalScreen(0, 0, ScrCX, ScrCY);
+End;
+
+{ WINSUSPENDSCREEN (ordinal 1004, interne : PMSHELL.EXE) : l'ecran est
+  prete a un programme lance (DosExecPgm) : mode texte 80 x 25 ; un
+  programme de PM lance pendant ce temps reprend l'ecran graphique a sa
+  premiere file de messages et le rend au mode texte a sa fin ; BOOL }
+Function WinSuspendScreen : LongInt;
+Var R, C : LongInt;
+Begin
+  Susp := 1; SuspPid := MyPid; SuspTook := 0;
+  If GMode <> 0 Then GLeave
+  Else
+    For R := 0 To ScrRows - 1 Do
+      For C := 0 To ScrCols - 1 Do PutCell(C, R, 32, 7);
+  CaptureWin := 0;
+  WrW(LongInt(@NameZ2), 14); WrW(LongInt(@NameZ2) + 2, 14); WrW(LongInt(@NameZ2) + 4, 15); WrW(LongInt(@NameZ2) + 6, 0);
+  Dummy := VioSetCurType(LongInt(@NameZ2), 0);
+  Dummy := VioSetCurPos(0, 0, 0);
+  WinSuspendScreen := 1;
+End;
+
+{ WINRESUMESCREEN (ordinal 1005, interne : PMSHELL.EXE) : l'ecran revient
+  a PM (mode graphique, tout est redessine) ; les evenements de la souris
+  recus pendant le programme sont oublies ; BOOL }
+Function WinResumeScreen : LongInt;
+Var Q, N, Wait : LongInt; Ev : Array[0..11] Of Byte;
+Begin
+  Susp := 0; SuspPid := 0;
+  CleanupDead;
+  ScreenStart;
+  Q := CurQ;
+  If (Q >= 0) And (QMou[Q] <> 0) Then
+  Begin
+    N := 0;
+    Repeat
+      Wait := 0;
+      MemZero(LongInt(@Ev), 12);
+      If MouReadEventQue(LongInt(@Ev), LongInt(@Wait), QMou[Q]) <> 0 Then N := 999;
+      If (RdW(LongInt(@Ev)) = 0) And (RdL(LongInt(@Ev) + 2) = 0) Then N := 999;
+      Inc(N);
+    Until N >= 64;
+  End;
+  MouseBtn := 0;
+  CaptureWin := 0;
+  WinResumeScreen := 1;
+End;
+
+{ WINQUERYSCREENTAKEN (ordinal 1006, interne : PMSHELL.EXE) : 1 si un
+  programme de PM a pris l'ecran depuis WINSUSPENDSCREEN }
+Function WinQueryScreenTaken : LongInt;
+Begin
+  WinQueryScreenTaken := SuspTook;
 End;
 
 { ==================================================================== }
@@ -14192,7 +14372,10 @@ exports
   WinSysClassProc Index 1000 Name 'WINSYSCLASSPROC',
   WinQueryPSInfo Index 1001 Name 'WINQUERYPSINFO',
   WinQueryScreenText Index 1002 Name 'WINQUERYSCREENTEXT',
-  WinHideOverlays Index 1003 Name 'WINHIDEOVERLAYS';
+  WinHideOverlays Index 1003 Name 'WINHIDEOVERLAYS',
+  WinSuspendScreen Index 1004 Name 'WINSUSPENDSCREEN',
+  WinResumeScreen Index 1005 Name 'WINRESUMESCREEN',
+  WinQueryScreenTaken Index 1006 Name 'WINQUERYSCREENTAKEN';
 
 Var
   InitI : LongInt;

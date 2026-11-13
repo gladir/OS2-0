@@ -52,9 +52,18 @@ Library PMGPI;
   acceptes), HPS 4750xxxxh (ceux de PMWIN 5053xxxxh sont acceptes),
   HBITMAP 4742xxxxh, HRGN 4752xxxxh, HMF 474Dxxxxh, HPAL 474Cxxxxh.
 
+  Impression : un DC OD_QUEUED est un travail du tampon d'impression
+  (PMSPL.DLL, charge a la premiere demande) : SplQmOpen a l'ouverture,
+  DEVESC_STARTDOC (8150) commence le document, DEVESC_ENDDOC (8151) le
+  termine et rend le numero du travail (mot), DEVESC_ABORTDOC (8153)
+  l'abandonne, DEVESC_RAWDATA (16303) ecrit des donnees PM_Q_RAW ; en
+  PM_Q_STD (defaut), les appels de la GPI faits entre STARTDOC et ENDDOC
+  sont enregistres (SplStdStart, SplStdStop) et le metafichier devient
+  les donnees du travail. Points d'entree internes pour PMSPL :
+  GPISTDSTART (1001) et GPISTDSTOP (1002).
+
   Limites : pas de GOCA (GpiPutData et GpiGetData transportent les
-  elements du format ci-dessus), pas d'impression (OD_QUEUED est un
-  contexte sans sortie), une seule police (System VIO / System
+  elements du format ci-dessus), une seule police (System VIO / System
   Monospaced), largeur geometrique des lignes approchee. Les fonctions
   Mt*, Segs*, Fmt* et Dsp* (internes a OS/2) sont decrites avec leur
   code. Les points d'entree 16 bits (ordinaux 1 a 312) ont le meme effet
@@ -230,6 +239,10 @@ Type
 Var
   { contextes de peripheriques }
   DcUse, DcPid, DcType, DcW, DcH, DcBmp, DcMeta, DcWnd, DcOwner, DcHab : Array[0..MaxDC - 1] Of LongInt;
+  { DC OD_QUEUED : HSPL de PMSPL.DLL, donnees PM_Q_STD }
+  DcSpl, DcStd : Array[0..MaxDC - 1] Of LongInt;
+  SplMod, SplTried, SesFlagsAdr : LongInt;
+  SplFns : Array[0..95] Of LongInt;
   { espaces de presentation }
   Gps : Array[0..MaxGPS - 1] Of TGps;
   GpsUse : Array[0..MaxGPS - 1] Of LongInt;
@@ -300,6 +313,7 @@ Var
 
 { --- services des autres DLL --- }
 Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
+Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
 Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Function KGetProcessHeap : LongInt; External 'DOSCALLS' Name 'GetProcessHeap';
 Function KHeapAlloc(H, Flags, Size : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapAlloc';
@@ -311,6 +325,7 @@ Function DcOpen(PName, PHf, PAct, Cb, Attr, Fl, Mode, PEa : LongInt) : LongInt; 
 Function DcRead(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS' Name 'DosRead';
 Function DcWrite(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS' Name 'DosWrite';
 Function DcClose(H : LongInt) : LongInt; External 'DOSCALLS' Name 'DosClose';
+Function DcLoadModule(PObj, Cb, PName, PH : LongInt) : LongInt; External 'DOSCALLS' Name 'DosLoadModule';
 Function VioGetMode(P, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioGetMode';
 Function VioGetFont(P, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioGetFont';
 
@@ -618,8 +633,26 @@ Begin
 End;
 
 { --- ports du VGA (anneau 0) --- }
+{ ports du VGA : seulement si l'ecran est a la session de l'appelant }
+Function GpiMine : Boolean;
+Type PLong = ^LongInt;
+Var Q : PLong; F, C, S : LongInt;
+Begin
+  If SesFlagsAdr = 0 Then SesFlagsAdr := KSes(15, 0, 0);
+  If SesFlagsAdr = 0 Then
+  Begin
+    GpiMine := True;
+    Exit;
+  End;
+  Q := Pointer(SesFlagsAdr); F := Q^;
+  Q := Pointer(SesFlagsAdr + 4); C := Q^;
+  Q := Pointer(SesFlagsAdr + 12); S := Q^;
+  GpiMine := (F = C) Or (S <> 0);
+End;
+
 Procedure OutB(P, V : LongInt);
 Begin
+  If Not GpiMine Then Exit;
   asm
     mov edx,P
     mov eax,V
@@ -648,6 +681,32 @@ Begin
     pop ebx
   end;
   CallSys2 := R;
+End;
+
+Function CallSys4(F, A1, A2, A3, A4 : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A4
+    push eax
+    mov eax,A3
+    push eax
+    mov eax,A2
+    push eax
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,16
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallSys4 := R;
 End;
 
 { --- memoire : blocs (+0 taille | 1 si utilise, +4 processus) --- }
@@ -739,6 +798,34 @@ Begin
   If PmErrFn <> 0 Then Dummy := CallSys2(PmErrFn, LastErr, 0);
 End;
 
+{ --- tampon d'impression : PMSPL.DLL charge a la premiere demande ;
+  point d'entree par ordinal (0 si absent) --- }
+Function SplF(On : LongInt) : LongInt;
+Var ErrB : Array[0..63] Of Byte; F : LongInt;
+Begin
+  SplF := 0;
+  If (SplMod = 0) And (SplTried = 0) Then
+  Begin
+    SplTried := 1;
+    PutZ(LongInt(@NameZ), 'PMSPL');
+    If DcLoadModule(LongInt(@ErrB), 64, LongInt(@NameZ), LongInt(@SplMod)) <> 0 Then SplMod := 0;
+  End;
+  If (SplMod = 0) Or (On < 0) Or (On > 95) Then Exit;
+  If SplFns[On] = 0 Then
+  Begin
+    F := 0;
+    If DcQueryProcAddr(SplMod, On, 0, LongInt(@F)) = 0 Then SplFns[On] := F;
+  End;
+  SplF := SplFns[On];
+End;
+
+Function SplCall(On, A1, A2, A3 : LongInt) : LongInt;
+Var F : LongInt;
+Begin
+  F := SplF(On);
+  If F = 0 Then SplCall := 0 Else SplCall := CallSys4(F, A1, A2, A3, 0);
+End;
+
 
 { ==================================================================== }
 { Partie 2 - Contextes, bitmaps, cible du dessin, pels, couleurs        }
@@ -772,6 +859,7 @@ Begin
   Begin
     DcUse[F] := 1; DcPid[F] := MyPid; DcType[F] := Typ; DcW[F] := 640; DcH[F] := 480;
     DcBmp[F] := -1; DcMeta[F] := -1; DcWnd[F] := 0; DcOwner[F] := MyPid; DcHab[F] := 0;
+    DcSpl[F] := 0; DcStd[F] := 0;
   End;
   NewDc := F;
 End;
@@ -2874,6 +2962,21 @@ Begin
     DcMeta[D] := M;
     DcType[D] := OD_METAFILE;
   End;
+  { OD_QUEUED : travail du tampon d'impression (PMSPL.DLL) ; sans PMSPL,
+    contexte sans sortie }
+  If (Typ = OD_QUEUED) And (SplF(1) <> 0) Then
+  Begin
+    DcSpl[D] := SplCall(1, PTok, N, PDop);
+    If DcSpl[D] = 0 Then
+    Begin
+      DcUse[D] := 0;
+      Exit;
+    End;
+    DcStd[D] := 1;
+    If (N >= 4) And (PDop <> 0) Then
+      If UpStr(GetZ(RdL(PDop + 12))) = 'PM_Q_RAW' Then DcStd[D] := 0;
+    If DcStd[D] <> 0 Then Dummy := SplCall(50, $44470001 + D, 0, 0);
+  End;
   DevOpenDC := $44470001 + D;
 End;
 
@@ -2913,6 +3016,12 @@ Begin
     SetErr(PMERR_INV_HDC);
     DevCloseDC := 0;
     Exit;
+  End;
+  If DcSpl[D] <> 0 Then
+  Begin
+    If DcStd[D] <> 0 Then Dummy := SplCall(51, H, 0, 0);
+    Dummy := SplCall(6, DcSpl[D], 0, 0);
+    DcSpl[D] := 0;
   End;
   For K := 0 To MaxGPS - 1 Do
     If (GpsUse[K] <> 0) And (Gps[K].Dc = D) Then Gps[K].Dc := -1;
@@ -2995,12 +3104,74 @@ End;
   DEVESC_QUERYESCSUPPORT 0, STARTDOC 8150, ENDDOC 8151, NEWFRAME 16300,
   ABORTDOC 8153, QUERYVIOCELLSIZES 35 ; DEV_OK 1, DEVESC_NOTIMPLEMENTED 0 }
 Function DevEscape(H, Code, NIn, PIn, PNOut, POut : LongInt) : LongInt;
-Var C : LongInt;
+Var C, D, Hs, Hst, L, Off, N : LongInt; Doc : Array[0..259] Of Byte; Chunk : Array[0..4095] Of Byte;
 Begin
   DevEscape := 0;
-  If DcK(H) < 0 Then
+  D := DcK(H);
+  If D < 0 Then
   Begin
     DevEscape := -1;
+    Exit;
+  End;
+  { DC du tampon d'impression : STARTDOC, ENDDOC, ABORTDOC, RAWDATA }
+  Hs := DcSpl[D];
+  If (Hs <> 0) And ((Code = 8150) Or (Code = 8151) Or (Code = 8153) Or (Code = 16303)) Then
+  Begin
+    DevEscape := 1;
+    Case Code Of
+      8150 :
+        Begin
+          N := 0;
+          If PIn <> 0 Then
+            While (N < NIn) And (N < 255) And (RdB(PIn + N) <> 0) Do
+            Begin
+              Doc[N] := RdB(PIn + N);
+              Inc(N);
+            End;
+          Doc[N] := 0;
+          If SplCall(2, Hs, LongInt(@Doc), 0) = 0 Then DevEscape := -1
+          Else If DcStd[D] <> 0 Then Dummy := SplCall(52, H, 0, 0);
+        End;
+      8151 :
+        Begin
+          If DcStd[D] <> 0 Then
+          Begin
+            Hst := SplCall(53, H, 0, 0);
+            If Hst <> 0 Then
+            Begin
+              L := SplCall(56, Hst, 0, 0);
+              Off := 0;
+              While Off < L Do
+              Begin
+                N := MinI(4096, L - Off);
+                If CallSys4(SplF(55), Hst, Off, N, LongInt(@Chunk)) <> 0 Then
+                  Dummy := SplCall(4, Hs, N, LongInt(@Chunk));
+                Off := Off + N;
+              End;
+              Dummy := SplCall(54, Hst, 0, 0);
+            End;
+          End;
+          N := SplCall(3, Hs, 0, 0);
+          If N = 0 Then DevEscape := -1
+          Else If (PNOut <> 0) And (POut <> 0) Then
+            If RdL(PNOut) >= 2 Then
+            Begin
+              WrW(POut, N);
+              WrL(PNOut, 2);
+            End;
+        End;
+      8153 :
+        Begin
+          If DcStd[D] <> 0 Then
+          Begin
+            Hst := SplCall(53, H, 0, 0);
+            If Hst <> 0 Then Dummy := SplCall(54, Hst, 0, 0);
+          End;
+          Dummy := SplCall(8, Hs, 0, 0);
+        End;
+      16303 :
+        If SplCall(4, Hs, NIn, PIn) = 0 Then DevEscape := -1;
+    End;
     Exit;
   End;
   Case Code Of
@@ -3009,6 +3180,7 @@ Begin
         C := 0;
         If (PIn <> 0) And (NIn >= 4) Then C := RdL(PIn);
         If (C = 8150) Or (C = 8151) Or (C = 8153) Or (C = 16300) Or (C = 0) Then DevEscape := 1;
+        If (C = 16303) And (DcSpl[D] <> 0) Then DevEscape := 1;
       End;
     8150, 8151, 8153, 16300 :
       Begin
@@ -7989,6 +8161,32 @@ Begin
   GpiCopyMetaFile := $474D0001 + N;
 End;
 
+{ GPISTDSTART(hdc) (interne, PMSPL.DLL : SplStdStart) : les appels faits
+  sur le DC sont enregistres dans un nouveau metafichier ; BOOL }
+Function GpiStdStart(H : LongInt) : LongInt;
+Var D, M : LongInt;
+Begin
+  GpiStdStart := 0;
+  D := DcIdx(H);
+  If (D < 0) Or (DcMeta[D] >= 0) Then Exit;
+  M := NewMeta;
+  If M < 0 Then Exit;
+  DcMeta[D] := M;
+  GpiStdStart := 1;
+End;
+
+{ GPISTDSTOP(hdc) (interne, SplStdStop) : fin de l'enregistrement ; HMF }
+Function GpiStdStop(H : LongInt) : LongInt;
+Var D, M : LongInt;
+Begin
+  GpiStdStop := 0;
+  D := DcIdx(H);
+  If (D < 0) Or (DcMeta[D] < 0) Or (DcType[D] = OD_METAFILE) Then Exit;
+  M := DcMeta[D];
+  DcMeta[D] := -1;
+  GpiStdStop := $474D0001 + M;
+End;
+
 Function GpiQueryMetaFileLength(H : LongInt) : LongInt;
 Var M : LongInt;
 Begin
@@ -10210,7 +10408,9 @@ exports
   DspDefaultResolution Index 654 Name 'DspDefaultResolution',
   DevQueryDisplayResolutions Index 655 Name 'DevQueryDisplayResolutions',
   DspInitSystemDriverName Index 656 Name 'DspInitSystemDriverName',
-  GpiQueryFullFontFileDescs Index 657 Name 'GpiQueryFullFontFileDescs';
+  GpiQueryFullFontFileDescs Index 657 Name 'GpiQueryFullFontFileDescs',
+  GpiStdStart Index 1001 Name 'GPISTDSTART',
+  GpiStdStop Index 1002 Name 'GPISTDSTOP';
 
 Var
   InitI : LongInt;

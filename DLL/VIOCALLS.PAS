@@ -280,7 +280,9 @@ Var
   Dummy     : LongInt;
   { mode graphique : numero du mode VGA (0 : texte 80 x 25), largeur,
     hauteur, bits par pel, octets d'un plan }
-  GrMode, GrW, GrH, GrBits, GrPlane : LongInt;
+  GrMode, GrW, GrH, GrBits, GrPlane : LongInt;   { mode du materiel }
+  SesAddr, HookOk : LongInt;               { etat des sessions du noyau }
+  SesGr : Array[0..15] Of LongInt;         { mode graphique de chaque session }
   PopGr     : LongInt;        { mode graphique a rendre apres VioEndPopup }
 
 { ==================================================================== }
@@ -303,6 +305,7 @@ Function DosOpen(PName, PHf, PAction, Cb, Attr, Flags, Mode, PEa : LongInt) : Lo
 Function DosWrite(H, Buf, Cb, PActual : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetFilePtr(H, Dist, Method, PNew : LongInt) : LongInt; External 'DOSCALLS';
 Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
+Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
 
 { ==================================================================== }
 { Partie 3 - Utilitaires (memoire, chaines, ports)                     }
@@ -417,8 +420,40 @@ End;
 
 { --- ports d'entree/sortie (anneau 0) --- }
 
+{ l'ecran est-il a la session de l'appelant ? (sinon, les ports du VGA
+  ne sont pas touches : ils appartiennent a la session au premier plan) }
+Function Mine : Boolean;
+Type PLong = ^LongInt;
+Var Q : PLong; F, C, S : LongInt;
+Begin
+  If SesAddr = 0 Then SesAddr := KSes(15, 0, 0);
+  If SesAddr = 0 Then
+  Begin
+    Mine := True;
+    Exit;
+  End;
+  Q := Pointer(SesAddr); F := Q^;
+  Q := Pointer(SesAddr + 4); C := Q^;
+  Q := Pointer(SesAddr + 12); S := Q^;
+  Mine := (F = C) Or (S <> 0);
+End;
+
+Function CurSesNo : LongInt;
+Type PLong = ^LongInt;
+Var Q : PLong;
+Begin
+  If SesAddr = 0 Then SesAddr := KSes(15, 0, 0);
+  If SesAddr = 0 Then CurSesNo := 0
+  Else
+  Begin
+    Q := Pointer(SesAddr + 4);
+    CurSesNo := Q^ And 15;
+  End;
+End;
+
 Procedure OutB(P, V : LongInt);
 Begin
+  If Not Mine Then Exit;
   asm
     mov edx,P
     mov eax,V
@@ -935,6 +970,7 @@ Begin
     OutB($3C4, 2); OutB($3C5, $0F);
   End;
   GrMode := VgaModeNo[K]; GrW := VgaModeW[K]; GrH := VgaModeH[K]; GrBits := VgaModeB[K];
+  SesGr[CurSesNo] := GrMode;
   If GrBits = 8 Then GrPlane := GrW * GrH Else GrPlane := (GrW Div 8) * GrH;
 End;
 
@@ -952,6 +988,7 @@ Begin
   M := AcGet($10);
   If Blink = 0 Then AcSet($10, M Or 8) Else AcSet($10, M And Not 8);
   GrMode := 0; GrW := 0; GrH := 0; GrBits := 0; GrPlane := 0;
+  SesGr[CurSesNo] := 0;
   CursorApply;
 End;
 
@@ -959,7 +996,7 @@ End;
   graphique pour l'ecran) }
 Function TextErr(Hvio : LongInt) : LongInt;
 Begin
-  If (Hvio = 0) And (GrMode <> 0) Then TextErr := ERROR_VIO_MODE
+  If (Hvio = 0) And (SesGr[CurSesNo] <> 0) Then TextErr := ERROR_VIO_MODE
   Else TextErr := SurfErr(Hvio);
 End;
 
@@ -1883,7 +1920,7 @@ Begin
     Begin
       Cols := SCols(Hvio); Rows := SRows(Hvio);
       FillB(LongInt(@Scratch), 34, 0);
-      If (Hvio = 0) And (GrMode <> 0) Then
+      If (Hvio = 0) And (SesGr[CurSesNo] <> 0) Then
       Begin
         { mode graphique : col x row = cellules de 8 x 8 (200 lignes),
           8 x 14 (350) ou 8 x 16 (480) }
@@ -1991,10 +2028,24 @@ Begin
       Else If (Rows <> 0) And (Rows <> NRows) Then R := ERROR_VIO_MODE;
     End;
   End;
-  If (R = NO_ERROR) And (K > 0) Then GrEnter(K)
+  { crochet de bascule des sessions (retour au mode texte) }
+  If HookOk = 0 Then
+  Begin
+    HookOk := 1;
+    PutZ(LongInt(@Scratch), 'VIOCALLS', 64);
+    I := 0;
+    If DosLoadModule(LongInt(@Scratch) + 512, 64, LongInt(@Scratch), LongInt(@I)) = 0 Then
+      If DosQueryProcAddr(I, 1001, 0, LongInt(@Cb)) = 0 Then Dummy := KSes(6, Cb, 0);
+  End;
+  If (R = NO_ERROR) And (K > 0) Then
+  Begin
+    SesGr[CurSesNo] := VgaModeNo[K];
+    If Mine Then GrEnter(K);
+  End
   Else If R = NO_ERROR Then
   Begin
-    GrLeave;
+    SesGr[CurSesNo] := 0;
+    If Mine Then GrLeave;
     For I := 0 To NCols * NRows - 1 Do WrW(SBase(0) + I * 2, $0720);
     SetAttr(0, 7);
     SetCur(0, 0, 0);
@@ -3382,6 +3433,20 @@ Begin
   XVioGetCAState := R;
 End;
 
+{ VIOSESSSWITCH (ordinal 1001, interne) : appele par le noyau quand une
+  session en mode texte passe au premier plan : le VGA revient au mode
+  texte (registres, police, palette) }
+Function VioSessSwitch(Op : LongInt) : LongInt;
+Var V : LongInt;
+Begin
+  { le mode de la session de l'appelant (qui n'est pas celle qui passe au
+    premier plan) est garde }
+  V := SesGr[CurSesNo];
+  If GrMode <> 0 Then GrLeave;
+  SesGr[CurSesNo] := V;
+  VioSessSwitch := 0;
+End;
+
 { ==================================================================== }
 { Exportations et initialisation                                       }
 { ==================================================================== }
@@ -3411,7 +3476,8 @@ exports
   VioSetDeviceCellSize Index 65, VioShowPS Index 66, VioGetPSAddress Index 67,
   VioQueryConsole Index 68, VioRedrawSize Index 69, VioGlobalReg Index 70,
   XVioSetCAState Index 71, XVioCheckCharType Index 72, XVioDestroyCA Index 73,
-  XVioCreateCA Index 74, VioCheckCharType Index 75, XVioGetCAState Index 76;
+  XVioCreateCA Index 74, VioCheckCharType Index 75, XVioGetCAState Index 76,
+  VioSessSwitch Name 'VIOSESSSWITCH' Index 1001;
 
 Var
   InitI : LongInt;
