@@ -14,7 +14,7 @@ Program TESTVIO;
   TESTVIO   verifie les 76 fonctions de VIOCALLS.DLL : les resultats sont
             relus par VIO, directement dans la memoire de l'ecran
             (000B8000h) et dans les registres du VGA ; les modes
-            graphiques (640 x 480 x 16, 320 x 200 x 256...) sont essayes
+            graphiques (640 x 480 x 16, 320 x 200 x 256, modes VESA...) sont essayes
             a la fin (pels ecrits en 000A0000h). TESTVIOR.DLL sert
             de sous-systeme de remplacement (VioRegister, VioGlobalReg). }
 
@@ -41,6 +41,8 @@ Function VioWrtTty(PCh, Cb, Hvio : LongInt) : LongInt; External 'VIOCALLS';
 Function VioSave(Hvio : LongInt) : LongInt; External 'VIOCALLS';
 Function VioGetMode(PMode, Hvio : LongInt) : LongInt; External 'VIOCALLS';
 Function VioSetMode(PMode, Hvio : LongInt) : LongInt; External 'VIOCALLS';
+Function VioQueryModes(I, P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYMODES';
+Function VioQueryVbe(P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYVBE';
 Function VioScrLock(FWait, PNot, Hvio : LongInt) : LongInt; External 'VIOCALLS';
 Function VioReadCellStr(PBuf, PCb, Row, Col, Hvio : LongInt) : LongInt; External 'VIOCALLS';
 Function VioSavRedrawWait(RedrawInd, PNotify, Reserved : LongInt) : LongInt; External 'VIOCALLS';
@@ -139,7 +141,8 @@ Var
   S : String;
   OutBuf : Array[0..32767] Of Byte;     { resultats, affiches a la fin (pas de
                                        defilement pendant les essais) }
-  OutLen, Dummy, Fs0, Bad, C, P : LongInt;
+  OutLen, Dummy, Fs0, Bad, C, P, Nm, Vv, Lfb, Pitch : LongInt;
+  Mq : Array[0..3] Of LongInt;
 
 Function IStr(V : LongInt) : String;
 Var T : String;
@@ -870,6 +873,40 @@ BEGIN
   R := GrMode(2, 640, 480);
   R2 := GrMode(1, 640, 480);
   Check('VioSetMode 640 x 480 x 4 refuse, 640 x 480 x 2 (11h)', (R = ERROR_VIO_MODE) And (R2 = 0) And (Info[3] = 1));
+  { modes VESA (BIOS VBE de la carte, QEMU : VBE 3.0) }
+  Nm := VioQueryModes(0, 0);
+  Vv := VioQueryVbe(LongInt(@Buf));
+  Check('VIOQUERYMODES : VGA 640 x 480 x 16 et modes VESA', (Nm >= 1) And (VioQueryModes(0, LongInt(@Mq)) = 1) And
+        (Mq[0] = 640) And (Mq[2] = 4) And ((Vv = 0) Or (Nm > 1)));
+  If Vv <> 0 Then
+  Begin
+    R := GrMode(8, 800, 600);
+    Lfb := RdL(LongInt(@Info) + 14); Pitch := RdL(LongInt(@Info) + 26);
+    Check('VioSetMode 800 x 600 x 256 (VESA) : memoire lineaire', (R = 0) And (Info[3] = 8) And
+          (RdW(LongInt(@Info) + 8) = 800) And (RdW(LongInt(@Info) + 10) = 600) And
+          ((Lfb < 0) Or (Lfb >= $100000)) And (Pitch >= 800));
+    Bad := 0;
+    For Y := 0 To 99 Do
+      For X := 0 To 799 Do WrB(Lfb + Y * Pitch + X, (X + Y) And 255);
+    For Y := 0 To 99 Do
+      For X := 0 To 799 Do
+        If RdB(Lfb + Y * Pitch + X) <> (X + Y) And 255 Then Inc(Bad);
+    Check('pels du mode 800 x 600 x 256 (un octet par pel)', Bad = 0);
+    Dummy := DosSleep(800);
+    R := GrMode(32, 1024, 768);
+    Lfb := RdL(LongInt(@Info) + 14); Pitch := RdL(LongInt(@Info) + 26);
+    Bad := 0;
+    For Y := 0 To 63 Do
+      For X := 0 To 1023 Do WrL(Lfb + Y * Pitch + X * 4, (X Shl 16) Or (Y Shl 8) Or 128);
+    For Y := 0 To 63 Do
+      For X := 0 To 1023 Do
+        If (RdL(Lfb + Y * Pitch + X * 4) And $FFFFFF) <> (((X Shl 16) Or (Y Shl 8) Or 128) And $FFFFFF) Then Inc(Bad);
+    Check('VioSetMode 1024 x 768 x 16 M couleurs (VESA, 32 bits par pel)', (R = 0) And (Info[3] = 32) And
+          (RdW(LongInt(@Info) + 8) = 1024) And (Pitch >= 4096) And (Bad = 0));
+    Dummy := DosSleep(800);
+    R := GrMode(16, 1234, 777);
+    Check('VioSetMode 1234 x 777 refuse (pas de mode VESA)', R = ERROR_VIO_MODE);
+  End;
   FillChar(Info, 64, 0);
   WrW(LongInt(@Info), 8); Info[2] := 1; Info[3] := 4; WrW(LongInt(@Info) + 4, 80); WrW(LongInt(@Info) + 6, 25);
   R := VioSetMode(LongInt(@Info), 0);

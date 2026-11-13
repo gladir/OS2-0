@@ -115,7 +115,7 @@ Const
   OS2_DLL_BASE  = $00C00000;  { base preferee par defaut des DLL OS/2-0 (region 8-16 Mo) }
   { Liste des API (noms Win32) utilisees par le runtime : le noyau OS/2-0
     (-COS2KRNL) exporte un point d entree pour chacune (DOSCALLS.DLL). }
-  OS2_API_COUNT = 140;
+  OS2_API_COUNT = 141;
   OS2_API_NAMES : Array[1..OS2_API_COUNT] Of String[31] = (
     'Arc', 'Beep', 'BitBlt', 'CloseHandle', 'CreateCompatibleBitmap',
     'CreateCompatibleDC', 'CreateDirectoryA', 'CreateFileA', 'CreateFontA',
@@ -153,7 +153,7 @@ Const
     'LoadLibraryA', 'GetProcAddress', 'FreeLibrary', 'GetModuleFileNameA', 'GetVolumeInformationA',
     'GlobalMemoryStatus', 'GetCurrentProcessId', 'GetCurrentThreadId', 'KrnGetParentPid', 'KrnModuleFromAddr',
     'FSH_DoVolIO', 'KrnMouRead', 'KrnMouInfo', 'KrnKbdRead', 'KrnKbdCtl', 'KrnMonIo', 'SetStdHandle',
-    'KrnTaskCtl', 'KrnSesCtl');
+    'KrnTaskCtl', 'KrnSesCtl', 'KrnVideo');
 
 Type
   TString = String;
@@ -28679,16 +28679,11 @@ Begin
     Exit;
   End;
 
-  { REP MOVSB / REP MOVSW -> REP MOVSD (ou traduire) }
+  { REP MOVSB/MOVSW/MOVSD, STOSB/STOSW/STOSD... : l instruction repetee
+    garde sa taille (MOVSW, STOSW : mots de 16 bits, prefixe 66h) }
   If Up = 'REP' Then
   Begin
-    { Le reste contient l instruction repetee }
-    If StrUpperCase(Op1) = 'MOVSW' Then
-      EmitInstr('REP MOVSD')
-    Else If StrUpperCase(Op1) = 'STOSW' Then
-      EmitInstr('REP STOSD')
-    Else
-      EmitInstr('REP ' + StrUpperCase(Op1));
+    EmitInstr('REP ' + StrUpperCase(Op1));
     Exit;
   End;
 
@@ -28707,13 +28702,8 @@ Begin
      (Up = 'SAHF') Or (Up = 'LAHF') Or
      (Up = 'IRET') Or (Up = 'IRETD') Then
   Begin
-    { MOVSW -> MOVSD en 32 bits }
-    If Up = 'MOVSW' Then EmitInstr('MOVSD')
-    Else If Up = 'STOSW' Then EmitInstr('STOSD')
-    Else If Up = 'LODSW' Then EmitInstr('LODSD')
-    Else If Up = 'SCASW' Then EmitInstr('SCASD')
-    Else If Up = 'CMPSW' Then EmitInstr('CMPSD')
-    Else If Up = 'PUSHA' Then EmitInstr('PUSHAD')
+    { MOVSW, STOSW... : mots de 16 bits (prefixe 66h) }
+    If Up = 'PUSHA' Then EmitInstr('PUSHAD')
     Else If Up = 'POPA' Then EmitInstr('POPAD')
     Else If Up = 'IRET' Then EmitInstr('IRETD')
     Else If Up = 'RETF' Then EmitInstr('RET')
@@ -38400,6 +38390,12 @@ Begin { BcAssemble }
   If Mnem = 'SCASD' Then Begin BcEmitB($AF); Exit; End;
   If Mnem = 'CMPSB' Then Begin BcEmitB($A6); Exit; End;
   If Mnem = 'CMPSD' Then Begin BcEmitB($A7); Exit; End;
+  { chaines de mots de 16 bits : prefixe 66h }
+  If Mnem = 'LODSW' Then Begin BcEmitB($66); BcEmitB($AD); Exit; End;
+  If Mnem = 'STOSW' Then Begin BcEmitB($66); BcEmitB($AB); Exit; End;
+  If Mnem = 'MOVSW' Then Begin BcEmitB($66); BcEmitB($A5); Exit; End;
+  If Mnem = 'SCASW' Then Begin BcEmitB($66); BcEmitB($AF); Exit; End;
+  If Mnem = 'CMPSW' Then Begin BcEmitB($66); BcEmitB($A7); Exit; End;
   If Mnem = 'CLD' Then Begin BcEmitB($FC); Exit; End;
   If Mnem = 'STD' Then Begin BcEmitB($FD); Exit; End;
   If Mnem = 'REP' Then Begin BcEmitB($F3);

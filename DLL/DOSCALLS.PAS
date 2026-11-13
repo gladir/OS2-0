@@ -35,7 +35,9 @@ Library DOSCALLS;
   fin de l'enfant, EXEC_ASYNC/EXEC_ASYNCRESULT la laissent a DosWaitChild,
   EXEC_BACKGROUND le detache ; DosCreateThread cree une tache du noyau
   (point d'entree ThrEntry32, qui appelle la fonction du fil) ; les
-  minuteries sont verifiees a chaque attente ; une attente qu'aucune
+  minuteries sont verifiees a chaque attente, par le processus qui les a
+  creees (la table est commune, les semaphores a poster sont les siens) ;
+  celles d'un processus termine sont liberees ; une attente qu'aucune
   autre tache ne peut plus satisfaire rend ERROR_TIMEOUT ou
   ERROR_INTERRUPT au lieu de bloquer le systeme.
 
@@ -362,6 +364,7 @@ Function KCreateProcessA(App, Cmd, PA, TA, Inh, Flags, Env, Dir, SI, PI : LongIn
 Function KGetExitCodeProcess(H, PCode : LongInt) : LongInt; External 'DOSCALLS' Name 'GetExitCodeProcess';
 Function KWaitForSingleObject(H, Ms : LongInt) : LongInt; External 'DOSCALLS' Name 'WaitForSingleObject';
 Function KTaskCtl(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
+Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Procedure KExitProcess(Code : LongInt); External 'DOSCALLS' Name 'ExitProcess';
 Function KHeapAlloc(Heap, Flags, Size : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapAlloc';
 Function KHeapFree(Heap, Flags, A : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapFree';
@@ -4514,6 +4517,7 @@ Type
     Interval : LongInt;       { 0 : une seule fois }
     Sem      : LongInt;
     Is32     : Boolean;       { HEV a poster, sinon HSEM 16 bits a liberer }
+    Pid      : LongInt;       { processus proprietaire }
   End;
 
 Var
@@ -4523,8 +4527,11 @@ Procedure PollTimers;
 Var I, Now : LongInt;
 Begin
   Now := KGetTickCount;
+  { la table est commune a tous les processus : seul le proprietaire
+    declenche sa minuterie (ses semaphores ne sont valables que pour
+    lui) }
   For I := 0 To MaxTimers - 1 Do
-    If Timers[I].Used And (Now - Timers[I].Due >= 0) Then
+    If Timers[I].Used And (Timers[I].Pid = MyPid) And (Now - Timers[I].Due >= 0) Then
     Begin
       If Timers[I].Is32 Then EvPost(Timers[I].Sem)
       Else S16Put(Timers[I].Sem, False);
@@ -4561,6 +4568,10 @@ Begin
     NewTimer := ERROR_TS_SEMHANDLE;
     Exit;
   End;
+  { minuteries d'un processus termine : liberees }
+  For I := 0 To MaxTimers - 1 Do
+    If Timers[I].Used And (Timers[I].Pid <> MyPid) And (KrnMonIo(0, 4, Timers[I].Pid) = 0) Then
+      Timers[I].Used := False;
   For I := 0 To MaxTimers - 1 Do
     If Not Timers[I].Used Then
     Begin
@@ -4569,6 +4580,7 @@ Begin
       Timers[I].Interval := Interval;
       Timers[I].Sem := HSem;
       Timers[I].Is32 := Is32;
+      Timers[I].Pid := MyPid;
       PokeL(PHTimer, I + 1);
       NewTimer := NO_ERROR;
       Exit;

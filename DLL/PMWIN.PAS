@@ -4,7 +4,8 @@
   @abstract(Target: OS2PC -COS2)
   @description: Bibliotheque OS/2 PMWIN.DLL de OS/2-0 (gestionnaire de
                 fenetres de Presentation Manager, ecran graphique
-                640 x 480 x 16 couleurs ou ecran texte).
+                VGA 640 x 480 x 16 couleurs ou VESA jusqu'a 16
+                millions de couleurs, ou ecran texte).
 }
 
 Library PMWIN;
@@ -26,7 +27,14 @@ Library PMWIN;
 
   Ecran : la premiere file de messages (WinCreateMsgQueue) passe l'ecran
   en mode graphique 640 x 480 x 16 couleurs (VioSetMode, mode 12h du VGA ;
-  origine en bas a gauche, y vers le haut). Les fenetres y sont dessinees
+  origine en bas a gauche, y vers le haut), ou dans le mode VESA demande
+  (WINSETSCREENMODE, ordinal 1007, ou SET PMRESOLUTION=1024x768x32 dans
+  CONFIG.SYS : largeur, hauteur, bits par pel 8, 15, 16, 24 ou 32) ; en
+  mode VESA, l'ecran est la memoire lineaire de la carte (VioGetMode :
+  adresse et octets par ligne) et les bitmaps gardent leurs couleurs
+  (256 couleurs ou couleurs directes). WINSETSCREENMODE change aussi la
+  resolution a chaud (fenetres ramenees dans l'ecran, tout redessine) ;
+  WINQUERYSCREENMODE (1008) la donne. Les fenetres y sont dessinees
   en pels : cadres et boutons en relief, barre de titre, menu systeme,
   boutons de reduction et d'agrandissement, barre d'actions et menus
   deroulants (mnemoniques soulignes, coches, sous-menus), cases a cocher,
@@ -322,10 +330,16 @@ Var
   GMask : LongInt;                        { masque de bits courant du VGA }
   GPtrOn, GPtrX, GPtrY : LongInt;         { pointeur dessine (x, ligne du haut) }
   GPtrSave : Array[0..255] Of Byte;       { pels sous le pointeur }
+  GPtrRaw : Array[0..255] Of LongInt;     { pels sous le pointeur (memoire lineaire) }
+  { ecran VESA (memoire lineaire) : 0 = plans du VGA }
+  GLfb, GPitch, GBpp, GBits, GXor : LongInt;
+  GPixV : Array[0..15] Of LongInt;        { valeur du peripherique des 16 couleurs }
+  PmReqW, PmReqH, PmReqBits : LongInt;    { mode demande (WINSETSCREENMODE) }
+  PmCurW, PmCurH : LongInt;               { resolution courante (VESA) }
   GCarWant, GCarOn : LongInt;             { curseur demande, curseur dessine }
   GCarX1, GCarY1, GCarX2, GCarY2 : LongInt;
   GCdX1, GCdY1, GCdX2, GCdY2 : LongInt;   { rectangle dessine }
-  GShadow : Array[0..2399] Of Byte;       { caracteres de l'ecran (80 x 30) }
+  GShadow : Array[0..15999] Of Byte;      { caracteres de l'ecran (200 x 80 au plus) }
   BrdX, BrdY, TitleH, MenuH, VsbW, HsbH, MRowH, MPad : LongInt;
   GPl : Array[0..11] Of LongInt;
   HwBit : LongInt;
@@ -1009,10 +1023,146 @@ Begin
   GIn := R;
 End;
 
+{ --- ecran VESA : memoire lineaire (GLfb, GPitch octets par ligne, GBpp
+  octets par pel) ; les couleurs de PMWIN sont les 16 couleurs du VGA
+  (GPixV) ou, avec l'indicateur 01000000h, une couleur RVB (bitmaps) --- }
+
+{ valeur du peripherique d'une couleur RVB }
+Function GRgbDev(Rgb : LongInt) : LongInt;
+Var R, G, B : LongInt;
+Begin
+  R := (Rgb Shr 16) And 255; G := (Rgb Shr 8) And 255; B := Rgb And 255;
+  Case GBits Of
+    8 : GRgbDev := 32 + ((R * 5 + 127) Div 255) * 36 + ((G * 5 + 127) Div 255) * 6 + (B * 5 + 127) Div 255;
+    15 : GRgbDev := ((R Shr 3) Shl 10) Or ((G Shr 3) Shl 5) Or (B Shr 3);
+    16 : GRgbDev := ((R Shr 3) Shl 11) Or ((G Shr 2) Shl 5) Or (B Shr 3);
+  Else
+    GRgbDev := Rgb And $FFFFFF;
+  End;
+End;
+
+Function GDev(C : LongInt) : LongInt;
+Begin
+  If (C And $1000000) <> 0 Then GDev := GRgbDev(C And $FFFFFF)
+  Else GDev := GPixV[C And 15];
+End;
+
+Procedure LPut(A, V : LongInt);
+Begin
+  Case GBpp Of
+    1 : WrB(A, V);
+    2 : WrW(A, V);
+    3 : Begin
+          WrB(A, V); WrB(A + 1, V Shr 8); WrB(A + 2, V Shr 16);
+        End;
+  Else
+    WrL(A, V);
+  End;
+End;
+
+Function LGet(A : LongInt) : LongInt;
+Begin
+  Case GBpp Of
+    1 : LGet := RdB(A);
+    2 : LGet := RdW(A);
+    3 : LGet := RdB(A) Or (RdB(A + 1) Shl 8) Or (RdB(A + 2) Shl 16);
+  Else
+    LGet := RdL(A) And $FFFFFF;
+  End;
+End;
+
+{ N pels de valeur V a partir de l'adresse A }
+Procedure LSpan(A, N, V : LongInt);
+Var K : LongInt;
+Begin
+  If N <= 0 Then Exit;
+  Case GBpp Of
+    1 : asm
+          push edi
+          mov edi,A
+          mov eax,V
+          mov ecx,N
+          cld
+          rep stosb
+          pop edi
+        end;
+    2 : asm
+          push edi
+          mov edi,A
+          mov eax,V
+          mov ecx,N
+          cld
+          rep stosw
+          pop edi
+        end;
+    4 : asm
+          push edi
+          mov edi,A
+          mov eax,V
+          mov ecx,N
+          cld
+          rep stosd
+          pop edi
+        end;
+  Else
+    For K := 0 To N - 1 Do LPut(A + K * 3, V);
+  End;
+End;
+
+{ copier N octets (zones qui peuvent se recouvrir) }
+Procedure LMove(Src, Dst, N : LongInt);
+Begin
+  If N <= 0 Then Exit;
+  If Dst <= Src Then
+    asm
+      push esi
+      push edi
+      mov esi,Src
+      mov edi,Dst
+      mov ecx,N
+      cld
+      rep movsb
+      pop edi
+      pop esi
+    end
+  Else
+    asm
+      push esi
+      push edi
+      mov esi,Src
+      mov edi,Dst
+      mov ecx,N
+      add esi,ecx
+      dec esi
+      add edi,ecx
+      dec edi
+      std
+      rep movsb
+      cld
+      pop edi
+      pop esi
+    end;
+End;
+
+{ couleur (0 a 15) la plus proche d'une valeur du peripherique }
+Function LIndex(V : LongInt) : LongInt;
+Var I, R : LongInt;
+Begin
+  R := 0;
+  For I := 15 DownTo 0 Do
+    If GPixV[I] = V Then R := I;
+  LIndex := R;
+End;
+
 { ecriture dans les 4 plans : mode d'ecriture 2 (couleur dans l'octet
   ecrit), operation Op (0 remplacement, 3 ou exclusif) }
 Procedure GBegin(Op : LongInt);
 Begin
+  If GLfb <> 0 Then
+  Begin
+    If Op = 3 Then GXor := 1 Else GXor := 0;
+    Exit;
+  End;
   GOut($3CE, 5); GOut($3CF, 2);
   GOut($3CE, 3); GOut($3CF, Op Shl 3);
   GOut($3C4, 2); GOut($3C5, $0F);
@@ -1022,6 +1172,11 @@ End;
 
 Procedure GEnd;
 Begin
+  If GLfb <> 0 Then
+  Begin
+    GXor := 0;
+    Exit;
+  End;
   GOut($3CE, 8); GOut($3CF, $FF);
   GOut($3CE, 3); GOut($3CF, 0);
   GOut($3CE, 5); GOut($3CF, 0);
@@ -1030,6 +1185,7 @@ End;
 
 Procedure GSetMask(M : LongInt);
 Begin
+  If GLfb <> 0 Then Exit;
   If M <> GMask Then
   Begin
     GOut($3CE, 8); GOut($3CF, M);
@@ -1040,9 +1196,25 @@ End;
 { pels X1 a X2 - 1 de la ligne Row (0 en haut) dont le bit du motif est
   mis (bit 7 : x multiple de 8) }
 Procedure GRow(Row, X1, X2, C, Pat : LongInt);
-Var A, B, B1, B2, M : LongInt;
+Var A, B, B1, B2, M, V, X : LongInt;
 Begin
   If (X1 >= X2) Or (Row < 0) Or (Row >= ScrCY) Then Exit;
+  If GLfb <> 0 Then
+  Begin
+    If Not GMine Then Exit;
+    V := GDev(C);
+    A := GLfb + Row * GPitch;
+    If ((Pat And $FF) = $FF) And (GXor = 0) Then LSpan(A + X1 * GBpp, X2 - X1, V)
+    Else
+      For X := X1 To X2 - 1 Do
+        If (Pat And ($80 Shr (X And 7))) <> 0 Then
+        Begin
+          If GXor <> 0 Then LPut(A + X * GBpp, LGet(A + X * GBpp) Xor V) Else LPut(A + X * GBpp, V);
+        End;
+    Exit;
+  End;
+  If (C And $1000000) <> 0 Then C := GNear(C And $FFFFFF);
+  C := C And 15;
   A := $A0000 + Row * 80;
   B1 := X1 Shr 3; B2 := (X2 - 1) Shr 3;
   B := B1;
@@ -1063,10 +1235,23 @@ End;
 
 { 8 pels (bit 7 a gauche) a partir de x sur la ligne Row }
 Procedure GMask8(Row, X, Bits, C : LongInt);
-Var A, Sh, M0, M1 : LongInt;
+Var A, Sh, M0, M1, I, V : LongInt;
 Begin
   Bits := Bits And $FF;
   If (Bits = 0) Or (Row < 0) Or (Row >= ScrCY) Then Exit;
+  If GLfb <> 0 Then
+  Begin
+    If Not GMine Then Exit;
+    V := GDev(C);
+    A := GLfb + Row * GPitch;
+    For I := 0 To 7 Do
+      If ((Bits And ($80 Shr I)) <> 0) And (X + I >= 0) And (X + I < ScrCX) Then
+      Begin
+        If GXor <> 0 Then LPut(A + (X + I) * GBpp, LGet(A + (X + I) * GBpp) Xor V)
+        Else LPut(A + (X + I) * GBpp, V);
+      End;
+    Exit;
+  End;
   If X < 0 Then
   Begin
     If X <= -8 Then Exit;
@@ -1097,7 +1282,9 @@ Function GGetRaw(X, Row : LongInt) : LongInt;
 Var A, M, P, V : LongInt;
 Begin
   V := 0;
-  If (X >= 0) And (X < ScrCX) And (Row >= 0) And (Row < ScrCY) Then
+  If (GLfb <> 0) And (X >= 0) And (X < ScrCX) And (Row >= 0) And (Row < ScrCY) Then
+    V := LIndex(LGet(GLfb + Row * GPitch + X * GBpp))
+  Else If (X >= 0) And (X < ScrCX) And (Row >= 0) And (Row < ScrCY) Then
   Begin
     A := $A0000 + Row * 80 + (X Shr 3);
     M := $80 Shr (X And 7);
@@ -1117,6 +1304,22 @@ Var R, X, Row, C, Px : LongInt;
 Begin
   If GPtrOn = 0 Then Exit;
   GPtrOn := 0;
+  If GLfb <> 0 Then
+  Begin
+    If Not GMine Then Exit;
+    For R := 0 To 15 Do
+    Begin
+      Row := GPtrY + R;
+      If (Row >= 0) And (Row < ScrCY) Then
+        For X := 0 To 15 Do
+        Begin
+          Px := GPtrX + X;
+          If (Px < ScrCX) And (((PtrB[R] Or PtrW[R]) And ($8000 Shr X)) <> 0) Then
+            LPut(GLfb + Row * GPitch + Px * GBpp, GPtrRaw[R * 16 + X]);
+        End;
+    End;
+    Exit;
+  End;
   GBegin(0);
   For R := 0 To 15 Do
   Begin
@@ -1138,6 +1341,28 @@ Procedure GPtrDraw(X0, Row0 : LongInt);
 Var R, X, Row, Px, B, P, Bt, A, N, V : LongInt;
 Begin
   GPtrX := X0; GPtrY := Row0;
+  If GLfb <> 0 Then
+  Begin
+    If Not GMine Then Exit;
+    For R := 0 To 15 Do
+    Begin
+      Row := Row0 + R;
+      If (Row >= 0) And (Row < ScrCY) Then
+        For X := 0 To 15 Do
+        Begin
+          Px := X0 + X;
+          N := $8000 Shr X;
+          If (Px < ScrCX) And (((PtrB[R] Or PtrW[R]) And N) <> 0) Then
+          Begin
+            A := GLfb + Row * GPitch + Px * GBpp;
+            GPtrRaw[R * 16 + X] := LGet(A);
+            If (PtrB[R] And N) <> 0 Then LPut(A, GPixV[0]) Else LPut(A, GPixV[15]);
+          End;
+        End;
+    End;
+    GPtrOn := 1;
+    Exit;
+  End;
   { pels sous le pointeur : 3 octets par plan et par ligne }
   For R := 0 To 15 Do
   Begin
@@ -1233,7 +1458,7 @@ Begin
     Top := ScrCY - R * 16;
     If (Top - 16 >= Y1) And (Top <= Y2) Then
       For C := 0 To ScrCols - 1 Do
-        If (C * 8 >= X1) And (C * 8 + 8 <= X2) Then GShadow[R * 80 + C] := 32;
+        If (C * 8 >= X1) And (C * 8 + 8 <= X2) And (C < 200) And (R < 80) Then GShadow[R * 200 + C] := 32;
   End;
 End;
 
@@ -1243,7 +1468,8 @@ Begin
   If (X < 0) Or (Y < 0) Or (Y + 16 > ScrCY) Then Exit;
   C := (X + 4) Div 8;
   R := (ScrCY - Y - 16 + 8) Div 16;
-  If (C >= 0) And (C < ScrCols) And (R >= 0) And (R < ScrRows) Then GShadow[R * 80 + C] := Ch And 255;
+  If (C >= 0) And (C < ScrCols) And (R >= 0) And (R < ScrRows) And (C < 200) And (R < 80) Then
+    GShadow[R * 200 + C] := Ch And 255;
 End;
 
 { --- dessin (pels de l'ecran, y vers le haut, decoupage GCx1...) --- }
@@ -1271,7 +1497,7 @@ Begin
   Begin
     P := Pat;
     If (Pat = $AA) And ((Y And 1) <> 0) Then P := $55;
-    GRow(ScrCY - 1 - Y, X1, X2, C And 15, P);
+    GRow(ScrCY - 1 - Y, X1, X2, C, P);
     Inc(Y);
   End;
   GEnd;
@@ -1449,7 +1675,12 @@ Begin
   ScrCols := 80;
   If GMode <> 0 Then
   Begin
-    ScrCX := 640; ScrCY := 480; ScrRows := 30;
+    ScrCX := 640; ScrCY := 480;
+    If GLfb <> 0 Then
+    Begin
+      ScrCX := PmCurW; ScrCY := PmCurH;
+    End;
+    ScrCols := ScrCX Div 8; ScrRows := ScrCY Div 16;
     BrdX := 4; BrdY := 4; TitleH := 20; MenuH := 20; VsbW := 16; HsbH := 16; MRowH := 20; MPad := 3;
   End
   Else
@@ -1469,6 +1700,33 @@ Begin
   If B1 >= B2 Then Exit;
   Db := Dx Div 8;
   GHideAll;
+  If GLfb <> 0 Then
+  Begin
+    If Not GMine Then Exit;
+    { lignes entieres de la memoire lineaire }
+    If Dy > 0 Then
+    Begin
+      Y := Y2 - 1; Ye := Y1 - 1; Stp := -1;
+    End
+    Else
+    Begin
+      Y := Y1; Ye := Y2; Stp := 1;
+    End;
+    While Y <> Ye Do
+    Begin
+      Ys := Y - Dy;
+      If (Ys >= Y1) And (Ys < Y2) Then
+      Begin
+        Ad := GLfb + (ScrCY - 1 - Y) * GPitch;
+        As := GLfb + (ScrCY - 1 - Ys) * GPitch;
+        { pels [B1*8, B2*8) de la destination, source decalee de Dx }
+        B := MaxI(B1 * 8, B1 * 8 + Dx); Bs := MinI(B2 * 8, B2 * 8 + Dx);
+        If B < Bs Then LMove(As + (B - Dx) * GBpp, Ad + B * GBpp, (Bs - B) * GBpp);
+      End;
+      Y := Y + Stp;
+    End;
+    Exit;
+  End;
   GOut($3CE, 5); GOut($3CF, 1);
   GOut($3C4, 2); GOut($3C5, $0F);
   If Dy > 0 Then
@@ -1544,7 +1802,7 @@ End;
   Bg (0) }
 Procedure GBitmap(P, X1, Y1, X2, Y2, Fg, Bg : LongInt; Inv : Boolean);
 Var Hd, Cx, Cy, Bpp, Pal, PalSz, Bits, Stride, X, Y, Sx, Sy, V, C, A, Run, RunC, J, N : LongInt;
-    Map : Array[0..255] Of Byte;
+    Map : Array[0..255] Of LongInt; Dc : Boolean;
 Begin
   If P = 0 Then Exit;
   If RdW(P) = $4142 Then P := P + 14;
@@ -1563,11 +1821,17 @@ Begin
   Pal := Hd + RdL(Hd);
   Bits := P + RdL(P + 10);
   Stride := ((Cx * Bpp + 31) Div 32) * 4;
+  { ecran a couleurs directes (VESA 15 a 32 bits) ou 256 couleurs : les
+    couleurs RVB du bitmap sont gardees (indicateur 01000000h) }
+  Dc := (GLfb <> 0) And (GBits >= 8);
   If Bpp <= 8 Then
   Begin
     N := 1 Shl Bpp;
     For J := 0 To N - 1 Do
-      Map[J] := GNear(RdB(Pal + J * PalSz) Or (RdB(Pal + J * PalSz + 1) Shl 8) Or (RdB(Pal + J * PalSz + 2) Shl 16));
+    Begin
+      V := (RdB(Pal + J * PalSz) Or (RdB(Pal + J * PalSz + 1) Shl 8) Or (RdB(Pal + J * PalSz + 2) Shl 16)) And $FFFFFF;
+      If Dc Then Map[J] := V Or $1000000 Else Map[J] := GNear(V);
+    End;
     If Bpp = 1 Then
     Begin
       Map[0] := Bg And 15; Map[1] := Fg And 15;
@@ -1592,9 +1856,15 @@ Begin
             End;
         8 : C := Map[RdB(A + Sx)];
       Else
-        C := GNear(RdB(A + Sx * 3) Or (RdB(A + Sx * 3 + 1) Shl 8) Or (RdB(A + Sx * 3 + 2) Shl 16));
+        Begin
+          V := RdB(A + Sx * 3) Or (RdB(A + Sx * 3 + 1) Shl 8) Or (RdB(A + Sx * 3 + 2) Shl 16);
+          If Dc Then C := V Or $1000000 Else C := GNear(V);
+        End;
       End;
-      If Inv Then C := 15 - C;
+      If Inv Then
+      Begin
+        If (C And $1000000) <> 0 Then C := C Xor $FFFFFF Else C := 15 - C;
+      End;
       If C <> RunC Then
       Begin
         If RunC >= 0 Then GFill(Run, Y, X, Y + 1, RunC);
@@ -5608,6 +5878,8 @@ Begin
     If (Fs And $06) <> 0 Then Btn := Btn Or 1;
     If (Fs And $18) <> 0 Then Btn := Btn Or 2;
     If (Fs And $60) <> 0 Then Btn := Btn Or 4;
+    { SV_SWAPBUTTON : boutons 1 et 2 inverses (gaucher) }
+    If (SysVal[0] <> 0) And ((Btn And 3) <> 0) And ((Btn And 3) <> 3) Then Btn := Btn Xor 3;
     If CaptureWin > 1 Then T := CaptureWin Else T := WinAtAbs(0, MouseX, MouseY, True);
     If (SysModalWin > 1) And (T > 1) And (T <> SysModalWin) And Not IsChildOf(T, SysModalWin) Then T := -1;
     { file de la fenetre visee (double clic) }
@@ -12202,10 +12474,10 @@ Begin
   For K := 10 To 50 Do SysClr[K] := ClrDef[K];
   If GMode <> 0 Then
   Begin
-    SysVal[4] := 4; SysVal[5] := 4; SysVal[20] := 640; SysVal[21] := 480; SysVal[22] := 16; SysVal[23] := 16;
+    SysVal[4] := 4; SysVal[5] := 4; SysVal[20] := ScrCX; SysVal[21] := ScrCY; SysVal[22] := 16; SysVal[23] := 16;
     SysVal[24] := 16; SysVal[25] := 16; SysVal[26] := 1; SysVal[27] := 1; SysVal[28] := 3; SysVal[29] := 3;
     SysVal[30] := 20; SysVal[31] := 16; SysVal[32] := 16; SysVal[33] := 20; SysVal[34] := 20; SysVal[35] := 20;
-    SysVal[36] := 640; SysVal[37] := 460; SysVal[40] := 16; SysVal[41] := 16;
+    SysVal[36] := ScrCX; SysVal[37] := ScrCY - 20; SysVal[40] := 16; SysVal[41] := 16;
     { cadres gris, boutons gris, champs blancs, selection bleue }
     SysClr[14] := $AAAAAA; SysClr[15] := $AAAAAA; SysClr[25] := $AAAAAA; SysClr[39] := $555555;
     SysClr[40] := $AAAAAA; SysClr[41] := $FFFFFF; SysClr[44] := $0000AA; SysClr[45] := $FFFFFF;
@@ -12225,7 +12497,57 @@ Begin
   GWanted := Not ((S <> '') And (S[1] = 'T'));
 End;
 
-{ passer l'ecran en 640 x 480 x 16 couleurs (VioSetMode) }
+{ VioSetMode en mode graphique W x H, Bits par pel ; memoire lineaire
+  (VESA) ou plans du VGA (16 couleurs) }
+Function GSetMode(W, H, Bits : LongInt) : Boolean;
+Var K : LongInt;
+Begin
+  GSetMode := False;
+  MemZero(LongInt(@NameZ2), 40);
+  WrW(LongInt(@NameZ2), 12); NameZ2[2] := 3; NameZ2[3] := Bits;
+  WrW(LongInt(@NameZ2) + 4, W Div 8); WrW(LongInt(@NameZ2) + 6, H Div 16);
+  WrW(LongInt(@NameZ2) + 8, W); WrW(LongInt(@NameZ2) + 10, H);
+  If VioSetMode(LongInt(@NameZ2), 0) <> 0 Then Exit;
+  MemZero(LongInt(@NameZ2), 40);
+  WrW(LongInt(@NameZ2), 34);
+  If VioGetMode(LongInt(@NameZ2), 0) <> 0 Then Exit;
+  GLfb := 0; GBits := NameZ2[3];
+  PmCurW := RdW(LongInt(@NameZ2) + 8); PmCurH := RdW(LongInt(@NameZ2) + 10);
+  If GBits >= 8 Then
+  Begin
+    GLfb := RdL(LongInt(@NameZ2) + 14);
+    GPitch := RdL(LongInt(@NameZ2) + 26);
+    GBpp := (GBits + 7) Div 8;
+    For K := 0 To 15 Do
+      If GBits = 8 Then GPixV[K] := K Else GPixV[K] := GRgbDev(VgaRgb[K]);
+  End;
+  GXor := 0;
+  GSetMode := True;
+End;
+
+{ SET PMRESOLUTION=1024x768x16 (largeur, hauteur, bits par pel) }
+Procedure GEnvRes;
+Var P, K, W, H, B, C : LongInt; S : String;
+Begin
+  P := 0; S := '';
+  PutZ(LongInt(@NameZ2), 'PMRESOLUTION');
+  If DcScanEnv(LongInt(@NameZ2), LongInt(@P)) = 0 Then
+    If P <> 0 Then S := UpStr(GetZ(P));
+  K := Pos('X', S);
+  If K < 2 Then Exit;
+  Val(Copy(S, 1, K - 1), W, C);
+  If C <> 0 Then Exit;
+  S := Copy(S, K + 1, 255);
+  K := Pos('X', S);
+  If K < 2 Then Exit;
+  Val(Copy(S, 1, K - 1), H, C);
+  If C <> 0 Then Exit;
+  Val(Copy(S, K + 1, 255), B, C);
+  If (C <> 0) Or (W < 320) Or (H < 200) Then Exit;
+  PmReqW := W; PmReqH := H; PmReqBits := B;
+End;
+
+{ passer l'ecran en mode graphique de PM (VioSetMode) }
 Procedure GEnter;
 Var K, P, H : LongInt;
 Begin
@@ -12242,14 +12564,14 @@ Begin
         If (P <> 0) And ((K Mod 16) < H) Then GFont[K] := RdB(P + (K Div 16) * H + K Mod 16) Else GFont[K] := 0;
     End;
   End;
-  MemZero(LongInt(@NameZ2), 40);
-  WrW(LongInt(@NameZ2), 12); NameZ2[2] := 3; NameZ2[3] := 4;
-  WrW(LongInt(@NameZ2) + 4, 80); WrW(LongInt(@NameZ2) + 6, 30);
-  WrW(LongInt(@NameZ2) + 8, 640); WrW(LongInt(@NameZ2) + 10, 480);
-  If VioSetMode(LongInt(@NameZ2), 0) <> 0 Then Exit;
+  { mode demande (WINSETSCREENMODE : VESA), sinon SET PMRESOLUTION=LxHxB
+    de CONFIG.SYS, sinon 640 x 480 x 16 }
+  If PmReqW <= 0 Then GEnvRes;
+  If (PmReqW <= 0) Or Not GSetMode(PmReqW, PmReqH, PmReqBits) Then
+    If Not GSetMode(640, 480, 4) Then Exit;
   GMode := 1;
   GPtrOn := 0; GCarOn := 0; GCarWant := 0;
-  For K := 0 To 2399 Do GShadow[K] := 32;
+  For K := 0 To 15999 Do GShadow[K] := 32;
   GMetrics;
   GSysVals;
 End;
@@ -12258,7 +12580,7 @@ End;
 Procedure GLeave;
 Begin
   If GMode = 0 Then Exit;
-  GPtrOn := 0; GCarOn := 0; GCarWant := 0;
+  GPtrOn := 0; GCarOn := 0; GCarWant := 0; GLfb := 0;
   MemZero(LongInt(@NameZ2), 40);
   WrW(LongInt(@NameZ2), 8); NameZ2[2] := 1; NameZ2[3] := 4;
   WrW(LongInt(@NameZ2) + 4, 80); WrW(LongInt(@NameZ2) + 6, 25);
@@ -12278,7 +12600,8 @@ Begin
   For K := 0 To N - 1 Do
     If (Row >= 0) And (Row < ScrRows) And (Col + K >= 0) And (Col + K < ScrCols) Then
     Begin
-      If GMode <> 0 Then WrB(P + K, GShadow[Row * 80 + Col + K])
+      If (GMode <> 0) And (Col + K < 200) And (Row < 80) Then WrB(P + K, GShadow[Row * 200 + Col + K])
+      Else If GMode <> 0 Then WrB(P + K, 32)
       Else WrB(P + K, RdB($B8000 + (Row * ScrCols + Col + K) * 2));
     End
     Else WrB(P + K, 32);
@@ -12291,6 +12614,58 @@ Function WinHideOverlays : LongInt;
 Begin
   If GMode <> 0 Then GHideAll;
   WinHideOverlays := GMode;
+End;
+
+{ WINSETSCREENMODE (ordinal 1007, interne : PMSHELL.EXE) : resolution de
+  l'ecran de PM (largeur, hauteur, bits par pel : 4 = VGA 16 couleurs,
+  8, 15, 16, 24, 32 = mode VESA) ; appliquee tout de suite si l'ecran
+  graphique est a PM (les fenetres sont ramenees dans l'ecran et tout est
+  redessine), sinon au retour de la session de PM ; BOOL }
+Function WinSetScreenMode(W, H, Bits : LongInt) : LongInt;
+Var Ow, Oh, Ob, I : LongInt;
+Begin
+  WinSetScreenMode := 0;
+  Ow := PmReqW; Oh := PmReqH; Ob := PmReqBits;
+  PmReqW := W; PmReqH := H; PmReqBits := Bits;
+  If (GMode = 0) Or Not GMine Then
+  Begin
+    WinSetScreenMode := 1;
+    Exit;
+  End;
+  GPtrOn := 0; GCarOn := 0;
+  If Not GSetMode(W, H, Bits) Then
+  Begin
+    PmReqW := Ow; PmReqH := Oh; PmReqBits := Ob;
+    If (Ow <= 0) Or Not GSetMode(Ow, Oh, Ob) Then Dummy := LongInt(GSetMode(640, 480, 4));
+    GMetrics; GSysVals;
+    InvalScreen(0, 0, ScrCX, ScrCY);
+    Exit;
+  End;
+  If GBits < 8 Then GLfb := 0;
+  GMetrics;
+  GSysVals;
+  { fenetres principales ramenees dans l'ecran }
+  For I := 2 To MaxWin - 1 Do
+    If (WUse[I] <> 0) And (WPar[I] = 0) Then
+    Begin
+      If WX[I] + WCX[I] > ScrCX Then WX[I] := MaxI(0, ScrCX - WCX[I]);
+      If WY[I] + WCY[I] > ScrCY Then WY[I] := MaxI(0, ScrCY - WCY[I]);
+    End;
+  InvalScreen(0, 0, ScrCX, ScrCY);
+  WinSetScreenMode := 1;
+End;
+
+{ WINQUERYSCREENMODE (ordinal 1008, interne) : largeur, hauteur, bits par
+  pel, memoire lineaire (1 : VESA) en p (16 octets) ; rend GMode }
+Function WinQueryScreenMode(P : LongInt) : LongInt;
+Begin
+  If P <> 0 Then
+  Begin
+    WrL(P, ScrCX); WrL(P + 4, ScrCY);
+    If GLfb <> 0 Then WrL(P + 8, GBits) Else WrL(P + 8, 4);
+    If GLfb <> 0 Then WrL(P + 12, 1) Else WrL(P + 12, 0);
+  End;
+  WinQueryScreenMode := GMode;
 End;
 
 Procedure RegSys(N : String; Kind, Cb : LongInt);
@@ -14375,7 +14750,9 @@ exports
   WinHideOverlays Index 1003 Name 'WINHIDEOVERLAYS',
   WinSuspendScreen Index 1004 Name 'WINSUSPENDSCREEN',
   WinResumeScreen Index 1005 Name 'WINRESUMESCREEN',
-  WinQueryScreenTaken Index 1006 Name 'WINQUERYSCREENTAKEN';
+  WinQueryScreenTaken Index 1006 Name 'WINQUERYSCREENTAKEN',
+  WinSetScreenMode Index 1007 Name 'WINSETSCREENMODE',
+  WinQueryScreenMode Index 1008 Name 'WINQUERYSCREENMODE';
 
 Var
   InitI : LongInt;

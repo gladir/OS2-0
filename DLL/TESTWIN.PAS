@@ -633,7 +633,7 @@ BEGIN
         (Swp[4] = 80));
   { marges du cadre : ecran graphique (bordure 4, titre 20, barre de
     defilement 16) ou ecran texte (cellules de 8 x 16) }
-  Gr := WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) = 480;
+  Gr := WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) >= 480;
   If Gr Then
   Begin
     MgL := 4; MgB := 4; MgR := 4 + 16; MgT := 4 + 20;
@@ -750,8 +750,10 @@ BEGIN
 
   { --- systeme --- }
   If Gr Then
-    Check('WinQuerySysValue : ecran 640 x 480, titre 20', (WinQuerySysValue(HWND_DESKTOP, SV_CXSCREEN) = 640) And
-          (WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) = 480) And (WinQuerySysValue(HWND_DESKTOP, SV_CYTITLEBAR) = 20))
+    Check('WinQuerySysValue : ecran graphique ' + IStr(WinQuerySysValue(HWND_DESKTOP, SV_CXSCREEN)) + ' x ' +
+          IStr(WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN)) + ', titre 20',
+          (WinQuerySysValue(HWND_DESKTOP, SV_CXSCREEN) >= 640) And
+          (WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) >= 480) And (WinQuerySysValue(HWND_DESKTOP, SV_CYTITLEBAR) = 20))
   Else
     Check('WinQuerySysValue : ecran 640 x 400, titre 16', (WinQuerySysValue(HWND_DESKTOP, SV_CXSCREEN) = 640) And
           (WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) = 400) And (WinQuerySysValue(HWND_DESKTOP, SV_CYTITLEBAR) = 16));

@@ -122,7 +122,7 @@ OS2-0 possède son propre noyau OS/2 32 bits écrit en Pascal. Comme sous OS/2, 
 	<tr><th>Fichier</th><th>Source</th><th>Description</th></tr>
 	<tr><td><b>OS2BOOT</b></td><td>KERNEL/OS2BOOT.PAS</td><td>Secteur d'amorce du CD-ROM (El Torito sans émulation, mode réel 8086) : lit le système de fichiers ISO 9660 par l'INT 13h étendue et charge OS2LDR en 2000:0000.</td></tr>
 	<tr><td><b>OS2LDR</b></td><td>KERNEL/OS2LDR.PAS</td><td>Chargeur 16 bits : charge l'image PE du noyau à 1 Mo (INT 15h/87h), relève la carte mémoire (E820h), active la ligne A20, installe une GDT plate et passe en mode protégé.</td></tr>
-	<tr><td><b>OS2KRNL</b></td><td>KERNEL/OS2KRNL.PAS</td><td>Noyau 32 bits (80386, mode protégé) : console VGA, IDT, exceptions (écran TRAP), PIC, minuterie, clavier, souris PS/2, tas, pagination, pilote ATAPI, disques durs IDE, ISO 9660 et disque virtuel en mémoire, systèmes de fichiers installables (IFS=), couche API DOSCALLS, chargeur de programmes PE et processus, lecture de CONFIG.SYS et lancement du PROTSHELL (<b>PMSHELL.EXE</b>, le bureau ; CMD.EXE par défaut), Ctrl+Alt+Suppr (redémarrage).</td></tr>
+	<tr><td><b>OS2KRNL</b></td><td>KERNEL/OS2KRNL.PAS</td><td>Noyau 32 bits (80386, mode protégé) : console VGA, IDT, exceptions (écran TRAP), PIC, minuterie, clavier, souris PS/2, tas, pagination, pilote ATAPI, disques durs IDE, ISO 9660 et disque virtuel en mémoire, systèmes de fichiers installables (IFS=), couche API DOSCALLS, chargeur de programmes PE et processus, lecture de CONFIG.SYS et lancement du PROTSHELL (<b>PMSHELL.EXE</b>, le bureau ; CMD.EXE par défaut), Ctrl+Alt+Suppr (redémarrage), appel du BIOS en mode réel (KERNEL/BIOSCALL.ASM) et modes VESA (KrnVideo).</td></tr>
 </table>
 
 <img width="720" height="400" alt="OS/2-0 : CMD.EXE sous le noyau OS2KRNL" src="IMAGE/OS2-0.png" />
@@ -203,7 +203,7 @@ Le fichier <b>DLL/VIOCALLS.PAS</b> est le sous-système vidéo OS/2 <b>VIOCALLS.
 	<tr><td>VioScrollUp, VioScrollDn, VioScrollLf, VioScrollRt</td><td>Défilement d'un rectangle dans les quatre directions.</td></tr>
 	<tr><td>VioWrtTty, VioGetAnsi, VioSetAnsi</td><td>Sortie télétype avec les séquences ANSI (position, déplacements, effacements, couleurs).</td></tr>
 	<tr><td>VioGetCurPos, VioSetCurPos, VioGetCurType, VioSetCurType</td><td>Position et forme du curseur (registres du CRTC).</td></tr>
-	<tr><td>VioGetMode, VioSetMode, VioGetConfig, VioGetState, VioSetState, VioGetFont, VioSetFont, VioGetCp, VioSetCp</td><td>Mode texte 80 x 25 et modes graphiques du VGA : 640 x 480 x 16 (12h), 640 x 480 x 2 (11h), 640 x 350 x 16 (10h), 640 x 200 x 16 (0Eh), 320 x 200 x 16 (0Dh), 320 x 200 x 256 (13h), mémoire en 000A0000h par VioGetPhysBuf (les fonctions du mode texte rendent alors ERROR_VIO_MODE ; le retour au texte recharge la police et la palette) ; configuration, palette, registres de couleur, bordure, clignotement, soulignement, police du générateur de caractères, page de codes.</td></tr>
+	<tr><td>VioGetMode, VioSetMode, VioGetConfig, VioGetState, VioSetState, VioGetFont, VioSetFont, VioGetCp, VioSetCp</td><td>Mode texte 80 x 25 et modes graphiques du VGA : 640 x 480 x 16 (12h), 640 x 480 x 2 (11h), 640 x 350 x 16 (10h), 640 x 200 x 16 (0Eh), 320 x 200 x 16 (0Dh), 320 x 200 x 256 (13h), mémoire en 000A0000h par VioGetPhysBuf (les fonctions du mode texte rendent alors ERROR_VIO_MODE ; le retour au texte recharge la police et la palette) ; configuration, palette, registres de couleur, bordure, clignotement, soulignement, police du générateur de caractères, page de codes. Modes VESA du BIOS de la carte (VBE, par le noyau) : toute résolution proposée (800 x 600, 1024 x 768, 1280 x 1024...) en 256 couleurs ou en couleurs directes (15, 16, 24, 32 bits), mémoire linéaire ; ordinaux internes VIOQUERYMODES (1002) et VIOQUERYVBE (1003).</td></tr>
 	<tr><td>VioGetBuf, VioShowBuf, VioGetPhysBuf</td><td>Tampon vidéo logique (LVB) et accès au tampon physique.</td></tr>
 	<tr><td>VioPopUp, VioEndPopup, VioScrLock, VioScrUnlock, VioSavRedrawWait, VioSavRedrawUndo, VioModeWait, VioModeUndo, VioSave, VioRestore, VioSswSwitch, VioRedrawSize, VioSrfBlock, VioSrfUnblock</td><td>Fenêtres surgissantes, verrou de l'écran, attentes du gestionnaire de sessions, sauvegarde, bascule et blocage de l'affichage.</td></tr>
 	<tr><td>VioPrtSc, VioPrtScToggle, Avs_Prtsc, Avs_PrtscToggle</td><td>Impression et capture de l'écran (fichier C:\PRTSC.TXT, copie de la sortie télétype).</td></tr>
@@ -576,6 +576,33 @@ Le fichier <b>PMSHELL.PAS</b> est le programme OS/2 <b>PMSHELL.EXE</b>, l'interp
 </table>
 
 Pour cela, PMWIN.DLL a trois points d'entrée internes : WINSUSPENDSCREEN (1004) prête l'écran au programme lancé, WINRESUMESCREEN (1005) le rend à PM (tout est redessiné, les événements de la souris reçus entre-temps sont oubliés) et WINQUERYSCREENTAKEN (1006) dit si un programme de PM l'a pris. Les icônes sont dessinées par PMGPI.DLL sur l'espace de présentation des fenêtres ; les dossiers, menus, boîtes de message et listes sont ceux de PMWIN. Il n'y a pas de limite au nombre de fenêtres ni au nombre d'objets d'un dossier : les tables de PMSHELL grandissent à la demande (GetMem), et PMWIN.DLL gère jusqu'à 1024 fenêtres, 64 files de messages, 128 espaces de présentation et 128 minuteries. Avec <code>SET PMMODE=TEXTE</code>, le bureau s'affiche en mode texte. Pour démarrer sur la ligne de commande comme avant, mettre <code>PROTSHELL=C:\CMD.EXE</code> dans CONFIG.SYS.
+
+<h3>Modes VESA et carnet « Système - Paramètres »</h3>
+
+L'écran de Presentation Manager n'est plus limité au VGA 640 x 480 x 16 couleurs : OS/2-0 utilise le <b>BIOS VESA</b> (VBE) de la carte vidéo.
+
+<table>
+	<tr><th>Couche</th><th>Rôle</th></tr>
+	<tr><td>Noyau (OS2KRNL)</td><td>Appel d'une interruption du BIOS en mode réel depuis le mode protégé : le petit programme <b>KERNEL/BIOSCALL.ASM</b> (assemblé une fois, recopié en 0000:7000) sauve CR0/CR3/CR4, la GDT et l'IDT, repasse en mode réel (pagination coupée, IVT du BIOS, PIC en 08h/70h avec les IRQ masquées), exécute INT 10h puis revient. Au démarrage, le noyau relève les modes du VBE (4F00h, 4F01h) : modes graphiques à mémoire linéaire de 640 x 480 au moins, 8 bits (palette) ou 15, 16, 24, 32 bits (couleurs directes) ; QEMU en propose 67 (VBE 3.0, 16 Mo). API <b>KrnVideo</b> : liste des modes, passage à un mode VESA (4F02h avec mémoire linéaire) ou à un mode du BIOS (retour au texte).</td></tr>
+	<tr><td>VIOCALLS.DLL</td><td>VioSetMode accepte toute résolution VESA (hres, vres, bits par pel) ; VioGetMode donne l'adresse de la mémoire linéaire (buf_addr) et les octets par ligne (partial_length) ; le retour au mode texte, une fenêtre surgissante et la bascule des sessions quittent proprement le mode VESA.</td></tr>
+	<tr><td>PMWIN.DLL, PMGPI.DLL</td><td>Dessin dans la mémoire linéaire en 8, 15, 16, 24 ou 32 bits par pel (remplissages par REP STOS, défilement par REP MOVS, pointeur, curseur, texte) ; les bitmaps gardent leurs couleurs RVB ; PMGPI dessine sur l'écran VESA (cible TG_LFB). La résolution se choisit par <code>SET PMRESOLUTION=1024x768x32</code> dans CONFIG.SYS, par OS2.INI (PM_Display, RESOLUTION) ou à chaud par WINSETSCREENMODE (ordinal interne 1007) : les fenêtres sont ramenées dans l'écran et tout est redessiné ; le LaunchPad se replace.</td></tr>
+	<tr><td>PMSHELL.EXE</td><td>Carnet <b>Système - Paramètres</b> (Système OS/2 → Configuration du système → Système, Souris ou Couleurs du bureau ; ou le menu du bureau « Paramètres du système... ») : reliure à spirale et onglets comme sous Warp 3.</td></tr>
+</table>
+
+<table>
+	<tr><th>Onglet</th><th>Réglages</th></tr>
+	<tr><td>Écran</td><td>Écran choisi (VESA, version du VBE, mémoire) ; liste des résolutions « largeur x hauteur x nombre de couleurs » (VGA 640 x 480 x 16 et tous les modes VESA de la carte, jusqu'à 16 777 216 couleurs) ; fréquence de balayage ; Appliquer (changement immédiat, puis « La conserver ? »), Annuler, Par défaut, Capacités.</td></tr>
+	<tr><td>Confirmations</td><td>Demander une confirmation avant de supprimer un dossier, un fichier ou un raccourci, avant l'arrêt du système.</td></tr>
+	<tr><td>Titre</td><td>Objet de même nom : ajouter un numéro ou avertir sans créer l'objet.</td></tr>
+	<tr><td>Fenêtre</td><td>Objet déjà ouvert : afficher la fenêtre existante ou en ouvrir une nouvelle.</td></tr>
+	<tr><td>Entrée</td><td>Délai du double clic, boutons de la souris inversés (gaucher : SV_SWAPBUTTON, géré par PMWIN).</td></tr>
+	<tr><td>Logo</td><td>Logo au démarrage du bureau : aucun, 3 ou 5 secondes, jusqu'à un clic.</td></tr>
+	<tr><td>Général</td><td>Couleur du fond du bureau (16 couleurs).</td></tr>
+</table>
+
+Les réglages sont gardés dans OS2.INI (application PMSHELL). Le programme <b>DLL/TESTVIO.PAS</b> vérifie les modes VESA (800 x 600 x 256 et 1024 x 768 x 32 bits : pels de la mémoire linéaire, retour au texte) ; TESTGPI et TESTWIN passent aussi en 1024 x 768 x 32 bits. Une correction d'OS2PC a accompagné ce travail : dans les blocs asm, STOSW, MOVSW, LODSW, SCASW et CMPSW (avec ou sans REP) sont maintenant de vraies instructions sur des mots de 16 bits (préfixe 66h) au lieu de devenir STOSD, MOVSD...
+
+<img width="640" height="480" alt="OS/2-0 en 1024 x 768 x 16 millions de couleurs : carnet Système - Paramètres, onglet Écran (résolutions VESA)" src="IMAGE/PARAMETRES.png" />
 
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 

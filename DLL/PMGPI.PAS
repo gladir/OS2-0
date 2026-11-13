@@ -83,6 +83,7 @@ Const
   DCT_WINDOW = 20; DCT_PMPS = 21;
   { cibles du dessin }
   TG_NONE = 0; TG_BMP = 1; TG_PLANAR = 2; TG_LINEAR = 3; TG_TEXT = 4;
+  TG_LFB = 5;           { ecran VESA : memoire lineaire, 8 a 32 bits par pel }
   { erreurs (gravite 4) }
   PMERR_INV_HPS = $207F; PMERR_INV_HDC = $2075; PMERR_INV_HBITMAP = $2079; PMERR_INV_HRGN = $208E;
   PMERR_INV_PARAMETER = $1208; PMERR_INV_COORDINATE = $205B; PMERR_INSUFFICIENT_MEMORY = $203E;
@@ -258,6 +259,7 @@ Var
   PlUse, PlPid, PlN, PlData : Array[0..MaxPal - 1] Of LongInt;
   { cible courante du dessin }
   TgKind, TgW, TgH, TgBase, TgStride, TgBpp, TgOffX, TgOffY, TgBm : LongInt;
+  ScrLfb, ScrPitch : LongInt;            { ecran VESA (ScreenMode) }
   ClipN : LongInt;
   ClipX1, ClipY1, ClipX2, ClipY2 : Array[0..MaxClipR - 1] Of LongInt;
   RMode, Hit, HitX1, HitY1, HitX2, HitY2 : LongInt;   { 0 dessin, 2 correlation }
@@ -875,6 +877,13 @@ Begin
   Begin
     W := RdW(LongInt(@Mi) + 8); H := RdW(LongInt(@Mi) + 10); Bits := Mi[3];
     If Bits = 8 Then ScreenMode := TG_LINEAR Else ScreenMode := TG_PLANAR;
+    { mode VESA : memoire lineaire (buf_addr), octets par ligne
+      (partial_length) }
+    If (Bits >= 8) And (RdL(LongInt(@Mi) + 14) <> $000A0000) Then
+    Begin
+      ScrLfb := RdL(LongInt(@Mi) + 14); ScrPitch := RdL(LongInt(@Mi) + 26);
+      ScreenMode := TG_LFB;
+    End;
   End
   Else
   Begin
@@ -986,6 +995,13 @@ Begin
         N := 256;
         TgTab := LongInt(@Pal256);
       End;
+    TG_LFB :
+      If TgBpp = 8 Then
+      Begin
+        N := 256;
+        TgTab := LongInt(@Pal256);
+      End
+      Else N := 0;
     TG_TEXT : N := 8;
   End;
 End;
@@ -1010,6 +1026,22 @@ Begin
       Inc(I);
     End;
   End;
+  { ecran VESA : les couleurs par defaut de PM sont celles du VGA, comme
+    dans PMWIN (meme gris pour les fonds et les cadres) }
+  If TgKind = TG_LFB Then
+  Begin
+    I := 0;
+    While (I < 16) And (V < 0) Do
+    Begin
+      If DefTab[I] = (Rgb And $FFFFFF) Then V := PmVga[I];
+      Inc(I);
+    End;
+    If V >= 0 Then
+    Begin
+      If N = 0 Then DevVal := Vga16[V] And $FFFFFF Else DevVal := V;
+      Exit;
+    End;
+  End;
   If (V >= 0) And (N = 16) Then DevVal := V
   Else If N = 0 Then DevVal := Rgb And $FFFFFF
   Else If (TgKind = TG_PLANAR) And (TgBpp = 1) Then
@@ -1021,9 +1053,31 @@ End;
 
 { couleur RVB d'une valeur du peripherique }
 Function DevRgb(V : LongInt) : LongInt;
-Var N, T, I : LongInt;
+Var N, T, I, J : LongInt;
 Begin
   T := TgTab(N);
+  { ecran VESA : les couleurs du VGA redeviennent les couleurs par defaut
+    de PM (inverse de DevVal) }
+  If TgKind = TG_LFB Then
+  Begin
+    J := -1;
+    If N = 0 Then
+    Begin
+      For I := 15 DownTo 0 Do
+        If (Vga16[I] And $FFFFFF) = (V And $FFFFFF) Then J := I;
+    End
+    Else If (V >= 0) And (V < 16) Then J := V;
+    If J >= 0 Then
+    Begin
+      I := 0;
+      While (I < 15) And (PmVga[I] <> J) Do Inc(I);
+      If PmVga[I] = J Then
+      Begin
+        DevRgb := DefTab[I];
+        Exit;
+      End;
+    End;
+  End;
   If N = 0 Then DevRgb := V And $FFFFFF
   Else If (TgKind = TG_PLANAR) And (TgBpp = 1) Then
   Begin
@@ -1044,6 +1098,7 @@ Begin
     TG_BMP : If TgBpp >= 24 Then DevMask := $FFFFFF Else DevMask := (1 Shl TgBpp) - 1;
     TG_PLANAR : If TgBpp = 1 Then DevMask := 1 Else DevMask := 15;
     TG_LINEAR : DevMask := 255;
+    TG_LFB : If TgBpp = 8 Then DevMask := 255 Else DevMask := $FFFFFF;
     TG_TEXT : DevMask := 7;
   Else
     DevMask := 15;
@@ -1108,6 +1163,51 @@ Begin
   MixV := R And Msk;
 End;
 
+{ --- ecran VESA : pel (x, y vers le haut) de la memoire lineaire ;
+  valeur du peripherique : index de la palette (8 bits) ou RVB --- }
+Function LfbGet(X, Y : LongInt) : LongInt;
+Var A, V : LongInt;
+Begin
+  A := TgBase + (TgH - 1 - Y) * TgStride;
+  Case TgBpp Of
+    8 : LfbGet := RdB(A + X);
+    15 : Begin
+           V := RdB(A + X * 2) Or (RdB(A + X * 2 + 1) Shl 8);
+           LfbGet := (((V Shr 10) And 31) Shl 19) Or (((V Shr 5) And 31) Shl 11) Or ((V And 31) Shl 3);
+         End;
+    16 : Begin
+           V := RdB(A + X * 2) Or (RdB(A + X * 2 + 1) Shl 8);
+           LfbGet := (((V Shr 11) And 31) Shl 19) Or (((V Shr 5) And 63) Shl 10) Or ((V And 31) Shl 3);
+         End;
+    24 : LfbGet := RdB(A + X * 3) Or (RdB(A + X * 3 + 1) Shl 8) Or (RdB(A + X * 3 + 2) Shl 16);
+  Else
+    LfbGet := RdB(A + X * 4) Or (RdB(A + X * 4 + 1) Shl 8) Or (RdB(A + X * 4 + 2) Shl 16);
+  End;
+End;
+
+Procedure LfbPut(X, Y, V : LongInt);
+Var A, W : LongInt;
+Begin
+  If Not GpiMine Then Exit;
+  A := TgBase + (TgH - 1 - Y) * TgStride;
+  Case TgBpp Of
+    8 : WrB(A + X, V);
+    15, 16 :
+      Begin
+        If TgBpp = 15 Then W := (((V Shr 19) And 31) Shl 10) Or (((V Shr 11) And 31) Shl 5) Or ((V Shr 3) And 31)
+        Else W := (((V Shr 19) And 31) Shl 11) Or (((V Shr 10) And 63) Shl 5) Or ((V Shr 3) And 31);
+        WrB(A + X * 2, W); WrB(A + X * 2 + 1, W Shr 8);
+      End;
+    24 : Begin
+           WrB(A + X * 3, V); WrB(A + X * 3 + 1, V Shr 8); WrB(A + X * 3 + 2, V Shr 16);
+         End;
+  Else
+    Begin
+      WrB(A + X * 4, V); WrB(A + X * 4 + 1, V Shr 8); WrB(A + X * 4 + 2, V Shr 16);
+    End;
+  End;
+End;
+
 { --- pels de la cible (coordonnees de la cible, y vers le haut) --- }
 Function TgGet(X, Y : LongInt) : LongInt;
 Var A, P, V, M, Row : LongInt;
@@ -1142,6 +1242,7 @@ Begin
         TgGet := V;
       End;
     TG_LINEAR : TgGet := RdB($A0000 + (TgH - 1 - Y) * TgW + X);
+    TG_LFB : TgGet := LfbGet(X, Y);
     TG_TEXT : TgGet := (RdB($B8000 + (((TgH - 1 - Y) Div 16) * 80 + X Div 8) * 2 + 1) Shr 4) And 7;
   End;
 End;
@@ -1192,6 +1293,7 @@ Begin
         OutB($3CE, 5); OutB($3CF, 0);
       End;
     TG_LINEAR : WrB($A0000 + (TgH - 1 - Y) * TgW + X, V);
+    TG_LFB : LfbPut(X, Y, V);
     TG_TEXT :
       Begin
         A := $B8000 + (((TgH - 1 - Y) Div 16) * 80 + X Div 8) * 2 + 1;
@@ -1307,6 +1409,10 @@ Begin
     Begin
       TgKind := ScreenMode(W, H, Bits);
       TgW := W; TgH := H; TgBpp := Bits; TgStride := W Div 8;
+      If TgKind = TG_LFB Then
+      Begin
+        TgBase := ScrLfb; TgStride := ScrPitch;
+      End;
       TgOffX := Info[1]; TgOffY := Info[2];
       ClipSet(0, 0, TgW, TgH);
       ClipRect(Info[3], Info[4], Info[5], Info[6]);
@@ -1330,6 +1436,10 @@ Begin
     Begin
       TgKind := ScreenMode(W, H, Bits);
       TgW := W; TgH := H; TgBpp := Bits; TgStride := W Div 8;
+      If TgKind = TG_LFB Then
+      Begin
+        TgBase := ScrLfb; TgStride := ScrPitch;
+      End;
       ClipSet(0, 0, TgW, TgH);
       Ok := DcType[D] <> OD_INFO;
       If DcType[D] = DCT_WINDOW Then
@@ -1350,7 +1460,7 @@ Begin
     BeginDraw := False;
     Exit;
   End;
-  If (TgKind = TG_PLANAR) Or (TgKind = TG_LINEAR) Then PmHide;
+  If (TgKind = TG_PLANAR) Or (TgKind = TG_LINEAR) Or (TgKind = TG_LFB) Then PmHide;
   If (Gps[K].X[gxClipRgn] >= 0) And (RgUse[Gps[K].X[gxClipRgn]] <> 0) Then ClipRegion(Gps[K].X[gxClipRgn], TgOffX, TgOffY);
   If (Gps[K].X[gxClipPath] >= 0) And (RgUse[Gps[K].X[gxClipPath]] <> 0) Then ClipRegion(Gps[K].X[gxClipPath], TgOffX, TgOffY);
   LimitClip(K);

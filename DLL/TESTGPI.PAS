@@ -818,7 +818,7 @@ BEGIN
   Hpss := WinGetScreenPS(1);
   R := GpiSetColor(Hpss, CLR_BLUE);
   R := GoTo2(Hpss, 80, 80); R := BoxTo(Hpss, DRO_FILL, 159, 111);
-  If WinQuerySysValue(1, 21) = 480 Then
+  If WinQuerySysValue(1, 21) >= 480 Then
   Begin
     R := GpiSetColor(Hpss, CLR_YELLOW);
     R := GpiCharStringAt(Hpss, PtA(320, 200), 3, Z('GPI'));

@@ -72,6 +72,18 @@ Program PMSHELL;
   CMD, RUN programme, BATCH fichier, VIEW fichier, WINLIST, HELP, INFO,
   SHUTDOWN.
 
+  Parametres du systeme (Systeme OS/2, Configuration du systeme :
+  Systeme, Souris, Couleurs du bureau ; menu du bureau : Parametres du
+  systeme...) : carnet a onglets "Systeme - Parametres" : Ecran
+  (resolution : modes VGA et VESA de la carte, appliquee tout de suite
+  par WINSETSCREENMODE de PMWIN, puis gardee si elle est confirmee :
+  OS2.INI, PM_Display, RESOLUTION = LxHxB ; Capacites : BIOS VESA),
+  Confirmations (suppression d'un dossier, d'un fichier, arret), Titre
+  (objet de meme nom : numero ou avertissement), Fenetre (objet deja
+  ouvert : fenetre existante ou nouvelle), Entree (delai du double clic,
+  boutons inverses), Logo (au demarrage), General (couleur du bureau).
+  Les reglages sont dans OS2.INI (application PMSHELL).
+
   Arret : apres confirmation, les fichiers sont ecrits (DosShutdown) et
   l'ecran indique que l'ordinateur peut etre eteint ; Ctrl+Alt+Suppr
   redemarre alors l'ordinateur. }
@@ -109,23 +121,29 @@ Const
   CLR_WHITE = -2; CLR_BLACK = -1; CLR_BLUE = 1; CLR_RED = 2; CLR_GREEN = 4; CLR_CYAN = 5;
   CLR_YELLOW = 6; CLR_DARKGRAY = 8; CLR_DARKBLUE = 9; CLR_DARKRED = 10; CLR_DARKGREEN = 12;
   CLR_DARKCYAN = 13; CLR_BROWN = 14; CLR_PALEGRAY = 15;
-  DeskRgb = $008080;
   DRO_FILL = 1; DRO_OUTLINE = 2;
   { vues et objets }
   CW = 112; CH = 80;
   VK_DESK = 0; VK_SYS = 1; VK_DRIVES = 2; VK_DIR = 3; VK_VIEWER = 4; VK_LIST = 5;
   IC_FOLDER = 0; IC_SYSTEM = 1; IC_DRIVES = 2; IC_PROGRAM = 3; IC_CMD = 4; IC_BATCH = 5; IC_FILE = 6;
   IC_CDROM = 7; IC_DISK = 8; IC_SHUTDOWN = 9; IC_WINLIST = 10; IC_INFO = 11; IC_HELP = 12;
-  IC_TEMPL = 13; IC_SHRED = 14;
+  IC_TEMPL = 13; IC_SHRED = 14; IC_SETUP = 15; IC_SCREEN = 16; IC_MOUSE = 17; IC_PALETTE = 18;
   OB_SYS = 1; OB_DRIVES = 2; OB_CMD = 3; OB_SHUTDOWN = 4; OB_WINLIST = 5; OB_INFO = 6; OB_HELP = 7;
   OB_DIR = 8; OB_EXE = 9; OB_BATCH = 10; OB_DATA = 11; OB_TEMPLATES = 12; OB_SHRED = 13;
-  OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16;
-  VK_TEMPL = 6;
+  OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16; OB_SETUP = 17; OB_SYSSET = 18; OB_MOUSE = 19; OB_COLORS = 20;
+  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8;
+  { controles du carnet des parametres }
+  WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
+  BS_PUSHBUTTON = 0; BS_AUTOCHECKBOX = 2; BS_AUTORADIOBUTTON = 4; SS_TEXT = 1; SS_GROUPBOX = 2;
+  WS_GROUP = $00010000; WS_TABSTOP = $00020000;
+  BM_QUERYCHECK = $0124; BM_SETCHECK = $0125; BN_CLICKED = 1; LN_SELECT = 1;
+  SV_SWAPBUTTON = 0; SV_DBLCLKTIME = 1;
+  NbTabs = 7;
   ShadowApp = 'PMSHELL_RACCOURCIS';
   { commandes des menus }
   CM_OPEN = 100; CM_REFRESH = 101; CM_ARRANGE = 102; CM_WINLIST = 103; CM_INFO = 104; CM_SHUTDOWN = 105;
   CM_HELP = 106; CM_PROPS = 107; CM_DELETE = 108; CM_CLOSE = 109; CM_PARENT = 110; CM_CMDHERE = 111;
-  CM_SHADOW = 112; CM_CREATE = 113;
+  CM_SHADOW = 112; CM_CREATE = 113; CM_SETTINGS = 114;
 
 Type
   { objet d'une vue (icone) }
@@ -170,6 +188,17 @@ Var
   I2 : LongInt;
   WlSess : Array[0..31] Of LongInt;   { liste des fenetres : sessions }
   WlViews, WlNS : LongInt;
+  { parametres du systeme (OS2.INI, application PMSHELL) }
+  DeskColor : LongInt;                     { couleur du fond du bureau (RVB) }
+  CfgConf : Array[0..2] Of LongInt;        { confirmer : dossier, objet, arret }
+  CfgTitle, CfgWin, CfgLogo, CfgDbl, CfgSwap, CfgClr : LongInt;
+  { carnet des parametres }
+  NbClient, NbTab, NbN, NbModeN, LogoH : LongInt;
+  NbCtl : Array[0..31] Of LongInt;
+  NbLblN : LongInt;
+  NbLblX, NbLblY : Array[0..15] Of LongInt;
+  NbLblS : Array[0..15] Of String[60];
+  NbMW, NbMH, NbMB : Array[0..127] Of LongInt;
   DeskDir : String[40];               { repertoire du bureau (C:\DESKTOP ou D:\DESKTOP) }
 
 { --- DOSCALLS.DLL --- }
@@ -236,6 +265,14 @@ Function WinAlarm(HD, T : LongInt) : LongInt; External 'PMWIN';
 Function WinSuspendScreen : LongInt; External 'PMWIN' Name 'WINSUSPENDSCREEN';
 Function WinResumeScreen : LongInt; External 'PMWIN' Name 'WINRESUMESCREEN';
 Function WinQueryScreenTaken : LongInt; External 'PMWIN' Name 'WINQUERYSCREENTAKEN';
+Function WinSetScreenMode(W, H, Bits : LongInt) : LongInt; External 'PMWIN' Name 'WINSETSCREENMODE';
+Function WinQueryScreenMode(P : LongInt) : LongInt; External 'PMWIN' Name 'WINQUERYSCREENMODE';
+Function WinSetSysValue(HD, Ix, V : LongInt) : LongInt; External 'PMWIN';
+Function WinStartTimer(Hab, H, Id, Dt : LongInt) : LongInt; External 'PMWIN';
+Function WinStopTimer(Hab, H, Id : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryWindowText(H, Cch, P : LongInt) : LongInt; External 'PMWIN';
+Function VioQueryModes(I, P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYMODES';
+Function VioQueryVbe(P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYVBE';
 
 { --- PMGPI.DLL --- }
 Function GpiSetColor(Hps, C : LongInt) : LongInt; External 'PMGPI';
@@ -746,6 +783,10 @@ Begin
     OB_HELP : Icon := IC_HELP;
     OB_TEMPLATES : Icon := IC_TEMPL;
     OB_SHRED : Icon := IC_SHRED;
+    OB_SETUP : Icon := IC_SETUP;
+    OB_SYSSET : Icon := IC_SCREEN;
+    OB_MOUSE : Icon := IC_MOUSE;
+    OB_COLORS : Icon := IC_PALETTE;
   Else
     Icon := IC_FILE;
   End;
@@ -835,6 +876,13 @@ Function UniqueName(Dir, Base, Ext : String) : String;
 Var N : LongInt; S : String;
 Begin
   S := Base + Ext; N := 2;
+  { parametres du systeme (Titre) : avertir au lieu de numeroter }
+  If (CfgTitle <> 0) And FileExists(Dir + S) Then
+  Begin
+    ShowMsg('Un objet nomme ' + S + ' existe deja dans ' + Dir + '.', 'Titre', MB_OK Or MB_WARNING);
+    UniqueName := '';
+    Exit;
+  End;
   While FileExists(Dir + S) Do
   Begin
     S := Base + IStr(N) + Ext;
@@ -852,6 +900,7 @@ Begin
     OB_TPLDIR :
       Begin
         S := UniqueName(Dir, 'Dossier', '');
+        If S = '' Then Exit;
         CreateFromTemplate := DosCreateDir(Z(Dir + S), 0) = 0;
       End;
     OB_TPLDATA, OB_TPLCMD :
@@ -865,6 +914,7 @@ Begin
           S := UniqueName(Dir, 'Commandes', '.CMD');
           Txt := '@ECHO OFF' + #13#10 + 'REM Fichier de commandes cree par le bureau' + #13#10;
         End;
+        If S = '' Then Exit;
         H := 0; A := 0;
         If DosOpen(Z(Dir + S), LongInt(@H), LongInt(@A), 0, 0, $12, $41, 0) = 0 Then
         Begin
@@ -906,9 +956,16 @@ Begin
         Dummy := NewItem(V, IC_CMD, OB_CMD, 'Invite de commandes OS/2', '');
         Dummy := NewItem(V, IC_DRIVES, OB_DRIVES, 'Lecteurs', '');
         Dummy := NewItem(V, IC_WINLIST, OB_WINLIST, 'Liste des fenetres', '');
+        Dummy := NewItem(V, IC_SETUP, OB_SETUP, 'Configuration du systeme', '');
         Dummy := NewItem(V, IC_INFO, OB_INFO, 'Informations systeme', '');
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
+      End;
+    VK_SETUP :
+      Begin
+        Dummy := NewItem(V, IC_SCREEN, OB_SYSSET, 'Systeme', '');
+        Dummy := NewItem(V, IC_MOUSE, OB_MOUSE, 'Souris', '');
+        Dummy := NewItem(V, IC_PALETTE, OB_COLORS, 'Couleurs du bureau', '');
       End;
     VK_DRIVES :
       Begin
@@ -1063,6 +1120,35 @@ Begin
         GLn(Hps, X + 17, Y + 5, X + 17, Y + 17, CLR_DARKGRAY);
         GLn(Hps, X + 21, Y + 3, X + 21, Y + 17, CLR_DARKGRAY);
       End;
+    IC_SETUP :
+      Begin
+        IconFolder(Hps, X, Y, CLR_YELLOW);
+        FBox(Hps, X + 9, Y + 7, X + 22, Y + 18, CLR_PALEGRAY, CLR_DARKGRAY);
+        GBox(Hps, X + 13, Y + 10, X + 18, Y + 15, CLR_DARKGRAY, DRO_FILL);
+      End;
+    IC_SCREEN :
+      Begin
+        FBox(Hps, X + 2, Y + 8, X + 29, Y + 29, CLR_PALEGRAY, CLR_BLACK);
+        FBox(Hps, X + 5, Y + 11, X + 26, Y + 26, CLR_DARKBLUE, CLR_DARKGRAY);
+        FBox(Hps, X + 11, Y + 2, X + 20, Y + 7, CLR_PALEGRAY, CLR_BLACK);
+      End;
+    IC_MOUSE :
+      Begin
+        FBox(Hps, X + 9, Y + 2, X + 22, Y + 22, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 16, X + 15, Y + 22, CLR_BLACK);
+        GLn(Hps, X + 9, Y + 16, X + 22, Y + 16, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 22, X + 15, Y + 29, CLR_DARKGRAY);
+      End;
+    IC_PALETTE :
+      Begin
+        FBox(Hps, X + 2, Y + 6, X + 29, Y + 26, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 5, Y + 17, X + 10, Y + 22, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 13, Y + 17, X + 18, Y + 22, CLR_GREEN, DRO_FILL);
+        GBox(Hps, X + 21, Y + 17, X + 26, Y + 22, CLR_BLUE, DRO_FILL);
+        GBox(Hps, X + 5, Y + 9, X + 10, Y + 14, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 13, Y + 9, X + 18, Y + 14, CLR_CYAN, DRO_FILL);
+        GBox(Hps, X + 21, Y + 9, X + 26, Y + 14, CLR_DARKRED, DRO_FILL);
+      End;
     IC_INFO, IC_HELP :
       Begin
         FBox(Hps, X + 4, Y + 4, X + 27, Y + 27, CLR_BLUE, CLR_DARKBLUE);
@@ -1123,7 +1209,7 @@ Begin
   If Hps = 0 Then Exit;
   If Vw(V)^.Kind = VK_DESK Then
   Begin
-    Bg := DeskRgb; Fg := CLR_WHITE;
+    Bg := DeskColor; Fg := CLR_WHITE;
   End
   Else
   Begin
@@ -1195,6 +1281,7 @@ Begin
     MenuAdd(0, '');
     MenuAdd(CM_WINLIST, '~Liste des fenetres');
     MenuAdd(CM_INFO, '~Informations systeme');
+    MenuAdd(CM_SETTINGS, '~Parametres du systeme...');
     MenuAdd(CM_HELP, 'Ai~de');
     MenuAdd(0, '');
     MenuAdd(CM_SHUTDOWN, 'A~rret...');
@@ -1316,7 +1403,8 @@ End;
 Procedure OpenFolder(Kind : LongInt; Path, Title : String);
 Var V, N : LongInt;
 Begin
-  V := FindView(Kind, Path);
+  { parametres du systeme (Fenetre) : fenetre existante ou nouvelle }
+  If CfgWin = 0 Then V := FindView(Kind, Path) Else V := -1;
   If V >= 0 Then
   Begin
     ActivateView(V);
@@ -1494,7 +1582,7 @@ End;
 Procedure SetDeskColor;
 Var C : LongInt;
 Begin
-  C := DeskRgb;
+  C := DeskColor;
   Dummy := WinSetSysColors(HWND_DESKTOP, 0, 2, -24, 1, LongInt(@C));
 End;
 
@@ -1593,8 +1681,9 @@ End;
 Procedure Shutdown;
 Var Ki : Array[0..15] Of Byte; S : String; At : Byte; K : LongInt;
 Begin
-  If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('L''arret du systeme ferme toutes les fenetres. Voulez-vous ' +
-                   'arreter le systeme ?'), Z2('Arret'), 0, MB_OKCANCEL Or MB_QUERY Or MB_MOVEABLE) <> MBID_OK Then Exit;
+  If CfgConf[2] <> 0 Then
+    If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('L''arret du systeme ferme toutes les fenetres. Voulez-vous ' +
+                     'arreter le systeme ?'), Z2('Arret'), 0, MB_OKCANCEL Or MB_QUERY Or MB_MOVEABLE) <> MBID_OK Then Exit;
   For K := 0 To ViewCap - 1 Do
     If (Vw(K)^.Use <> 0) And (Vw(K)^.Kind <> VK_DESK) Then CloseView(K);
   Dummy := DosShutdown(0);
@@ -1728,6 +1817,15 @@ Begin
     ShowMsg('Un dossier ne peut pas etre depose dans lui-meme.', 'Bureau', MB_OK Or MB_WARNING);
     Exit;
   End;
+  { un objet du meme nom existe deja : numero ajoute (ou avertissement) }
+  If FileExists(Dest + Nm) Then
+  Begin
+    R := Length(Nm);
+    While (R > 0) And (Nm[R] <> '.') Do Dec(R);
+    If R > 1 Then Nm := UniqueName(Dest, Copy(Nm, 1, R - 1), Copy(Nm, R, 255))
+    Else Nm := UniqueName(Dest, Nm, '');
+    If Nm = '' Then Exit;
+  End;
   Copy2 := ((Kc And KC_CTRL) <> 0) Or (UpCase(Src[1]) <> UpCase(Dest[1]));
   If Copy2 Then R := DosCopy(Z(Src), Z2(Dest + Nm), 0)
   Else R := DosMove(Z(Src), Z2(Dest + Nm));
@@ -1774,6 +1872,8 @@ Begin
   DoDrop(DSrc, TV, TK, Kc);
 End;
 
+Procedure OpenNotebook(Tab : LongInt); Forward;
+
 Procedure OpenItem(K : LongInt);
 Var V : LongInt; P : String;
 Begin
@@ -1796,6 +1896,10 @@ Begin
     OB_BATCH : RunProgram(Comspec, '/C ' + It(K)^.Path, DirOf(It(K)^.Path), True);
     OB_DATA : OpenViewer(It(K)^.Path);
     OB_TEMPLATES : OpenFolder(VK_TEMPL, '', 'Modeles');
+    OB_SETUP : OpenFolder(VK_SETUP, '', 'Configuration du systeme');
+    OB_SYSSET : OpenNotebook(0);
+    OB_MOUSE : OpenNotebook(4);
+    OB_COLORS : OpenNotebook(6);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
@@ -1845,6 +1949,9 @@ Begin
   If It(K)^.Shadow <> 0 Then T := 'le raccourci ' + It(K)^.Name
   Else If It(K)^.Obj = OB_DIR Then T := 'le dossier ' + It(K)^.Path + ' et son contenu'
   Else T := 'le fichier ' + It(K)^.Path;
+  { parametres du systeme : confirmations }
+  If (It(K)^.Obj = OB_DIR) And (It(K)^.Shadow = 0) Then Ask := Ask And (CfgConf[0] <> 0)
+  Else Ask := Ask And (CfgConf[1] <> 0);
   If Ask Then
     If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('Supprimer ' + T + ' ?'), Z2('Supprimer'), 0,
                      MB_YESNO Or MB_WARNING Or MB_MOVEABLE) <> MBID_YES Then Exit;
@@ -1920,6 +2027,7 @@ Begin
     CM_WINLIST : OpenWinList;
     CM_INFO : SysInfo;
     CM_HELP : Help;
+    CM_SETTINGS : OpenNotebook(0);
     CM_SHUTDOWN : Shutdown;
     CM_CLOSE : CloseView(V);
     CM_PARENT : ParentFolder(V);
@@ -2102,7 +2210,554 @@ Begin
   Else If Verb = 'WINLIST' Then OpenWinList
   Else If Verb = 'HELP' Then Help
   Else If Verb = 'INFO' Then SysInfo
-  Else If Verb = 'SHUTDOWN' Then Shutdown;
+  Else If Verb = 'SHUTDOWN' Then Shutdown
+  Else If Verb = 'SETTINGS' Then OpenNotebook(0);
+End;
+
+{ ==================================================================== }
+{ Parametres du systeme : carnet "Systeme - Parametres"                 }
+{ ==================================================================== }
+{ Onglets : Ecran (resolution : modes VGA et VESA de VIOCALLS),
+  Confirmations, Titre, Fenetre, Entree (souris), Logo, General
+  (couleur du bureau). Les valeurs sont gardees dans OS2.INI
+  (application PMSHELL ; resolution : PM_Display, RESOLUTION). }
+
+Const
+  NbTabName : Array[0..NbTabs - 1] Of String[16] = ('Ecran', 'Confirmations', 'Titre', 'Fenetre', 'Entree', 'Logo',
+                                                     'General');
+  ClrName : Array[0..15] Of String[16] = ('Cyan fonce', 'Bleu fonce', 'Vert fonce', 'Rouge fonce', 'Magenta fonce',
+                                          'Brun', 'Gris clair', 'Gris fonce', 'Bleu', 'Vert', 'Cyan', 'Rouge', 'Magenta',
+                                          'Jaune', 'Blanc', 'Noir');
+  ClrRgbTab : Array[0..15] Of LongInt = ($008080, $000080, $008000, $800000, $800080, $808000, $C0C0C0, $808080,
+                                         $0000FF, $00FF00, $00FFFF, $FF0000, $FF00FF, $FFFF00, $FFFFFF, $000000);
+  DblTab : Array[0..4] Of LongInt = (200, 300, 500, 700, 1000);
+
+Function PrfNum(Key : String; Df : LongInt) : LongInt;
+Var V, C : LongInt; S : String;
+Begin
+  S := PrfStr('PMSHELL', Key);
+  Val(S, V, C);
+  If (S = '') Or (C <> 0) Then V := Df;
+  PrfNum := V;
+End;
+
+Procedure ApplySettings;
+Begin
+  If (CfgClr < 0) Or (CfgClr > 15) Then CfgClr := 0;
+  DeskColor := ClrRgbTab[CfgClr];
+  Dummy := WinSetSysValue(HWND_DESKTOP, SV_DBLCLKTIME, CfgDbl);
+  Dummy := WinSetSysValue(HWND_DESKTOP, SV_SWAPBUTTON, CfgSwap);
+End;
+
+Procedure LoadSettings;
+Begin
+  CfgConf[0] := PrfNum('CONF_DOSSIER', 1); CfgConf[1] := PrfNum('CONF_OBJET', 1); CfgConf[2] := PrfNum('CONF_ARRET', 1);
+  CfgTitle := PrfNum('TITRE', 0); CfgWin := PrfNum('FENETRE', 0); CfgLogo := PrfNum('LOGO', 0);
+  CfgDbl := PrfNum('DOUBLECLIC', 500); CfgSwap := PrfNum('GAUCHER', 0); CfgClr := PrfNum('COULEUR', 0);
+  ApplySettings;
+End;
+
+Procedure SaveSettings;
+Begin
+  PrfSet('PMSHELL', 'CONF_DOSSIER', IStr(CfgConf[0])); PrfSet('PMSHELL', 'CONF_OBJET', IStr(CfgConf[1]));
+  PrfSet('PMSHELL', 'CONF_ARRET', IStr(CfgConf[2])); PrfSet('PMSHELL', 'TITRE', IStr(CfgTitle));
+  PrfSet('PMSHELL', 'FENETRE', IStr(CfgWin)); PrfSet('PMSHELL', 'LOGO', IStr(CfgLogo));
+  PrfSet('PMSHELL', 'DOUBLECLIC', IStr(CfgDbl)); PrfSet('PMSHELL', 'GAUCHER', IStr(CfgSwap));
+  PrfSet('PMSHELL', 'COULEUR', IStr(CfgClr));
+End;
+
+{ nombre de couleurs d'un mode (texte du carnet) }
+Function ColorsOf(B : LongInt) : String;
+Begin
+  Case B Of
+    1 : ColorsOf := '2';
+    4 : ColorsOf := '16';
+    8 : ColorsOf := '256';
+    15 : ColorsOf := '32 768';
+    16 : ColorsOf := '65 536';
+    24 : ColorsOf := '16 777 216';
+  Else
+    ColorsOf := '16 777 216 (32 bits)';
+  End;
+End;
+
+{ modes de l'ecran (VIOQUERYMODES), tries par largeur, hauteur, couleurs }
+Procedure LoadModes;
+Var N, I, J, T : LongInt; M : Array[0..3] Of LongInt;
+Begin
+  NbModeN := 0;
+  N := VioQueryModes(0, 0);
+  For I := 0 To N - 1 Do
+    If (NbModeN < 128) And (VioQueryModes(I, LongInt(@M)) <> 0) Then
+    Begin
+      NbMW[NbModeN] := M[0]; NbMH[NbModeN] := M[1]; NbMB[NbModeN] := M[2];
+      Inc(NbModeN);
+    End;
+  If NbModeN = 0 Then
+  Begin
+    NbMW[0] := 640; NbMH[0] := 480; NbMB[0] := 4; NbModeN := 1;
+  End;
+  For I := 1 To NbModeN - 1 Do
+  Begin
+    J := I;
+    While (J > 0) And ((NbMW[J - 1] > NbMW[J]) Or ((NbMW[J - 1] = NbMW[J]) And
+          ((NbMH[J - 1] > NbMH[J]) Or ((NbMH[J - 1] = NbMH[J]) And (NbMB[J - 1] > NbMB[J]))))) Do
+    Begin
+      T := NbMW[J]; NbMW[J] := NbMW[J - 1]; NbMW[J - 1] := T;
+      T := NbMH[J]; NbMH[J] := NbMH[J - 1]; NbMH[J - 1] := T;
+      T := NbMB[J]; NbMB[J] := NbMB[J - 1]; NbMB[J - 1] := T;
+      Dec(J);
+    End;
+  End;
+End;
+
+{ l'ecran a change de taille : bureau redimensionne, icones replacees }
+Procedure ScreenResized;
+Var M : Array[0..3] Of LongInt; V : LongInt;
+Begin
+  M[0] := 0;
+  Dummy := WinQueryScreenMode(LongInt(@M));
+  If M[0] <= 0 Then Exit;
+  ScrW := M[0]; ScrH := M[1];
+  If Desk <> 0 Then
+  Begin
+    Dummy := WinSetWindowPos(Desk, HWND_BOTTOM, 0, 0, ScrW, ScrH, SWP_SIZE Or SWP_MOVE Or SWP_ZORDER);
+    V := ViewOf(Desk);
+    If V >= 0 Then Layout(V);
+  End;
+  Dummy := WinInvalidateRect(HWND_DESKTOP, 0, 1);
+End;
+
+{ choisir la resolution W x H x B ; elle est gardee (OS2.INI) si
+  l'utilisateur la confirme, sinon l'ancienne est rendue }
+Procedure ApplyResolution(W, H, B : LongInt);
+Var M : Array[0..3] Of LongInt;
+Begin
+  M[0] := 640; M[1] := 480; M[2] := 4;
+  Dummy := WinQueryScreenMode(LongInt(@M));
+  If (M[0] = W) And (M[1] = H) And (M[2] = B) Then Exit;
+  If WinSetScreenMode(W, H, B) = 0 Then
+  Begin
+    ShowMsg('La carte video ne peut pas afficher ' + IStr(W) + ' x ' + IStr(H) + ' x ' + ColorsOf(B) + ' couleurs.',
+            'Ecran', MB_OK Or MB_ERROR);
+    ScreenResized;
+    Exit;
+  End;
+  ScreenResized;
+  If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('Nouvelle resolution : ' + IStr(W) + ' x ' + IStr(H) + ' x ' +
+                   ColorsOf(B) + ' couleurs. La conserver ?'), Z2('Ecran'), 0,
+                   MB_YESNO Or MB_QUERY Or MB_MOVEABLE) = MBID_YES Then
+    PrfSet('PM_Display', 'RESOLUTION', IStr(W) + 'x' + IStr(H) + 'x' + IStr(B))
+  Else
+  Begin
+    Dummy := WinSetScreenMode(M[0], M[1], M[2]);
+    ScreenResized;
+  End;
+End;
+
+{ --- controles d'une page (coordonnees depuis le haut de la page) --- }
+Function NbAdd(Cls, Style, X, YTop, W, Hh, Id : LongInt; Text : String) : LongInt;
+Var R : Array[0..3] Of LongInt; Hw : LongInt;
+Begin
+  Dummy := WinQueryWindowRect(NbClient, LongInt(@R));
+  Hw := WinCreateWindow(NbClient, Cls, Z(Text), WS_VISIBLE Or Style, 40 + X, R[3] - 18 - YTop - Hh, W, Hh, NbClient,
+                        HWND_TOP, Id, 0, 0);
+  If NbN < 32 Then
+  Begin
+    NbCtl[NbN] := Hw;
+    Inc(NbN);
+  End;
+  NbAdd := Hw;
+End;
+
+{ texte de la page (dessine par NbPaint, sur le fond de la page) }
+Procedure NbText(X, YTop, W : LongInt; Text : String);
+Begin
+  If NbLblN < 16 Then
+  Begin
+    NbLblX[NbLblN] := X; NbLblY[NbLblN] := YTop; NbLblS[NbLblN] := Text;
+    Inc(NbLblN);
+  End;
+End;
+
+Function NbCheck(X, YTop, W, Id : LongInt; Text : String; On : Boolean; Style : LongInt) : LongInt;
+Var Hw : LongInt;
+Begin
+  W := MinI(W, Length(Text) * 8 + 28);
+  Hw := NbAdd(WC_BUTTON, Style Or WS_TABSTOP, X, YTop, W, 20, Id, Text);
+  If On Then Dummy := WinSendMsg(Hw, BM_SETCHECK, 1, 0);
+  NbCheck := Hw;
+End;
+
+Function NbButton(X, YTop, W, Id : LongInt; Text : String) : LongInt;
+Begin
+  NbButton := NbAdd(WC_BUTTON, BS_PUSHBUTTON Or WS_TABSTOP, X, YTop, W, 22, Id, Text);
+End;
+
+Function NbList(X, YTop, W, Hh, Id : LongInt) : LongInt;
+Begin
+  NbList := NbAdd(WC_LISTBOX, WS_TABSTOP, X, YTop, W, Hh, Id, '');
+End;
+
+Procedure NbItem(Lb : LongInt; S : String);
+Var B : Array[0..127] Of Byte;
+Begin
+  PutZ(LongInt(@B), S);
+  Dummy := WinSendMsg(Lb, LM_INSERTITEM, -1, LongInt(@B));
+End;
+
+Procedure NbClear;
+Var K : LongInt;
+Begin
+  For K := 0 To NbN - 1 Do
+    If NbCtl[K] <> 0 Then Dummy := WinDestroyWindow(NbCtl[K]);
+  NbN := 0;
+End;
+
+{ selection courante de la liste des resolutions }
+Procedure NbSelectMode(W, H, B : LongInt);
+Var K, Lb : LongInt;
+Begin
+  Lb := WinWindowFromID(NbClient, 300);
+  For K := 0 To NbModeN - 1 Do
+    If (NbMW[K] = W) And (NbMH[K] = H) And (NbMB[K] = B) Then Dummy := WinSendMsg(Lb, LM_SELECTITEM, K, 1);
+End;
+
+Procedure NbBuild;
+Var Lb, K, Sel : LongInt; M : Array[0..3] Of LongInt; Vb : Array[0..31] Of LongInt; S : String;
+Begin
+  NbClear;
+  NbLblN := 0;
+  Case NbTab Of
+    0 :
+      Begin
+        Vb[0] := 0;
+        If VioQueryVbe(LongInt(@Vb)) <> 0 Then
+          S := 'VESA ' + IStr((Vb[0] Shr 8) And 255) + '.' + IStr(Vb[0] And 255) + ', ' + IStr(Vb[1]) + ' Ko'
+        Else S := 'VGA';
+        NbText(0, 0, 330, 'Ecran choisi : ' + S);
+        NbText(0, 24, 330, 'Resolution de l''ecran :');
+        Lb := NbList(0, 44, 300, 124, 300);
+        LoadModes;
+        For K := 0 To NbModeN - 1 Do
+          NbItem(Lb, IStr(NbMW[K]) + ' x ' + IStr(NbMH[K]) + ' x ' + ColorsOf(NbMB[K]));
+        M[0] := 640; M[1] := 480; M[2] := 4;
+        Dummy := WinQueryScreenMode(LongInt(@M));
+        NbSelectMode(M[0], M[1], M[2]);
+        NbText(0, 172, 330, 'largeur x hauteur x nombre de couleurs');
+        NbText(0, 196, 330, 'Frequence de balayage :');
+        Lb := NbList(0, 216, 120, 36, 301);
+        NbItem(Lb, '60');
+        Dummy := WinSendMsg(Lb, LM_SELECTITEM, 0, 1);
+        NbText(130, 226, 200, 'frequence verticale en Hz');
+        Dummy := NbButton(0, 262, 80, 310, 'Appliquer');
+        Dummy := NbButton(86, 262, 80, 311, 'Annuler');
+        Dummy := NbButton(172, 262, 80, 312, 'Par defaut');
+        Dummy := NbButton(258, 262, 80, 313, 'Capacites');
+      End;
+    1 :
+      Begin
+        NbText(0, 0, 330, 'Demander une confirmation avant :');
+        Dummy := NbCheck(10, 28, 320, 320, 'la suppression d''un dossier', CfgConf[0] <> 0, BS_AUTOCHECKBOX);
+        Dummy := NbCheck(10, 52, 320, 321, 'la suppression d''un fichier ou d''un raccourci', CfgConf[1] <> 0,
+                         BS_AUTOCHECKBOX);
+        Dummy := NbCheck(10, 76, 320, 322, 'l''arret du systeme', CfgConf[2] <> 0, BS_AUTOCHECKBOX);
+      End;
+    2 :
+      Begin
+        NbText(0, 0, 330, 'Quand un objet du meme nom existe deja :');
+        Dummy := NbCheck(10, 28, 320, 330, 'ajouter un numero au nom', CfgTitle = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 52, 320, 331, 'avertir et ne pas creer l''objet', CfgTitle <> 0, BS_AUTORADIOBUTTON);
+      End;
+    3 :
+      Begin
+        NbText(0, 0, 330, 'Ouverture d''un objet deja ouvert :');
+        Dummy := NbCheck(10, 28, 320, 340, 'afficher la fenetre existante', CfgWin = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 52, 320, 341, 'ouvrir une nouvelle fenetre', CfgWin <> 0, BS_AUTORADIOBUTTON);
+      End;
+    4 :
+      Begin
+        NbText(0, 0, 330, 'Souris - delai du double clic :');
+        Lb := NbList(10, 22, 160, 96, 350);
+        Sel := 2;
+        For K := 0 To 4 Do
+        Begin
+          NbItem(Lb, IStr(DblTab[K]) + ' ms');
+          If DblTab[K] = CfgDbl Then Sel := K;
+        End;
+        Dummy := WinSendMsg(Lb, LM_SELECTITEM, Sel, 1);
+        Dummy := NbCheck(10, 128, 320, 351, 'boutons inverses (gaucher)', CfgSwap <> 0, BS_AUTOCHECKBOX);
+      End;
+    5 :
+      Begin
+        NbText(0, 0, 330, 'Logo affiche au demarrage du bureau :');
+        Dummy := NbCheck(10, 28, 320, 360, 'aucun', CfgLogo = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 52, 320, 361, '3 secondes', CfgLogo = 3, BS_AUTORADIOBUTTON);
+        Dummy := NbCheck(10, 76, 320, 362, '5 secondes', CfgLogo = 5, BS_AUTORADIOBUTTON);
+        Dummy := NbCheck(10, 100, 320, 363, 'jusqu''a un clic', CfgLogo < 0, BS_AUTORADIOBUTTON);
+      End;
+    6 :
+      Begin
+        NbText(0, 0, 330, 'Couleur du fond du bureau :');
+        Lb := NbList(10, 22, 200, 196, 370);
+        For K := 0 To 15 Do NbItem(Lb, ClrName[K]);
+        Dummy := WinSendMsg(Lb, LM_SELECTITEM, CfgClr, 1);
+      End;
+  End;
+  Dummy := WinInvalidateRect(NbClient, 0, 1);
+End;
+
+Procedure NbSelect(T : LongInt);
+Begin
+  If (T < 0) Or (T >= NbTabs) Or (T = NbTab) Then Exit;
+  NbTab := T;
+  NbBuild;
+End;
+
+{ rectangle de l'onglet T (client de largeur W, hauteur H) }
+Procedure TabRect(T, W, H : LongInt; Var X1, Y1, X2, Y2 : LongInt);
+Begin
+  X1 := W - 116 + T * 2; X2 := W - 8;
+  Y2 := H - 10 - T * 28; Y1 := Y2 - 24;
+End;
+
+Procedure NbPaint(H : LongInt);
+Var Hps, K, X1, Y1, X2, Y2, Pr : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  Hps := WinBeginPaint(H, 0, LongInt(@Rc));
+  If Hps = 0 Then Exit;
+  Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+  Dummy := WinFillRect(Hps, LongInt(@Rc), CLR_PALEGRAY);
+  Pr := Rc[2] - 120;
+  { pages (avec l'epaisseur du carnet) et reliure a spirale }
+  FBox(Hps, 30, 28, Pr + 4, Rc[3] - 4, CLR_PALEGRAY, CLR_DARKGRAY);
+  FBox(Hps, 27, 31, Pr + 1, Rc[3] - 7, CLR_PALEGRAY, CLR_DARKGRAY);
+  FBox(Hps, 24, 34, Pr - 2, Rc[3] - 10, CLR_PALEGRAY, CLR_BLACK);
+  K := 40;
+  While K < Rc[3] - 16 Do
+  Begin
+    GBox(Hps, 6, K, 30, K + 6, CLR_DARKGRAY, DRO_OUTLINE);
+    GLn(Hps, 7, K + 5, 29, K + 5, CLR_WHITE);
+    K := K + 16;
+  End;
+  { onglets }
+  For K := 0 To NbTabs - 1 Do
+  Begin
+    TabRect(K, Rc[2], Rc[3], X1, Y1, X2, Y2);
+    If K = NbTab Then
+    Begin
+      FBox(Hps, Pr - 3, Y1, X2, Y2, CLR_PALEGRAY, CLR_BLACK);
+      GLn(Hps, Pr - 2, Y1 + 1, Pr - 2, Y2 - 1, CLR_PALEGRAY);
+    End
+    Else FBox(Hps, X1, Y1, X2, Y2, CLR_PALEGRAY, CLR_DARKGRAY);
+    GLn(Hps, X1 + 1, Y2 - 1, X2 - 1, Y2 - 1, CLR_WHITE);
+    GText(Hps, X1 + 6, Y1 + 4, NbTabName[K], CLR_BLACK, CLR_PALEGRAY);
+  End;
+  GText(Hps, Pr - 210, 8, NbTabName[NbTab] + ' - Page 1 sur 1', CLR_BLACK, CLR_PALEGRAY);
+  { textes de la page }
+  For K := 0 To NbLblN - 1 Do
+    GText(Hps, 40 + NbLblX[K], Rc[3] - 18 - NbLblY[K] - 16, NbLblS[K], CLR_DARKBLUE, CLR_PALEGRAY);
+  Dummy := WinEndPaint(Hps);
+End;
+
+Function NbChecked(Id : LongInt) : Boolean;
+Begin
+  NbChecked := WinSendMsg(WinWindowFromID(NbClient, Id), BM_QUERYCHECK, 0, 0) <> 0;
+End;
+
+Procedure NbControl(Id, Code : LongInt);
+Var Sel : LongInt;
+Begin
+  Case Id Of
+    300 : If Code = LN_ENTER Then
+          Begin
+            Sel := WinSendMsg(WinWindowFromID(NbClient, 300), LM_QUERYSELECTION, -1, 0);
+            If (Sel >= 0) And (Sel < NbModeN) Then ApplyResolution(NbMW[Sel], NbMH[Sel], NbMB[Sel]);
+          End;
+    320, 321, 322 :
+      Begin
+        If NbChecked(Id) Then CfgConf[Id - 320] := 1 Else CfgConf[Id - 320] := 0;
+        SaveSettings;
+      End;
+    330, 331 :
+      Begin
+        If NbChecked(331) Then CfgTitle := 1 Else CfgTitle := 0;
+        SaveSettings;
+      End;
+    340, 341 :
+      Begin
+        If NbChecked(341) Then CfgWin := 1 Else CfgWin := 0;
+        SaveSettings;
+      End;
+    350 : If (Code = LN_SELECT) Or (Code = LN_ENTER) Then
+          Begin
+            Sel := WinSendMsg(WinWindowFromID(NbClient, 350), LM_QUERYSELECTION, -1, 0);
+            If (Sel >= 0) And (Sel <= 4) Then CfgDbl := DblTab[Sel];
+            ApplySettings; SaveSettings;
+          End;
+    351 :
+      Begin
+        If NbChecked(351) Then CfgSwap := 1 Else CfgSwap := 0;
+        ApplySettings; SaveSettings;
+      End;
+    360, 361, 362, 363 :
+      Begin
+        If NbChecked(361) Then CfgLogo := 3
+        Else If NbChecked(362) Then CfgLogo := 5
+        Else If NbChecked(363) Then CfgLogo := -1
+        Else CfgLogo := 0;
+        SaveSettings;
+      End;
+    370 : If (Code = LN_SELECT) Or (Code = LN_ENTER) Then
+          Begin
+            Sel := WinSendMsg(WinWindowFromID(NbClient, 370), LM_QUERYSELECTION, -1, 0);
+            If (Sel >= 0) And (Sel <= 15) Then CfgClr := Sel;
+            ApplySettings; SaveSettings;
+            SetDeskColor;
+            If Desk <> 0 Then Dummy := WinInvalidateRect(Desk, 0, 1);
+          End;
+  End;
+End;
+
+Procedure NbCommand(Id : LongInt);
+Var Sel : LongInt; M : Array[0..3] Of LongInt; Vb : Array[0..31] Of LongInt; S : String;
+Begin
+  Case Id Of
+    310 :
+      Begin
+        Sel := WinSendMsg(WinWindowFromID(NbClient, 300), LM_QUERYSELECTION, -1, 0);
+        If (Sel >= 0) And (Sel < NbModeN) Then ApplyResolution(NbMW[Sel], NbMH[Sel], NbMB[Sel]);
+      End;
+    311 :
+      Begin
+        M[0] := 640; M[1] := 480; M[2] := 4;
+        Dummy := WinQueryScreenMode(LongInt(@M));
+        NbSelectMode(M[0], M[1], M[2]);
+      End;
+    312 : NbSelectMode(640, 480, 4);
+    313 :
+      Begin
+        Vb[0] := 0;
+        If VioQueryVbe(LongInt(@Vb)) <> 0 Then
+          S := 'Carte VESA (VBE ' + IStr((Vb[0] Shr 8) And 255) + '.' + IStr(Vb[0] And 255) + ') : ' +
+               GetZ(LongInt(@Vb) + 8) + '. Memoire video : ' + IStr(Vb[1]) + ' Ko. ' + IStr(NbModeN) +
+               ' resolutions (VGA et VESA a memoire lineaire, 256 a 16 777 216 couleurs).'
+        Else S := 'Carte VGA sans BIOS VESA : 640 x 480 x 16 couleurs.';
+        ShowMsg(S, 'Capacites de l''ecran', MB_OK Or MB_INFORMATION);
+      End;
+  End;
+End;
+
+Function NotebookProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var V, X, Y, K, X1, Y1, X2, Y2, Fs, Vk : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  NotebookProc := 0;
+  V := ViewOf(H);
+  If (V < 0) And (Msg = WM_CREATE) And (Creating >= 0) Then
+  Begin
+    Vw(Creating)^.Client := H;
+    NbClient := H; NbN := 0;
+    Exit;
+  End;
+  Case Msg Of
+    WM_SIZE : If NbN = 0 Then NbBuild;
+    WM_PAINT : NbPaint(H);
+    WM_BUTTON1DOWN :
+      Begin
+        NotebookProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+        X := S16(Mp1); Y := S16(Mp1 Shr 16);
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        For K := 0 To NbTabs - 1 Do
+        Begin
+          TabRect(K, Rc[2], Rc[3], X1, Y1, X2, Y2);
+          If (X >= X1) And (X < X2) And (Y >= Y1) And (Y < Y2) Then NbSelect(K);
+        End;
+        NotebookProc := 1;
+      End;
+    WM_CONTROL : NbControl(Lo16(Mp1), Hi16(Mp1));
+    WM_COMMAND : NbCommand(Lo16(Mp1));
+    WM_CHAR :
+      Begin
+        Fs := Lo16(Mp1); Vk := Hi16(Mp2);
+        If ((Fs And KC_KEYUP) = 0) And ((Fs And KC_VIRTUALKEY) <> 0) And (Vk = VK_PAGEDOWN) Then
+          NbSelect((NbTab + 1) Mod NbTabs)
+        Else If ((Fs And KC_KEYUP) = 0) And ((Fs And KC_VIRTUALKEY) <> 0) And (Vk = VK_PAGEUP) Then
+          NbSelect((NbTab + NbTabs - 1) Mod NbTabs)
+        Else If ((Fs And KC_KEYUP) = 0) And ((Fs And KC_VIRTUALKEY) <> 0) And (Vk = VK_ESC) And (V >= 0) Then
+          CloseView(V)
+        Else NotebookProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+      End;
+    WM_CLOSE :
+      If V >= 0 Then
+      Begin
+        NbN := 0; NbClient := 0;
+        CloseView(V);
+      End;
+    WM_DESTROY :
+      Begin
+        NbN := 0; NbClient := 0;
+      End;
+  Else
+    NotebookProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+Procedure OpenNotebook(Tab : LongInt);
+Var V : LongInt;
+Begin
+  V := FindView(VK_NOTE, '');
+  If V >= 0 Then
+  Begin
+    ActivateView(V);
+    NbSelect(Tab);
+    Exit;
+  End;
+  V := NewView(VK_NOTE, '', 'Systeme - Parametres');
+  If V < 0 Then Exit;
+  NbTab := Tab; NbN := 0;
+  If Not OpenFrame(V, 'WPNotebook', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON, MaxI(0, (ScrW - 500) Div 2),
+                   MaxI(0, (ScrH - 440) Div 2), 500, 440) Then Exit;
+  If NbN = 0 Then NbBuild;
+End;
+
+{ --- logo du demarrage --- }
+Function LogoProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Hps : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  LogoProc := 0;
+  Case Msg Of
+    WM_PAINT :
+      Begin
+        Hps := WinBeginPaint(H, 0, LongInt(@Rc));
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        Dummy := WinFillRect(Hps, LongInt(@Rc), CLR_DARKBLUE);
+        FBox(Hps, 4, 4, Rc[2] - 5, Rc[3] - 5, CLR_DARKBLUE, CLR_WHITE);
+        FBox(Hps, 30, 60, 110, 140, CLR_RED, CLR_WHITE);
+        FBox(Hps, 50, 80, 90, 120, CLR_DARKBLUE, CLR_WHITE);
+        GText(Hps, 130, 110, 'OS/2-0', CLR_WHITE, CLR_DARKBLUE);
+        GText(Hps, 130, 86, 'Workplace Shell', CLR_YELLOW, CLR_DARKBLUE);
+        GText(Hps, 130, 62, 'version 0.1', CLR_WHITE, CLR_DARKBLUE);
+        Dummy := WinEndPaint(Hps);
+      End;
+    WM_TIMER, WM_BUTTON1DOWN, WM_CHAR :
+      Begin
+        Dummy := WinStopTimer(Hab, H, 7);
+        Dummy := WinDestroyWindow(H);
+        LogoH := 0;
+        LogoProc := 1;
+      End;
+  Else
+    LogoProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+Procedure ShowLogo;
+Begin
+  If CfgLogo = 0 Then Exit;
+  LogoH := WinCreateWindow(HWND_DESKTOP, Z('WPLogo'), Z2('Logo'), WS_VISIBLE, (ScrW - 320) Div 2, (ScrH - 200) Div 2,
+                           320, 200, 0, HWND_TOP, 9, 0, 0);
+  If (LogoH <> 0) And (CfgLogo > 0) Then Dummy := WinStartTimer(Hab, LogoH, 7, CfgLogo * 1000);
+  If LogoH <> 0 Then Dummy := WinSetFocus(HWND_DESKTOP, LogoH);
 End;
 
 Function ViewProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
@@ -2358,6 +3013,38 @@ Begin
   Dummy := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
 End;
 
+{ resolution "LxHxB" (largeur, hauteur, bits par pel) ; faux si la
+  chaine n'est pas valable }
+Function ParseRes(S : String; Var W, H, B : LongInt) : Boolean;
+Var P, C : LongInt;
+Begin
+  ParseRes := False;
+  S := UpStr(S);
+  P := Pos('X', S);
+  If P < 2 Then Exit;
+  Val(Copy(S, 1, P - 1), W, C);
+  If C <> 0 Then Exit;
+  S := Copy(S, P + 1, 255);
+  P := Pos('X', S);
+  If P < 2 Then Exit;
+  Val(Copy(S, 1, P - 1), H, C);
+  If C <> 0 Then Exit;
+  Val(Copy(S, P + 1, 255), B, C);
+  If C <> 0 Then Exit;
+  ParseRes := (W >= 320) And (H >= 200) And (B >= 1);
+End;
+
+{ resolution de l'ecran : OS2.INI (PM_Display, RESOLUTION), sinon
+  SET PMRESOLUTION=1024x768x16 dans CONFIG.SYS ; appliquee par PMWIN a
+  la premiere file de messages (WINSETSCREENMODE) }
+Procedure InitResolution;
+Var S : String; W, H, B : LongInt;
+Begin
+  S := PrfStr('PM_Display', 'RESOLUTION');
+  If S = '' Then S := GetEnvS('PMRESOLUTION');
+  If ParseRes(S, W, H, B) Then Dummy := WinSetScreenMode(W, H, B);
+End;
+
 Procedure StartupCmd;
 Var S : String;
 Begin
@@ -2382,12 +3069,14 @@ BEGIN
   Grow(ItemBuf, ItemCap, SizeOf(TItem));
   Grow(ViewBuf, ViewCap, SizeOf(TView));
   Hab := WinInitialize(0);
+  InitResolution;
   Hmq := WinCreateMsgQueue(Hab, 64);
   If Hmq = 0 Then
   Begin
     WriteLn('PMSHELL : Presentation Manager (PMWIN.DLL) ne peut pas demarrer.');
     Halt(1);
   End;
+  LoadSettings;
   SetDeskColor;
   ScrW := WinQuerySysValue(HWND_DESKTOP, 20); ScrH := WinQuerySysValue(HWND_DESKTOP, 21);
   If ScrW <= 0 Then ScrW := 640;
@@ -2396,6 +3085,8 @@ BEGIN
   Dummy := WinRegisterClass(Hab, Z('WPFolder'), LongInt(@ViewProc), 0, 8);
   Dummy := WinRegisterClass(Hab, Z('WPView'), LongInt(@ListProc), 0, 8);
   Dummy := WinRegisterClass(Hab, Z('WPList'), LongInt(@ListProc), 0, 8);
+  Dummy := WinRegisterClass(Hab, Z('WPNotebook'), LongInt(@NotebookProc), 0, 8);
+  Dummy := WinRegisterClass(Hab, Z('WPLogo'), LongInt(@LogoProc), 0, 8);
   StartupCmd;
   { bureau : fenetre de tout l'ecran, sous les autres }
   I := NewView(VK_DESK, '', 'Bureau');
@@ -2410,6 +3101,7 @@ BEGIN
   Dummy := WinSetFocus(HWND_DESKTOP, Desk);
   Dummy := WinInvalidateRect(HWND_DESKTOP, 0, 1);
   PrfSet('PMSHELL', 'HWND', IStr(Desk));
+  ShowLogo;
   StartLaunchPad;
   { boucle des messages (WM_QUIT est ignore : le bureau ne se termine pas) }
   Repeat
