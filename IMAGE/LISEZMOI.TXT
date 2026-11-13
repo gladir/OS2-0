@@ -8,14 +8,14 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
-              PMSPL.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
+              PMSPL.DLL, PMVIOP.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
               TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE,
               TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE,
               TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE,
-              TESTSPL.EXE et les
+              TESTSPL.EXE, TESTVIOP.EXE et les
               commandes du depot
               compilees avec
               OS2PC (-COS2).
@@ -25,7 +25,7 @@ SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
               RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL,
               PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL,
-              PMSHAPI.DLL, PMSPL.DLL et
+              PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL et
               CONFIG.SYS (copies
               faites par
               KERNEL\BUILD.sh).
@@ -98,6 +98,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTSHA.PAS                     -> TESTSHA.EXE (essai de PMSHAPI.DLL)
   OS2PC DLL\PMSPL.PAS                       -> PMSPL.DLL (tampon d'impression de PM)
   OS2PC DLL\TESTSPL.PAS                     -> TESTSPL.EXE (essai de PMSPL.DLL)
+  OS2PC DLL\PMVIOP.PAS                      -> PMVIOP.DLL (bouclier VIO : fenetres OS/2)
+  OS2PC DLL\TESTVIOP.PAS                    -> TESTVIOP.EXE (essai de PMVIOP.DLL)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -143,7 +145,7 @@ Carte memoire
                      00F80000h, SESMGR.DLL a 00FA0000h, LIBUNI.DLL a
                      00900000h, PMDRAG.DLL a 00A00000h, PMWIN.DLL a
                      00B00000h, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL,
-                     PMSHAPI.DLL et PMSPL.DLL a 00800000h :
+                     PMSHAPI.DLL, PMSPL.DLL et PMVIOP.DLL a 00800000h :
                      directive
                      {$IMAGEBASE} d'OS2PC) ; si la place est prise,
                      le noyau reloge la DLL (section .reloc) a la
@@ -519,12 +521,39 @@ PrtDevIOCtl categorie 5). SplMessageBox : boite de message (MBID_RETRY
 apres MSGTIMEOUT secondes, 180 par defaut). SplRing3 : appel d'une
 fonction. Un DC OD_QUEUED de PMGPI.DLL est un travail de PMSPL.
 
+PMVIOP.DLL et fenetres OS/2
+---------------------------
+Bouclier VIO de PM : un ecran de caracteres (cellules caractere +
+attribut) montre dans une fenetre de PM ; 73 ordinaux (1 a 57, 101 a
+122 ; les donnees de l'original sont rendues par des fonctions). Objet
+"Fenetre OS/2" du bureau (et du dossier Systeme OS/2) : CMD.EXE dans
+une nouvelle session dont l'ecran est redessine dans une fenetre
+(KrnSesCtl 18 toutes les 120 ms : lignes changees et curseur) ; les
+touches frappees dans la fenetre vont a la session (KrnSesCtl 19).
+Fenetre bornee par l'ecran (640 x 480 : 79 colonnes, la zone visible
+suit le curseur). Bouton 2 ou Maj+F10 : Marquer (glisser avec le
+bouton 1), Copier, Tout copier (presse-papiers de PM), Coller (texte
+envoye au programme), Plein ecran, Fermer (confirmation, fin des
+programmes de la session : KrnSesCtl 20).
+  WinCreateConsole(hwndOwner, pszTitre, fl, phcon) : fl 1 visible,
+  2 session (numero dans les bits 8 a 15), 4 clavier ouvert ; handle
+  56430001h + rang (16 consoles). WinSyncWithPS : tampon d'une console
+  privee rempli depuis un PS AVIO de VIOCALLS. Etat (1 gelee,
+  2 marquage, 4 selection), page de codes, traduction du clavier
+  (table de 256 octets), focus, files de 32 evenements du clavier
+  (KBDKEYINFO) et de la souris (MOUEVENTINFO en cellules, masque),
+  position du pointeur, LockVioPS/UnlockVioPS, WinShieldAbort,
+  Mortician, QueryConsole, GetPasteChar, KeyboardEvent,
+  ScreenGroupToFPConsole, HFrameWindowFromConsole. Pas de WIN-OS/2 :
+  SeamlessCommonVDM rend ERROR_NOT_SUPPORTED (50) ; Get32DisplayType
+  rend 3 (VGA) ou 8 (VESA).
+
 Bureau (PMSHELL.EXE)
 --------------------
 PMSHELL.EXE (Workplace Shell) est lance au demarrage
 (PROTSHELL=C:\PMSHELL.EXE). Bureau en 640 x 480 x 16 couleurs avec les
 objets Systeme OS/2, Lecteurs, Invite de commandes OS/2, Liste des
-fenetres, Modeles, Broyeur et Arret, puis le contenu de C:\DESKTOP (ou
+fenetres, Modeles, Broyeur, Arret et Fenetre OS/2, puis le contenu de C:\DESKTOP (ou
 D:\DESKTOP si C: est en lecture seule) et les raccourcis ; dossiers
 Systeme OS/2, Lecteurs, Modeles et repertoires (programmes, fichiers de
 commandes, fichiers de donnees ; visionneuse de texte). Pas de limite
