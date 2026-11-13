@@ -604,6 +604,24 @@ Les réglages sont gardés dans OS2.INI (application PMSHELL). Le programme <b>D
 
 <img width="640" height="480" alt="OS/2-0 en 1024 x 768 x 16 millions de couleurs : carnet Système - Paramètres, onglet Écran (résolutions VESA)" src="IMAGE/PARAMETRES.png" />
 
+<h3>Carnet « Souris - Paramètres »</h3>
+
+L'objet <b>Souris</b> (Système OS/2 → Configuration du système) ouvre le carnet de la souris de Warp 3, dont chaque réglage agit tout de suite et est gardé dans OS2.INI (application PMSHELL) :
+
+<img width="640" height="480" alt="OS/2-0 : carnet Souris - Paramètres, onglet Minutage (zone d'essai du double clic réussie)" src="IMAGE/SOURIS.png" />
+
+<table>
+	<tr><th>Onglet</th><th>Réglages</th></tr>
+	<tr><td>Minutage</td><td>Double clic : curseur de Lent à Rapide (1000 à 200 ms, SV_DBLCLKTIME) et <b>zone d'essai</b> qui change de couleur quand le double clic est reconnu ; vitesse de déplacement : curseur de Lent à Rapide (facteurs d'échelle et seuils d'accélération de MOUCALLS.DLL : MouSetScaleFact, MouSetThreshold) ; Annuler, Par défaut, Aide. Les curseurs se glissent à la souris ou s'avancent par leurs flèches.</td></tr>
+	<tr><td>Configuration</td><td>Droitier ou gaucher (boutons 1 et 2 inversés par PMWIN : SV_SWAPBUTTON), avec le dessin de la souris.</td></tr>
+	<tr><td>Affectations</td><td>Liste des fenêtres : clic du bouton 3 (milieu), double clic du bouton 1 sur le fond du bureau, ou aucun ; menus contextuels : clic du bouton 2 ou Maj + clic du bouton 1 ; glisser-déposer : bouton 2 (et 1) ou bouton 1 seulement.</td></tr>
+	<tr><td>Pointeurs</td><td>Taille normale (16 x 16) ou grande (32 x 32), blanc à bord noir ou noir à bord blanc, avec un aperçu (PMWIN : WINSETPOINTERSTYLE, ordinal interne 1009).</td></tr>
+	<tr><td>Comète</td><td>Pointeur comète : une traînée d'images grises suit le pointeur et s'efface quand la souris s'arrête ; longueur de la traînée (1 à 6).</td></tr>
+	<tr><td>Général</td><td>Titre de l'objet (renomme l'objet et le carnet) ; souris détectée (nombre de boutons) et réglages courants.</td></tr>
+</table>
+
+Le pointeur de PMWIN est maintenant fait de « lutins » : les pels qu'ils couvrent sont gardés (valeur du périphérique en mémoire linéaire, couleur sur les plans du VGA) et rendus dans l'ordre inverse du dessin, ce qui permet la grande taille et la traînée.
+
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 
 Le fichier <b>LAUNCHPAD.PAS</b> est le <b>LaunchPad</b> d'OS/2 Warp 3 (<b>LAUNCHPD.EXE</b> sur le CD-ROM, nom 8.3 de l'ISO 9660) : PMSHELL le lance au démarrage du bureau (sauf si OS2.INI contient PMSHELL, LAUNCHPAD = 0), dans la session de Presentation Manager, et les deux programmes s'exécutent en même temps. C'est une petite barre toujours visible, en bas au centre de l'écran (déplaçable en glissant son fond ; position gardée dans OS2.INI).

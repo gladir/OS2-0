@@ -34,7 +34,10 @@ Library PMWIN;
   adresse et octets par ligne) et les bitmaps gardent leurs couleurs
   (256 couleurs ou couleurs directes). WINSETSCREENMODE change aussi la
   resolution a chaud (fenetres ramenees dans l'ecran, tout redessine) ;
-  WINQUERYSCREENMODE (1008) la donne. Les fenetres y sont dessinees
+  WINQUERYSCREENMODE (1008) la donne.
+  Pointeur : fleche de 16 x 16 ou 32 x 32 pels, blanche ou noire, et
+  pointeur comete (trainee) : WINSETPOINTERSTYLE (1009) ; boutons 1 et 2
+  inverses par SV_SWAPBUTTON. Les fenetres y sont dessinees
   en pels : cadres et boutons en relief, barre de titre, menu systeme,
   boutons de reduction et d'agrandissement, barre d'actions et menus
   deroulants (mnemoniques soulignes, coches, sous-menus), cases a cocher,
@@ -330,7 +333,13 @@ Var
   GMask : LongInt;                        { masque de bits courant du VGA }
   GPtrOn, GPtrX, GPtrY : LongInt;         { pointeur dessine (x, ligne du haut) }
   GPtrSave : Array[0..255] Of Byte;       { pels sous le pointeur }
-  GPtrRaw : Array[0..255] Of LongInt;     { pels sous le pointeur (memoire lineaire) }
+  { lutins du pointeur : 0..GSprN-1 (trainee puis pointeur) }
+  GSave : Array[0..7167] Of LongInt;      { pels sous les lutins (7 x 32 x 32) }
+  GSprX, GSprY : Array[0..6] Of LongInt;
+  GSprN, GBx1, GBy1, GBx2, GBy2 : LongInt;
+  GPtrK, GPtrInv, GComet : LongInt;       { taille (1, 2), inverse, longueur de la trainee }
+  GTrN, GLastX, GLastRow, GHaveLast, GLastMove : LongInt;
+  GTrX, GTrY : Array[0..5] Of LongInt;    { trainee : positions recentes d'abord }
   { ecran VESA (memoire lineaire) : 0 = plans du VGA }
   GLfb, GPitch, GBpp, GBits, GXor : LongInt;
   GPixV : Array[0..15] Of LongInt;        { valeur du peripherique des 16 couleurs }
@@ -1298,113 +1307,139 @@ Begin
   GGetRaw := V;
 End;
 
-{ --- pointeur de la souris --- }
+{ --- pointeur de la souris ---
+  Le pointeur (fleche PtrB/PtrW, taille 16 x 16 pels, ou 32 x 32 si
+  GPtrK = 2 ; bord noir et interieur blanc, ou l'inverse si GPtrInv) et
+  la trainee du pointeur comete (GComet images precedentes, bord gris,
+  qui s'effacent quand la souris s'arrete) sont des "lutins" : les pels
+  qu'ils couvrent sont gardes dans GSave (valeur du peripherique en
+  memoire lineaire, couleur 0 a 15 sur les plans du VGA ; -1 : pel non
+  couvert) et rendus dans l'ordre inverse du dessin. }
+
+Function SprGet(X, Row : LongInt) : LongInt;
+Begin
+  If GLfb <> 0 Then SprGet := LGet(GLfb + Row * GPitch + X * GBpp) Else SprGet := GGetRaw(X, Row);
+End;
+
+Procedure SprPut(X, Row, V : LongInt);
+Begin
+  If GLfb <> 0 Then LPut(GLfb + Row * GPitch + X * GBpp, V)
+  Else GMask8(Row, X And Not 7, $80 Shr (X And 7), V);
+End;
+
+{ couleur (valeur a ecrire) d'un pel du lutin }
+Function SprCol(C : LongInt) : LongInt;
+Begin
+  If GLfb <> 0 Then SprCol := GPixV[C And 15] Else SprCol := C And 15;
+End;
+
+Procedure SprDraw(Slot, X0, Row0 : LongInt; Trail : Boolean);
+Var R, C, Row, Px, Sz, N, Idx, Cb, Rb : LongInt; Bk, Wh : Boolean;
+Begin
+  Sz := 16 * GPtrK;
+  GSprX[Slot] := X0; GSprY[Slot] := Row0;
+  For R := 0 To Sz - 1 Do
+  Begin
+    Row := Row0 + R;
+    Rb := R Div GPtrK;
+    For C := 0 To Sz - 1 Do
+    Begin
+      Idx := Slot * 1024 + R * 32 + C;
+      GSave[Idx] := -1;
+      Px := X0 + C;
+      If (Row >= 0) And (Row < ScrCY) And (Px >= 0) And (Px < ScrCX) Then
+      Begin
+        Cb := C Div GPtrK;
+        N := $8000 Shr Cb;
+        Bk := (PtrB[Rb] And N) <> 0;
+        Wh := ((PtrW[Rb] And N) <> 0) And Not Trail;
+        If Bk Or Wh Then
+        Begin
+          GSave[Idx] := SprGet(Px, Row);
+          If Trail Then SprPut(Px, Row, SprCol(8))
+          Else If Bk = (GPtrInv = 0) Then SprPut(Px, Row, SprCol(0))
+          Else SprPut(Px, Row, SprCol(15));
+        End;
+      End;
+    End;
+  End;
+End;
+
+Procedure SprHide(Slot : LongInt);
+Var R, C, Sz, Idx : LongInt;
+Begin
+  Sz := 16 * GPtrK;
+  For R := 0 To Sz - 1 Do
+    For C := 0 To Sz - 1 Do
+    Begin
+      Idx := Slot * 1024 + R * 32 + C;
+      If GSave[Idx] <> -1 Then SprPut(GSprX[Slot] + C, GSprY[Slot] + R, GSave[Idx]);
+    End;
+End;
+
 Procedure GPtrHide;
-Var R, X, Row, C, Px : LongInt;
+Var K : LongInt;
 Begin
   If GPtrOn = 0 Then Exit;
   GPtrOn := 0;
-  If GLfb <> 0 Then
+  If (GLfb <> 0) And Not GMine Then
   Begin
-    If Not GMine Then Exit;
-    For R := 0 To 15 Do
-    Begin
-      Row := GPtrY + R;
-      If (Row >= 0) And (Row < ScrCY) Then
-        For X := 0 To 15 Do
-        Begin
-          Px := GPtrX + X;
-          If (Px < ScrCX) And (((PtrB[R] Or PtrW[R]) And ($8000 Shr X)) <> 0) Then
-            LPut(GLfb + Row * GPitch + Px * GBpp, GPtrRaw[R * 16 + X]);
-        End;
-    End;
+    GSprN := 0;
     Exit;
   End;
-  GBegin(0);
-  For R := 0 To 15 Do
-  Begin
-    Row := GPtrY + R;
-    For X := 0 To 15 Do
-    Begin
-      Px := GPtrX + X;
-      If (Px < ScrCX) And (((PtrB[R] Or PtrW[R]) And ($8000 Shr X)) <> 0) Then
-      Begin
-        C := GPtrSave[R * 16 + X];
-        GMask8(Row, Px And Not 7, $80 Shr (Px And 7), C);
-      End;
-    End;
-  End;
-  GEnd;
+  If GLfb = 0 Then GBegin(0);
+  For K := GSprN - 1 DownTo 0 Do SprHide(K);
+  If GLfb = 0 Then GEnd;
+  GSprN := 0;
 End;
 
 Procedure GPtrDraw(X0, Row0 : LongInt);
-Var R, X, Row, Px, B, P, Bt, A, N, V : LongInt;
+Var K, N, Sz, Mx, My, Nx, Ny : LongInt;
 Begin
+  { pointeur comete : la position precedente rejoint la trainee }
+  If GComet > 0 Then
+  Begin
+    If (GHaveLast <> 0) And ((GLastX <> X0) Or (GLastRow <> Row0)) Then
+    Begin
+      For K := MinI(GTrN, GComet - 1) DownTo 1 Do
+      Begin
+        GTrX[K] := GTrX[K - 1]; GTrY[K] := GTrY[K - 1];
+      End;
+      GTrX[0] := GLastX; GTrY[0] := GLastRow;
+      GTrN := MinI(GTrN + 1, GComet);
+      GLastMove := KGetTickCount;
+    End;
+  End
+  Else GTrN := 0;
+  GLastX := X0; GLastRow := Row0; GHaveLast := 1;
   GPtrX := X0; GPtrY := Row0;
-  If GLfb <> 0 Then
+  If (GLfb <> 0) And Not GMine Then Exit;
+  If GLfb = 0 Then GBegin(0);
+  N := 0;
+  For K := GTrN - 1 DownTo 0 Do
   Begin
-    If Not GMine Then Exit;
-    For R := 0 To 15 Do
-    Begin
-      Row := Row0 + R;
-      If (Row >= 0) And (Row < ScrCY) Then
-        For X := 0 To 15 Do
-        Begin
-          Px := X0 + X;
-          N := $8000 Shr X;
-          If (Px < ScrCX) And (((PtrB[R] Or PtrW[R]) And N) <> 0) Then
-          Begin
-            A := GLfb + Row * GPitch + Px * GBpp;
-            GPtrRaw[R * 16 + X] := LGet(A);
-            If (PtrB[R] And N) <> 0 Then LPut(A, GPixV[0]) Else LPut(A, GPixV[15]);
-          End;
-        End;
-    End;
-    GPtrOn := 1;
-    Exit;
+    SprDraw(N, GTrX[K], GTrY[K], True);
+    Inc(N);
   End;
-  { pels sous le pointeur : 3 octets par plan et par ligne }
-  For R := 0 To 15 Do
+  SprDraw(N, X0, Row0, False);
+  GSprN := N + 1;
+  If GLfb = 0 Then GEnd;
+  { rectangle couvert (pels de l'ecran, y vers le haut) }
+  Sz := 16 * GPtrK;
+  Mx := X0; My := Row0; Nx := X0; Ny := Row0;
+  For K := 0 To GSprN - 1 Do
   Begin
-    Row := Row0 + R;
-    If (Row >= 0) And (Row < ScrCY) Then
-    Begin
-      A := $A0000 + Row * 80 + (X0 Shr 3);
-      For P := 0 To 3 Do
-      Begin
-        GOut($3CE, 4); GOut($3CF, P);
-        For Bt := 0 To 2 Do
-          If (X0 Shr 3) + Bt < 80 Then GPl[P * 3 + Bt] := RdB(A + Bt) Else GPl[P * 3 + Bt] := 0;
-      End;
-      For X := 0 To 15 Do
-      Begin
-        B := (X0 And 7) + X;
-        V := 0;
-        For P := 0 To 3 Do
-          If (GPl[P * 3 + (B Shr 3)] And ($80 Shr (B And 7))) <> 0 Then V := V Or (1 Shl P);
-        GPtrSave[R * 16 + X] := V;
-      End;
-    End;
+    Mx := MinI(Mx, GSprX[K]); My := MinI(My, GSprY[K]);
+    Nx := MaxI(Nx, GSprX[K]); Ny := MaxI(Ny, GSprY[K]);
   End;
-  GOut($3CE, 4); GOut($3CF, 0);
-  GBegin(0);
-  For R := 0 To 15 Do
-  Begin
-    Row := Row0 + R;
-    If (Row >= 0) And (Row < ScrCY) Then
-      For X := 0 To 15 Do
-      Begin
-        Px := X0 + X;
-        N := $8000 Shr X;
-        If Px < ScrCX Then
-        Begin
-          If (PtrB[R] And N) <> 0 Then GMask8(Row, Px And Not 7, $80 Shr (Px And 7), 0)
-          Else If (PtrW[R] And N) <> 0 Then GMask8(Row, Px And Not 7, $80 Shr (Px And 7), 15);
-        End;
-      End;
-  End;
-  GEnd;
+  GBx1 := Mx; GBx2 := Nx + Sz; GBy1 := ScrCY - (Ny + Sz); GBy2 := ScrCY - My;
   GPtrOn := 1;
+End;
+
+{ le pointeur (et sa trainee) recouvre-t-il le rectangle ? }
+Function GPtrHit(X1, Y1, X2, Y2 : LongInt) : Boolean;
+Begin
+  GPtrHit := (GPtrOn <> 0) And (X1 < GBx2) And (GBx1 < X2) And (Y1 < GBy2) And (GBy1 < Y2);
 End;
 
 { --- curseur (rectangle inverse) --- }
@@ -1431,7 +1466,7 @@ End;
 Procedure GCarHide;
 Begin
   If GCarOn = 0 Then Exit;
-  If (GPtrOn <> 0) And GHits(GCdX1, GCdY1, GCdX2, GCdY2, GPtrX, ScrCY - GPtrY - 16, GPtrX + 16, ScrCY - GPtrY) Then GPtrHide;
+  If GPtrHit(GCdX1, GCdY1, GCdX2, GCdY2) Then GPtrHide;
   GXorRaw(GCdX1, GCdY1, GCdX2, GCdY2);
   GCarOn := 0;
 End;
@@ -1439,7 +1474,7 @@ End;
 { retirer ce qui est superpose au rectangle (pels de l'ecran) }
 Procedure GHide(X1, Y1, X2, Y2 : LongInt);
 Begin
-  If (GPtrOn <> 0) And GHits(X1, Y1, X2, Y2, GPtrX, ScrCY - GPtrY - 16, GPtrX + 16, ScrCY - GPtrY) Then GPtrHide;
+  If GPtrHit(X1, Y1, X2, Y2) Then GPtrHide;
   If (GCarOn <> 0) And GHits(X1, Y1, X2, Y2, GCdX1, GCdY1, GCdX2, GCdY2) Then GCarHide;
 End;
 
@@ -5950,11 +5985,18 @@ Begin
   If (GCarWant <> 0) And (GCarOn = 0) And (GCarX1 < GCarX2) And (GCarY1 < GCarY2) Then
   Begin
     GCdX1 := GCarX1; GCdY1 := GCarY1; GCdX2 := GCarX2; GCdY2 := GCarY2;
-    If (GPtrOn <> 0) And GHits(GCdX1, GCdY1, GCdX2, GCdY2, GPtrX, ScrCY - GPtrY - 16, GPtrX + 16, ScrCY - GPtrY) Then GPtrHide;
+    If GPtrHit(GCdX1, GCdY1, GCdX2, GCdY2) Then GPtrHide;
     GXorRaw(GCdX1, GCdY1, GCdX2, GCdY2);
     GCarOn := 1;
   End;
   If (GPtrOn <> 0) And ((GPtrX <> MouseX) Or (GPtrY <> ScrCY - 1 - MouseY)) Then GPtrHide;
+  { pointeur comete : la trainee s'efface quand la souris s'arrete }
+  If (GPtrOn <> 0) And (GTrN > 0) And (KGetTickCount - GLastMove > 40) Then
+  Begin
+    GPtrHide;
+    Dec(GTrN);
+    GLastMove := KGetTickCount;
+  End;
   If (GPtrOn = 0) And (PtrLevel >= 0) And (Q >= 0) Then
     If QMou[Q] <> 0 Then GPtrDraw(MouseX, ScrCY - 1 - MouseY);
 End;
@@ -12655,6 +12697,20 @@ Begin
   WinSetScreenMode := 1;
 End;
 
+{ WINSETPOINTERSTYLE (ordinal 1009, interne : PMSHELL.EXE, carnet Souris -
+  Parametres) : taille du pointeur (1 : 16 x 16, 2 : 32 x 32), couleurs
+  inversees (bord blanc, interieur noir), pointeur comete (longueur de
+  la trainee, 0 a 6) ; BOOL }
+Function WinSetPointerStyle(Size, Inv, Comet : LongInt) : LongInt;
+Begin
+  If GMode <> 0 Then GPtrHide;
+  If Size >= 2 Then GPtrK := 2 Else GPtrK := 1;
+  If Inv <> 0 Then GPtrInv := 1 Else GPtrInv := 0;
+  GComet := MaxI(0, MinI(6, Comet));
+  GTrN := 0;
+  WinSetPointerStyle := 1;
+End;
+
 { WINQUERYSCREENMODE (ordinal 1008, interne) : largeur, hauteur, bits par
   pel, memoire lineaire (1 : VESA) en p (16 octets) ; rend GMode }
 Function WinQueryScreenMode(P : LongInt) : LongInt;
@@ -14752,7 +14808,8 @@ exports
   WinResumeScreen Index 1005 Name 'WINRESUMESCREEN',
   WinQueryScreenTaken Index 1006 Name 'WINQUERYSCREENTAKEN',
   WinSetScreenMode Index 1007 Name 'WINSETSCREENMODE',
-  WinQueryScreenMode Index 1008 Name 'WINQUERYSCREENMODE';
+  WinQueryScreenMode Index 1008 Name 'WINQUERYSCREENMODE',
+  WinSetPointerStyle Index 1009 Name 'WINSETPOINTERSTYLE';
 
 Var
   InitI : LongInt;
@@ -14762,6 +14819,7 @@ BEGIN
   GMode := 0;
   GMetrics;
   HeapInitIn(LongInt(@Arena), ArenaSize);
+  GPtrK := 1; GPtrInv := 0; GComet := 0; GTrN := 0; GSprN := 0;
   For InitI := 0 To MaxWin - 1 Do
   Begin
     WUse[InitI] := 0; WGen[InitI] := 0; WCls[InitI] := -1;

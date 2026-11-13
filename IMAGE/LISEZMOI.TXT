@@ -569,6 +569,20 @@ Confirmations, Titre (objet de meme nom), Fenetre (objet deja ouvert),
 Entree (double clic, boutons inverses), Logo, General (couleur du
 bureau). Clic sur un onglet, ou PgSuiv/PgPrec : autre onglet.
 
+Souris (carnet Souris - Parametres)
+-----------------------------------
+Systeme OS/2, Configuration du systeme, Souris :
+  Minutage : double clic (curseur Lent - Rapide, zone d'essai) et
+  vitesse de deplacement (echelle et acceleration de MOUCALLS) ;
+  Configuration : droitier ou gaucher ;
+  Affectations : liste des fenetres (bouton 3, double clic du bouton 1
+  sur le bureau, aucun), menus (bouton 2 ou Maj + bouton 1), glisser
+  (bouton 2 ou bouton 1) ;
+  Pointeurs : taille normale ou grande, blanc ou noir (apercu) ;
+  Comete : pointeur comete et longueur de la trainee ;
+  General : titre de l'objet, souris detectee.
+Reglages gardes dans OS2.INI (application PMSHELL).
+
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
 Le LaunchPad d'OS/2 Warp 3 (source LAUNCHPAD.PAS) est lance par
