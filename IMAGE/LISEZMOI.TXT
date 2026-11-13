@@ -566,18 +566,27 @@ Limites
   rendent ERROR_LOCK_VIOLATION ou ERROR_TIMEOUT) ; un disque dur non
   formate n'est pas monte (seul le disque virtuel est formate au
   demarrage) ; disques IDE en mode PIO 28 bits, sans interruption.
-- Les programmes s'executent en anneau 0, un a la fois (le parent attend
-  la fin de l'enfant, comme DosExecPgm synchrone).
+- Les programmes s'executent en anneau 0. Le noyau est multitache : les
+  processus et leurs fils s'executent en parallele ; la minuterie
+  interrompt toutes les 30 ms une tache qui execute le code de son
+  programme (le noyau et les DLL ne sont pas interrompus, et un programme
+  de PM cede la main en attendant ses messages). Sessions : chaque
+  session a son ecran (tampon de 32 Ko, projete en 000B8000h par la
+  pagination quand elle n'est pas au premier plan), sa console et son
+  clavier ; Alt+Echap passe a la session suivante, Ctrl+Echap revient a
+  Presentation Manager ; les programmes de PM partagent la session de PM
+  (ecran graphique) et leur sortie standard reste dans la console de la
+  session ou ils ont ete lances.
 - Clavier americain (QWERTY), ecran texte 80 x 25 ; un programme peut
   reserver les lignes du bas (SetConsoleScreenBufferSize, utilise par
   FKA.DLL pour la zone des touches de fonction).
 - Une exception d'un programme affiche "Runtime error N" (filtre du
   runtime) ou l'ecran SYS3175/TRAP et rend la main a CMD ; les
   gestionnaires DosSetExceptionHandler sont appeles avant.
-- DOSCALLS.DLL : un seul processus leger s'execute (DosCreateThread
-  execute la fonction jusqu'a sa fin), les minuteries sont verifiees a
-  chaque attente, et une attente qui ne pourrait jamais etre satisfaite
-  rend ERROR_TIMEOUT ou ERROR_INTERRUPT. Les fonctions de rappel
+- DOSCALLS.DLL : DosCreateThread cree un vrai fil (tache du noyau) ; les
+  minuteries sont verifiees a chaque attente, et une attente qu'aucune
+  autre tache ne peut plus satisfaire rend ERROR_TIMEOUT ou
+  ERROR_INTERRUPT. Les fonctions de rappel
   (gestionnaires d'exceptions...) suivent la convention _System : avec
   OS2PC, une fonction de rappel a plusieurs parametres les declare dans
   l'ordre inverse.

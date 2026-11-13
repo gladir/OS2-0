@@ -241,7 +241,7 @@ Var
   DcUse, DcPid, DcType, DcW, DcH, DcBmp, DcMeta, DcWnd, DcOwner, DcHab : Array[0..MaxDC - 1] Of LongInt;
   { DC OD_QUEUED : HSPL de PMSPL.DLL, donnees PM_Q_STD }
   DcSpl, DcStd : Array[0..MaxDC - 1] Of LongInt;
-  SplMod, SplTried : LongInt;
+  SplMod, SplTried, SesFlagsAdr : LongInt;
   SplFns : Array[0..95] Of LongInt;
   { espaces de presentation }
   Gps : Array[0..MaxGPS - 1] Of TGps;
@@ -313,6 +313,7 @@ Var
 
 { --- services des autres DLL --- }
 Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
+Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
 Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Function KGetProcessHeap : LongInt; External 'DOSCALLS' Name 'GetProcessHeap';
 Function KHeapAlloc(H, Flags, Size : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapAlloc';
@@ -632,8 +633,26 @@ Begin
 End;
 
 { --- ports du VGA (anneau 0) --- }
+{ ports du VGA : seulement si l'ecran est a la session de l'appelant }
+Function GpiMine : Boolean;
+Type PLong = ^LongInt;
+Var Q : PLong; F, C, S : LongInt;
+Begin
+  If SesFlagsAdr = 0 Then SesFlagsAdr := KSes(15, 0, 0);
+  If SesFlagsAdr = 0 Then
+  Begin
+    GpiMine := True;
+    Exit;
+  End;
+  Q := Pointer(SesFlagsAdr); F := Q^;
+  Q := Pointer(SesFlagsAdr + 4); C := Q^;
+  Q := Pointer(SesFlagsAdr + 12); S := Q^;
+  GpiMine := (F = C) Or (S <> 0);
+End;
+
 Procedure OutB(P, V : LongInt);
 Begin
+  If Not GpiMine Then Exit;
   asm
     mov edx,P
     mov eax,V

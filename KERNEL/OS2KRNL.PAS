@@ -55,9 +55,28 @@ Program OS2KRNL;
   sont confies aux points d'entree FS_* du pilote.
 
   Les programmes s'executent en anneau 0, dans une fenetre de 4 Mo
-  (00400000h-007FFFFFh) propre a chaque processus (pagination) ; un
-  processus lance par CreateProcessA s'execute jusqu'a sa fin avant que
-  le parent ne reprenne (comme DosExecPgm en mode synchrone). }
+  (00400000h-007FFFFFh) propre a chaque processus (pagination).
+
+  Multitache : chaque fil d'execution est une tache (la tache 0 est le
+  noyau) ; CtxSwitch change de pile. Une attente (Idle) cede le
+  processeur aux autres taches (arret du processeur quand toutes
+  attendent) ; la minuterie (100 Hz) interrompt toutes les 30 ms une
+  tache qui execute le code de son programme : le noyau et les DLL, dont
+  les donnees sont globales, ne sont jamais interrompus, et un programme
+  de PM (PMWIN.DLL appelle ses procedures de fenetre) n'est pas preempte.
+  CreateProcessA est asynchrone (WaitForSingleObject attend la fin) ;
+  KrnTaskCtl sert DOSCALLS.DLL (fils, attentes, etat des processus).
+
+  Sessions : une session a son ecran (tampon video logique de 32 Ko), sa
+  console (curseur, attribut, lignes) et sa file du clavier. La table de
+  pages des 4 premiers Mo est propre a chaque session : celle qui est au
+  premier plan voit le VGA en 000A0000h et 000B8000h, les autres leur
+  tampon (et une zone perdue pour la memoire graphique). Les ports du VGA
+  ne sont programmes que par la session au premier plan (VIOCALLS,
+  PMWIN, PMGPI). Alt+Echap passe a la session suivante, Ctrl+Echap
+  revient a Presentation Manager ; KrnSesCtl cree les sessions, les met
+  au premier plan et fait entrer les programmes de PM dans la session de
+  PM. }
 
 {$R-,S-,I-}
 
@@ -103,6 +122,7 @@ Const
   MaxFinds      = 64;
   MaxProcs      = 64;
   MaxTasks      = 128;         { taches (fils d'execution) ; la 0 est le noyau }
+  MaxSess       = 16;          { sessions (ecran et clavier) }
   MaxPBlk       = 192;         { blocs de memoire physique des processus }
   HThreadBase   = $400;        { handles de fils (CreateProcessA) }
   ThreadStackMin = $00010000;  { pile minimale d'un fil (64 Ko) }
@@ -220,6 +240,7 @@ Type
     NoPreempt : Boolean;     { pas de preemption (programme de PM) }
     NextTid   : LongInt;     { prochain identificateur de fil }
     Sess      : LongInt;     { session (ecran et clavier) }
+    ConSess   : LongInt;     { session de la console (sortie standard) }
   End;
 
 Var
@@ -306,6 +327,21 @@ Var
   { memoire physique des processus : blocs tries par adresse }
   PBase, PSize     : Array[0..MaxPBlk - 1] Of LongInt;
   PCount           : LongInt;
+
+  { Sessions : chaque session a son ecran (tampon video logique de 32 Ko,
+    projete en 000B8000h quand elle n'est pas au premier plan), sa
+    console et sa file du clavier }
+  SUsed, SNew, SPause, SPrompt : Array[0..MaxSess - 1] Of Boolean;
+  SPT, SLvb, SMode, SRet : Array[0..MaxSess - 1] Of LongInt;
+  SCurRow, SCurCol, SAttr, SConRows, SConOwn, SKbdMode, SKbdHead, SKbdTail, SLinePos : Array[0..MaxSess - 1] Of LongInt;
+  SLineReady       : Array[0..MaxSess - 1] Of Boolean;
+  SLineBuf         : Array[0..MaxSess - 1] Of String;
+  STitle           : Array[0..MaxSess - 1] Of String[47];
+  SKbdBuf, SKbdXt, SKbdTm : Array[0..MaxSess * 64 - 1] Of LongInt;
+  SesFlags         : Array[0..7] Of LongInt;   { lus par les DLL (KrnSesCtl 15) }
+  FgSess, CurSess, Epoch, Switching, PmSess, PendSwitch, NextSess, SwHook : LongInt;
+  KernPT, GfxScratch : LongInt;
+  PauseMsg         : String;
 
 { ==================================================================== }
 { Partie 2 - Utilitaires                                               }
@@ -444,9 +480,18 @@ Begin
   Port[Com1] := Ord(C);
 End;
 
+{ etat des sessions publie pour les DLL : 0 premier plan, 1 session
+  courante, 2 compteur des bascules, 3 bascule en cours, 4 session PM }
+Procedure SyncFlags;
+Begin
+  SesFlags[0] := FgSess; SesFlags[1] := CurSess; SesFlags[2] := Epoch;
+  SesFlags[3] := Switching; SesFlags[4] := PmSess;
+End;
+
 Procedure UpdateCursor;
 Var P : LongInt;
 Begin
+  If (CurSess <> FgSess) And (Switching = 0) Then Exit;
   P := CurRow * ScrCols + CurCol;
   Port[$3D4] := $0F; Port[$3D5] := P And $FF;
   Port[$3D4] := $0E; Port[$3D5] := (P Shr 8) And $FF;
@@ -866,9 +911,23 @@ End;
 { Ranger une touche ; Xt : etat des touches (bits 0 a 15), 10000h
   prefixe E0h, 20000h touche relachee, 40000h changement d'etat seul }
 Function KbdPushRaw(V, Xt, Tm : LongInt) : Boolean;
-Var N : LongInt;
+Var N, B : LongInt;
 Begin
   KbdPushRaw := False;
+  If FgSess <> CurSess Then
+  Begin
+    { la session au premier plan n'est pas celle de la tache courante :
+      file sauvee de la session }
+    B := FgSess * 64;
+    N := (SKbdHead[FgSess] + 1) And 63;
+    If N = SKbdTail[FgSess] Then Exit;
+    SKbdBuf[B + SKbdHead[FgSess]] := V;
+    SKbdXt[B + SKbdHead[FgSess]] := Xt;
+    SKbdTm[B + SKbdHead[FgSess]] := Tm;
+    SKbdHead[FgSess] := N;
+    KbdPushRaw := True;
+    Exit;
+  End;
   N := (KbdHead + 1) And 63;
   If N = KbdTail Then Exit;      { tampon plein }
   KbdBuf[KbdHead] := V;
@@ -923,6 +982,29 @@ Begin
   N := 0;
   While ((Port[$64] And 2) <> 0) And (N < 100000) Do Inc(N);
   Port[$60] := L;
+End;
+
+{ session suivante pour Alt+Echap : sessions qui ont un processus, et la
+  session de Presentation Manager }
+Function NextSessOf(S : LongInt) : LongInt;
+Var I, T, P : LongInt; Ok : Boolean;
+Begin
+  NextSessOf := S;
+  For I := 1 To MaxSess Do
+  Begin
+    T := (S + I) Mod MaxSess;
+    If SUsed[T] Then
+    Begin
+      Ok := T = PmSess;
+      For P := 0 To MaxProcs - 1 Do
+        If Procs[P].Used And Procs[P].Running And (Procs[P].Sess = T) Then Ok := True;
+      If Ok Then
+      Begin
+        NextSessOf := T;
+        Exit;
+      End;
+    End;
+  End;
 End;
 
 Procedure IrqKeyboard;
@@ -999,6 +1081,16 @@ Begin
   { Ctrl+Alt+Suppr : redemarrage (impulsion de remise a zero du
     controleur du clavier) }
   If (Up = 0) And (Sc = $53) And ((KbdState And $000C) = $000C) Then Port[$64] := $FE;
+  { Alt+Echap : session suivante ; Ctrl+Echap (hors de PM) : retour a
+    Presentation Manager }
+  If (Up = 0) And (Sc = $01) And Not KbdE0 And ((KbdState And $000C) <> 0) Then
+    If ((KbdState And $0008) <> 0) Or ((PmSess >= 0) And (FgSess <> PmSess)) Then
+    Begin
+      If (KbdState And $0008) <> 0 Then PendSwitch := NextSessOf(FgSess) Else PendSwitch := PmSess;
+      KbdE0 := False;
+      Port[$20] := $20;
+      Exit;
+    End;
   If (Sc = 0) Or (KbdState <> Old) Or (Sc = $54) Then
   Begin
     { touche d'etat : signalee seulement en mode de rapport }
@@ -2735,11 +2827,41 @@ Begin
     End;
 End;
 
-Procedure ConWrite(Buf, N : LongInt);
+Procedure SessSwap(NS : LongInt); Forward;
+
+Procedure ConWrite0(Buf, N : LongInt);
 Var I : LongInt;
 Begin
   For I := 0 To N - 1 Do ConPutRaw(Chr(Mem[0:Buf + I]));
   UpdateCursor;
+End;
+
+{ un processus passe dans une autre session (programme de PM lance depuis
+  une invite de commandes) ecrit toujours dans la console de la session
+  ou il a ete lance }
+Procedure ConWrite(Buf, N : LongInt);
+Var Old : LongInt;
+Begin
+  If (CurProc >= 0) And (Procs[CurProc].ConSess <> CurSess) And SUsed[Procs[CurProc].ConSess] Then
+  Begin
+    Old := CurSess;
+    asm
+      cli
+    end;
+    SessSwap(Procs[CurProc].ConSess);
+    asm
+      sti
+    end;
+    ConWrite0(Buf, N);
+    asm
+      cli
+    end;
+    SessSwap(Old);
+    asm
+      sti
+    end;
+  End
+  Else ConWrite0(Buf, N);
 End;
 
 { ==================================================================== }
@@ -5168,6 +5290,13 @@ Begin
   Procs[Pid].NextTid := 2;
   Procs[Pid].Sess := 0;
   If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
+  If (NextSess >= 0) And SUsed[NextSess] Then
+  Begin
+    Procs[Pid].Sess := NextSess;
+    SNew[NextSess] := False;
+    NextSess := -1;
+  End;
+  Procs[Pid].ConSess := Procs[Pid].Sess;
   ProcEntry[Pid] := ProcWinBase + Entry;
   ProcStack[Pid] := Phys + PhysSize - 16;
   LastError := 0;
@@ -5222,6 +5351,183 @@ Begin
   PhysFree := T;
 End;
 
+{ --- Sessions --- }
+
+Procedure SessMap(S : LongInt; Fg : Boolean);
+Var I : LongInt;
+Begin
+  For I := 0 To 15 Do
+    If Fg Then MemL[0:SPT[S] + ($A0 + I) * 4] := (($A0 + I) Shl 12) Or 3
+    Else MemL[0:SPT[S] + ($A0 + I) * 4] := (GfxScratch + I * 4096) Or 3;
+  For I := 0 To 7 Do
+    If Fg Then MemL[0:SPT[S] + ($B8 + I) * 4] := (($B8 + I) Shl 12) Or 3
+    Else MemL[0:SPT[S] + ($B8 + I) * 4] := (SLvb[S] + I * 4096) Or 3;
+End;
+
+Function NewSessAt(S : LongInt; Title : String; Mode : LongInt) : Boolean;
+Var I : LongInt;
+Begin
+  NewSessAt := False;
+  SPT[S] := PAlloc(4096);
+  SLvb[S] := PAlloc(32768);
+  If (SPT[S] = 0) Or (SLvb[S] = 0) Then Exit;
+  For I := 0 To 1023 Do MemL[0:SPT[S] + I * 4] := (I Shl 12) Or 3;
+  For I := 0 To 16383 Do MemW[0:SLvb[S] + I * 2] := $0720;
+  SUsed[S] := True; SNew[S] := False; SPause[S] := False; SPrompt[S] := False; SMode[S] := Mode; STitle[S] := Title; SRet[S] := CurSess;
+  SCurRow[S] := 0; SCurCol[S] := 0; SAttr[S] := 7; SConRows[S] := ScrRows; SConOwn[S] := -2;
+  SKbdMode[S] := 0; SKbdHead[S] := 0; SKbdTail[S] := 0; SLinePos[S] := 0;
+  SLineReady[S] := False; SLineBuf[S] := '';
+  SessMap(S, False);
+  NewSessAt := True;
+End;
+
+Function NewSess(Title : String; Mode : LongInt) : LongInt;
+Var I, S : LongInt;
+Begin
+  S := -1;
+  For I := MaxSess - 1 DownTo 1 Do
+    If Not SUsed[I] Then S := I;
+  If (S >= 0) And Not NewSessAt(S, Title, Mode) Then S := -1;
+  NewSess := S;
+End;
+
+Procedure FreeSess(S : LongInt);
+Begin
+  PFree(SPT[S]); PFree(SLvb[S]);
+  SUsed[S] := False;
+  If PmSess = S Then PmSess := -1;
+  SyncFlags;
+End;
+
+Procedure SaveSess(S : LongInt);
+Var I : LongInt;
+Begin
+  SCurRow[S] := CurRow; SCurCol[S] := CurCol; SAttr[S] := TextAttr; SConRows[S] := ConRows;
+  SConOwn[S] := ConRowsOwner; SKbdMode[S] := KbdMode; SKbdHead[S] := KbdHead; SKbdTail[S] := KbdTail;
+  SLinePos[S] := LinePos; SLineReady[S] := LineReady; SLineBuf[S] := LineBuf;
+  For I := 0 To 63 Do
+  Begin
+    SKbdBuf[S * 64 + I] := KbdBuf[I]; SKbdXt[S * 64 + I] := KbdXt[I]; SKbdTm[S * 64 + I] := KbdTm[I];
+  End;
+End;
+
+Procedure LoadSess(S : LongInt);
+Var I : LongInt;
+Begin
+  CurRow := SCurRow[S]; CurCol := SCurCol[S]; TextAttr := SAttr[S]; ConRows := SConRows[S];
+  ConRowsOwner := SConOwn[S]; KbdMode := SKbdMode[S]; KbdHead := SKbdHead[S]; KbdTail := SKbdTail[S];
+  LinePos := SLinePos[S]; LineReady := SLineReady[S]; LineBuf := SLineBuf[S];
+  For I := 0 To 63 Do
+  Begin
+    KbdBuf[I] := SKbdBuf[S * 64 + I]; KbdXt[I] := SKbdXt[S * 64 + I]; KbdTm[I] := SKbdTm[S * 64 + I];
+  End;
+End;
+
+{ la tache qui reprend appartient a la session NS (interruptions masquees) }
+Procedure SessSwap(NS : LongInt);
+Begin
+  If (NS = CurSess) Or (NS < 0) Or Not SUsed[NS] Then Exit;
+  SaveSess(CurSess);
+  LoadSess(NS);
+  CurSess := NS;
+  MemL[0:PageDir] := SPT[NS] Or 3;
+  FlushTlb;
+  SyncFlags;
+End;
+
+Function SessProcs(S : LongInt) : LongInt;
+Var P, N : LongInt;
+Begin
+  N := 0;
+  For P := 0 To MaxProcs - 1 Do
+    If Procs[P].Used And Procs[P].Running And (Procs[P].Sess = S) Then Inc(N);
+  SessProcs := N;
+End;
+
+{ Mettre la session T au premier plan : l'ecran de la session quittee est
+  garde dans son tampon, celui de T est affiche (mode texte : crochet de
+  VIOCALLS.DLL ; Presentation Manager se redessine en voyant changer le
+  compteur des bascules) }
+Procedure DoSwitch(T : LongInt);
+Var From, H, R, C, P : LongInt;
+Begin
+  If (T < 0) Or (T >= MaxSess) Or Not SUsed[T] Or (T = FgSess) Then Exit;
+  asm
+    cli
+  end;
+  Switching := 1;
+  From := FgSess;
+  MemL[0:PageDir] := KernPT Or 3;
+  FlushTlb;
+  If SUsed[From] And (SMode[From] = 0) Then MoveMem($B8000, SLvb[From], 32768);
+  If SUsed[From] Then SessMap(From, False);
+  SessMap(T, True);
+  FgSess := T;
+  Inc(Epoch);
+  SyncFlags;
+  If SMode[T] = 0 Then
+  Begin
+    H := SwHook;
+    If H <> 0 Then
+      asm
+        push 0
+        mov eax,H
+        call eax
+        add esp,4
+      end;
+    MoveMem(SLvb[T], $B8000, 32768);
+    If T = CurSess Then
+    Begin
+      R := CurRow; C := CurCol;
+    End
+    Else
+    Begin
+      R := SCurRow[T]; C := SCurCol[T];
+    End;
+    P := R * ScrCols + C;
+    Port[$3D4] := $0F; Port[$3D5] := P And $FF;
+    Port[$3D4] := $0E; Port[$3D5] := (P Shr 8) And $FF;
+  End;
+  MemL[0:PageDir] := SPT[CurSess] Or 3;
+  FlushTlb;
+  Switching := 0;
+  SyncFlags;
+  asm
+    sti
+  end;
+End;
+
+Procedure CheckPending;
+Var T : LongInt;
+Begin
+  If PendSwitch < 0 Then Exit;
+  T := PendSwitch;
+  PendSwitch := -1;
+  DoSwitch(T);
+End;
+
+Procedure InitSessions;
+Var I : LongInt;
+Begin
+  For I := 0 To MaxSess - 1 Do
+  Begin
+    SUsed[I] := False; SNew[I] := False;
+  End;
+  KernPT := PAlloc(4096);
+  For I := 0 To 1023 Do MemL[0:KernPT + I * 4] := (I Shl 12) Or 3;
+  GfxScratch := PAlloc(65536);
+  CurSess := 0; FgSess := 0; PmSess := -1; Epoch := 0; Switching := 0;
+  PendSwitch := -1; NextSess := -1; SwHook := 0;
+  PauseMsg := ' Programme termine. Appuyez sur une touche pour revenir au bureau.';
+  If NewSessAt(0, 'Noyau', 0) Then
+  Begin
+    SessMap(0, True);
+    MemL[0:PageDir] := SPT[0] Or 3;
+    FlushTlb;
+  End;
+  SyncFlags;
+End;
+
 { --- Taches --- }
 
 { Changer de pile : les registres et les drapeaux sont sauves sur la pile
@@ -5263,6 +5569,7 @@ Procedure SwitchTo(N : LongInt);
 Begin
   If (N = CurTask) Or (N < 0) Then Exit;
   TkLastErr[CurTask] := LastError;
+  If TkProc[N] >= 0 Then SessSwap(Procs[TkProc[N]].Sess) Else SessSwap(0);
   If TkProc[N] <> TkProc[CurTask] Then MapWindow(TkProc[N]);
   SwSave := LongInt(@TkEsp) + CurTask * 4;
   SwNew := TkEsp[N];
@@ -5298,11 +5605,45 @@ Begin
         If Not Procs[P].HandleOpen Then Procs[P].Used := False;
       End;
     End;
+  { sessions sans processus : retour a la session d'origine, puis fin }
+  For P := 1 To MaxSess - 1 Do
+    If SUsed[P] And Not SNew[P] And (P <> CurSess) And (P <> NextSess) And (SessProcs(P) = 0) Then
+    Begin
+      If FgSess = P Then
+      Begin
+        { pause a la fin : invite sur la derniere ligne, puis une touche }
+        If SPause[P] Then
+        Begin
+          If Not SPrompt[P] Then
+          Begin
+            SPrompt[P] := True;
+            SKbdTail[P] := SKbdHead[P];
+            MemL[0:PageDir] := KernPT Or 3;
+            FlushTlb;
+            For K := 0 To ScrCols - 1 Do
+              If K < Length(PauseMsg) Then MemW[0:$B8000 + (24 * ScrCols + K) * 2] := $7000 Or Ord(PauseMsg[K + 1])
+              Else MemW[0:$B8000 + (24 * ScrCols + K) * 2] := $7020;
+            MemL[0:PageDir] := SPT[CurSess] Or 3;
+            FlushTlb;
+          End
+          Else If SKbdHead[P] <> SKbdTail[P] Then SPause[P] := False;
+        End;
+        If Not SPause[P] Then
+        Begin
+          K := 0;
+          If SUsed[SRet[P]] And (SRet[P] <> P) Then K := SRet[P]
+          Else If (PmSess >= 0) And (PmSess <> P) Then K := PmSess;
+          PendSwitch := K;
+        End;
+      End
+      Else FreeSess(P);
+    End;
 End;
 
 { Ceder le processeur (attente cooperative) }
 Procedure Yield;
 Begin
+  CheckPending;
   asm
     cli
   end;
@@ -5719,6 +6060,94 @@ Begin
           Else KrnTaskCtl := -1;
         End;
    14 : If (CurProc >= 0) And (P1 > 1) Then Procs[CurProc].NextTid := P1;
+  End;
+End;
+
+{ KrnSesCtl(op, p1, p2) : sessions (SESMGR.DLL, PMWIN.DLL, VIOCALLS.DLL)
+    0 session au premier plan     1 session de l'appelant
+    2 compteur des bascules       3 mettre la session p1 au premier plan
+    4 creer une session (p1 titre ASCIIZ, p2 mode 0 texte, 1 PM)
+    5 l'appelant rejoint la session de Presentation Manager (creee au
+      besoin et mise au premier plan) ; rend son numero
+    6 crochet de bascule (VIOCALLS : remettre le mode texte)
+    7 description de la session p1 dans p2 : utilisee, premier plan,
+      mode, processus, titre (48 octets) ; rend 1 si elle existe
+    8 mode de la session de l'appelant (p1)
+    9 l'ecran est-il a l'appelant (session au premier plan) ?
+   10 session de PM (-1 : aucune)  11 titre de la session p1 (p2)
+   12 le prochain processus cree va dans la session p1
+   13 session du processus de PID p1
+   15 adresse de l'etat des sessions (SesFlags)
+   16 pause a la fin de la session p1 (p2 = 1) : une touche avant le
+      retour a la session d'origine
+   17 supprimer la session p1 (sans processus, pas au premier plan) }
+Function KrnSesCtl(Op, P1, P2 : LongInt) : LongInt;
+Var S, Old : LongInt;
+Begin
+  KrnSesCtl := 0;
+  Case Op Of
+    0 : KrnSesCtl := FgSess;
+    1 : KrnSesCtl := CurSess;
+    2 : KrnSesCtl := Epoch;
+    3 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] Then DoSwitch(P1) Else KrnSesCtl := -1;
+    4 : Begin
+          If P1 <> 0 Then S := NewSess(PStr(P1), P2) Else S := NewSess('Session', P2);
+          If S >= 0 Then SNew[S] := True;
+          KrnSesCtl := S;
+        End;
+    5 : If CurProc < 0 Then KrnSesCtl := -1
+        Else
+        Begin
+          If PmSess < 0 Then
+          Begin
+            PmSess := NewSess('Presentation Manager', 1);
+            SyncFlags;
+          End;
+          If PmSess >= 0 Then
+          Begin
+            Old := Procs[CurProc].Sess;
+            If Old <> PmSess Then
+            Begin
+              If SUsed[PmSess] Then SRet[PmSess] := Old;
+              Procs[CurProc].Sess := PmSess;
+              asm
+                cli
+              end;
+              SessSwap(PmSess);
+              asm
+                sti
+              end;
+            End;
+            DoSwitch(PmSess);
+          End;
+          KrnSesCtl := PmSess;
+        End;
+    6 : SwHook := P1;
+    7 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] And (P2 <> 0) Then
+        Begin
+          MemL[0:P2] := 1;
+          If FgSess = P1 Then MemL[0:P2 + 4] := 1 Else MemL[0:P2 + 4] := 0;
+          MemL[0:P2 + 8] := SMode[P1];
+          MemL[0:P2 + 12] := SessProcs(P1);
+          PutPStr(P2 + 16, STitle[P1], 48);
+          KrnSesCtl := 1;
+        End;
+    8 : SMode[CurSess] := P1;
+    9 : If (CurSess = FgSess) Or (Switching <> 0) Then KrnSesCtl := 1;
+   10 : KrnSesCtl := PmSess;
+   11 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] And (P2 <> 0) Then STitle[P1] := PStr(P2);
+   12 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] Then NextSess := P1 Else NextSess := -1;
+   13 : Begin
+          S := ProcBySerial(P1);
+          If S >= 0 Then KrnSesCtl := Procs[S].Sess Else KrnSesCtl := -1;
+        End;
+   15 : KrnSesCtl := LongInt(@SesFlags);
+   16 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] Then SPause[P1] := P2 <> 0;
+   17 : If (P1 > 0) And (P1 < MaxSess) And SUsed[P1] And (SessProcs(P1) = 0) And (P1 <> FgSess) Then
+        Begin
+          If NextSess = P1 Then NextSess := -1;
+          FreeSess(P1);
+        End;
   End;
 End;
 
@@ -6165,6 +6594,7 @@ BEGIN
   Mods := Nil;
   ModCap := 0;
   InitPaging;
+  InitSessions;
   InitExports;
   RootLba := MemL[0:BootInfo + 4];
   RootSize := MemL[0:BootInfo + 8];

@@ -312,6 +312,7 @@ Var
 Var
   GMode : LongInt;                        { 1 : ecran graphique }
   Susp, SuspPid, SuspTook : LongInt;      { ecran prete a un programme (WINSUSPENDSCREEN) }
+  SesAddr, PmEpoch : LongInt;              { sessions du noyau (KrnSesCtl 15) }
   ScrCols, ScrRows, ScrCX, ScrCY : LongInt;
   GCx1, GCy1, GCx2, GCy2 : LongInt;       { decoupage (pels de l'ecran, x2 et y2 exclus) }
   GFont : Array[0..4095] Of Byte;         { police 8 x 16 }
@@ -350,6 +351,8 @@ Function DcMuxSemWait(PI, PL, T : LongInt) : LongInt; External 'DOSCALLS' Name '
 Function DcWrite(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS' Name 'DosWrite';
 Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
+Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
+Function KTask(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
 Function KGetTickCount : LongInt; External 'DOSCALLS' Name 'GetTickCount';
 Function KbdCharIn(PInfo, Wait, H : LongInt) : LongInt; External 'KBDCALLS' Name 'KbdCharIn';
 Function MouOpen(PDrv, PH : LongInt) : LongInt; External 'MOUCALLS' Name 'MouOpen';
@@ -949,8 +952,40 @@ Const
                                     $7F00, $7C00, $6C00, $4600, $0600, $0300, $0300, $0000);
 
 { --- ports du VGA --- }
+{ l'ecran est-il a la session de l'appelant ? (session de PM au premier
+  plan, ou bascule en cours) }
+Function GMine : Boolean;
+Type PLong = ^LongInt;
+Var Q : PLong; F, C, S : LongInt;
+Begin
+  If SesAddr = 0 Then SesAddr := KSes(15, 0, 0);
+  If SesAddr = 0 Then
+  Begin
+    GMine := True;
+    Exit;
+  End;
+  Q := Pointer(SesAddr); F := Q^;
+  Q := Pointer(SesAddr + 4); C := Q^;
+  Q := Pointer(SesAddr + 12); S := Q^;
+  GMine := (F = C) Or (S <> 0);
+End;
+
+Function SesEpoch : LongInt;
+Type PLong = ^LongInt;
+Var Q : PLong;
+Begin
+  If SesAddr = 0 Then SesAddr := KSes(15, 0, 0);
+  If SesAddr = 0 Then SesEpoch := 0
+  Else
+  Begin
+    Q := Pointer(SesAddr + 8);
+    SesEpoch := Q^;
+  End;
+End;
+
 Procedure GOut(P, V : LongInt);
 Begin
+  If Not GMine Then Exit;
   asm
     mov edx,P
     mov eax,V
@@ -4511,7 +4546,13 @@ Begin
   { premiere file, ou premiere file d'un programme lance par l'interpreteur
     pendant que l'ecran lui est prete }
   If (Susp <> 0) And (MyPid <> SuspPid) Then SuspTook := 1;
+  { le programme rejoint la session de Presentation Manager (premier plan) }
+  Dummy := KSes(5, 0, 0);
+  { un programme de PM n'est pas preempte (ses procedures de fenetre sont
+    appelees depuis PMWIN) : il cede la main en attendant ses messages }
+  Dummy := KTask(4, 1, 0, 0);
   If First Or ((Susp <> 0) And (MyPid <> SuspPid)) Then ScreenStart;
+  PmEpoch := SesEpoch;
   WinCreateMsgQueue := $00510001 + F;
 End;
 
@@ -5589,6 +5630,12 @@ Var Got : Boolean; W, K, T : LongInt;
 Begin
   Got := False;
   Repeat
+    { la session de PM revient au premier plan : ecran graphique redessine }
+    If SesEpoch <> PmEpoch Then
+    Begin
+      PmEpoch := SesEpoch;
+      If GMine Then ScreenStart;
+    End;
     PollInput(Q);
     GShow(Q);
     Got := QTake(Q, HF, First, Last, Remove, P);

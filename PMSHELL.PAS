@@ -72,7 +72,7 @@ Const
   SWP_SIZE = 1; SWP_MOVE = 2; SWP_ZORDER = 4; SWP_SHOW = 8; SWP_ACTIVATE = $80; SWP_RESTORE = $1000;
   QW_PARENT = 5; QWL_STYLE = -2;
   WC_LISTBOX = $FFFF0007;
-  LM_INSERTITEM = $0161; LM_SELECTITEM = $0164; LM_QUERYSELECTION = $0165; LM_DELETEALL = $016E;
+  LM_QUERYITEMCOUNT = $0160; LM_INSERTITEM = $0161; LM_SELECTITEM = $0164; LM_QUERYSELECTION = $0165; LM_DELETEALL = $016E;
   LN_ENTER = 5;
   SBM_SETSCROLLBAR = $01A0; SBM_SETTHUMBSIZE = $01A6;
   SB_LINEUP = 1; SB_LINEDOWN = 2; SB_PAGEUP = 3; SB_PAGEDOWN = 4; SB_SLIDERTRACK = 5; SB_SLIDERPOSITION = 6;
@@ -123,6 +123,8 @@ Var
   SortA : Array[0..299] Of LongInt;
   Qmsg : Array[0..7] Of LongInt;
   I2 : LongInt;
+  WlSess : Array[0..31] Of LongInt;   { liste des fenetres : sessions }
+  WlViews, WlNS : LongInt;
 
 { --- DOSCALLS.DLL --- }
 Function DosExecPgm(PObj, CbObj, Flags, PArg, PEnv, PRes, PName : LongInt) : LongInt; External 'DOSCALLS';
@@ -141,6 +143,7 @@ Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetCurrentDir(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetDefaultDisk(Disk : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSleep(Ms : LongInt) : LongInt; External 'DOSCALLS';
+Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
 
 { --- PMWIN.DLL --- }
 Function WinInitialize(Fl : LongInt) : LongInt; External 'PMWIN';
@@ -1080,7 +1083,7 @@ End;
 
 { liste des fenetres (Ctrl+Echap) }
 Procedure FillWinList(V : LongInt);
-Var K : LongInt; B : Array[0..259] Of Byte;
+Var K : LongInt; B : Array[0..259] Of Byte; Info : Array[0..15] Of LongInt;
 Begin
   Dummy := WinSendMsg(VList[V], LM_DELETEALL, 0, 0);
   PutZ(LongInt(@B), 'Bureau');
@@ -1091,6 +1094,18 @@ Begin
       PutZ(LongInt(@B), VTitle[K]);
       Dummy := WinSendMsg(VList[V], LM_INSERTITEM, -1, LongInt(@B));
     End;
+  { sessions en mode texte (programmes lances, plein ecran) }
+  WlViews := WinSendMsg(VList[V], LM_QUERYITEMCOUNT, 0, 0);
+  WlNS := 0;
+  For K := 0 To 15 Do
+    If (WlNS < 32) And (KSes(7, K, LongInt(@Info)) = 1) Then
+      If (Info[3] > 0) And (Info[2] = 0) And (K <> KSes(10, 0, 0)) Then
+      Begin
+        PutZ(LongInt(@B), GetZ(LongInt(@Info) + 16) + ' (plein ecran)');
+        Dummy := WinSendMsg(VList[V], LM_INSERTITEM, -1, LongInt(@B));
+        WlSess[WlNS] := K;
+        Inc(WlNS);
+      End;
   Dummy := WinSendMsg(VList[V], LM_SELECTITEM, 0, 1);
 End;
 
@@ -1115,6 +1130,13 @@ Var Sel, K, N, T : LongInt;
 Begin
   Sel := WinSendMsg(VList[V], LM_QUERYSELECTION, -1, 0);
   T := -1;
+  If (Sel >= WlViews) And (Sel - WlViews < WlNS) Then
+  Begin
+    { session plein ecran : au premier plan }
+    CloseView(V);
+    Dummy := KSes(3, WlSess[Sel - WlViews], 0);
+    Exit;
+  End;
   If Sel = 0 Then T := 0
   Else If Sel > 0 Then
   Begin
@@ -1183,8 +1205,16 @@ Begin
 End;
 
 { lancer un programme (DosExecPgm synchrone) dans le repertoire Dir }
+Function BaseName(S : String) : String;
+Var K : LongInt;
+Begin
+  K := Length(S);
+  While (K > 0) And (S[K] <> '\') And (S[K] <> ':') Do Dec(K);
+  BaseName := Copy(S, K + 1, 255);
+End;
+
 Procedure RunProgram(Prog, Params, Dir : String; Pause : Boolean);
-Var Res : Array[0..1] Of LongInt; Rc, Act, R, K : LongInt; D : String;
+Var Res : Array[0..1] Of LongInt; Rc, Act, K, S : LongInt; D, T : String;
 Begin
   Act := WinQueryActiveWindow(HWND_DESKTOP);
   If Dir <> '' Then
@@ -1199,17 +1229,28 @@ Begin
   K := Length(Prog) + 1;
   PutZ(LongInt(@ArgBuf) + K, Params);
   WrB(LongInt(@ArgBuf) + K + Length(Params) + 1, 0);
+  { nouvelle session plein ecran (un programme de PM la quitte pour la
+    session de Presentation Manager) ; le bureau continue de s'executer }
+  If (Params = '') And (Prog = Comspec) Then T := 'Invite de commandes OS/2'
+  Else T := UpStr(BaseName(Prog));
+  S := KSes(4, Z(T), 0);
+  If S < 0 Then
+  Begin
+    ShowMsg('Trop de sessions : fermez un programme.', 'Bureau', MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  If Pause Then Dummy := KSes(16, S, 1);
+  Dummy := KSes(12, S, 0);
   PutZ(LongInt(@NameZ2), Prog);
-  HideAll;
-  Dummy := WinSuspendScreen;
   Res[0] := 0; Res[1] := 0;
-  Rc := DosExecPgm(LongInt(@FailBuf), 64, 0, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
-  { un programme de PM a rendu l'ecran au mode texte : pas d'attente }
-  If (Rc = 0) And Pause And (WinQueryScreenTaken = 0) Then WaitKey(Res[1]);
-  R := WinResumeScreen;
-  ShowAll(Act);
+  Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
   If Rc <> 0 Then
+  Begin
+    Dummy := KSes(12, -1, 0);
+    Dummy := KSes(17, S, 0);
     ShowMsg('SYS1041: Impossible de lancer ' + Prog + ' (erreur ' + IStr(Rc) + ').', 'Bureau', MB_OK Or MB_ERROR);
+  End
+  Else Dummy := KSes(3, S, 0);
 End;
 
 { ==================================================================== }

@@ -30,12 +30,14 @@ Library DOSCALLS;
   CreateFileA, FindFirstFileA, CreateProcessA, HeapAlloc...) importee
   sous les noms K* (partie 2).
 
-  Le noyau OS2KRNL execute un processus a la fois (le parent attend la
-  fin de l'enfant) et un seul processus leger : DosCreateThread execute
-  le processus leger jusqu'a sa fin (ou le garde suspendu jusqu'a
-  DosResumeThread), les minuteries sont verifiees a chaque attente, et
-  une attente qui ne pourrait jamais etre satisfaite rend ERROR_TIMEOUT
-  ou ERROR_INTERRUPT au lieu de bloquer le systeme.
+  Le noyau OS2KRNL est multitache : les processus et leurs fils
+  s'executent en parallele (KrnTaskCtl). DosExecPgm EXEC_SYNC attend la
+  fin de l'enfant, EXEC_ASYNC/EXEC_ASYNCRESULT la laissent a DosWaitChild,
+  EXEC_BACKGROUND le detache ; DosCreateThread cree une tache du noyau
+  (point d'entree ThrEntry32, qui appelle la fonction du fil) ; les
+  minuteries sont verifiees a chaque attente ; une attente qu'aucune
+  autre tache ne peut plus satisfaire rend ERROR_TIMEOUT ou
+  ERROR_INTERRUPT au lieu de bloquer le systeme.
 
   Organisation :
     Partie 1  - Constantes et types
