@@ -21,7 +21,7 @@ Program PMSHELL;
   contient PMSHELL, LAUNCHPAD = 0).
 
   Bureau : objets Systeme OS/2, Lecteurs, Invite de commandes OS/2,
-  Liste des fenetres, Modeles, Broyeur et Arret, puis le contenu du
+  Liste des fenetres, Modeles, Broyeur, Arret et Fenetre OS/2, puis le contenu du
   repertoire du bureau (C:\DESKTOP, ou D:\DESKTOP quand C: est le CD-ROM : les
   objets crees ou deposes sur le bureau) et les
   raccourcis du bureau. Les icones du bureau se deplacent a la souris
@@ -58,6 +58,10 @@ Program PMSHELL;
   COMSPEC /C) ou l'invite de commandes (COMSPEC) est lance par
   DosExecPgm dans une nouvelle session plein ecran, dans le repertoire de
   son dossier ; le bureau continue de s'executer (OS/2-0 est multitache).
+  Fenetre OS/2 : COMSPEC dans une nouvelle session montree dans une
+  fenetre du bureau par PMVIOP.DLL (bouclier VIO : l'ecran de la session
+  y est redessine, le clavier y est envoye ; bouton 2 : Marquer, Copier,
+  Tout copier, Coller, Plein ecran, Fermer).
   Ctrl+Echap revient au bureau, Alt+Echap passe a la session suivante, et
   la liste des fenetres montre les sessions. Un programme de PM rejoint
   la session de Presentation Manager. Apres un programme en mode texte
@@ -139,6 +143,7 @@ Const
   OB_SYS = 1; OB_DRIVES = 2; OB_CMD = 3; OB_SHUTDOWN = 4; OB_WINLIST = 5; OB_INFO = 6; OB_HELP = 7;
   OB_DIR = 8; OB_EXE = 9; OB_BATCH = 10; OB_DATA = 11; OB_TEMPLATES = 12; OB_SHRED = 13;
   OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16; OB_SETUP = 17; OB_SYSSET = 18; OB_MOUSE = 19; OB_COLORS = 20;
+  OB_CMDWIN = 21;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
@@ -186,6 +191,7 @@ Var
   DragItem, DragX0, DragY0, DragIX, DragITop, Dragging, MenuView, MenuItem : LongInt;
   { tampons }
   NameZ, NameZ2, ArgBuf, FailBuf : Array[0..511] Of Byte;
+  ShieldOk : LongInt;
   MenuTpl : Array[0..2047] Of Byte;
   MenuLen, MenuCnt : LongInt;
   FindBuf : Array[0..4095] Of Byte;
@@ -290,6 +296,8 @@ Function WinSetSysValue(HD, Ix, V : LongInt) : LongInt; External 'PMWIN';
 Function WinStartTimer(Hab, H, Id, Dt : LongInt) : LongInt; External 'PMWIN';
 Function WinStopTimer(Hab, H, Id : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryWindowText(H, Cch, P : LongInt) : LongInt; External 'PMWIN';
+Function WinInitShield(Hab, Hmq : LongInt) : LongInt; External 'PMVIOP' Name 'WININITSHIELD';
+Function WinCreateConsole(Own, PTitle, Fl, PH : LongInt) : LongInt; External 'PMVIOP' Name 'WINCREATECONSOLE';
 Function VioQueryModes(I, P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYMODES';
 Function VioQueryVbe(P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYVBE';
 Function WinSetPointerStyle(Size, Inv, Comet : LongInt) : LongInt; External 'PMWIN' Name 'WINSETPOINTERSTYLE';
@@ -801,6 +809,7 @@ Begin
     OB_SYS : Icon := IC_SYSTEM;
     OB_DRIVES : Icon := IC_DRIVES;
     OB_CMD : Icon := IC_CMD;
+    OB_CMDWIN : Icon := IC_CMD;
     OB_SHUTDOWN : Icon := IC_SHUTDOWN;
     OB_WINLIST : Icon := IC_WINLIST;
     OB_INFO : Icon := IC_INFO;
@@ -965,6 +974,7 @@ Begin
         Dummy := NewItem(V, IC_TEMPL, OB_TEMPLATES, 'Modeles', '');
         Dummy := NewItem(V, IC_SHRED, OB_SHRED, 'Broyeur', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
+        Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
         { fichiers et dossiers du repertoire du bureau, puis raccourcis }
         AddSorted(V, DeskDir);
         AddShadows(V, 'BUREAU');
@@ -984,6 +994,7 @@ Begin
         Dummy := NewItem(V, IC_INFO, OB_INFO, 'Informations systeme', '');
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
+        Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
       End;
     VK_SETUP :
       Begin
@@ -1681,6 +1692,49 @@ Begin
   Else Dummy := KSes(3, S, 0);
 End;
 
+{ fenetre OS/2 : l'interpreteur de commandes dans une nouvelle session
+  montree dans une fenetre de PM par PMVIOP.DLL (bouclier VIO) ; si la
+  console ne peut etre creee, la session passe en plein ecran }
+Procedure RunWindow(Dir : String);
+Var Res : Array[0..1] Of LongInt; Rc, K, S, Hc : LongInt; D : String;
+Begin
+  If Dir <> '' Then
+  Begin
+    If (Length(Dir) >= 2) And (Dir[2] = ':') Then Dummy := DosSetDefaultDisk(Ord(UpCase(Dir[1])) - 64);
+    D := Dir;
+    If (Length(D) > 3) And (D[Length(D)] = '\') Then D := Copy(D, 1, Length(D) - 1);
+    Dummy := DosSetCurrentDir(Z(D));
+  End;
+  PutZ(LongInt(@ArgBuf), Comspec);
+  K := Length(Comspec) + 1;
+  WrB(LongInt(@ArgBuf) + K, 0); WrB(LongInt(@ArgBuf) + K + 1, 0);
+  S := KSes(4, Z('Fenetre OS/2'), 0);
+  If S < 0 Then
+  Begin
+    ShowMsg('Trop de sessions : fermez un programme.', 'Bureau', MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  Dummy := KSes(12, S, 0);
+  PutZ(LongInt(@NameZ2), Comspec);
+  Res[0] := 0; Res[1] := 0;
+  Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
+  If Rc <> 0 Then
+  Begin
+    Dummy := KSes(12, -1, 0);
+    Dummy := KSes(17, S, 0);
+    ShowMsg('SYS1041: Impossible de lancer ' + Comspec + ' (erreur ' + IStr(Rc) + ').', 'Bureau', MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  If ShieldOk = 0 Then
+  Begin
+    Dummy := WinInitShield(Hab, Hmq);
+    ShieldOk := 1;
+  End;
+  Hc := 0;
+  If WinCreateConsole(HWND_DESKTOP, Z('Fenetre OS/2'), 1 Or 2 Or (S Shl 8), LongInt(@Hc)) <> 0 Then
+    Dummy := KSes(3, S, 0);
+End;
+
 { ==================================================================== }
 { Actions                                                               }
 { ==================================================================== }
@@ -1739,6 +1793,7 @@ Begin
     OB_BATCH : T := T + ' : fichier de commandes ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
     OB_DATA : T := T + ' : fichier de donnees ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
     OB_CMD : T := T + ' : ' + Comspec + ' (plein ecran).';
+    OB_CMDWIN : T := T + ' : ' + Comspec + ' dans une fenetre de PM (PMVIOP.DLL).';
   Else
     T := T + ' : objet du systeme.';
   End;
@@ -1911,6 +1966,11 @@ Begin
       Begin
         If Vw(V)^.Kind = VK_DIR Then P := Vw(V)^.Path Else P := '';
         RunProgram(Comspec, '', P, False);
+      End;
+    OB_CMDWIN :
+      Begin
+        If Vw(V)^.Kind = VK_DIR Then P := Vw(V)^.Path Else P := '';
+        RunWindow(P);
       End;
     OB_SHUTDOWN : Shutdown;
     OB_WINLIST : OpenWinList;
@@ -3563,6 +3623,7 @@ BEGIN
   End;
   Grow(ItemBuf, ItemCap, SizeOf(TItem));
   Grow(ViewBuf, ViewCap, SizeOf(TView));
+  ShieldOk := 0;
   Hab := WinInitialize(0);
   InitResolution;
   Hmq := WinCreateMsgQueue(Hab, 64);

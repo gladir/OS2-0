@@ -197,6 +197,8 @@ Type
     CurStart, CurEnd, CurAttr : LongInt;
     OrgRow, OrgCol : LongInt; { cellule affichee en haut a gauche }
     Hdc      : LongInt;       { contexte associe (0 = aucun) }
+    WinCx, WinCy : LongInt;   { taille de la fenetre du DC (WM_SIZE par
+                                WinDefAVioWindowProc de PMVIOP ; 0 : inconnue) }
     CellH, CellW : LongInt;   { taille d'une cellule en pels }
     Attr     : LongInt;       { attribut du teletype }
     Ansi     : Boolean;
@@ -304,6 +306,7 @@ Function KHeapFree(H, Flags, P : LongInt) : LongInt; External 'DOSCALLS' Name 'H
 Function KBeep(Freq, Dur : LongInt) : LongInt; External 'DOSCALLS' Name 'Beep';
 Function DosLoadModule(PFail, CbFail, PName, PHmod : LongInt) : LongInt; External 'DOSCALLS';
 Function DosQueryProcAddr(H, Ord, PName, PPfn : LongInt) : LongInt; External 'DOSCALLS';
+Function DosQueryModuleHandle(PName, PH : LongInt) : LongInt; External 'DOSCALLS';
 Function DosOpen(PName, PHf, PAction, Cb, Attr, Flags, Mode, PEa : LongInt) : LongInt; External 'DOSCALLS';
 Function DosWrite(H, Buf, Cb, PActual : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetFilePtr(H, Dist, Method, PNew : LongInt) : LongInt; External 'DOSCALLS';
@@ -731,11 +734,205 @@ End;
 
 { Afficher sur l'ecran les cellules d'un espace AVIO associe (region de
   Depth lignes et Width colonnes a partir de la cellule Ofs) }
+{ --- PS associe au DC d'une fenetre de PM (WinOpenWindowDC : 4443xxxxh) :
+  les cellules sont dessinees dans la fenetre par PMWIN.DLL (appels
+  dynamiques : PMWIN importe VIOCALLS) --- }
+Var
+  PmFn : Array[0..4] Of LongInt;   { WinWindowFromDC, WinGetPS, WinReleasePS, WinDrawText, WinQueryWindowRect }
+  PmFnOk : LongInt;
+  PmName : Array[0..31] Of Byte;
+
+Function CallSys1(F, A1 : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,4
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallSys1 := R;
+End;
+
+Function CallSys2(F, A1, A2 : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A2
+    push eax
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,8
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallSys2 := R;
+End;
+
+Function CallSys7(F, A1, A2, A3, A4, A5, A6, A7 : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A7
+    push eax
+    mov eax,A6
+    push eax
+    mov eax,A5
+    push eax
+    mov eax,A4
+    push eax
+    mov eax,A3
+    push eax
+    mov eax,A2
+    push eax
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,28
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallSys7 := R;
+End;
+
+Function PmAddr(H : LongInt; S : String) : LongInt;
+Var K, P : LongInt;
+Begin
+  For K := 1 To Length(S) Do PmName[K - 1] := Ord(S[K]);
+  PmName[Length(S)] := 0;
+  P := 0;
+  If DosQueryProcAddr(H, 0, LongInt(@PmName), LongInt(@P)) <> 0 Then P := 0;
+  PmAddr := P;
+End;
+
+{ points d'entree de PMWIN (PMWIN.DLL chargee : programme de PM) }
+Function PmReady : Boolean;
+Var H : LongInt;
+Begin
+  If PmFnOk = 0 Then
+  Begin
+    H := 0;
+    PmName[0] := Ord('P'); PmName[1] := Ord('M'); PmName[2] := Ord('W'); PmName[3] := Ord('I');
+    PmName[4] := Ord('N'); PmName[5] := 0;
+    If (DosQueryModuleHandle(LongInt(@PmName), LongInt(@H)) = 0) And (H <> 0) Then
+    Begin
+      PmFn[0] := PmAddr(H, 'WinWindowFromDC'); PmFn[1] := PmAddr(H, 'WinGetPS');
+      PmFn[2] := PmAddr(H, 'WinReleasePS'); PmFn[3] := PmAddr(H, 'WinDrawText');
+      PmFn[4] := PmAddr(H, 'WinQueryWindowRect');
+      If (PmFn[0] <> 0) And (PmFn[1] <> 0) And (PmFn[2] <> 0) And (PmFn[3] <> 0) And (PmFn[4] <> 0) Then PmFnOk := 1;
+    End;
+  End;
+  PmReady := PmFnOk <> 0;
+End;
+
+Function IsWinDC(Hdc : LongInt) : Boolean;
+Begin
+  IsWinDC := (Hdc >= $44430000) And (Hdc < $44440000);
+End;
+
+{ couleurs du VGA -> couleurs de PM (CLR_*) }
+Function PmClr(V : LongInt) : LongInt;
+Begin
+  Case V And 15 Of
+    0 : PmClr := -1;  1 : PmClr := 9;   2 : PmClr := 12;  3 : PmClr := 13;
+    4 : PmClr := 10;  5 : PmClr := 11;  6 : PmClr := 14;  7 : PmClr := 15;
+    8 : PmClr := 8;   9 : PmClr := 1;   10 : PmClr := 4;  11 : PmClr := 5;
+    12 : PmClr := 2;  13 : PmClr := 3;  14 : PmClr := 6;
+  Else
+    PmClr := -2;
+  End;
+End;
+
+{ taille de la fenetre du PS I (WM_SIZE, sinon rectangle de la fenetre) }
+Procedure WinSizeOf(I, H : LongInt; Var Cx, Cy : LongInt);
+Var Rc : Array[0..3] Of LongInt;
+Begin
+  Cx := PS[I].WinCx; Cy := PS[I].WinCy;
+  If (Cx <= 0) Or (Cy <= 0) Then
+  Begin
+    Rc[0] := 0; Rc[1] := 0; Rc[2] := 0; Rc[3] := 0;
+    If CallSys2(PmFn[4], H, LongInt(@Rc)) <> 0 Then
+    Begin
+      Cx := Rc[2] - Rc[0]; Cy := Rc[3] - Rc[1];
+    End;
+  End;
+End;
+
+{ lignes R0 a R0 + Depth - 1, colonnes C0 a C0 + Width - 1 du PS dans la
+  fenetre : cellule (OrgRow, OrgCol) en haut a gauche, CellH pels par ligne }
+Procedure PaintWin(I, R0, C0, Depth, Width : LongInt);
+Var H, Hps, Cx, Cy, VisR, VisC, R, C, CE, Cs, N, A, A0, Ch : LongInt; Rc : Array[0..3] Of LongInt;
+    B : Array[0..255] Of Byte;
+Begin
+  If Not PmReady Then Exit;
+  H := CallSys1(PmFn[0], PS[I].Hdc);
+  If H = 0 Then Exit;
+  WinSizeOf(I, H, Cx, Cy);
+  If PS[I].CellH < 1 Then Exit;
+  VisR := Cy Div PS[I].CellH; VisC := Cx Div 8;
+  If (VisR <= 0) Or (VisC <= 0) Then Exit;
+  Hps := CallSys1(PmFn[1], H);
+  If Hps = 0 Then Exit;
+  For R := R0 To R0 + Depth - 1 Do
+    If (R >= PS[I].OrgRow) And (R < PS[I].OrgRow + VisR) And (R < PS[I].Rows) Then
+    Begin
+      C := C0;
+      If C < PS[I].OrgCol Then C := PS[I].OrgCol;
+      CE := C0 + Width;
+      If CE > PS[I].Cols Then CE := PS[I].Cols;
+      If CE > PS[I].OrgCol + VisC Then CE := PS[I].OrgCol + VisC;
+      While C < CE Do
+      Begin
+        Cs := C; N := 0;
+        A0 := RdB(PS[I].Buf + (R * PS[I].Cols + C) * PS[I].CellSz + 1);
+        A := A0;
+        While (C < CE) And (A = A0) And (N < 255) Do
+        Begin
+          Ch := RdB(PS[I].Buf + (R * PS[I].Cols + C) * PS[I].CellSz);
+          If Ch = 0 Then Ch := 32;
+          B[N] := Ch;
+          Inc(N); Inc(C);
+          If C < CE Then A := RdB(PS[I].Buf + (R * PS[I].Cols + C) * PS[I].CellSz + 1);
+        End;
+        Rc[0] := (Cs - PS[I].OrgCol) * 8; Rc[2] := Rc[0] + N * 8;
+        Rc[1] := Cy - (R - PS[I].OrgRow + 1) * PS[I].CellH; Rc[3] := Rc[1] + PS[I].CellH;
+        Dummy := CallSys7(PmFn[3], Hps, N, LongInt(@B), LongInt(@Rc), PmClr(A0), PmClr(A0 Shr 4), 0);
+      End;
+    End;
+  Dummy := CallSys1(PmFn[2], Hps);
+End;
+
 Procedure PaintPS(I, Ofs, Depth, Width : LongInt);
 Var R0, C0, R, C, SR, SC, A, D : LongInt;
 Begin
   If (I < 1) Or (I > MaxPS) Then Exit;
   If Not PS[I].Used Or (PS[I].Hdc = 0) Then Exit;
+  If IsWinDC(PS[I].Hdc) Then
+  Begin
+    PaintWin(I, Ofs Div PS[I].Cols, Ofs Mod PS[I].Cols, Depth, Width);
+    Exit;
+  End;
   R0 := Ofs Div PS[I].Cols;
   C0 := Ofs Mod PS[I].Cols;
   For R := R0 To R0 + Depth - 1 Do
@@ -3130,7 +3327,7 @@ Begin
       PS[F].CellH := 16; PS[F].CellW := 8;
       PS[F].CurStart := 13; PS[F].CurEnd := 14; PS[F].CurAttr := 0;
       PS[F].OrgRow := 0; PS[F].OrgCol := 0;
-      PS[F].Hdc := 0;
+      PS[F].Hdc := 0; PS[F].WinCx := 0; PS[F].WinCy := 0;
       PS[F].Attr := 7;
       PS[F].Ansi := True;
       For J := 0 To MaxLcid - 1 Do PS[F].Lcid[J] := 0;
@@ -3157,17 +3354,54 @@ End;
 
 { ---------------------------------------------------------------------
   VioAssociate(hdc, hvps) : associer le PS a un contexte de peripherique
-  (hdc <> 0 : l'ecran ; le PS y est affiche) ou le dissocier (hdc = 0) }
+  (hdc <> 0 : l'ecran ; le PS y est affiche ; DC d'une fenetre de PM,
+  WinOpenWindowDC : le PS est dessine dans la fenetre) ou le dissocier
+  (hdc = 0) }
 Function VioAssociate(Hdc, Hvps : LongInt) : LongInt;
 Var R : LongInt;
 Begin
   If Hvps = 0 Then R := ERROR_VIO_INVALID_HANDLE Else R := SurfErr(Hvps);
   If R = NO_ERROR Then
   Begin
-    PS[Hvps].Hdc := Hdc;
+    PS[Hvps].Hdc := Hdc; PS[Hvps].WinCx := 0; PS[Hvps].WinCy := 0;
     If Hdc <> 0 Then PaintPS(Hvps, 0, PS[Hvps].Rows, PS[Hvps].Cols);
   End;
   VioAssociate := R;
+End;
+
+{ ---------------------------------------------------------------------
+  VIOAVIOSIZE(hdc, cx, cy) (interne, ordinal 1004 ; appele par
+  WinDefAVioWindowProc de PMVIOP.DLL sur WM_SIZE) : taille de la fenetre
+  des PS associes au DC hdc ; ils sont redessines. Rend leur nombre. }
+Function VioAvioSize(Hdc, Cx, Cy : LongInt) : LongInt;
+Var I, N : LongInt;
+Begin
+  N := 0;
+  If Hdc <> 0 Then
+    For I := 1 To MaxPS Do
+      If PS[I].Used And (PS[I].Hdc = Hdc) Then
+      Begin
+        PS[I].WinCx := Cx; PS[I].WinCy := Cy;
+        PaintPS(I, 0, PS[I].Rows, PS[I].Cols);
+        Inc(N);
+      End;
+  VioAvioSize := N;
+End;
+
+{ VIOQUERYAVIOSIZE(hvps, p) (interne, ordinal 1005) : taille de la
+  fenetre connue du PS (cx, cy), lignes et colonnes visibles }
+Function VioQueryAvioSize(Hvps, P : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  If Hvps = 0 Then R := ERROR_VIO_INVALID_HANDLE Else R := SurfErr(Hvps);
+  If (R = NO_ERROR) And (P = 0) Then R := ERROR_VIO_PTR;
+  If R = NO_ERROR Then
+  Begin
+    WrL(P, PS[Hvps].WinCx); WrL(P + 4, PS[Hvps].WinCy);
+    If PS[Hvps].CellH > 0 Then WrL(P + 8, PS[Hvps].WinCy Div PS[Hvps].CellH) Else WrL(P + 8, 0);
+    WrL(P + 12, PS[Hvps].WinCx Div 8);
+  End;
+  VioQueryAvioSize := R;
 End;
 
 { ---------------------------------------------------------------------
@@ -3619,12 +3853,14 @@ exports
   XVioSetCAState Index 71, XVioCheckCharType Index 72, XVioDestroyCA Index 73,
   XVioCreateCA Index 74, VioCheckCharType Index 75, XVioGetCAState Index 76,
   VioSessSwitch Name 'VIOSESSSWITCH' Index 1001,
-  VioQueryModes Name 'VIOQUERYMODES' Index 1002, VioQueryVbe Name 'VIOQUERYVBE' Index 1003;
+  VioQueryModes Name 'VIOQUERYMODES' Index 1002, VioQueryVbe Name 'VIOQUERYVBE' Index 1003,
+  VioAvioSize Name 'VIOAVIOSIZE' Index 1004, VioQueryAvioSize Name 'VIOQUERYAVIOSIZE' Index 1005;
 
 Var
   InitI : LongInt;
 
 BEGIN
+  PmFnOk := 0;
   ConH := KGetStdHandle(-11);
   ScrAnsi := True;
   CodePage := 850;

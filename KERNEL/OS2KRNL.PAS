@@ -6280,7 +6280,11 @@ End;
    15 adresse de l'etat des sessions (SesFlags)
    16 pause a la fin de la session p1 (p2 = 1) : une touche avant le
       retour a la session d'origine
-   17 supprimer la session p1 (sans processus, pas au premier plan) }
+   17 supprimer la session p1 (sans processus, pas au premier plan)
+   18 ecran de la session p1 dans p2 : tampon video, ligne et colonne du
+      curseur, lignes, colonnes, processus (PMVIOP.DLL)
+   19 touche p2 (caractere + code Shl 8, etat) pour la session p1
+   20 terminer les processus de la session p1 (fenetre OS/2 fermee) }
 Function KrnSesCtl(Op, P1, P2 : LongInt) : LongInt;
 Var S, Old : LongInt;
 Begin
@@ -6347,6 +6351,67 @@ Begin
         Begin
           If NextSess = P1 Then NextSess := -1;
           FreeSess(P1);
+        End;
+   18 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] And (P2 <> 0) Then
+        Begin
+          { ecran d'une session (PMVIOP.DLL : fenetre OS/2) : tampon video
+            (B8000h si elle est au premier plan), curseur, lignes, colonnes }
+          If P1 = FgSess Then MemL[0:P2] := $B8000 Else MemL[0:P2] := SLvb[P1];
+          If P1 = CurSess Then
+          Begin
+            MemL[0:P2 + 4] := CurRow; MemL[0:P2 + 8] := CurCol;
+          End
+          Else
+          Begin
+            MemL[0:P2 + 4] := SCurRow[P1]; MemL[0:P2 + 8] := SCurCol[P1];
+          End;
+          MemL[0:P2 + 12] := ScrRows; MemL[0:P2 + 16] := ScrCols;
+          MemL[0:P2 + 20] := SessProcs(P1);
+          KrnSesCtl := 1;
+        End;
+   19 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] And (P2 <> 0) Then
+        Begin
+          { touche (p2 : caractere + code Shl 8, etat des touches) dans la
+            file du clavier de la session p1 (fenetre OS/2) }
+          asm
+            cli
+          end;
+          If P1 = CurSess Then
+          Begin
+            S := (KbdHead + 1) And 63;
+            If S <> KbdTail Then
+            Begin
+              KbdBuf[KbdHead] := MemL[0:P2]; KbdXt[KbdHead] := MemL[0:P2 + 4]; KbdTm[KbdHead] := Ticks * 10;
+              KbdHead := S;
+              KrnSesCtl := 1;
+            End;
+          End
+          Else
+          Begin
+            S := (SKbdHead[P1] + 1) And 63;
+            If S <> SKbdTail[P1] Then
+            Begin
+              SKbdBuf[P1 * 64 + SKbdHead[P1]] := MemL[0:P2]; SKbdXt[P1 * 64 + SKbdHead[P1]] := MemL[0:P2 + 4];
+              SKbdTm[P1 * 64 + SKbdHead[P1]] := Ticks * 10;
+              SKbdHead[P1] := S;
+              KrnSesCtl := 1;
+            End;
+          End;
+          asm
+            sti
+          end;
+        End;
+   20 : If (P1 > 0) And (P1 < MaxSess) And SUsed[P1] And (P1 <> CurSess) Then
+        Begin
+          { fermeture d'une fenetre OS/2 : fin des processus de la session }
+          Old := 0;
+          For S := 0 To MaxProcs - 1 Do
+            If Procs[S].Used And Procs[S].Running And (Procs[S].Sess = P1) Then
+            Begin
+              KillOther(S, 1);
+              Inc(Old);
+            End;
+          KrnSesCtl := Old;
         End;
   End;
 End;
