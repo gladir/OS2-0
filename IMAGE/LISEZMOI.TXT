@@ -20,7 +20,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE,
               TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE,
               TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE,
-              TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE et les
+              TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE, TESTVDM.EXE
+              et les
               commandes du depot
               compilees avec
               OS2PC (-COS2).
@@ -74,6 +75,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\ICHAUDIO.PAS                    -> ICHAUDIO.DLL (pilote AC'97 Intel ICH)
   OS2PC DLL\ESAUDIO.PAS                     -> ESAUDIO.DLL (pilote Ensoniq AudioPCI)
   OS2PC DLL\TESTMDM.PAS                     -> TESTMDM.EXE (essai du son)
+  OS2PC -CD DLL\TESTVDM.PAS                 -> TESTVDM.EXE (essai de la
+                                               session DOS, MS-DOS 16 bits)
   OS2PC DLL\VBOXGST.PAS                     -> VBOXGST.DLL (Additions VirtualBox)
   OS2PC DLL\VMWTOOLS.PAS                    -> VMWTOOLS.DLL (VMware Tools)
   OS2PC DLL\TCPIP32.PAS                     -> TCPIP32.DLL (pile TCP/IP, sockets)
@@ -797,6 +800,21 @@ PCI, BIOS, disques), ses ressources, son pilote et son etat. Sous
 VirtualBox : VBOXGST.DLL, souris VirtualBox ; sous VMware : VMware
 Tools d'OS/2-0, souris VMware (vmmouse), adaptateur VMware SVGA II.
 
+Sessions DOS (machine virtuelle 8086)
+-------------------------------------
+Les programmes MS-DOS (.COM, .EXE sans en-tete PE ni NE) s'executent
+dans une machine virtuelle DOS en mode virtuel 8086 (moniteur, BIOS,
+DOS 5.00, souris, XMS, EMS et serveur DPMI repris de Pasdows 95) : on
+les lance depuis l'invite de commandes OS/2 ou le bureau, ou par
+Systeme OS/2, DOS plein ecran (interpreteur COMMAND.COM integre).
+Plein ecran : au premier plan, la carte VGA est utilisee directement
+(modes graphiques par le vrai BIOS) ; Ctrl+Echap et Alt+Echap changent
+de session (un programme graphique est alors suspendu, son ecran est
+rendu au retour). Disquette A: (FAT12) en lecture. Turbo Pascal 7
+s'installe depuis ses disquettes (A:, INSTALL ; dans QEMU : -fda
+Disk01.img, puis change floppy0 Disk02.img...) ; TURBO, TPC, BGIDEMO
+et TPX (DPMI) fonctionnent. TESTVDM verifie la machine.
+
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
 Le LaunchPad d'OS/2 Warp 3 (source LAUNCHPAD.PAS) est lance par
@@ -847,6 +865,10 @@ Limites
   les trames quand un programme attend (pas d'interruption).
 - VirtualBox : un seul ecran ; pas de dossiers partages, de presse-
   papiers partage ni de mode transparent (seamless).
+- Sessions DOS : une seule a la fois, plein ecran seulement (pas de
+  fenetre DOS), disquette en lecture seule, pas de carte son emulee
+  (haut-parleur seulement), pas de modes VESA pour les programmes DOS,
+  pas de zone haute (HMA) ; clients DPMI 16 bits (Borland) essayes.
 - VMware : un seul ecran, 32 bits par pel sur la SVGA II ; pas de
   dossiers partages, de presse-papiers partage, de glisser-deposer avec
   l'hote, de synchronisation de l'heure ni de mode Unity ; pas de pilote

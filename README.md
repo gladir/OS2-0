@@ -122,7 +122,7 @@ OS2-0 possède son propre noyau OS/2 32 bits écrit en Pascal. Comme sous OS/2, 
 	<tr><th>Fichier</th><th>Source</th><th>Description</th></tr>
 	<tr><td><b>OS2BOOT</b></td><td>KERNEL/OS2BOOT.PAS</td><td>Secteur d'amorce du CD-ROM (El Torito sans émulation, mode réel 8086) : lit le système de fichiers ISO 9660 par l'INT 13h étendue et charge OS2LDR en 2000:0000.</td></tr>
 	<tr><td><b>OS2LDR</b></td><td>KERNEL/OS2LDR.PAS</td><td>Chargeur 16 bits : charge l'image PE du noyau à 1 Mo (INT 15h/87h), relève la carte mémoire (E820h), active la ligne A20, installe une GDT plate et passe en mode protégé.</td></tr>
-	<tr><td><b>OS2KRNL</b></td><td>KERNEL/OS2KRNL.PAS</td><td>Noyau 32 bits (80386, mode protégé) : console VGA, IDT, exceptions (écran TRAP), PIC, minuterie, clavier, souris PS/2, tas, pagination, pilote ATAPI, disques durs IDE, ISO 9660 et disque virtuel en mémoire, systèmes de fichiers installables (IFS=), couche API DOSCALLS, chargeur de programmes PE et processus, lecture de CONFIG.SYS et lancement du PROTSHELL (<b>PMSHELL.EXE</b>, le bureau ; CMD.EXE par défaut), Ctrl+Alt+Suppr (redémarrage), appel du BIOS en mode réel (KERNEL/BIOSCALL.ASM) et modes VESA (KrnVideo).</td></tr>
+	<tr><td><b>OS2KRNL</b></td><td>KERNEL/OS2KRNL.PAS</td><td>Noyau 32 bits (80386, mode protégé) : console VGA, IDT, exceptions (écran TRAP), PIC, minuterie, clavier, souris PS/2, tas, pagination, pilote ATAPI, disques durs IDE, ISO 9660 et disque virtuel en mémoire, systèmes de fichiers installables (IFS=), couche API DOSCALLS, chargeur de programmes PE et processus, lecture de CONFIG.SYS et lancement du PROTSHELL (<b>PMSHELL.EXE</b>, le bureau ; CMD.EXE par défaut), Ctrl+Alt+Suppr (redémarrage), appel du BIOS en mode réel (KERNEL/BIOSCALL.ASM), modes VESA (KrnVideo), lecteur de disquettes A: (FAT12) et machine virtuelle DOS (mode V86, TSS, LDT : sessions DOS).</td></tr>
 </table>
 
 <img width="720" height="400" alt="OS/2-0 : CMD.EXE sous le noyau OS2KRNL" src="IMAGE/OS2-0.png" />
@@ -751,6 +751,37 @@ Réglages conseillés de la machine virtuelle : système invité « OS/2 » (ou 
 
 <pre>qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d -vga vmware -nic user,model=pcnet</pre>
 
+<h3>Sessions DOS : machine virtuelle 8086 (Turbo Pascal, DPMI, EMS, XMS)</h3>
+
+Comme OS/2 2.0, OS/2-0 exécute les programmes <b>MS-DOS</b> (fichiers <b>.COM</b>, et <b>.EXE</b> sans en-tête PE ni NE) dans une <b>machine virtuelle DOS</b> en <b>mode virtuel 8086</b>. Le moniteur, le BIOS, le DOS, la souris, XMS, EMS et le serveur DPMI viennent de la machine virtuelle de <a href="https://github.com/gladir/Pasdows95">Pasdows 95</a> (KERNEL/VMM32.PAS, partie 17), adaptés au noyau d'OS/2-0 (partie 13b de KERNEL/OS2KRNL.PAS). On lance un programme DOS depuis l'invite de commandes OS/2 (CMD.EXE l'attend, comme un programme OS/2), depuis un dossier du bureau, ou on ouvre <b>DOS plein écran</b> (dossier Système OS/2) : l'interpréteur de commandes intégré de la machine (COMMAND.COM : DIR, CD, COPY, DEL, MD, RD, REN, TYPE, SET, VER, EXIT, programmes...).
+
+<table>
+	<tr><th>Élément</th><th>Rôle</th></tr>
+	<tr><td>Mode virtuel 8086</td><td>Une tâche du noyau exécute le code 16 bits (EFLAGS.VM, IOPL 0). Le processeur a maintenant une <b>TSS</b> (pile de l'anneau 0 de chaque tâche, ESP0 changé avec la tâche) et une <b>LDT</b> (sélecteurs des clients DPMI) ; les procédures <i>Interrupt</i> du noyau rechargent DS et ES (compilateur OS2PC), car une interruption peut survenir en mode V86 ou en anneau 3. L'horloge partage le temps entre la machine et les autres tâches.</td></tr>
+	<tr><td>Mémoire</td><td>Le premier mégaoctet de la machine est projeté par la <b>table de pages de sa session</b> (entrée 0 du répertoire de pages, qui suit la session) : 0 à 9FFFFh, B0000h à B7FFFh et C0000h à FFFFFh sont 1 Mo de mémoire physique de la machine ; A0000h à AFFFFh et B8000h à BFFFFh sont l'écran de la session (la carte au premier plan, le tampon de la session sinon). Les tâches du noyau gardent les pages d'identité (CtxSwitch change l'entrée 0 après le changement de pile).</td></tr>
+	<tr><td>Moniteur</td><td>INT, IRET, PUSHF, POPF, CLI, STI, HLT, IN, OUT provoquent une faute de protection générale émulée ; IF virtuel ; horloge (INT 08h, 1Ch, minuterie reprogrammable), clavier (INT 09h, port 60h : les codes de balayage de la session au premier plan) et souris PS/2 sont des interruptions virtuelles.</td></tr>
+	<tr><td>BIOS et DOS 5.00</td><td>BIOS écrit en Pascal (INT 10h, 11h, 12h, 13h, 15h, 16h, 1Ah, zone de données), DOS (INT 21h : mémoire MCB, PSP, chargement des .COM et .EXE, EXEC, fichiers du noyau sur toutes les unités, recherche, répertoire courant par unité, pays...), INT 2Fh, souris INT 33h (pointeur en mode texte).</td></tr>
+	<tr><td>Écran plein écran</td><td>Au premier plan, la session utilise directement la carte VGA : mode texte dans B8000h, <b>modes graphiques par le vrai BIOS</b> (appel en mode réel, BDA vidéo et tampons recopiés) et ports de la carte (3B0h à 3DFh) ; le haut-parleur (port 61h, canal 2 de la minuterie) aussi. À l'arrière-plan (Ctrl+Échap, Alt+Échap), un programme en mode texte continue dans le tampon de la session ; un programme en mode graphique est suspendu, ses plans, son mode et sa palette sont sauvés et rendus à son retour.</td></tr>
+	<tr><td>XMS 3.0, EMS 4.0, DPMI 0.9</td><td>Mémoire étendue XMS (INT 2Fh 4300h/4310h, blocs pris dans la mémoire physique), mémoire paginée EMS (INT 67h, cadre en E000h projeté par la table de pages de la session), serveur <b>DPMI</b> (INT 2Fh 1687h, client 16 ou 32 bits en anneau 3, services de l'INT 31h, extensions MS-DOS) : les programmes de Borland Pascal en mode protégé (RTM.EXE, DPMI16BI.OVL) comme <b>TPX.EXE</b> fonctionnent.</td></tr>
+	<tr><td>Disquette A:</td><td>Lecteur A: (contrôleur 765, DMA, IRQ 6) en <b>FAT12</b> (et FAT16), en lecture, vu par toutes les API de fichiers du noyau (CMD et sessions DOS) ; un changement de disquette est détecté (DSKCHG).</td></tr>
+	<tr><td><b>TESTVDM.EXE</b> (DLL/TESTVDM.PAS)</td><td>Programme MS-DOS 16 bits compilé par <b>OS2PC -CD</b> : 36 vérifications (version, fichiers, recherche, mémoire, BIOS, souris, XMS, EMS, DPMI).</td></tr>
+</table>
+
+<b>Turbo Pascal 7</b> s'installe depuis ses quatre disquettes : <i>qemu-system-i386 ... -fda Disk01.img</i>, puis <b>A:</b> et <b>INSTALL</b> dans l'invite de commandes ; on change de disquette dans le moniteur de QEMU (<i>change floppy0 Disk02.img</i>) quand l'installateur la demande. L'EDI (<b>TURBO</b>) fonctionne entièrement : édition, menus au clavier et à la souris, compilation et exécution (Ctrl+F9), écran utilisateur (Alt+F5) ; le compilateur <b>TPC</b>, les programmes graphiques comme <b>BGIDEMO</b> (VGA 640 x 480, pilote EGAVGA.BGI) et l'EDI en mode protégé <b>TPX</b> (DPMI, plus de 34 Mo de mémoire protégée libre).
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/DOS_INSTALL.png" width="400" alt="Installation de Turbo Pascal 7"><br><i>INSTALL.EXE depuis les disquettes (A:)</i></td>
+		<td align="center"><img src="IMAGE/DOS_TURBO.png" width="400" alt="EDI de Turbo Pascal 7"><br><i>L'EDI de Turbo Pascal 7 en session DOS</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/DOS_BGIDEMO.png" width="400" alt="BGIDEMO"><br><i>BGIDEMO en VGA 640x480 16 couleurs</i></td>
+		<td align="center"><img src="IMAGE/DOS_TPX.png" width="400" alt="TPX.EXE"><br><i>TPX.EXE (DPMI) : mémoire protégée libre</i></td>
+	</tr>
+</table>
+
+Limites : une seule session DOS à la fois ; pas de fenêtre DOS (plein écran seulement) ; la disquette est en lecture seule ; pas de carte son émulée pour la machine (le haut-parleur seulement) ; pas de modes VESA pour les programmes DOS ; la zone haute (HMA) n'est pas disponible ; seuls des clients DPMI 16 bits (Borland Pascal) ont été essayés.
+
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 
 Le fichier <b>LAUNCHPAD.PAS</b> est le <b>LaunchPad</b> d'OS/2 Warp 3 (<b>LAUNCHPD.EXE</b> sur le CD-ROM, nom 8.3 de l'ISO 9660) : PMSHELL le lance au démarrage du bureau (sauf si OS2.INI contient PMSHELL, LAUNCHPAD = 0), dans la session de Presentation Manager, et les deux programmes s'exécutent en même temps. C'est une petite barre toujours visible, en bas au centre de l'écran (déplaçable en glissant son fond ; position gardée dans OS2.INI).
@@ -801,7 +832,7 @@ Langue : la variable <code>LANGUAGE</code> de CONFIG.SYS (convention commune ave
 
 <img width="640" height="480" alt="OS/2-0 : onglet Langue du carnet Système - Paramètres" src="IMAGE/LANGUE.png" />
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, DIGAUDIO.EXE, DEVMGR.EXE, IFCONFIG.EXE, PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, DIGAUDIO.EXE, DEVMGR.EXE, IFCONFIG.EXE, PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE, TESTVDM.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
