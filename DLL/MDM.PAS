@@ -456,9 +456,13 @@ End;
 { ==================================================================== }
 
 Function PlayPos : LongInt;
+Var P : LongInt;
 Begin
-  If Paused <> 0 Then PlayPos := PausePos
-  Else PlayPos := StartFrame + MulDiv(DevDone, SrcRate, DevRate);
+  If Paused <> 0 Then P := PausePos
+  Else P := StartFrame + MulDiv(DevDone, SrcRate, DevRate);
+  { la carte peut avoir lu le silence apres la fin : jamais au-dela }
+  If P > EndFrame Then P := EndFrame;
+  PlayPos := P;
 End;
 
 Procedure PollPlay;

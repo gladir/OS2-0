@@ -118,6 +118,7 @@ Library VIOCALLS;
 { ==================================================================== }
 
 Const
+  BGASLOT = 95;                 { entree du mode DISPI dans la table VESA }
   NO_ERROR                  = 0;
   ERROR_ACCESS_DENIED       = 5;
   ERROR_INVALID_PARAMETER   = 87;
@@ -285,6 +286,9 @@ Var
   GrMode, GrW, GrH, GrBits, GrPlane : LongInt;   { mode du materiel }
   GrLfb, GrPitch : LongInt;                { mode VESA : memoire lineaire, octets par ligne }
   VesaN : LongInt;                         { modes VESA du BIOS (-1 : pas encore lus) }
+  { adaptateur VirtualBox / Bochs / QEMU (VBE DISPI) : -1 pas encore vu,
+    0 absent, 1 present ; memoire de la carte (octets) }
+  BgaState, BgaMem : LongInt;
   VesaNo, VesaW, VesaH, VesaB, VesaPitch, VesaLfb : Array[0..95] Of LongInt;
   SesAddr, HookOk : LongInt;               { etat des sessions du noyau }
   SesGr : Array[0..15] Of LongInt;         { mode graphique de chaque session }
@@ -479,6 +483,29 @@ Begin
     mov R,eax
   end;
   InB := R;
+End;
+
+Procedure OutW(P, V : LongInt);
+Begin
+  If Not Mine Then Exit;
+  asm
+    mov edx,P
+    mov eax,V
+    out dx,ax
+  end;
+End;
+
+Function InW(P : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := 0;
+  asm
+    mov edx,P
+    xor eax,eax
+    in ax,dx
+    mov R,eax
+  end;
+  InW := R;
 End;
 
 Function CrtcGet(I : LongInt) : LongInt;
@@ -1163,6 +1190,7 @@ Var I : LongInt;
 Begin
   { la police courante est dans FontBuf (rechargee au retour au texte) ;
     un mode VESA est d'abord quitte par le BIOS }
+  If GrMode = $10FFF Then DispiW(4, 0);
   If GrMode >= $10000 Then Dummy := KVid(4, 3, 0);
   VgaLoad(K);
   GrClear;
@@ -1184,6 +1212,7 @@ Var I, M : LongInt;
 Begin
   If GrMode = 0 Then Exit;
   { mode VESA : le BIOS rend le mode texte (INT 10h, 03h) }
+  If GrMode = $10FFF Then DispiW(4, 0);
   If GrMode >= $10000 Then Dummy := KVid(4, 3, 0);
   VgaLoad(0);
   If CellHeight <> 16 Then CrtcSet(9, (CrtcGet(9) And $E0) Or (CellHeight - 1));
@@ -1211,7 +1240,7 @@ Begin
   If KVid(0, 0, 0) = 0 Then Exit;
   N := KVid(1, 0, 0);
   For I := 0 To N - 1 Do
-    If (VesaN < 96) And (KVid(2, I, LongInt(@E)) <> 0) Then
+    If (VesaN < BGASLOT) And (KVid(2, I, LongInt(@E)) <> 0) Then
     Begin
       VesaNo[VesaN] := E[0]; VesaW[VesaN] := E[1]; VesaH[VesaN] := E[2]; VesaB[VesaN] := E[3];
       VesaPitch[VesaN] := E[4]; VesaLfb[VesaN] := E[5];
@@ -1219,14 +1248,81 @@ Begin
     End;
 End;
 
-{ mode VESA de la resolution donnee (-1 : aucun) }
+{ --- adaptateur graphique de VirtualBox (VBoxVGA, VMSVGA), de Bochs et
+  de QEMU : interface VBE DISPI (index 1CEh, donnees 1CFh), qui accepte
+  toute resolution (redimensionnement de la fenetre de la machine
+  virtuelle) ; la memoire lineaire est celle des modes VESA du BIOS.
+  Le mode est l'entree BGASLOT de la table (numero VBE fictif FFFh). --- }
+Procedure DispiW(I, V : LongInt);
+Begin
+  OutW($1CE, I);
+  OutW($1CF, V);
+End;
+
+Function DispiR(I : LongInt) : LongInt;
+Begin
+  OutW($1CE, I);
+  DispiR := InW($1CF);
+End;
+
+Function BgaPresent : Boolean;
+Var V, I : LongInt;
+Begin
+  If BgaState < 0 Then
+  Begin
+    BgaState := 0; BgaMem := 0;
+    If Mine Then
+    Begin
+      DispiW(0, $B0C4);
+      V := DispiR(0);
+      If (V And $FFF0) = $B0C0 Then
+      Begin
+        { memoire de la carte : index 0Ah, blocs de 64 Ko (sinon 4 Mo) }
+        BgaMem := DispiR($0A) * 65536;
+        If BgaMem <= 0 Then BgaMem := 4194304;
+        { la memoire lineaire des modes VESA du BIOS }
+        VesaLoad;
+        For I := 0 To VesaN - 1 Do
+          If (VesaLfb[I] <> 0) And (BgaState = 0) Then
+          Begin
+            VesaLfb[BGASLOT] := VesaLfb[I];
+            BgaState := 1;
+          End;
+      End;
+    End;
+  End;
+  BgaPresent := BgaState = 1;
+End;
+
+Function BgaSet(W, H, Bits : LongInt) : Boolean;
+Begin
+  DispiW(4, 0);                                 { arret }
+  DispiW(1, W); DispiW(2, H); DispiW(3, Bits);
+  DispiW(6, W); DispiW(7, H); DispiW(8, 0); DispiW(9, 0);
+  DispiW(4, $41);                               { marche, memoire lineaire }
+  BgaSet := (DispiR(1) = W) And (DispiR(2) = H) And (DispiR(3) = Bits);
+End;
+
+{ mode VESA de la resolution donnee (-1 : aucun) ; a defaut, mode DISPI
+  de l'adaptateur VirtualBox/Bochs/QEMU }
 Function VesaFind(W, H, Bits : LongInt) : LongInt;
-Var I, R : LongInt;
+Var I, R, Bp : LongInt;
 Begin
   VesaLoad;
   R := -1;
   For I := VesaN - 1 DownTo 0 Do
     If (VesaW[I] = W) And (VesaH[I] = H) And (VesaB[I] = Bits) Then R := I;
+  If (R < 0) And ((Bits = 8) Or (Bits = 15) Or (Bits = 16) Or (Bits = 24) Or (Bits = 32)) And (W >= 320) And
+     (H >= 200) And (W <= 8192) And (H <= 8192) And BgaPresent Then
+  Begin
+    Bp := (Bits + 7) Div 8;
+    If W * H * Bp <= BgaMem Then
+    Begin
+      VesaNo[BGASLOT] := $FFF; VesaW[BGASLOT] := W; VesaH[BGASLOT] := H; VesaB[BGASLOT] := Bits;
+      VesaPitch[BGASLOT] := W * Bp;
+      R := BGASLOT;
+    End;
+  End;
   VesaFind := R;
 End;
 
@@ -1237,6 +1333,7 @@ Begin
   R := -1;
   For I := 0 To VesaN - 1 Do
     If VesaNo[I] + $10000 = Code Then R := I;
+  If (Code = $10FFF) And (VesaNo[BGASLOT] = $FFF) Then R := BGASLOT;
   VesaOf := R;
 End;
 
@@ -1244,8 +1341,12 @@ End;
 Function VesaEnter(I : LongInt) : Boolean;
 Begin
   VesaEnter := False;
-  If (I < 0) Or (I >= VesaN) Then Exit;
-  If KVid(3, VesaNo[I], 0) <> 0 Then Exit;
+  If (I < 0) Or ((I >= VesaN) And (I <> BGASLOT)) Then Exit;
+  If VesaNo[I] = $FFF Then
+  Begin
+    If Not BgaSet(VesaW[I], VesaH[I], VesaB[I]) Then Exit;
+  End
+  Else If KVid(3, VesaNo[I], 0) <> 0 Then Exit;
   GrMode := $10000 + VesaNo[I]; GrW := VesaW[I]; GrH := VesaH[I]; GrBits := VesaB[I];
   GrPitch := VesaPitch[I]; GrLfb := VesaLfb[I];
   GrPlane := GrPitch * GrH;
@@ -3873,6 +3974,6 @@ BEGIN
   For InitI := 1 To MaxPS Do PS[InitI].Used := False;
   For InitI := 1 To MaxCA Do CAs[InitI].Used := False;
   For InitI := 0 To MaxLvb - 1 Do Lvbs[InitI].Addr := 0;
-  VesaN := -1;
+  VesaN := -1; BgaState := -1; BgaMem := 0;
   HwCapture;
 END.

@@ -328,6 +328,11 @@ Var
   Dummy, MyMod : LongInt;
 
 Var
+  { VirtualBox (VBOXGST.DLL) : adresse de VBOXGUESTREQUEST (0 pas encore
+    cherchee, -1 absente), prochaine verification, paquet }
+  VbxFn, VbxNext : LongInt;
+  VbxPk : Array[0..7] Of LongInt;
+  VbxName, VbxErr : Array[0..63] Of Byte;
   GMode : LongInt;                        { 1 : ecran graphique }
   Susp, SuspPid, SuspTook : LongInt;      { ecran prete a un programme (WINSUSPENDSCREEN) }
   SesAddr, PmEpoch : LongInt;              { sessions du noyau (KrnSesCtl 15) }
@@ -6021,12 +6026,94 @@ Begin
     If QMou[Q] <> 0 Then GPtrDraw(MouseX, ScrCY - 1 - MouseY);
 End;
 
+Function WinSetScreenMode(W, H, Bits : LongInt) : LongInt; Forward;
+
+Function CallVb(F, A1 : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,4
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallVb := R;
+End;
+
+{ le VMMDev de VirtualBox (PCI 80EEh:CAFEh) est-il sur le bus 0 ? }
+Function VmmDevOnPci : Boolean;
+Var D, V : LongInt;
+Begin
+  VmmDevOnPci := False;
+  For D := 0 To 31 Do
+  Begin
+    V := $80000000 Or (D Shl 11);
+    asm
+      mov edx,3320
+      mov eax,V
+      out dx,eax
+      mov edx,3324
+      in eax,dx
+      mov V,eax
+    end;
+    If V = $CAFE80EE Then VmmDevOnPci := True;
+  End;
+End;
+
+{ VirtualBox (VBOXGST.DLL) : l'hote demande une autre taille de l'ecran
+  (fenetre redimensionnee, ajustement automatique, menu Ecran virtuel) ;
+  verifie toutes les 300 ms par la session de PM ; l'ecran passe a la
+  taille demandee (adaptateur VBE DISPI) et les fenetres en sont
+  averties (WM_SYSVALUECHANGED, SV_CXSCREEN) }
+Procedure VBoxCheck;
+Var H, F, W, Hh, B, K : LongInt;
+Begin
+  If (GMode = 0) Or Not GMine Then Exit;
+  K := KGetTickCount;
+  If (VbxNext <> 0) And (K - VbxNext < 0) Then Exit;
+  VbxNext := K + 300;
+  If VbxFn = 0 Then
+  Begin
+    VbxFn := -1;
+    If Not VmmDevOnPci Then Exit;
+    PutZ(LongInt(@VbxName), 'VBOXGST');
+    H := 0; F := 0;
+    If DcLoadModule(LongInt(@VbxErr), 64, LongInt(@VbxName), LongInt(@H)) = 0 Then
+      If (DcQueryProcAddr(H, 1, 0, LongInt(@F)) = 0) And (F <> 0) Then
+      Begin
+        VbxPk[0] := 1;
+        If CallVb(F, LongInt(@VbxPk)) <> 0 Then VbxFn := F;
+      End;
+  End;
+  If VbxFn = -1 Then Exit;
+  VbxPk[0] := 3;
+  If CallVb(VbxFn, LongInt(@VbxPk)) = 0 Then Exit;
+  W := VbxPk[1] And Not 7; Hh := VbxPk[2]; B := VbxPk[3];
+  If (B <> 8) And (B <> 15) And (B <> 16) And (B <> 24) And (B <> 32) Then B := GBits;
+  If B < 8 Then B := 32;
+  If (W < 320) Or (Hh < 200) Or ((W = PmCurW) And (Hh = PmCurH) And (B = GBits)) Then Exit;
+  { memoire de la carte trop petite : moins de couleurs }
+  If WinSetScreenMode(W, Hh, B) = 0 Then
+    If WinSetScreenMode(W, Hh, 16) = 0 Then
+      If WinSetScreenMode(W, Hh, 8) = 0 Then Exit;
+  Dummy := WinBroadcastMsg(HWND_DESKTOP, WM_SYSVALUECHANGED, 20, 21, 0);
+End;
+
 Procedure PollInput(Q : LongInt);
 Begin
   If (QLockIn[Q] <> 0) Or (PhysInput = 0) Then Exit;
   If PlaybackInput(Q) Then Exit;
   KeyInput(Q);
   MouseInput(Q);
+  VBoxCheck;
 End;
 
 { Message suivant : postes et entrees, WM_PAINT, WM_TIMER ; Wait :
@@ -14902,6 +14989,7 @@ Var
   InitI : LongInt;
 
 BEGIN
+  VbxFn := 0; VbxNext := 0;
   HwBit := $80000000;
   DropCombo := -1; DropList := -1; DropFill := 0;
   GMode := 0;
