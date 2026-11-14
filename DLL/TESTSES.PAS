@@ -391,9 +391,10 @@ BEGIN
   WrW(LongInt(@Sd) + 6, 1);
   R := Dos32StartSession(LongInt(@Sd), LongInt(@A), LongInt(@Pid));
   SetSd(32, 1, 0);
-  WrW(LongInt(@Sd) + 30, 3);
+  { types 0 a 22 d'OS/2 2.x acceptes (3 : PM) ; 23 refuse }
+  WrW(LongInt(@Sd) + 30, 23);
   R2 := Dos32StartSession(LongInt(@Sd), LongInt(@A), LongInt(@Pid));
-  Check('TraceOpt et session PM refuses', (R = ERROR_SMG_INVALID_TRACE_OPTION) And (R2 = ERROR_SMG_INVALID_PROGRAM_TYPE));
+  Check('TraceOpt et type de session 23 refuses', (R = ERROR_SMG_INVALID_TRACE_OPTION) And (R2 = ERROR_SMG_INVALID_PROGRAM_TYPE));
   SetSd(50, 1, 0);
   WrW(LongInt(@Sd) + 40, $0100);
   R := Dos32StartSession(LongInt(@Sd), LongInt(@A), LongInt(@Pid));

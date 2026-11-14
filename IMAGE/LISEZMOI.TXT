@@ -8,7 +8,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
-              PMSPL.DLL, PMVIOP.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL,
+              PMSPL.DLL, PMVIOP.DLL, API16.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL,
               ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
@@ -37,7 +37,7 @@ SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
               RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL,
               PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL,
-              PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL et
+              PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL et
               CONFIG.SYS (copies
               faites par
               KERNEL\BUILD.sh).
@@ -136,6 +136,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\TESTSPL.PAS                     -> TESTSPL.EXE (essai de PMSPL.DLL)
   OS2PC DLL\PMVIOP.PAS                      -> PMVIOP.DLL (bouclier VIO : fenetres OS/2)
   OS2PC DLL\TESTVIOP.PAS                    -> TESTVIOP.EXE (essai de PMVIOP.DLL)
+  OS2PC DLL\API16.PAS                       -> API16.DLL (programmes 16 bits d'OS/2 1.x)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
 
 Demarrage
@@ -819,6 +820,21 @@ rendu au retour). Disquette A: (FAT12) en lecture. Turbo Pascal 7
 s'installe depuis ses disquettes (A:, INSTALL ; dans QEMU : -fda
 Disk01.img, puis change floppy0 Disk02.img...) ; TURBO, TPC, BGIDEMO
 et TPX (DPMI) fonctionnent. TESTVDM verifie la machine.
+
+Programmes d'OS/2 2.x (LX) et d'OS/2 1.x (NE 16 bits)
+------------------------------------------------------
+Le noyau charge les executables LX d'OS/2 2.x (objets, pages iterees,
+corrections, importations par ordinal ou par nom, ressources) et les
+programmes 16 bits NE d'OS/2 1.x : segments et selecteurs de la LDT,
+execution a l'anneau 3, appels du systeme par une porte d'appel vers
+API16.DLL (pointeurs 16:16 et structures de 16 bits traduits, puis
+fonctions 32 bits de DOSCALLS, VIOCALLS, KBDCALLS, NLS et MSG),
+segments (DosAllocSeg...), fils (DosCreateThread) et semaphores.
+Essai : l'installation d'IBM Works demarre depuis la disquette, son
+decompresseur 16 bits FPWTUPCK.EXE extrait les fichiers et
+l'utilitaire FPWIDLDS.EXE est lance ; les objets 16:16 des programmes
+LX (DosFlatToSel) et les classes du Workplace Shell (PMWP.DLL) restent
+a faire.
 
 LaunchPad (LAUNCHPD.EXE)
 ------------------------

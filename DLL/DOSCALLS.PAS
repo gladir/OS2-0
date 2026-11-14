@@ -6251,6 +6251,14 @@ Begin
       Flags := (PeekL(LongInt(@Scratch) + Lfa + $10) Shr 8) And 7;
       If (PeekL(LongInt(@Scratch) + Lfa + $10) And $8000) <> 0 Then Flags := Flags Or $10;
     End;
+  { programme ou DLL d'OS/2 1.x (NE) : drapeaux du programme (bits 8 a
+    10 : 1 plein ecran, 2 fenetre VIO, 3 PM ; 8000h DLL) }
+  If (Lfa > 0) And (Lfa + 24 < Got) Then
+    If (PeekW(LongInt(@Scratch) + Lfa) And $FFFF) = $454E Then
+    Begin
+      Flags := (PeekW(LongInt(@Scratch) + Lfa + $0C) Shr 8) And 7;
+      If (PeekW(LongInt(@Scratch) + Lfa + $0C) And $8000) <> 0 Then Flags := Flags Or $10;
+    End;
   PokeL(PFlags, Flags);
   DosQueryAppType := NO_ERROR;
 End;

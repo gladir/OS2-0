@@ -621,7 +621,7 @@ Begin
   Else If (FgBg <> 0) And (FgBg <> 1) Then R := ERROR_SMG_INVALID_START_MODE
   Else If Trace <> 0 Then R := ERROR_SMG_INVALID_TRACE_OPTION
   Else If (Inh <> 0) And (Inh <> 1) Then R := ERROR_SMG_INVALID_INHERIT_OPT
-  Else If (Typ <> 0) And (Typ <> 1) And (Typ <> 2) Then R := ERROR_SMG_INVALID_PROGRAM_TYPE
+  Else If (Typ < 0) Or (Typ > 22) Then R := ERROR_SMG_INVALID_PROGRAM_TYPE
   Else If (Ctl And Not $800F) <> 0 Then R := ERROR_SMG_INVALID_PGM_CONTROL;
   If R <> NO_ERROR Then
   Begin
@@ -664,7 +664,10 @@ Begin
   SBond[S] := False;
   SPid[S] := 0;
   SResult[S] := 0;
-  If Typ = 0 Then Typ := 1;
+  { types d'OS/2 2.x : 3 Presentation Manager (le programme rejoint la
+    session de PM), 4 a 7 DOS, 8 et plus (Windows...) : comme plein
+    ecran }
+  If (Typ = 0) Or (Typ > 2) Then Typ := 1;
   SType[S] := Typ;
   SCtl[S] := Ctl;
   SParentSw[S] := False;
