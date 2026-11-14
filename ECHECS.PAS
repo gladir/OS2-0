@@ -714,11 +714,7 @@ Begin
   Base := Ply * MaxMoves;
   N := GenMoves(Base, True);
   OrderMoves(Base, N);
-  { While et non For : OS2PC garde la borne d'un For dans une variable
-    statique, qu'un appel recursif ecraserait }
-  K := 0;
-  While K < N Do
-  Begin
+  For K := 0 To N - 1 Do
     If MakeLegal(MvList[Base + K]) Then
     Begin
       V := -Quiesce(-Beta, -Alpha);
@@ -730,8 +726,6 @@ Begin
       End;
       If V > Alpha Then Alpha := V;
     End;
-    Inc(K);
-  End;
   Quiesce := Alpha;
 End;
 
@@ -748,9 +742,7 @@ Begin
   N := GenMoves(Base, False);
   OrderMoves(Base, N);
   Legal := 0;
-  K := 0;
-  While K < N Do
-  Begin
+  For K := 0 To N - 1 Do
     If MakeLegal(MvList[Base + K]) Then
     Begin
       Inc(Legal);
@@ -763,8 +755,6 @@ Begin
       End;
       If V > Alpha Then Alpha := V;
     End;
-    Inc(K);
-  End;
   If Legal = 0 Then
   Begin
     If InCheck(Side) Then Search := -MateVal + Ply Else Search := 0;

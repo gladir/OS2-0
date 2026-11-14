@@ -680,7 +680,7 @@ Comme OS/2 Warp 3, le bureau a un dossier <b>Jeux</b> (Système OS/2 → Jeux) a
 <img width="640" height="480" alt="OS/2-0 : Échecs (l'ordinateur a répondu au premier coup)" src="IMAGE/ECHECS.png" />
 <img width="640" height="480" alt="OS/2-0 : Mahjongg Solitaire" src="IMAGE/MAHJONGG.png" />
 
-Écrire ces jeux a fait apparaître des limites d'OS2PC, contournées dans les sources : la borne d'une boucle <code>For</code> est gardée dans une variable statique (une fonction récursive comme la recherche alpha-bêta utilise donc <code>While</code>), et les tableaux à deux dimensions dans un enregistrement ou la copie d'enregistrements entiers ne sont pas fiables (les jeux utilisent des tableaux globaux à une dimension).
+Écrire ces jeux a fait apparaître des limites d'OS2PC. La borne d'une boucle <code>For</code> était gardée dans une variable statique : dans une fonction récursive (la recherche alpha-bêta des Échecs), un appel intérieur écrasait la borne de la boucle de l'appelant, qui ne se terminait plus. OS2PC la range maintenant dans le cadre de pile de la procédure (une case par <code>For</code> du corps, sous les variables locales) ; seul le programme principal garde une variable statique. Les tableaux à deux dimensions dans un enregistrement et la copie d'enregistrements entiers ne sont pas encore fiables (les jeux utilisent des tableaux globaux à une dimension).
 
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 
