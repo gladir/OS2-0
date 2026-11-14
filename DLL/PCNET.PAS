@@ -256,13 +256,13 @@ Begin
   Dummy0 := InW(Io + $14);
   Dummy0 := InL(Io + RST);
   WaitIo(200);
+  { adresse MAC : APROM, lue octet par octet avant le mode 32 bits }
+  For K := 0 To 5 Do Mac[K] := InB(Io + K);
   OutL(Io + RDP, 0);
   { arret ; structures de 32 bits (style 2) ; puce (CSR88/89) }
   SetCsr(0, 4);
   SetBcr(20, (Bcr(20) And Not $FF) Or 2);
   Chip := ((Csr(89) Shl 16) Or Csr(88)) Shr 12 And $FFFF;
-  { adresse MAC : APROM }
-  For K := 0 To 5 Do Mac[K] := InB(Io + K);
   { memoire : bloc d'initialisation, anneaux, tampons }
   If MemBlk = 0 Then MemBlk := HeapAlloc(2, 8, 256 + 32 + (NRX + NTX) * 16 + (NRX + NTX) * BUFSZ);
   If MemBlk = 0 Then Exit;

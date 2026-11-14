@@ -376,7 +376,7 @@ End;
 Function PciClass(Cls : LongInt; Var Cat : LongInt) : String;
 Var B, S : LongInt;
 Begin
-  B := (Cls Shr 16) And 255; S := (Cls Shr 8) And 255;
+  B := (Cls Shr 24) And 255; S := (Cls Shr 16) And 255;
   Cat := 9;
   Case B Of
     1 :
@@ -423,7 +423,7 @@ End;
 
 { ressources : barres d'adresses et IRQ }
 Function PciRes(A, Id : LongInt) : String;
-Var K, B, S, Irq : LongInt;
+Var K, B, Irq : LongInt; S : String;
 Begin
   S := 'PCI ' + HexN(Id And $FFFF, 4) + ':' + HexN((Id Shr 16) And $FFFF, 4) + ', bus ' + IStr((A Shr 16) And 255) +
        ' appareil ' + IStr((A Shr 11) And 31) + ' fonction ' + IStr((A Shr 8) And 7);
@@ -461,7 +461,7 @@ Begin
             Name := PciName(Id, Cc);
             If Name = '' Then Name := Cn;
             Drv := 'Aucun pilote'; Info := ''; Ok := 0;
-            Cc := (Cls Shr 16) And 255;
+            Cc := (Cls Shr 24) And 255;
             If (Id And $FFFF) = $80EE Then IsVBox := 1;
             If Id = $CAFE80EE Then
             Begin
@@ -513,7 +513,7 @@ Begin
                 Ok := 1;
               End;
             End
-            Else If (Cc = 1) And ((Cls Shr 8 And 255) = 1) Then
+            Else If (Cc = 1) And (((Cls Shr 16) And 255) = 1) Then
             Begin
               Drv := 'Pilote IDE du noyau (OS2KRNL), HPFS.IFS';
               Info := 'Disques durs et CD-ROM ATAPI en mode PIO';
@@ -727,7 +727,7 @@ Begin
       If K <= 1 Then K := N + 1;
     End;
     TextT(X, Yt + Lines * 16, Copy(S, 1, K - 1), Fg, CLR_PALEGRAY);
-    Delete(S, 1, K);
+    S := Copy(S, K + 1, 255);
     Inc(Lines);
   End;
 End;
@@ -753,7 +753,7 @@ Begin
       If D < 0 Then
       Begin
         CatIcon(-1 - D, 8, Yt);
-        TextT(28, Yt, CatName[-1 - D], CLR_DARKBLUE, CLR_WHITE);
+        TextT(28, Yt, CatName(-1 - D), CLR_DARKBLUE, CLR_WHITE);
       End
       Else
       Begin
@@ -789,7 +789,7 @@ Begin
     WrapText(X, Yt, N, DName[D], CLR_DARKBLUE, L);
     Yt := Yt + L * 16 + 8;
     TextT(X, Yt, 'Categorie :', CLR_BLACK, CLR_PALEGRAY);
-    TextT(X + 96, Yt, CatName[DCat[D]], CLR_DARKBLUE, CLR_PALEGRAY);
+    TextT(X + 96, Yt, CatName(DCat[D]), CLR_DARKBLUE, CLR_PALEGRAY);
     Yt := Yt + 24;
     TextT(X, Yt, 'Ressources :', CLR_BLACK, CLR_PALEGRAY);
     WrapText(X, Yt + 16, N, DRes[D], CLR_DARKBLUE, L);
