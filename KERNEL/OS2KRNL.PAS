@@ -2125,6 +2125,16 @@ Type
     Count  : LongInt;       { nombre de secteurs }
     Mem    : LongInt;       { disque virtuel : adresse en memoire }
     PType  : LongInt;       { type de partition (07h = HPFS/IFS) }
+    Disk   : LongInt;       { disque dur (table Disks), -1 : disque virtuel }
+    Seen   : Boolean;       { deja presente aux pilotes IFS }
+  End;
+
+  { disque dur IDE (KrnDiskCtl : partitionnement et installation) }
+  TDisk = Record
+    Base, Ctrl : LongInt;
+    Slave      : Boolean;
+    Sectors    : LongInt;
+    Model      : String[40];
   End;
 
   { pilote IFS charge (IFS= de CONFIG.SYS) : points d'entree FS_* }
@@ -2160,6 +2170,14 @@ Var
   IfsLines : Array[0..MaxIfs - 1] Of String;   { lignes IFS= de CONFIG.SYS }
   RamDiskKb : LongInt;                           { /RAMDISK:n de la ligne IFS= }
   NIfsLines : LongInt;
+  Disks  : Array[0..3] Of TDisk;
+  NDisk  : LongInt;
+  { amorcage depuis un disque dur (MBR d'OS/2-0, zone d'amorcage) : C:
+    est la partition HPFS active ; OS2LDR a charge HPFS.IFS en memoire }
+  HdBoot      : Boolean;
+  BootPartLba : LongInt;
+  BootIfsBuf  : LongInt;
+  BootIfsSize : LongInt;
 
 Function HdWait(Base : LongInt) : LongInt;
 Var N, St : LongInt;
@@ -2222,20 +2240,20 @@ Begin
   HdIdentify := R;
 End;
 
-{ Lire ou ecrire N secteurs (1 a 128) a partir de Lba }
-Function HdIO(B, Lba, N, Addr : LongInt; Wr : Boolean) : Boolean;
-Var St, I, X, A, Base, Tries : LongInt; Ok : Boolean;
+{ Lire ou ecrire N secteurs (1 a 128) a partir de Lba (disque IDE aux
+  ports Base et Ctrl) }
+Function HdIOx(Base, Ctrl : LongInt; Slave : Boolean; Lba, N, Addr : LongInt; Wr : Boolean) : Boolean;
+Var St, I, X, A, Tries : LongInt; Ok : Boolean;
 Begin
-  Base := Blks[B].Base;
   Ok := False;
   Tries := 0;
   While (Not Ok) And (Tries < 3) Do
   Begin
     Inc(Tries);
     Ok := True;
-    If Blks[B].Slave Then Port[Base + 6] := $F0 Or ((Lba Shr 24) And $0F)
+    If Slave Then Port[Base + 6] := $F0 Or ((Lba Shr 24) And $0F)
     Else Port[Base + 6] := $E0 Or ((Lba Shr 24) And $0F);
-    For I := 1 To 4 Do X := Port[Blks[B].Ctrl];
+    For I := 1 To 4 Do X := Port[Ctrl];
     If HdWait(Base) < 0 Then Ok := False;
     If Ok Then
     Begin
@@ -2248,7 +2266,7 @@ Begin
       I := 0;
       While Ok And (I < N) Do
       Begin
-        For X := 1 To 4 Do St := Port[Blks[B].Ctrl];
+        For X := 1 To 4 Do St := Port[Ctrl];
         St := HdWait(Base);
         If (St < 0) Or ((St And 1) <> 0) Or ((St And 8) = 0) Then Ok := False
         Else
@@ -2290,7 +2308,12 @@ Begin
       End;
     End;
   End;
-  HdIO := Ok;
+  HdIOx := Ok;
+End;
+
+Function HdIO(B, Lba, N, Addr : LongInt; Wr : Boolean) : Boolean;
+Begin
+  HdIO := HdIOx(Blks[B].Base, Blks[B].Ctrl, Blks[B].Slave, Lba, N, Addr, Wr);
 End;
 
 Function NewBlk : LongInt;
@@ -2304,6 +2327,7 @@ Begin
     Blks[R].Used := True;
     Blks[R].Kind := 0; Blks[R].Base := 0; Blks[R].Ctrl := 0; Blks[R].Slave := False;
     Blks[R].Start := 0; Blks[R].Count := 0; Blks[R].Mem := 0; Blks[R].PType := 0;
+    Blks[R].Disk := -1; Blks[R].Seen := False;
   End;
   NewBlk := R;
 End;
@@ -2311,13 +2335,14 @@ End;
 { Volumes d'un disque : partitions principales de type 07h de la table
   du secteur 0, ou disque entier s'il commence par un secteur d'amorce
   HPFS (sans table de partitions) }
-Procedure ScanDisk(Base, Ctrl : LongInt; Slave : Boolean; Sectors : LongInt);
-Var B, I, E, T, S, N : LongInt; Found : Boolean;
+Procedure ScanDisk(Dk : LongInt);
+Var B, I, E, T, S, N, Base, Ctrl, Sectors : LongInt; Found, Slave : Boolean;
 Begin
+  Base := Disks[Dk].Base; Ctrl := Disks[Dk].Ctrl; Slave := Disks[Dk].Slave; Sectors := Disks[Dk].Sectors;
   B := NewBlk;
   If B < 0 Then Exit;
   Blks[B].Kind := BlkAta; Blks[B].Base := Base; Blks[B].Ctrl := Ctrl; Blks[B].Slave := Slave;
-  Blks[B].Start := 0; Blks[B].Count := Sectors;
+  Blks[B].Start := 0; Blks[B].Count := Sectors; Blks[B].Disk := Dk;
   If Not HdIO(B, 0, 1, LongInt(@HdBuf), False) Then
   Begin
     Dec(NBlk);
@@ -2344,7 +2369,7 @@ Begin
         If B >= 0 Then
         Begin
           Blks[B].Kind := BlkAta; Blks[B].Base := Base; Blks[B].Ctrl := Ctrl; Blks[B].Slave := Slave;
-          Blks[B].Start := S; Blks[B].Count := N; Blks[B].PType := T;
+          Blks[B].Start := S; Blks[B].Count := N; Blks[B].PType := T; Blks[B].Disk := Dk;
           Found := True;
         End;
       End;
@@ -2357,10 +2382,12 @@ Begin
          IntStr(Sectors Div 2048) + ' Mo, volume(s) de type 07h.');
 End;
 
-{ Chercher les disques durs IDE (sauf le lecteur de CD-ROM) }
+{ Chercher les disques durs IDE (sauf le lecteur de CD-ROM) : table des
+  disques (KrnDiskCtl) et volumes de type 07h }
 Procedure HdInit;
-Var I, Base, Ctrl, Sectors : LongInt; Slave : Boolean;
+Var I, K, Base, Ctrl, Sectors : LongInt; Slave : Boolean; M : String;
 Begin
+  If NDisk > 0 Then Exit;
   For I := 0 To 3 Do
   Begin
     If I < 2 Then
@@ -2372,8 +2399,18 @@ Begin
       Base := $170; Ctrl := $376;
     End;
     Slave := Odd(I);
-    If Not ((Base = AtaBase) And (Slave = AtaSlave)) Then
-      If HdIdentify(Base, Ctrl, Slave, Sectors) Then ScanDisk(Base, Ctrl, Slave, Sectors);
+    If Not (AtaFound And (Base = AtaBase) And (Slave = AtaSlave)) Then
+      If HdIdentify(Base, Ctrl, Slave, Sectors) And (NDisk < 4) Then
+      Begin
+        { modele : mots 27 a 46 d'IDENTIFY (octets inverses) }
+        M := '';
+        For K := 0 To 19 Do M := M + Chr(HdBuf[54 + K * 2 + 1]) + Chr(HdBuf[54 + K * 2]);
+        While (Length(M) > 0) And ((M[Length(M)] = ' ') Or (M[Length(M)] = #0)) Do Delete(M, Length(M), 1);
+        Disks[NDisk].Base := Base; Disks[NDisk].Ctrl := Ctrl; Disks[NDisk].Slave := Slave;
+        Disks[NDisk].Sectors := Sectors; Disks[NDisk].Model := M;
+        Inc(NDisk);
+        ScanDisk(NDisk - 1);
+      End;
   End;
   { le lecteur de CD-ROM redevient le peripherique selectionne }
   AtaSelect;
@@ -2389,7 +2426,7 @@ Begin
   B := NewBlk;
   If B < 0 Then Exit;
   PhysTop := PhysTop - Size;
-  Blks[B].Kind := BlkRam;
+  Blks[B].Kind := BlkRam; Blks[B].Disk := -1;
   Blks[B].Mem := PhysTop;
   Blks[B].Count := Size Div 512;
   Blks[B].PType := 7;
@@ -2402,7 +2439,7 @@ Function BlkIO(B, Op, Sec, N, Addr : LongInt) : LongInt;
 Var R, K, Done : LongInt;
 Begin
   R := 0;
-  If (B < 0) Or (B >= NBlk) Then R := 21
+  If (B < 0) Or (B >= NBlk) Or (Blks[B].Kind = 0) Then R := 21
   Else If (Sec < 0) Or (N < 0) Or (Sec + N > Blks[B].Count) Then R := 27   { secteur introuvable }
   Else If Blks[B].Kind = BlkRam Then
   Begin
@@ -2782,7 +2819,8 @@ Begin
   If (Length(Path) >= 2) And (Path[2] = ':') Then
   Begin
     D := Ord(UpCase(Path[1])) - 65;
-    If (D >= 3) And (D <= 25) Then
+    { C: aussi, quand le systeme a demarre d'un disque dur (HPFS) }
+    If (D >= 2) And (D <= 25) Then
       If IfsVols[D].Mounted Then IfsDrive := D;
   End;
 End;
@@ -5015,15 +5053,30 @@ Begin
   If M >= 0 Then Exit;
   LoadModule := -1;
   LastError := 126;                        { ERROR_MOD_NOT_FOUND }
-  Path := FindLibrary(Name);
-  If Path = '' Then Exit;
+  Buf := 0;
+  If HdBoot And (Not IfsVols[2].Mounted) And (BootIfsSize > 0) And (UpStr(BaseName(Trim(Name))) = 'HPFS.IFS') Then
+  Begin
+    { demarrage d'un disque dur : le pilote de C: a ete charge en memoire
+      par OS2LDR (zone d'amorcage), C: n'est pas encore monte }
+    Path := 'C:\HPFS.IFS';
+    Size := BootIfsSize;
+    Buf := KAlloc(Size + 1);
+    If Buf = 0 Then Exit;
+    MoveMem(BootIfsBuf, Buf, Size);
+  End
+  Else
+  Begin
+    Path := FindLibrary(Name);
+    If Path = '' Then Exit;
+  End;
   M := NewModSlot;
   If M < 0 Then
   Begin
+    If Buf <> 0 Then KFree(Buf);
     LastError := 8;                        { ERROR_NOT_ENOUGH_MEMORY }
     Exit;
   End;
-  Buf := ReadWholeFile(Path, Size);
+  If Buf = 0 Then Buf := ReadWholeFile(Path, Size);
   If Buf = 0 Then Exit;
   LastError := ErrBadFormat;
   Pe := Buf + MemL[0:Buf + $3C];
@@ -6639,6 +6692,24 @@ Begin
   KFree(Buf);
 End;
 
+{ /RAMDISK:n : disque virtuel de n Ko (propre a OS/2-0) }
+Procedure ParseRamDisk(Parm : String);
+Var P, A : LongInt;
+Begin
+  P := Pos('/RAMDISK:', UpStr(Parm));
+  If P > 0 Then
+  Begin
+    A := 0;
+    P := P + 9;
+    While (P <= Length(Parm)) And (Parm[P] >= '0') And (Parm[P] <= '9') Do
+    Begin
+      A := A * 10 + Ord(Parm[P]) - 48;
+      Inc(P);
+    End;
+    RamDiskKb := A;
+  End;
+End;
+
 { Charger un pilote IFS (ligne IFS= : chemin et parametres) }
 Procedure LoadIfs(Line : String);
 Var P, M, I, A, R : LongInt; Path, Parm : String;
@@ -6661,6 +6732,14 @@ Begin
          IntStr(LastError) + ').');
     Exit;
   End;
+  { pilote deja charge (celui de C: au demarrage d'un disque dur) : seul
+    /RAMDISK:n est pris en compte }
+  For I := 0 To NIfs - 1 Do
+    If Ifss[I].Module = M Then
+    Begin
+      ParseRamDisk(Parm);
+      Exit;
+    End;
   I := NIfs;
   Ifss[I].Used := True;
   Ifss[I].Module := M;
@@ -6706,111 +6785,324 @@ Begin
   End;
   Inc(NIfs);
   KLog(Mods^[M].Name + ' (' + Ifss[I].Name + ') charge en ' + HexStr(Mods^[M].Base, 8) + 'h.');
-  { /RAMDISK:n : disque virtuel de n Ko (propre a OS/2-0) }
-  P := Pos('/RAMDISK:', UpStr(Parm));
-  If P > 0 Then
+  ParseRamDisk(Parm);
+End;
+
+{ Presenter le peripherique bloc B aux pilotes IFS et, s'il est reconnu,
+  lui donner la lettre D (2 = C:, 3 = D:...). Fmt : formater le volume
+  (FS_MOUNT 3 puis FS_FSCTL 8000h, nom Lbl) ; un disque virtuel non
+  reconnu est toujours formate par le premier pilote }
+Function MountBlk(B, D : LongInt; Fmt : Boolean; Lbl : String) : Boolean;
+Var I, R, V, A : LongInt; Ok : Boolean; S1 : String;
+Begin
+  MountBlk := False;
+  If (D < 2) Or (D > 25) Then Exit;
+  IfsVols[D].Blk := B;
+  IfsVols[D].Mounted := False;
+  V := LongInt(@IfsVols[D].Vpfsi);
+  FillMem(V, 44, 0);
+  FillMem(LongInt(@IfsVols[D].Vpfsd), 64, 0);
+  MemL[0:V + 4] := B;
+  MemL[0:V + 8] := 512;
+  MemL[0:V + 12] := Blks[B].Count;
+  MemL[0:V + 16] := 63;
+  MemL[0:V + 20] := 16;
+  MemL[0:V + 36] := D;
+  MemL[0:V + 40] := B;
+  Ok := False;
+  If (Not Fmt) And (BlkIO(B, 0, 0, 1, LongInt(@HdBuf)) = 0) Then
+    For I := 0 To NIfs - 1 Do
+      If Not Ok Then
+      Begin
+        IfsArgs4(0, V, LongInt(@IfsVols[D].Vpfsd), D);
+        IfsArg[4] := LongInt(@HdBuf);
+        If IfsCall(Ifss[I].FMount, 5) = 0 Then
+        Begin
+          Ok := True;
+          IfsVols[D].Ifs := I;
+        End;
+      End;
+  If (Not Ok) And (Fmt Or (Blks[B].Kind = BlkRam)) And (NIfs > 0) And (Ifss[0].FFsCtl <> 0) Then
   Begin
-    A := 0;
-    P := P + 9;
-    While (P <= Length(Parm)) And (Parm[P] >= '0') And (Parm[P] <= '9') Do
+    IfsArgs4(3, V, LongInt(@IfsVols[D].Vpfsd), D);
+    IfsArg[4] := LongInt(@HdBuf);
+    IfsCall(Ifss[0].FMount, 5);
+    If Lbl = '' Then
     Begin
-      A := A * 10 + Ord(Parm[P]) - 48;
-      Inc(P);
+      If Blks[B].Kind = BlkRam Then Lbl := 'RAMDISK' Else Lbl := 'OS2';
     End;
-    RamDiskKb := A;
+    PutPStr(LongInt(@IfsName2), Lbl, 12);
+    A := LongInt(@IfsInfo);
+    MemL[0:A] := D;
+    MemL[0:A + 4] := LongInt(@IfsName2);
+    IfsArgs4(0, 3, $8000, A);
+    IfsArgs8(8, LongInt(@IfsCnt), 0, 0);
+    IfsArg[8] := LongInt(@IfsCnt);
+    R := IfsCall(Ifss[0].FFsCtl, 9);
+    If R = 0 Then
+    Begin
+      Ok := True;
+      IfsVols[D].Ifs := 0;
+    End
+    Else
+    Begin
+      KLog('SYS1719: formatage de ' + Chr(65 + D) + ': impossible (erreur ' + IntStr(R) + ').');
+      IfsArgs4(2, V, LongInt(@IfsVols[D].Vpfsd), D);
+      IfsArg[4] := 0;
+      IfsCall(Ifss[0].FMount, 5);
+    End;
+  End;
+  If Ok And (Ifss[IfsVols[D].Ifs].FFsCtl <> 0) And Not Fmt Then
+  Begin
+    { volume mal ferme et lettre citee par /AUTOCHECK : verification
+      et correction (FS_FSCTL 8002h puis 8001h) }
+    A := LongInt(@IfsInfo);
+    MemL[0:A] := D;
+    FillMem(A + 64, 40, 0);
+    IfsArgs4(0, 3, $8002, A);
+    IfsArgs8(4, 0, A + 64, 40);
+    IfsArg[8] := LongInt(@IfsCnt);
+    If (IfsCall(Ifss[IfsVols[D].Ifs].FFsCtl, 9) = 0) And (MemL[0:A + 96] <> 0) And
+       (MemL[0:A + 100] <> 0) Then
+    Begin
+      MemL[0:A + 4] := 1;
+      IfsArgs4(0, 3, $8001, A);
+      IfsArgs8(8, 0, A + 64, 36);
+      IfsArg[8] := LongInt(@IfsCnt);
+      If IfsCall(Ifss[IfsVols[D].Ifs].FFsCtl, 9) = 0 Then
+        KLog('Verification automatique de ' + Chr(65 + D) + ': (volume mal ferme) : ' +
+             IntStr(MemL[0:A + 64]) + ' erreur(s), ' + IntStr(MemL[0:A + 68]) +
+             ' secteur(s) perdu(s) recupere(s).');
+    End;
+  End;
+  If Ok Then
+  Begin
+    IfsVols[D].Mounted := True;
+    If Blks[B].Kind = BlkRam Then S1 := 'disque virtuel' Else S1 := 'disque IDE';
+    KLog('Unite ' + Chr(65 + D) + ': ' + Ifss[IfsVols[D].Ifs].Name + ' (' + S1 + ', ' +
+         IntStr(Blks[B].Count Div 2) + ' Ko) : ' + PStr(V + 24));
+  End
+  Else
+    IfsVols[D].Blk := -1;
+  MountBlk := Ok;
+End;
+
+{ premiere lettre libre a partir de D: }
+Function FreeLetter : LongInt;
+Var D : LongInt;
+Begin
+  D := 3;
+  While (D <= 25) And IfsVols[D].Mounted Do Inc(D);
+  FreeLetter := D;
+End;
+
+{ Presenter aux pilotes IFS les peripheriques bloc qui ne l'ont pas encore
+  ete et donner une lettre d'unite (D: et suivantes) aux volumes reconnus ;
+  au demarrage d'un disque dur, la partition d'amorcage devient C: }
+Procedure MountIfsVolumes;
+Var B, D : LongInt;
+Begin
+  For B := 0 To NBlk - 1 Do
+    If (Blks[B].Kind <> 0) And Not Blks[B].Seen Then
+    Begin
+      Blks[B].Seen := True;
+      If HdBoot And (Not IfsVols[2].Mounted) And (Blks[B].Kind = BlkAta) And (Blks[B].Start = BootPartLba) Then D := 2
+      Else D := FreeLetter;
+      If D <= 25 Then MountBlk(B, D, False, '');
+    End;
+End;
+
+{ Lettre de la partition qui commence au secteur Start du disque Dk (-1) }
+Function PartLetter(Dk, Start : LongInt) : LongInt;
+Var D : LongInt;
+Begin
+  PartLetter := -1;
+  For D := 2 To 25 Do
+    If IfsVols[D].Mounted Then
+      If (Blks[IfsVols[D].Blk].Kind = BlkAta) And (Blks[IfsVols[D].Blk].Disk = Dk) And
+         (Blks[IfsVols[D].Blk].Start = Start) Then PartLetter := D;
+End;
+
+{ Peripherique bloc de la partition (cree au besoin) }
+Function PartBlk(Dk, Start, Count : LongInt) : LongInt;
+Var B, K : LongInt;
+Begin
+  PartBlk := -1;
+  For B := 0 To NBlk - 1 Do
+    If (Blks[B].Kind = BlkAta) And (Blks[B].Disk = Dk) And (Blks[B].Start = Start) Then
+    Begin
+      Blks[B].Count := Count;
+      PartBlk := B;
+      Exit;
+    End;
+  B := NewBlk;
+  If B < 0 Then
+  Begin
+    { reprendre une entree liberee (partition demontee) }
+    For K := NBlk - 1 DownTo 0 Do
+      If Blks[K].Kind = 0 Then B := K;
+    If B < 0 Then Exit;
+  End;
+  Blks[B].Used := True;
+  Blks[B].Kind := BlkAta; Blks[B].Base := Disks[Dk].Base; Blks[B].Ctrl := Disks[Dk].Ctrl;
+  Blks[B].Slave := Disks[Dk].Slave; Blks[B].Start := Start; Blks[B].Count := Count;
+  Blks[B].PType := 7; Blks[B].Disk := Dk; Blks[B].Seen := True; Blks[B].Mem := 0;
+  PartBlk := B;
+End;
+
+{ Demonter l'unite D (vidage des tampons du pilote) }
+Procedure Unmount(D : LongInt);
+Var V : LongInt;
+Begin
+  If Not IfsVols[D].Mounted Then Exit;
+  IfsArg[0] := D; IfsArg[1] := 0;
+  IfsCall(Ifss[IfsVols[D].Ifs].FFlush, 2);
+  V := LongInt(@IfsVols[D].Vpfsi);
+  IfsArgs4(2, V, LongInt(@IfsVols[D].Vpfsd), D);
+  IfsArg[4] := 0;
+  IfsCall(Ifss[IfsVols[D].Ifs].FMount, 5);
+  IfsVols[D].Mounted := False;
+End;
+
+{ Vider les tampons de tous les volumes }
+Procedure FlushAllVolumes;
+Var D : LongInt;
+Begin
+  For D := 2 To 25 Do
+    If IfsVols[D].Mounted Then
+    Begin
+      IfsArg[0] := D; IfsArg[1] := 0;
+      IfsCall(Ifss[IfsVols[D].Ifs].FFlush, 2);
+    End;
+End;
+
+{ KrnDiskCtl(op, p1, p2) : disques durs (INSTALL.EXE, DOSCALLS.DLL)
+    0 nombre de disques durs IDE
+    1 description du disque p1 dans p2 : secteurs, ports, esclave (0/1),
+      modele ASCIIZ (41 octets en +12) ; rend 1 s'il existe
+    2 lire, 3 ecrire des secteurs du disque p1 : p2 = LBA, nombre, adresse
+      (rend 0, ou le code d'erreur)
+    4 lettre (2 = C:) de la partition du disque p1 qui commence au
+      secteur p2 (-1 : non montee)
+    5 formater (HPFS) la partition du disque p1 : p2 = debut, nombre de
+      secteurs, nom de volume ASCIIZ (ou 0), lettre en retour (+12) ; la
+      partition est montee (rend 0, ou le code d'erreur)
+    6 demonter la partition du disque p1 qui commence au secteur p2
+    7 monter la partition du disque p1 : p2 = debut, nombre, lettre en
+      retour (+8) ; rend 0 si un pilote IFS la reconnait
+    8 vider les tampons de tous les volumes
+    9 redemarrer l'ordinateur (apres vidage)
+   10 demarrage : rend 1 si le systeme a demarre d'un disque dur (p2 :
+      debut de la partition d'amorcage) }
+Function KrnDiskCtl(Op, P1, P2 : LongInt) : LongInt;
+Var R, B, D, N, Done, K : LongInt;
+Begin
+  KrnDiskCtl := 0;
+  Case Op Of
+    0 : KrnDiskCtl := NDisk;
+    1 : If (P1 >= 0) And (P1 < NDisk) And (P2 <> 0) Then
+        Begin
+          MemL[0:P2] := Disks[P1].Sectors; MemL[0:P2 + 4] := Disks[P1].Base;
+          MemL[0:P2 + 8] := Ord(Disks[P1].Slave);
+          PutPStr(P2 + 12, Disks[P1].Model, 41);
+          KrnDiskCtl := 1;
+        End;
+    2, 3 :
+        If (P1 < 0) Or (P1 >= NDisk) Or (P2 = 0) Then KrnDiskCtl := 15
+        Else
+        Begin
+          N := MemL[0:P2 + 4];
+          If (MemL[0:P2] < 0) Or (N < 0) Or (MemL[0:P2] + N > Disks[P1].Sectors) Then KrnDiskCtl := 27
+          Else
+          Begin
+            R := 0; Done := 0;
+            While (R = 0) And (Done < N) Do
+            Begin
+              K := N - Done;
+              If K > 128 Then K := 128;
+              If Not HdIOx(Disks[P1].Base, Disks[P1].Ctrl, Disks[P1].Slave, MemL[0:P2] + Done, K,
+                           MemL[0:P2 + 8] + Done * 512, Op = 3) Then
+              Begin
+                If Op = 3 Then R := 29 Else R := 30;
+              End
+              Else Done := Done + K;
+            End;
+            AtaSelect;
+            KrnDiskCtl := R;
+          End;
+        End;
+    4 : KrnDiskCtl := PartLetter(P1, P2);
+    5 : If (P1 < 0) Or (P1 >= NDisk) Or (P2 = 0) Or (NIfs = 0) Then KrnDiskCtl := 15
+        Else
+        Begin
+          D := PartLetter(P1, MemL[0:P2]);
+          If D = 2 Then KrnDiskCtl := 5
+          Else
+          Begin
+            If D >= 0 Then Unmount(D) Else D := FreeLetter;
+            B := PartBlk(P1, MemL[0:P2], MemL[0:P2 + 4]);
+            If (B < 0) Or (D > 25) Then KrnDiskCtl := 8
+            Else If MountBlk(B, D, True, PStr(MemL[0:P2 + 8])) Then MemL[0:P2 + 12] := D
+            Else KrnDiskCtl := 31;
+          End;
+        End;
+    6 : Begin
+          D := PartLetter(P1, P2);
+          If D = 2 Then KrnDiskCtl := 5
+          Else If D > 2 Then
+          Begin
+            Unmount(D);
+            B := IfsVols[D].Blk;
+            If (B >= 0) And (B < NBlk) Then Blks[B].Kind := 0;
+          End;
+        End;
+    7 : If (P1 < 0) Or (P1 >= NDisk) Or (P2 = 0) Or (NIfs = 0) Then KrnDiskCtl := 15
+        Else
+        Begin
+          D := PartLetter(P1, MemL[0:P2]);
+          If D < 0 Then
+          Begin
+            D := FreeLetter;
+            B := PartBlk(P1, MemL[0:P2], MemL[0:P2 + 4]);
+            If (B < 0) Or (D > 25) Then KrnDiskCtl := 8
+            Else If Not MountBlk(B, D, False, '') Then KrnDiskCtl := 31;
+          End;
+          If PartLetter(P1, MemL[0:P2]) >= 0 Then MemL[0:P2 + 8] := PartLetter(P1, MemL[0:P2]);
+        End;
+    8 : FlushAllVolumes;
+    9 : Begin
+          FlushAllVolumes;
+          asm
+            cli
+          end;
+          K := 0;
+          While ((Port[$64] And 2) <> 0) And (K < 100000) Do Inc(K);
+          Port[$64] := $FE;
+          K := 0;
+          While K < 10000000 Do Inc(K);
+          { remise a zero par le processeur : IDT vide puis interruption }
+          asm
+            push 0
+            push 0
+            lidt [esp]
+            int 3
+          end;
+        End;
+   10 : Begin
+          If P2 <> 0 Then MemL[0:P2] := BootPartLba;
+          KrnDiskCtl := Ord(HdBoot);
+        End;
   End;
 End;
 
-{ Presenter chaque peripheriques bloc aux pilotes IFS et donner une lettre
-  d'unite (D: et suivantes) aux volumes reconnus ; un disque virtuel non
-  reconnu est formate par le premier pilote (FS_FSCTL 8000h) }
-Procedure MountIfsVolumes;
-Var B, D, I, R, V, A : LongInt; Ok : Boolean; S1 : String;
+{ SetEnvironmentVariableA(nom, valeur) : environnement du systeme (les
+  programmes lances ensuite le recoivent) ; valeur 0 ou vide : supprimer }
+Function SetEnvironmentVariableA(PName, PValue : LongInt) : LongInt;
 Begin
-  D := 3;
-  For B := 0 To NBlk - 1 Do
-    If D <= 25 Then
-    Begin
-      IfsVols[D].Blk := B;
-      IfsVols[D].Mounted := False;
-      V := LongInt(@IfsVols[D].Vpfsi);
-      FillMem(V, 44, 0);
-      FillMem(LongInt(@IfsVols[D].Vpfsd), 64, 0);
-      MemL[0:V + 4] := B;
-      MemL[0:V + 8] := 512;
-      MemL[0:V + 12] := Blks[B].Count;
-      MemL[0:V + 16] := 63;
-      MemL[0:V + 20] := 16;
-      MemL[0:V + 36] := D;
-      MemL[0:V + 40] := B;
-      Ok := False;
-      If BlkIO(B, 0, 0, 1, LongInt(@HdBuf)) = 0 Then
-        For I := 0 To NIfs - 1 Do
-          If Not Ok Then
-          Begin
-            IfsArgs4(0, V, LongInt(@IfsVols[D].Vpfsd), D);
-            IfsArg[4] := LongInt(@HdBuf);
-            If IfsCall(Ifss[I].FMount, 5) = 0 Then
-            Begin
-              Ok := True;
-              IfsVols[D].Ifs := I;
-            End;
-          End;
-      If (Not Ok) And (Blks[B].Kind = BlkRam) And (NIfs > 0) And (Ifss[0].FFsCtl <> 0) Then
-      Begin
-        IfsArgs4(3, V, LongInt(@IfsVols[D].Vpfsd), D);
-        IfsArg[4] := LongInt(@HdBuf);
-        IfsCall(Ifss[0].FMount, 5);
-        PutPStr(LongInt(@IfsName2), 'RAMDISK', 12);
-        A := LongInt(@IfsInfo);
-        MemL[0:A] := D;
-        MemL[0:A + 4] := LongInt(@IfsName2);
-        IfsArgs4(0, 3, $8000, A);
-        IfsArgs8(8, LongInt(@IfsCnt), 0, 0);
-        IfsArg[8] := LongInt(@IfsCnt);
-        R := IfsCall(Ifss[0].FFsCtl, 9);
-        If R = 0 Then
-        Begin
-          Ok := True;
-          IfsVols[D].Ifs := 0;
-        End
-        Else
-          KLog('SYS1719: formatage du disque virtuel impossible (erreur ' + IntStr(R) + ').');
-      End;
-      If Ok And (Ifss[IfsVols[D].Ifs].FFsCtl <> 0) Then
-      Begin
-        { volume mal ferme et lettre citee par /AUTOCHECK : verification
-          et correction (FS_FSCTL 8002h puis 8001h) }
-        A := LongInt(@IfsInfo);
-        MemL[0:A] := D;
-        FillMem(A + 64, 40, 0);
-        IfsArgs4(0, 3, $8002, A);
-        IfsArgs8(4, 0, A + 64, 40);
-        IfsArg[8] := LongInt(@IfsCnt);
-        If (IfsCall(Ifss[IfsVols[D].Ifs].FFsCtl, 9) = 0) And (MemL[0:A + 96] <> 0) And
-           (MemL[0:A + 100] <> 0) Then
-        Begin
-          MemL[0:A + 4] := 1;
-          IfsArgs4(0, 3, $8001, A);
-          IfsArgs8(8, 0, A + 64, 36);
-          IfsArg[8] := LongInt(@IfsCnt);
-          If IfsCall(Ifss[IfsVols[D].Ifs].FFsCtl, 9) = 0 Then
-            KLog('Verification automatique de ' + Chr(65 + D) + ': (volume mal ferme) : ' +
-                 IntStr(MemL[0:A + 64]) + ' erreur(s), ' + IntStr(MemL[0:A + 68]) +
-                 ' secteur(s) perdu(s) recupere(s).');
-        End;
-      End;
-      If Ok Then
-      Begin
-        IfsVols[D].Mounted := True;
-        If Blks[B].Kind = BlkRam Then S1 := 'disque virtuel' Else S1 := 'disque IDE';
-        KLog('Unite ' + Chr(65 + D) + ': ' + Ifss[IfsVols[D].Ifs].Name + ' (' + S1 + ', ' +
-             IntStr(Blks[B].Count Div 2) + ' Ko) : ' + PStr(V + 24));
-        Inc(D);
-      End
-      Else
-        IfsVols[D].Blk := -1;
-    End;
+  SetEnvironmentVariableA := 0;
+  If PName = 0 Then Exit;
+  If PValue = 0 Then EnvSet(PStr(PName), '') Else EnvSet(PStr(PName), PStr(PValue));
+  SetEnvironmentVariableA := 1;
 End;
 
 Procedure Banner;
@@ -6861,6 +7153,23 @@ BEGIN
   TkUsed[0] := 1; TkProc[0] := -1; TkTid[0] := 1; TkStack[0] := 0;
   CurTask := 0; NTasks := 1; IdleStreak := 0; SliceStart := 0;
   HeapInit(KBase + KSize + 65536, ProcWinBase);
+  { demarrage d'un disque dur (bloc d'amorcage +34h = 'HD') : partition
+    d'amorcage (+38h) et pilote HPFS.IFS charge par OS2LDR (+40h adresse,
+    +44h taille), recopie avant la pagination }
+  NDisk := 0;
+  HdBoot := MemW[0:BootInfo + $34] = $4448;
+  BootPartLba := 0; BootIfsBuf := 0; BootIfsSize := 0;
+  If HdBoot Then
+  Begin
+    BootPartLba := MemL[0:BootInfo + $38];
+    BootIfsSize := MemL[0:BootInfo + $44];
+    If BootIfsSize > 0 Then
+    Begin
+      BootIfsBuf := KAlloc(BootIfsSize);
+      If BootIfsBuf <> 0 Then MoveMem(MemL[0:BootInfo + $40], BootIfsBuf, BootIfsSize)
+      Else BootIfsSize := 0;
+    End;
+  End;
   Mods := Nil;
   ModCap := 0;
   InitPaging;
@@ -6877,7 +7186,7 @@ BEGIN
   If PhysTop < PhysProcBase + $00400000 Then
     KLog('OS2KRNL: au moins 12 Mo de memoire sont necessaires.');
   AtaInit;
-  If Not AtaFound Then
+  If (Not AtaFound) And (Not HdBoot) Then
   Begin
     KLog('OS2KRNL: lecteur de CD-ROM ATAPI introuvable.');
     ExitProcess(1);
@@ -6889,6 +7198,19 @@ BEGIN
   EnvSet('PATH', 'C:\');
   EnvSet('PROMPT', '$i[$p]');
   EnvSet('OS2_SHELL', 'C:\CMD.EXE');
+  If HdBoot Then
+  Begin
+    { C: : partition HPFS du disque dur, montee avant la lecture de
+      CONFIG.SYS par le pilote charge en memoire par OS2LDR }
+    LoadIfs('C:\HPFS.IFS /CACHE:64 /AUTOCHECK:C');
+    HdInit;
+    MountIfsVolumes;
+    If Not IfsVols[2].Mounted Then
+    Begin
+      KLog('OS2KRNL: la partition d''amorcage (secteur ' + IntStr(BootPartLba) + ') ne peut pas etre montee en C:.');
+      ExitProcess(1);
+    End;
+  End;
   ReadConfigSys;
   { COMSPEC : celui de CONFIG.SYS (SET COMSPEC=), sinon le PROTSHELL }
   If EnvFind('COMSPEC') = 0 Then EnvSet('COMSPEC', ShellPath);

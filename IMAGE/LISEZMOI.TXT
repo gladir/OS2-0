@@ -9,6 +9,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
               PMSPL.DLL, PMVIOP.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
+              INSTALL.EXE,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
@@ -19,6 +20,10 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               commandes du depot
               compilees avec
               OS2PC (-COS2).
+OS2INST.ISO   CD-ROM d'installation : memes fichiers, CONFIG.SYS de
+              INSTALL\ (PROTSHELL=C:\INSTALL.EXE) ; installe OS/2-0
+              sur un disque dur (partition HPFS, qui devient C:).
+INSTALL\      CONFIG.SYS du CD-ROM d'installation.
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
@@ -36,6 +41,10 @@ Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
          32 Mo pour le disque virtuel HPFS)
          Avec un disque dur HPFS (partition de type 07h) :
          qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d -hda disque.img
+Installation sur un disque dur :
+         qemu-img create -f raw disque.img 300M
+         qemu-system-i386 -m 64 -cdrom OS2INST.ISO -boot d -hda disque.img
+         puis (sans CD-ROM) : qemu-system-i386 -m 64 -hda disque.img
 
 Fabrication
 -----------
@@ -49,6 +58,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC CMD.PAS                             -> CMD.EXE (et les commandes)
   OS2PC PMSHELL.PAS                         -> PMSHELL.EXE (le bureau, Workplace Shell)
   OS2PC LAUNCHPAD.PAS LAUNCHPD.EXE          -> LAUNCHPD.EXE (le LaunchPad)
+  OS2PC INSTALL.PAS                         -> INSTALL.EXE (installation sur disque dur)
+  nasm -f bin KERNEL\HDBOOT.ASM             -> MBR du disque dur (deja dans INSTALL.PAS)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
   OS2PC DLL\FKA.PAS                         -> FKA.DLL (touches de fonction)
@@ -603,7 +614,47 @@ Onglets du carnet : Ecran (resolution appliquee tout de suite puis
 gardee si confirmee : OS2.INI, PM_Display, RESOLUTION ; Capacites),
 Confirmations, Titre (objet de meme nom), Fenetre (objet deja ouvert),
 Entree (double clic, boutons inverses), Logo, General (couleur du
-bureau). Clic sur un onglet, ou PgSuiv/PgPrec : autre onglet.
+bureau), Langue (SET LANGUAGE= de CONFIG.SYS). Clic sur un onglet, ou
+PgSuiv/PgPrec : autre onglet.
+
+Installation sur un disque dur (INSTALL.EXE)
+--------------------------------------------
+Le CD-ROM OS2INST.ISO demarre dans INSTALL.EXE (Presentation Manager,
+apparence de l'installation de Warp 3) :
+  Bienvenue : installation facile (premier disque dur, partition HPFS
+    existante ou tout l'espace libre) ou avancee ;
+  Configuration du systeme : pays, clavier, LANGUE (francais par
+    defaut), souris, ports serie, affichage principal (VGA ou VESA :
+    SET PMRESOLUTION=), affichage secondaire, alimentation, PCMCIA,
+    CD-ROM, imprimante, multimedia, SCSI ; clic sur l'icone d'un choix :
+    liste des valeurs ; l'assistant change aussitot de langue ;
+  Partitionnement (comme FDISK) : partitions principales et espace
+    libre, creer une partition HPFS (taille en Mo), supprimer, choisir ;
+  Formatage HPFS (nom du volume) ou conservation des fichiers ;
+  Composants : bureau et LaunchPad, utilitaires, programmes d'essai,
+    disque virtuel ;
+  Transfert des fichiers (barre aux logos OS/2), CONFIG.SYS du disque,
+    zone d'amorcage et MBR ; Redemarrer.
+Tab et Maj+Tab : controle suivant ; F1 : aide. Parametres : /AUTO
+(installation facile sans question), /LANG:xx.
+Disque installe : secteur 0 = MBR d'OS/2-0 (KERNEL\HDBOOT.ASM) ;
+secteurs 1 a 8191 = zone d'amorcage (repertoire 'OS20BOOT' au secteur
+1, puis OS2LDR, OS2KRNL, HPFS.IFS) ; premiere partition au secteur 8192.
+Le MBR charge OS2LDR (bloc d'amorcage : 'HD' en +34h, partition active
+en +38h) ; OS2LDR charge OS2KRNL et HPFS.IFS (en 00600000h) ; le noyau
+monte la partition active en C: (HPFS) puis lit C:\CONFIG.SYS. API du
+noyau : KrnDiskCtl (disques IDE, secteurs, formatage, montage,
+redemarrage), SetEnvironmentVariableA.
+
+Langue (variable LANGUAGE de CONFIG.SYS)
+----------------------------------------
+  FR francais (defaut)   EN anglais        GR allemand     SP espagnol
+  IT italien             ALB, SQ albanais  PT, PRT portugais
+  SE, SWE suedois        DK, DNK danois    JP, JPN japonais (romaji)
+ES est aussi accepte pour l'espagnol. L'installation l'ecrit dans
+CONFIG.SYS ; ensuite : Systeme OS/2, Configuration du systeme, Langue
+(onglet Langue du carnet Systeme - Parametres) : CONFIG.SYS et
+l'environnement du systeme sont modifies (programmes lances ensuite).
 
 Souris (carnet Souris - Parametres)
 -----------------------------------
@@ -658,7 +709,12 @@ Limites
   d'EA de 16 Ko ; les verrous et les surveillances n'attendent pas (ils
   rendent ERROR_LOCK_VIOLATION ou ERROR_TIMEOUT) ; un disque dur non
   formate n'est pas monte (seul le disque virtuel est formate au
-  demarrage) ; disques IDE en mode PIO 28 bits, sans interruption.
+  demarrage, ou par INSTALL.EXE) ; disques IDE en mode PIO 28 bits, sans
+  interruption.
+- Demarrage d'un disque dur : partitions principales seulement ; le
+  lecteur de CD-ROM n'est pas une unite (C: est la partition HPFS) ;
+  INSTALL.EXE n'affiche que six langues (le portugais, le suedois, le
+  danois et le japonais en anglais).
 - Les programmes s'executent en anneau 0. Le noyau est multitache : les
   processus et leurs fils s'executent en parallele ; la minuterie
   interrompt toutes les 30 ms une tache qui execute le code de son

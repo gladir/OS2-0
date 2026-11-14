@@ -1951,7 +1951,7 @@ BEGIN
   If StrToUpper(Copy(TmpLanguage,1,2))='EN'Then Language:=_English Else
   If StrToUpper(Copy(TmpLanguage,1,2))='GR'Then Language:=_Germany Else
   If StrToUpper(Copy(TmpLanguage,1,2))='IT'Then Language:=_Italian Else
-  If StrToUpper(Copy(TmpLanguage,1,2))='SP'Then Language:=_Spain;
+  If(StrToUpper(Copy(TmpLanguage,1,2))='SP')or(StrToUpper(Copy(TmpLanguage,1,2))='ES')Then Language:=_Spain;
  End;
  Echo:=True;Pipe:=False;PipeToCommand:=False;
  InCmd:=0;

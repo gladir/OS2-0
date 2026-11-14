@@ -303,7 +303,7 @@ BEGIN
   If StrToUpper(Copy(TmpLanguage,1,2))='EN'Then Language:=_English Else
   If StrToUpper(Copy(TmpLanguage,1,2))='GR'Then Language:=_Germany Else
   If StrToUpper(Copy(TmpLanguage,1,2))='IT'Then Language:=_Italian Else
-  If StrToUpper(Copy(TmpLanguage,1,2))='SP'Then Language:=_Spain;
+  If(StrToUpper(Copy(TmpLanguage,1,2))='SP')or(StrToUpper(Copy(TmpLanguage,1,2))='ES')Then Language:=_Spain;
  End;
  If(ParamStr(1)='/?')or(ParamStr(1)='--help')or(ParamStr(1)='-h')or
    (ParamStr(1)='/h')or(ParamStr(1)='/H')or(ParamStr(1)='HELP')Then Begin

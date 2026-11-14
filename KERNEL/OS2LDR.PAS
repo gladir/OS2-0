@@ -35,8 +35,20 @@ Program OS2LDR;
     +1C base du noyau       +20 taille de l'image  +24 point d'entree
     +28 ligne du curseur    +29 colonne du curseur
     +2C LBA OS2KRNL         +30 taille OS2KRNL
+    +34 'HD' (4448h) : demarrage d'un disque dur (ecrit par le MBR)
+    +38 debut de la partition d'amorcage  +3C sa taille (secteurs)
+    +40 adresse de HPFS.IFS charge en memoire  +44 sa taille
   GDT temporaire en 0000:0A00, GDTR en 0000:0A20, code de transition
-  32 bits en 0000:0A40. }
+  32 bits en 0000:0A40.
+
+  Demarrage d'un disque dur (installe par INSTALL.EXE) : le MBR d'OS/2-0
+  (KERNEL/HDBOOT.ASM) charge OS2LDR depuis la zone d'amorcage (secteurs 1
+  et suivants du disque, avant la premiere partition) et met 'HD' en +34.
+  OS2LDR y lit alors des secteurs de 512 octets : repertoire au secteur
+  1 ('OS20BOOT', nombre d'entrees, puis des entrees de 32 octets en +16 :
+  nom ASCIIZ de 16 octets, LBA, taille), OS2KRNL, et HPFS.IFS qu'il
+  recopie en 00600000h pour que le noyau puisse monter C: (partition HPFS
+  active) avant de lire ses fichiers. }
 
 {$S-,R-,I-}
 
@@ -45,6 +57,7 @@ Const
   HdrSeg    = $3800;          { copie des en-tetes PE (38000h)          }
   ZeroSeg   = $4000;          { 32 Ko de zeros (40000h)                 }
   Staging   = $00400000;      { zone de transit du fichier OS2KRNL      }
+  IfsAddr   = $00600000;      { HPFS.IFS (demarrage d'un disque dur)    }
   Info      = $0500;
   E820Tab   = $0600;
   E820Max   = 40;
@@ -76,6 +89,8 @@ Var
   MoveGdt    : Array[0..47] Of Byte;
   E820Buf    : Array[0..23] Of Byte;
   ContVal    : LongInt;       { valeur de continuation E820 (EBX) }
+  HdMode     : Boolean;       { demarrage d'un disque dur (zone d'amorcage) }
+  SecSize    : LongInt;       { 2048 (CD-ROM) ou 512 (disque dur) }
 
 { ------------------------------------------------------------------ }
 { Affichage par le BIOS                                              }
@@ -127,12 +142,12 @@ End;
 { Lecture du CD-ROM (INT 13h etendue, secteurs de 2048 octets)       }
 { ------------------------------------------------------------------ }
 
-Function ReadSector(Lba : LongInt; BSeg : Word) : Boolean;
+Function ReadSectors(Lba : LongInt; Count : Word; BSeg : Word) : Boolean;
 Var Drv, Err, Tries : Byte;
 Begin
   Tries := 0;
   Repeat
-    Dap.Size := 16; Dap.Res := 0; Dap.Count := 1;
+    Dap.Size := 16; Dap.Res := 0; Dap.Count := Count;
     Dap.BufOfs := 0; Dap.BufSg := BSeg;
     Dap.LbaLo := Lba; Dap.LbaHi := 0;
     Drv := BootDrive;
@@ -147,7 +162,7 @@ Begin
     end;
     If Err = 0 Then
     Begin
-      ReadSector := True;
+      ReadSectors := True;
       Exit;
     End;
     asm
@@ -157,7 +172,12 @@ Begin
     end;
     Inc(Tries);
   Until Tries >= 3;
-  ReadSector := False;
+  ReadSectors := False;
+End;
+
+Function ReadSector(Lba : LongInt; BSeg : Word) : Boolean;
+Begin
+  ReadSector := ReadSectors(Lba, 1, BSeg);
 End;
 
 Function GetD(Sg, Ofs : Word) : LongInt;
@@ -181,9 +201,37 @@ Begin
   NameMatch := True;
 End;
 
+{ repertoire de la zone d'amorcage d'un disque dur (secteur RootLba) }
+Procedure FindBootFile(Const Name : String);
+Var E, I : Integer; Ok : Boolean;
+Begin
+  Found := False;
+  If Not ReadSector(RootLba, BufSeg) Then Fatal('erreur de lecture de la zone d''amorcage');
+  If (Mem[BufSeg:0] <> Ord('O')) Or (Mem[BufSeg:1] <> Ord('S')) Or (Mem[BufSeg:2] <> Ord('2')) Or
+     (Mem[BufSeg:3] <> Ord('0')) Then Fatal('zone d''amorcage invalide');
+  For E := 0 To MemW[BufSeg:8] - 1 Do
+    If (Not Found) And (E < 15) Then
+    Begin
+      Ok := True;
+      For I := 1 To Length(Name) Do
+        If UpCase(Chr(Mem[BufSeg:16 + E * 32 + I - 1])) <> Name[I] Then Ok := False;
+      If Ok And (Mem[BufSeg:16 + E * 32 + Length(Name)] = 0) Then
+      Begin
+        FileLba := GetD(BufSeg, 16 + E * 32 + 16);
+        FileSize := GetD(BufSeg, 16 + E * 32 + 20);
+        Found := True;
+      End;
+    End;
+End;
+
 Procedure FindFile(Const Name : String);
 Var Sector, NSect : LongInt; Ofs, RecLen : Word;
 Begin
+  If HdMode Then
+  Begin
+    FindBootFile(Name);
+    Exit;
+  End;
   Found := False;
   NSect := (RootSize + 2047) Div 2048;
   Sector := 0;
@@ -381,6 +429,33 @@ Var
   Sector, NSectors : LongInt;
   Row, Col : Byte;
 
+{ fichier FileLba / FileSize -> memoire etendue (blocs de 32 Ko) }
+Procedure ReadFileTo(Dst : LongInt; Const What : String);
+Var N : Word;
+Begin
+  NSectors := (FileSize + SecSize - 1) Div SecSize;
+  Sector := 0;
+  While Sector < NSectors Do
+  Begin
+    N := 32768 Div SecSize;
+    If NSectors - Sector < N Then N := NSectors - Sector;
+    If Not ReadSectors(FileLba + Sector, N, BufSeg) Then Fatal('erreur de lecture de ' + What);
+    ExtCopy(LongInt(BufSeg) * 16, Dst + Sector * SecSize, LongInt(N) * SecSize);
+    PutC('.');
+    Sector := Sector + N;
+  End;
+End;
+
+{ demarrage d'un disque dur : HPFS.IFS en memoire pour le noyau }
+Procedure LoadBootIfs;
+Begin
+  FindFile('HPFS.IFS');
+  If Not Found Then Fatal('HPFS.IFS introuvable dans la zone d''amorcage');
+  ReadFileTo(IfsAddr, 'HPFS.IFS');
+  MemW[0:Info + $40] := Word(IfsAddr); MemW[0:Info + $42] := Word(IfsAddr Shr 16);
+  MemW[0:Info + $44] := Word(FileSize); MemW[0:Info + $46] := Word(FileSize Shr 16);
+End;
+
 Procedure LoadKernel;
 Begin
   FindFile(KrnlName);
@@ -388,15 +463,7 @@ Begin
   MemW[0:Info + $2C] := Word(FileLba);  MemW[0:Info + $2E] := Word(FileLba Shr 16);
   MemW[0:Info + $30] := Word(FileSize); MemW[0:Info + $32] := Word(FileSize Shr 16);
   { lecture du fichier vers la zone de transit en memoire etendue }
-  NSectors := (FileSize + 2047) Div 2048;
-  Sector := 0;
-  While Sector < NSectors Do
-  Begin
-    If Not ReadSector(FileLba + Sector, BufSeg) Then Fatal('erreur de lecture de OS2KRNL');
-    ExtCopy(LongInt(BufSeg) * 16, Staging + Sector * 2048, 2048);
-    If (Sector And 7) = 0 Then PutC('.');
-    Inc(Sector);
-  End;
+  ReadFileTo(Staging, 'OS2KRNL');
   { en-tetes PE (4 Ko) }
   ExtCopy(Staging, LongInt(HdrSeg) * 16, 4096);
   If MemW[HdrSeg:0] <> $5A4D Then Fatal('OS2KRNL : signature MZ absente');
@@ -494,12 +561,20 @@ BEGIN
   If MemW[0:Info] <> $424F Then Fatal('bloc d''information d''amorcage absent');
   RootLba := GetD(0, Info + 4);
   RootSize := GetD(0, Info + 8);
+  HdMode := MemW[0:Info + $34] = $4448;
+  If HdMode Then SecSize := 512
+  Else
+  Begin
+    SecSize := 2048;
+    MemW[0:Info + $34] := 0;
+  End;
   PutS('OS2LDR');
   { 32 Ko de zeros pour la mise a zero de la memoire etendue }
   For I := 0 To 16383 Do MemW[ZeroSeg:I * 2] := 0;
   EnableA20;
   ReadMemoryMap;
   LoadKernel;
+  If HdMode Then LoadBootIfs;
   BuildGdt;
   PutS(#13#10);
   GetCursor;
