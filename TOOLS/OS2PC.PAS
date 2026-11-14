@@ -9867,6 +9867,13 @@ Var
   EP      : Integer;   { position courante dans TokenPool         }
   EPEnd   : Integer;   { borne superieure (exclusive)             }
   RetLbl  : TString;   { label de retour de la fonction courante  }
+  { bornes des boucles FOR de la procedure courante : cases du cadre de
+    pile (une par FOR du corps, sous les locales), pour qu un appel
+    recursif n ecrase pas la borne de la boucle de l appelant }
+  ForSlotOn   : Boolean;
+  ForSlotBase : LongInt;
+  ForSlotNext : LongInt;
+  ForSlotMax  : LongInt;
   LastPrimaryName : TString; { dernier ident charge par ParsePrimary }
   LastVarTypeIdx : Integer; { type index du dernier ident charge }
   LastExprIsPascalStr : Boolean; { True = EAX pointe sur format Pascal [len][chars][NUL] }
@@ -22408,6 +22415,7 @@ Procedure ParseForStmt(PI : Integer);
 Var
   VarName  : TString;
   LimLabel : TString;
+  LimRef   : TString;
   LblTest  : TString;
   LblEnd   : TString;
   LblCont  : TString;
@@ -22469,10 +22477,22 @@ Begin
   ParseExpr(PI);
   WantCharLit := False;
 
-  { Stocker la limite dans une variable data temporaire }
-  LimLabel := LabelGen;
-  DataAddDWord(LimLabel, 0);  { Allouer la variable temporaire pour la limite }
-  EmitInstr('MOV DWORD PTR [' + LimLabel + '],EAX');
+  { Stocker la limite : dans une case du cadre de pile de la procedure
+    (chaque activation a la sienne : appels recursifs), sinon (programme
+    principal) dans une variable data temporaire }
+  If ForSlotOn And (ForSlotNext < ForSlotMax) Then
+  Begin
+    Inc(ForSlotNext);
+    LimLabel := '';
+    LimRef := 'DWORD PTR ' + EBPOfs(-(ForSlotBase + 4 * ForSlotNext));
+  End
+  Else
+  Begin
+    LimLabel := LabelGen;
+    DataAddDWord(LimLabel, 0);  { Allouer la variable temporaire pour la limite }
+    LimRef := 'DWORD PTR [' + LimLabel + ']';
+  End;
+  EmitInstr('MOV ' + LimRef + ',EAX');
 
   { Generer les labels de boucle }
   LblTest := LabelGen;
@@ -22491,7 +22511,7 @@ Begin
 
   { Test : CMP variable, limite }
   GenLoadVar(PI, VarName);
-  EmitInstr('CMP EAX,DWORD PTR [' + LimLabel + ']');
+  EmitInstr('CMP EAX,' + LimRef);
   If IsDownTo Then
     EmitInstr('JL ' + LblEnd)
   Else
@@ -22514,7 +22534,7 @@ Begin
   { Fin de boucle quand la variable a atteint la limite AVANT de l incrementer : }
   { un compteur Word ou Byte (For J := N DownTo 0, For B := 0 To 255) ne deborde pas }
   GenLoadVar(PI, VarName);
-  EmitInstr('CMP EAX,DWORD PTR [' + LimLabel + ']');
+  EmitInstr('CMP EAX,' + LimRef);
   EmitInstr('JE ' + LblEnd);
   If IsDownTo Then
     EmitInstr('DEC EAX')
@@ -22529,7 +22549,7 @@ Begin
   LoopPop;
 
   { Ajouter la variable limite dans le segment de donnees }
-  DataAddDWord(LimLabel, 0);
+  If LimLabel <> '' Then DataAddDWord(LimLabel, 0);
 End;
 
 { ------------------------------------------------------------ }
@@ -28126,7 +28146,7 @@ Procedure EmitProcedures;
 Var
   FI       : Integer;
   PK       : Integer;
-  Extra, CopyOfs, CopySz : LongInt;
+  Extra, CopyOfs, CopySz, NFor : LongInt;
 Begin
   For FI := 0 To ProcCount - 1 Do
   Begin
@@ -28150,7 +28170,22 @@ Begin
            (TypeIsString(ProcTab[FI].Params[PK].TypeIdx) Or
             W32IsAggregate(ProcTab[FI].Params[PK].TypeIdx)) Then
           Extra := Extra + ((TypeSizeofIdx(ProcTab[FI].Params[PK].TypeIdx) + 3) And (Not 3));
-    EmitProlog(ProcTab[FI].LocalSize + Extra);
+    { une case de pile par FOR du corps (borne de la boucle) }
+    NFor := 0;
+    ForSlotOn := False;
+    If Not Is68kTarget And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) And
+       (ProcTab[FI].BodyStart >= 0) And (ProcTab[FI].BodyEnd >= ProcTab[FI].BodyStart) And
+       (StrUpperCase(TokenPool[ProcTab[FI].BodyStart].Val) = 'BEGIN') Then
+    Begin
+      For PK := ProcTab[FI].BodyStart To ProcTab[FI].BodyEnd Do
+        If (TokenPool[PK].Kind = TK_KEYWORD) And (StrUpperCase(TokenPool[PK].Val) = 'FOR') Then
+          Inc(NFor);
+      ForSlotOn := NFor > 0;
+    End;
+    ForSlotBase := ProcTab[FI].LocalSize + Extra;
+    ForSlotNext := 0;
+    ForSlotMax := NFor;
+    EmitProlog(ProcTab[FI].LocalSize + Extra + 4 * NFor);
     If Extra > 0 Then
     Begin
       CopyOfs := ProcTab[FI].LocalSize;
@@ -28202,6 +28237,7 @@ Begin
 
     { Parser et emettre le corps de la fonction }
     ParseBody(FI);
+    ForSlotOn := False;
 
     { Emettre le label de retour }
     EmitLabel(RetLbl);

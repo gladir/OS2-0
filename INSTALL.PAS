@@ -37,7 +37,8 @@ Program INSTALL;
        KrnDiskCtl), nom du volume, ou conservation des fichiers d'une
        partition HPFS existante ;
     5. Composants : bureau et LaunchPad, utilitaires, programmes
-       d'essai, disque virtuel ;
+       d'essai, disque virtuel, jeux (Solitaire - Klondike, Echecs,
+       Mahjongg : dossier Jeux de Systeme OS/2) ;
     6. Transfert des fichiers (barre de progression aux logos OS/2) :
        copie des fichiers du CD-ROM, CONFIG.SYS du disque dur, zone
        d'amorcage (secteurs 1 et suivants du disque : repertoire
@@ -82,7 +83,7 @@ Const
   ID_PLIST = 200; ID_PSIZE = 201; ID_PCREATE = 202; ID_PDELETE = 203; ID_PINSTALL = 205; ID_PPREV = 207;
   ID_PNEXT = 208;
   ID_FHPFS = 300; ID_FFAT = 301; ID_FKEEP = 302; ID_FLABEL = 303; ID_FGO = 310;
-  ID_CBASE = 400; ID_CDESK = 401; ID_CUTIL = 402; ID_CTEST = 403; ID_CRAM = 404; ID_CGO = 410;
+  ID_CBASE = 400; ID_CDESK = 401; ID_CUTIL = 402; ID_CTEST = 403; ID_CRAM = 404; ID_CGAMES = 405; ID_CGO = 410;
   ID_REBOOT = 600;
   ID_CHLIST = 700; ID_CHOK = 701; ID_CHCANCEL = 702;
   { configuration du systeme : choix }
@@ -151,7 +152,7 @@ Var
   TgtEntry, TgtDrive, TgtStart, TgtCount, Formatted : LongInt;
   StatusMsg : String;
   { composants }
-  OptDesk, OptUtil, OptTest, OptRam : LongInt;
+  OptDesk, OptUtil, OptTest, OptRam, OptGames : LongInt;
   { transfert }
   FName : Array[0..MaxFiles - 1] Of String[16];
   FSize : Array[0..MaxFiles - 1] Of LongInt;
@@ -1064,6 +1065,7 @@ Begin
   If (U = 'CONFIG.SYS') Or (U = 'OS2BOOT') Or (U = 'INSTALL.EXE') Then Wanted := False
   Else If Copy(U, 1, 4) = 'TEST' Then Wanted := OptTest <> 0
   Else If (U = 'PMSHELL.EXE') Or (U = 'LAUNCHPD.EXE') Then Wanted := OptDesk <> 0
+  Else If (U = 'KLONDIKE.EXE') Or (U = 'ECHECS.EXE') Or (U = 'MAHJONGG.EXE') Then Wanted := OptGames <> 0
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 
@@ -1189,6 +1191,10 @@ Begin
                     'Virtuelle Platte im Speicher (4 MB)', 'Disco virtual en memoria (4 MB)',
                     'Disco virtuale in memoria (4 MB)', 'Disk virtual n'#137' kujtes'#137' (4 MB)'), OptRam <> 0,
                     BS_AUTOCHECKBOX);
+        Hw := Check(30, Y + 130, ID_CGAMES, L('Jeux (Solitaire - Klondike, Echecs, Mahjongg)',
+                    'Games (Klondike Solitaire, Chess, Mahjongg)', 'Spiele (Klondike, Schach, Mahjongg)',
+                    'Juegos (Klondike, Ajedrez, Mahjongg)', 'Giochi (Klondike, Scacchi, Mahjongg)',
+                    'Loj'#137'ra (Klondike, Shah, Mahjongg)'), OptGames <> 0, BS_AUTOCHECKBOX);
         Hw := Button(40, CH - 40, 0, ID_CGO, L('Installer', 'Install', 'Installieren', 'Instalar', 'Installa', 'Instalo'));
         Dummy := WinSetFocus(HWND_DESKTOP, Hw);
         Hw := Button(220, CH - 40, 0, ID_BACK, TxtPrev);
@@ -1366,10 +1372,10 @@ Begin
     'Zgjidhni p'#137'rb'#137'r'#137'sit p'#137'r nj'#137'sin'#137' ') + Chr(65 + TgtDrive) + ':.', CLR_DARKBLUE);
   ListFiles;
   Need := TotBytes Div 1024;
-  TextAt(Hps, 30, 230, L('Espace n'#130'cessaire : ', 'Space needed: ', 'Ben'#148'tigter Platz: ', 'Espacio necesario: ',
+  TextAt(Hps, 30, 262, L('Espace n'#130'cessaire : ', 'Space needed: ', 'Ben'#148'tigter Platz: ', 'Espacio necesario: ',
          'Spazio necessario: ', 'Hap'#137'sira e nevojshme: ') + IStr(Need) + ' Ko', CLR_BLACK, CLR_PALEGRAY);
   K := FreeKb(TgtDrive);
-  TextAt(Hps, 30, 248, L('Espace disponible : ', 'Space available: ', 'Verf'#129'gbarer Platz: ', 'Espacio disponible: ',
+  TextAt(Hps, 30, 280, L('Espace disponible : ', 'Space available: ', 'Verf'#129'gbarer Platz: ', 'Espacio disponible: ',
          'Spazio disponibile: ', 'Hap'#137'sira e lir'#137': ') + IStr(K) + ' Ko', CLR_BLACK, CLR_PALEGRAY);
 End;
 
@@ -2169,6 +2175,7 @@ Begin
           If K = 2 Then OptUtil := Ord(Checked(Ctl[K]));
           If K = 3 Then OptTest := Ord(Checked(Ctl[K]));
           If K = 4 Then OptRam := Ord(Checked(Ctl[K]));
+          If K = 5 Then OptGames := Ord(Checked(Ctl[K]));
         End;
         StartCopy;
       End;
@@ -2202,10 +2209,10 @@ Begin
     WM_PAINT : PaintPage(H);
     WM_COMMAND : Command(Lo16(Mp1));
     WM_CONTROL :
-      If (Page = PG_COMP) And (Lo16(Mp1) >= ID_CDESK) And (Lo16(Mp1) <= ID_CRAM) Then
+      If (Page = PG_COMP) And (Lo16(Mp1) >= ID_CDESK) And (Lo16(Mp1) <= ID_CGAMES) Then
       Begin
         OptDesk := Ord(Checked(Ctl[1])); OptUtil := Ord(Checked(Ctl[2]));
-        OptTest := Ord(Checked(Ctl[3])); OptRam := Ord(Checked(Ctl[4]));
+        OptTest := Ord(Checked(Ctl[3])); OptRam := Ord(Checked(Ctl[4])); OptGames := Ord(Checked(Ctl[5]));
         Dummy := WinInvalidateRect(Client, 0, 1);
       End
       Else If (Page = PG_DISK) And (Lo16(Mp1) = ID_PLIST) Then
@@ -2300,7 +2307,7 @@ BEGIN
   Lang := 0; AutoMode := 0; Advanced := 0; Page := PG_WELCOME;
   NCtl := 0; ChFrame := 0; ChClient := 0; ChList := 0; ChItem := -1;
   DiskCur := 0; SelRow := 0; TgtDrive := -1; Formatted := 0;
-  OptDesk := 1; OptUtil := 1; OptTest := 0; OptRam := 0;
+  OptDesk := 1; OptUtil := 1; OptTest := 0; OptRam := 0; OptGames := 1;
   CopyErr := ''; StatusMsg := ''; CurName := ''; CopyStep := CS_LIST; TotBytes := 0; DoneBytes := 0;
   { langue de l'environnement (CONFIG.SYS du CD-ROM), puis parametres }
   I := 0;

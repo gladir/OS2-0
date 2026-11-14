@@ -6640,7 +6640,7 @@ End;
 { Partie 14 - Demarrage du systeme                                     }
 { ==================================================================== }
 
-{ CONFIG.SYS : PROTSHELL=, LIBPATH=, IFS=, SET NOM=VALEUR ; les autres
+{ CONFIG.SYS : PROTSHELL=, LIBPATH=, IFS=, COUNTRY=, SET NOM=VALEUR ; les autres
   lignes (DEVICE=, BUFFERS=...) sont acceptees sans effet }
 Procedure ReadConfigSys;
 Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
@@ -6665,6 +6665,16 @@ Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
         IfsLines[NIfsLines] := Trim(Copy(Line, 5, 255));
         Inc(NIfsLines);
       End;
+    End
+    Else If Copy(U, 1, 8) = 'COUNTRY=' Then
+    Begin
+      { COUNTRY=033,C:\COUNTRY.SYS : variable COUNTRY (code du pays, lu
+        par DOSCALLS.DLL et NLS.DLL) }
+      Line := Trim(Copy(Line, 9, 255));
+      P := Pos(',', Line);
+      If P > 0 Then Line := Copy(Line, 1, P - 1);
+      While (Length(Line) > 1) And (Line[1] = '0') Do Delete(Line, 1, 1);
+      If Line <> '' Then EnvSet('COUNTRY', Line);
     End
     Else If Copy(U, 1, 4) = 'SET ' Then
     Begin

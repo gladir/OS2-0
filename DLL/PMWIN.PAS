@@ -278,6 +278,10 @@ Var
   KpT, KpFs, KpCh, KpVk, KpSc : Array[0..MaxQ * 16 - 1] Of LongInt;
   { --- etat global --- }
   FocusWin, ActiveWin, CaptureWin, SysModalWin, LockUpdWin, VisLock : LongInt;
+  { liste deroulante d'un champ combine (une a la fois) : champ, liste,
+    remplissage en cours }
+  DropCombo, DropList, DropFill : LongInt;
+  DropText : Array[0..259] Of Byte;
   PhysInput, ShuttingDown, NoShutdown, SemCount, FsrCount, InSend : LongInt;
   PtrCur, PtrLevel, CursorWin, CurX, CurY, CurCX, CurCY, CurFs, CurShown : LongInt;
   MouseX, MouseY, MouseBtn, LastMsgTime, TrackShown : LongInt;
@@ -2375,6 +2379,17 @@ Procedure ReleasePSOf(I : LongInt); Forward;
 Procedure DestroyIdx(I : LongInt);
 Var J, H, X1, Y1, X2, Y2 : LongInt; WasShown : Boolean;
 Begin
+  { champ combine ou liste deroulante detruits : liste fermee }
+  If I = DropList Then
+  Begin
+    DropList := -1; DropCombo := -1;
+  End
+  Else If (I = DropCombo) And (DropList > 1) And (WUse[DropList] <> 0) Then
+  Begin
+    J := DropList;
+    DropList := -1; DropCombo := -1;
+    DestroyIdx(J);
+  End;
   If (I < 2) Or (WUse[I] = 0) Then Exit;
   H := HwOf(I);
   WasShown := VisRect(I, X1, Y1, X2, Y2);
@@ -5880,6 +5895,8 @@ Begin
   End;
 End;
 
+Procedure CloseDrop; Forward;
+
 Procedure MouseInput(Q : LongInt);
 Var Ev : Array[0..11] Of Byte; Wait, H, Fs, Btn, T, N, Kc, K, Bit, Dn, Up, Dbl, TQ : LongInt;
 Begin
@@ -5917,6 +5934,9 @@ Begin
     If (SysVal[0] <> 0) And ((Btn And 3) <> 0) And ((Btn And 3) <> 3) Then Btn := Btn Xor 3;
     If CaptureWin > 1 Then T := CaptureWin Else T := WinAtAbs(0, MouseX, MouseY, True);
     If (SysModalWin > 1) And (T > 1) And (T <> SysModalWin) And Not IsChildOf(T, SysModalWin) Then T := -1;
+    { clic hors de la liste deroulante ouverte (et de son champ) : fermee }
+    If (DropList > 1) And ((Btn And Not MouseBtn) <> 0) And (T <> DropList) And (T <> DropCombo) And
+       Not IsChildOf(T, DropList) Then CloseDrop;
     { file de la fenetre visee (double clic) }
     TQ := Q;
     If (T > 1) And (WUse[T] <> 0) And (WHmq[T] >= 0) Then TQ := WHmq[T];
@@ -8391,10 +8411,77 @@ Begin
 End;
 
 { liste deroulante : champ de saisie et articles d'une liste }
+{ fermer la liste deroulante }
+Procedure CloseDrop;
+Var L, C, F : LongInt;
+Begin
+  L := DropList; C := DropCombo;
+  DropList := -1; DropCombo := -1;
+  If (L > 1) And (WUse[L] <> 0) Then
+  Begin
+    DestroyIdx(L);
+    { le cadre du champ reste la fenetre active }
+    If (C > 1) And (WUse[C] <> 0) Then
+    Begin
+      F := C;
+      While (WPar[F] > 1) And (WUse[WPar[F]] <> 0) Do F := WPar[F];
+      Dummy := WinSetActiveWindow(HWND_DESKTOP, HwOf(F));
+    End;
+  End;
+End;
+
+{ liste deroulante du champ combine I : sous le champ (ou au-dessus pres
+  du bas de l'ecran), articles du champ, choix au clic ou par Entree }
+Procedure OpenDrop(I : LongInt);
+Var N, K, Hh, X, Y, Hw, L, J : LongInt; S : String;
+Begin
+  CloseDrop;
+  N := ItCnt(I);
+  If N <= 0 Then Exit;
+  Hh := MinI(N, 8) * 16 + 4;
+  X := AbsX(I); Y := AbsY(I) - Hh;
+  If Y < 0 Then Y := AbsY(I) + WCY[I];
+  DropText[0] := 0;
+  Hw := WinCreateWindow(HWND_DESKTOP, $FFFF0007, LongInt(@DropText), WS_VISIBLE, X, Y, WCX[I], Hh, HwOf(I),
+                        HWND_TOP, $7FF0, 0, 0);
+  L := WIdx(Hw);
+  If L < 2 Then Exit;
+  DropCombo := I; DropList := L;
+  DropFill := 1;
+  For K := 0 To N - 1 Do
+  Begin
+    S := ItTextGet(ItAt(I, K));
+    For J := 1 To Length(S) Do DropText[J - 1] := Ord(S[J]);
+    DropText[Length(S)] := 0;
+    Dummy := SendM(Hw, LM_INSERTITEM, -1, LongInt(@DropText));
+  End;
+  If LCur(I) >= 0 Then Dummy := SendM(Hw, LM_SELECTITEM, LCur(I), 1);
+  DropFill := 0;
+  { le cadre du champ reste actif (la liste ne prend pas le focus : les
+    fleches du champ changent la valeur, le clic choisit) }
+End;
+
 Function ComboProc(I, Msg, Mp1, Mp2 : LongInt) : LongInt;
 Var K, Ix, N, Vk : LongInt;
 Begin
-  If (Msg >= LM_QUERYITEMCOUNT) And (Msg <= LM_DELETEALL) Then ComboProc := ListProc(I, Msg, Mp1, Mp2)
+  If (Msg = WM_BUTTON1DOWN) Or (Msg = WM_BUTTON1DBLCLK) Then
+  Begin
+    { clic : la liste s'ouvre (ou se ferme) }
+    If DropCombo = I Then CloseDrop Else OpenDrop(I);
+    ComboProc := 1;
+  End
+  Else If (Msg = WM_CONTROL) And (Lo16(Mp1) = $7FF0) Then
+  Begin
+    ComboProc := 0;
+    If (DropFill = 0) And (DropCombo = I) And ((Hi16(Mp1) = LN_SELECT) Or (Hi16(Mp1) = LN_ENTER)) Then
+    Begin
+      Ix := LCur(DropList);
+      CloseDrop;
+      If Ix >= 0 Then LSelect(I, Ix, True);
+      Dummy := WinSetFocus(HWND_DESKTOP, HwOf(I));
+    End;
+  End
+  Else If (Msg >= LM_QUERYITEMCOUNT) And (Msg <= LM_DELETEALL) Then ComboProc := ListProc(I, Msg, Mp1, Mp2)
   Else If Msg = WM_CREATE Then
   Begin
     WS5[I] := -1;
@@ -14816,6 +14903,7 @@ Var
 
 BEGIN
   HwBit := $80000000;
+  DropCombo := -1; DropList := -1; DropFill := 0;
   GMode := 0;
   GMetrics;
   HeapInitIn(LongInt(@Arena), ArenaSize);
