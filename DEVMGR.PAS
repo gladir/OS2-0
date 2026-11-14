@@ -19,7 +19,8 @@ Program DEVMGR;
   ports, memoire, IRQ), son pilote d'OS/2-0 et son etat. Sources : le bus
   PCI (configuration par les ports CF8h/CFCh), la zone de donnees du BIOS
   (ports serie et parallele), les disques du noyau (KrnDiskCtl) et les
-  pilotes eux-memes : VBOXGST.DLL (VirtualBox), E1000.DLL et PCNET.DLL
+  pilotes eux-memes : VBOXGST.DLL (VirtualBox), VMWTOOLS.DLL (VMware
+  Workstation), E1000.DLL et PCNET.DLL
   (reseau), MDM.DLL (son), VIOCALLS.DLL (affichage).
   Souris ou fleches : choisir un peripherique ; F5 : actualiser. }
 
@@ -57,7 +58,7 @@ Var
   NRow : LongInt;
   RowDev : Array[0..MAXD + NCAT - 1] Of LongInt;
   Sel, Top : LongInt;
-  IsVBox, VbFn, NetFn : LongInt;
+  IsVBox, VbFn, NetFn, IsVmw, VmFn : LongInt;
   NameZ, NameZ2, TxtBuf, FailBuf : Array[0..511] Of Byte;
   MenuT : Array[0..1023] Of Byte;
   MenuLen : LongInt;
@@ -248,6 +249,34 @@ Begin
   FileExists := DosQueryPathInfo(Z(S), 1, LongInt(@Info), 64) = 0;
 End;
 
+{ machine virtuelle VMware : porte derobee 5658h (nombre magique
+  564D5868h) ; QEMU y repond aussi (vmport), d'ou l'exigence de la carte
+  VMware SVGA II (PCI 15ADh:0405h) qui est toujours presente sous VMware }
+Function VmwareBdoor : Boolean;
+Var A, B, D : LongInt; R : Boolean;
+Begin
+  A := 0; B := 0;
+  asm
+    push ebx
+    mov eax,1447909480
+    mov ebx,-1
+    mov ecx,10
+    mov edx,22104
+    in eax,dx
+    mov A,eax
+    mov B,ebx
+    pop ebx
+  end;
+  R := (B = 1447909480) And (A <> -1);
+  If R Then
+  Begin
+    R := False;
+    For D := 0 To 31 Do
+      If PciRead($80000000 Or (D Shl 11), 0) = $040515AD Then R := True;
+  End;
+  VmwareBdoor := R;
+End;
+
 { point d'entree 1 d'une DLL de pilote (0 : absente) }
 Function DrvEntry(N : String) : LongInt;
 Var H, F : LongInt;
@@ -331,7 +360,23 @@ Begin
         $0021 : PciName := 'Controleur USB VirtualBox';
       End;
     $15AD :
-      If D = $0405 Then PciName := 'Adaptateur graphique VMware SVGA II (VirtualBox VMSVGA)';
+      Case D Of
+        $0405 : If IsVBox <> 0 Then PciName := 'Adaptateur graphique VirtualBox VMSVGA (SVGA II)'
+                Else PciName := 'Adaptateur graphique VMware SVGA II';
+        $0710 : PciName := 'Adaptateur graphique VMware SVGA (ancien)';
+        $0720 : PciName := 'Carte reseau VMware VMXNET';
+        $0740 : PciName := 'Interface de communication VMware (VMCI)';
+        $0770 : PciName := 'Controleur USB 2.0 VMware (EHCI)';
+        $0774 : PciName := 'Controleur USB 1.1 VMware (UHCI)';
+        $0778, $0779 : PciName := 'Controleur USB 3 VMware (xHCI)';
+        $0790 : PciName := 'Pont PCI VMware';
+        $07A0 : PciName := 'Pont PCI Express VMware (port racine)';
+        $07B0 : PciName := 'Carte reseau VMware VMXNET3';
+        $07C0 : PciName := 'Controleur SCSI VMware paravirtuel (PVSCSI)';
+        $07E0 : PciName := 'Controleur SATA AHCI VMware';
+        $07F0 : PciName := 'Controleur NVMe VMware';
+        $1977 : PciName := 'VMware HD Audio';
+      End;
     $1234 :
       If D = $1111 Then PciName := 'Adaptateur graphique standard (QEMU, Bochs : VBE DISPI)';
     $1B36 :
@@ -339,7 +384,11 @@ Begin
     $1AF4 :
       If D = $1000 Then PciName := 'Carte reseau virtio' Else If D = $1050 Then PciName := 'Adaptateur graphique virtio';
     $1022 :
-      If D = $2000 Then PciName := 'AMD PCnet-PCI II / PCnet-FAST III';
+      If D = $2000 Then
+      Begin
+        If IsVmw <> 0 Then PciName := 'AMD PCnet-PCI II (VMware vlance)'
+        Else PciName := 'AMD PCnet-PCI II / PCnet-FAST III';
+      End;
     $1274 :
       If D = $5000 Then PciName := 'Ensoniq AudioPCI ES1370';
     $106B :
@@ -463,6 +512,8 @@ Begin
             Drv := 'Aucun pilote'; Info := ''; Ok := 0;
             Cc := (Cls Shr 24) And 255;
             If (Id And $FFFF) = $80EE Then IsVBox := 1;
+            If (IsVmw <> 0) And (((Id And $FFFF) = $8086) And (Cc = 2)) Then
+              Name := Name + ' - carte reseau VMware';
             If Id = $CAFE80EE Then
             Begin
               Drv := 'VBOXGST.DLL (Additions VirtualBox d''OS/2-0)';
@@ -481,8 +532,16 @@ Begin
             Begin
               Drv := 'VIOCALLS.DLL, PMWIN.DLL';
               Info := 'VGA (640 x 480 x 16 couleurs) et modes VESA du BIOS';
-              If ((Id And $FFFF) = $80EE) Or (Id = $11111234) Or (Id = $040515AD) Then
+              If ((Id And $FFFF) = $80EE) Or (Id = $11111234) Or ((Id = $040515AD) And (IsVmw = 0)) Then
                 Info := Info + ' ; interface VBE DISPI : toute resolution (taille choisie par l''hote VirtualBox)';
+              If Id = $040515AD Then
+              Begin
+                Drv := 'VIOCALLS.DLL (pilote SVGA II), PMWIN.DLL';
+                Info := 'SVGA II : 32 bits par pel, toute resolution, file de commandes, curseur de l''hote ' +
+                        'transparent ; VGA et VESA du BIOS';
+                If IsVmw <> 0 Then
+                  Info := Info + ' ; taille choisie par VMware (VMWTOOLS.DLL)';
+              End;
               Ok := 1;
             End
             Else If Cc = 2 Then
@@ -519,6 +578,13 @@ Begin
               Info := 'Disques durs et CD-ROM ATAPI en mode PIO';
               Ok := 1;
             End
+            Else If (Id = $074015AD) Or (Id = $07B015AD) Or (Id = $072015AD) Then
+            Begin
+              If Id = $074015AD Then Drv := 'Aucun pilote necessaire (VMWTOOLS.DLL utilise la porte derobee)'
+              Else Info := 'Choisir une carte "e1000" ou "vlance" dans les reglages de la machine virtuelle ' +
+                           '(ethernet0.virtualDev dans le fichier .vmx) : E1000.DLL ou PCNET.DLL';
+              If Id = $074015AD Then Ok := 1;
+            End
             Else If (Cc = 6) Or ((Cc = 8) And (Id <> $CAFE80EE)) Then
             Begin
               Drv := 'Aucun pilote necessaire';
@@ -534,7 +600,25 @@ Procedure ScanLegacy;
 Var K, P, N : LongInt; Info : Array[0..15] Of LongInt; S : String;
 Begin
   AddDev(4, 'Clavier PS/2 (8042)', 'Ports 60h et 64h, IRQ 1', 'Noyau (OS2KRNL), KBDCALLS.DLL', 'Clavier americain (QWERTY)', 1);
-  If IsVBox <> 0 Then
+  If IsVmw <> 0 Then
+  Begin
+    S := 'Souris absolue (vmmouse) : le pointeur d''OS/2-0 suit celui de l''hote, qui est cache au-dessus de ' +
+         'la machine (un seul pointeur, pas de capture)';
+    If VmFn = 0 Then S := 'VMWTOOLS.DLL absent : souris relative';
+    AddDev(4, 'Souris VMware (PS/2 + vmmouse absolue)', 'Ports 60h et 64h, IRQ 12, porte derobee 5658h',
+           'Noyau, MOUCALLS.DLL, VMWTOOLS.DLL', S, 1);
+    S := 'VMWTOOLS.DLL absent';
+    K := 0;
+    If VmFn <> 0 Then
+    Begin
+      Pk[0] := 4; Pk[1] := LongInt(@TxtBuf); Pk[2] := 200;
+      If CallPtr1(VmFn, LongInt(@Pk)) <> 0 Then K := 1;
+      S := GetZ(LongInt(@TxtBuf));
+    End;
+    AddDev(6, 'VMware Tools d''OS/2-0', 'Porte derobee 5658h (GuestRPC : RPCI et TCLO)',
+           'VMWTOOLS.DLL (souris absolue, taille de l''ecran)', S, K);
+  End
+  Else If IsVBox <> 0 Then
   Begin
     S := 'Souris integree (absolue) : le pointeur d''OS/2-0 suit celui de l''hote, qui est cache au-dessus de ' +
          'la machine (un seul pointeur)';
@@ -601,12 +685,27 @@ End;
 
 Procedure Scan;
 Begin
-  NDev := 0; IsVBox := 0;
-  VbFn := DrvEntry('VBOXGST');
-  If VbFn <> 0 Then
+  NDev := 0; IsVBox := 0; IsVmw := 0; VmFn := 0; VbFn := 0;
+  For Dummy := 0 To 31 Do
+    If PciRead($80000000 Or (Dummy Shl 11), 0) = $CAFE80EE Then IsVBox := 1;
+  If IsVBox <> 0 Then
   Begin
-    Pk[0] := 1;
-    If CallPtr1(VbFn, LongInt(@Pk)) = 0 Then VbFn := 0;
+    VbFn := DrvEntry('VBOXGST');
+    If VbFn <> 0 Then
+    Begin
+      Pk[0] := 1;
+      If CallPtr1(VbFn, LongInt(@Pk)) = 0 Then VbFn := 0;
+    End;
+  End
+  Else If VmwareBdoor Then
+  Begin
+    IsVmw := 1;
+    VmFn := DrvEntry('VMWTOOLS');
+    If VmFn <> 0 Then
+    Begin
+      Pk[0] := 1;
+      If CallPtr1(VmFn, LongInt(@Pk)) = 0 Then VmFn := 0;
+    End;
   End;
   ScanPci;
   ScanLegacy;
@@ -805,6 +904,12 @@ Begin
     TextT(X, Yt, 'Etat :', CLR_BLACK, CLR_PALEGRAY);
     If DOk[D] <> 0 Then WrapText(X, Yt + 16, N, 'Ce peripherique fonctionne correctement.', CLR_DARKGREEN, L)
     Else WrapText(X, Yt + 16, N, 'Aucun pilote d''OS/2-0 n''est charge pour ce peripherique.', CLR_DARKRED, L);
+  End;
+  If IsVmw <> 0 Then
+  Begin
+    If VmFn <> 0 Then S := 'Machine virtuelle VMware : VMware Tools d''OS/2-0 actifs'
+    Else S := 'Machine virtuelle VMware (VMWTOOLS.DLL absent)';
+    WrapText(X, CH - 40, N, S, CLR_DARKBLUE, L);
   End;
   If IsVBox <> 0 Then
   Begin
