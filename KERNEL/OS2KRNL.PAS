@@ -5385,6 +5385,14 @@ Begin
   PAlloc := Cand;
 End;
 
+{ grands blocs de memoire d'un processus (KrnTaskCtl 15 a 17 :
+  DosAllocMem de 64 Ko et plus) : memoire physique au-dela de 16 Mo, vue
+  a la meme adresse lineaire, rendue a la fin du processus }
+Const
+  MaxXBlk = 64;
+Var
+  XBase, XOwner : Array[0..MaxXBlk - 1] Of LongInt;
+
 Procedure PFree(Base : LongInt);
 Var I, J : LongInt;
 Begin
@@ -5656,6 +5664,12 @@ Begin
         If (TkUsed[K] <> 0) And (TkProc[K] = P) Then Alive := True;
       If Not Alive Then
       Begin
+        For K := 0 To MaxXBlk - 1 Do
+          If (XBase[K] <> 0) And (XOwner[K] = P) Then
+          Begin
+            PFree(XBase[K]);
+            XBase[K] := 0;
+          End;
         PFree(Procs[P].PhysBase);
         KFree(Procs[P].PtAlloc);
         Procs[P].MemLive := False;
@@ -6117,6 +6131,33 @@ Begin
           Else KrnTaskCtl := -1;
         End;
    14 : If (CurProc >= 0) And (P1 > 1) Then Procs[CurProc].NextTid := P1;
+   { grands blocs de memoire du processus : 15 allouer (P1 octets),
+     16 liberer (P1 adresse), 17 le bloc P1 existe-t-il ? }
+   15 : If (CurProc >= 0) And (P1 > 0) Then
+        Begin
+          K := 0;
+          While (K < MaxXBlk) And (XBase[K] <> 0) Do Inc(K);
+          If K < MaxXBlk Then
+          Begin
+            Sz := (P1 + 4095) And Not 4095;
+            S := PAlloc(Sz);
+            If S <> 0 Then
+            Begin
+              FillMem(S, Sz, 0);
+              XBase[K] := S; XOwner[K] := CurProc;
+              KrnTaskCtl := S;
+            End;
+          End;
+        End;
+   16 : For K := 0 To MaxXBlk - 1 Do
+          If (P1 <> 0) And (XBase[K] = P1) Then
+          Begin
+            PFree(P1);
+            XBase[K] := 0;
+            KrnTaskCtl := 1;
+          End;
+   17 : For K := 0 To MaxXBlk - 1 Do
+          If (P1 <> 0) And (XBase[K] = P1) Then KrnTaskCtl := 1;
   End;
 End;
 
