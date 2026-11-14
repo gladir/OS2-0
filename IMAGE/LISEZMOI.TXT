@@ -8,15 +8,17 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
-              PMSPL.DLL, PMVIOP.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
+              PMSPL.DLL, PMVIOP.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL,
+              ESAUDIO.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
+              DIGAUDIO.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
               TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE,
               TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE,
               TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE,
-              TESTSPL.EXE, TESTVIOP.EXE et les
+              TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE et les
               commandes du depot
               compilees avec
               OS2PC (-COS2).
@@ -24,6 +26,8 @@ OS2INST.ISO   CD-ROM d'installation : memes fichiers, CONFIG.SYS de
               INSTALL\ (PROTSHELL=C:\INSTALL.EXE) ; installe OS/2-0
               sur un disque dur (partition HPFS, qui devient C:).
 INSTALL\      CONFIG.SYS du CD-ROM d'installation.
+SONS\         Sons du systeme (DEMARRE.WAV, CLOCHE.WAV), copies sur le
+              CD-ROM par KERNEL\BUILD.sh.
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
               DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
@@ -62,6 +66,12 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC KLONDIKE.PAS                        -> KLONDIKE.EXE (Solitaire - Klondike)
   OS2PC ECHECS.PAS                          -> ECHECS.EXE (Echecs)
   OS2PC MAHJONGG.PAS                        -> MAHJONGG.EXE (Mahjongg Solitaire)
+  OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
+  OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
+  OS2PC DLL\SBAUDIO.PAS                     -> SBAUDIO.DLL (pilote Sound Blaster)
+  OS2PC DLL\ICHAUDIO.PAS                    -> ICHAUDIO.DLL (pilote AC'97 Intel ICH)
+  OS2PC DLL\ESAUDIO.PAS                     -> ESAUDIO.DLL (pilote Ensoniq AudioPCI)
+  OS2PC DLL\TESTMDM.PAS                     -> TESTMDM.EXE (essai du son)
   nasm -f bin KERNEL\HDBOOT.ASM             -> MBR du disque dur (deja dans INSTALL.PAS)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
@@ -165,7 +175,9 @@ Carte memoire
                      le noyau reloge la DLL (section .reloc) a la
                      premiere place libre ; la table des modules
                      grandit au besoin (tas du noyau)
-  01000000h et plus  memoire physique des processus (image + pile)
+  01000000h et plus  memoire physique des processus (image + pile) et
+                     grands blocs de DosAllocMem (64 Ko et plus :
+                     KrnTaskCtl 15 a 17, meme adresse lineaire)
   haut de la memoire disque virtuel HPFS (/RAMDISK:n Ko)
 
 CONFIG.SYS
@@ -635,7 +647,7 @@ apparence de l'installation de Warp 3) :
     libre, creer une partition HPFS (taille en Mo), supprimer, choisir ;
   Formatage HPFS (nom du volume) ou conservation des fichiers ;
   Composants : bureau et LaunchPad, utilitaires, programmes d'essai,
-    disque virtuel, jeux ;
+    disque virtuel, jeux, multimedia ;
   Transfert des fichiers (barre aux logos OS/2), CONFIG.SYS du disque,
     zone d'amorcage et MBR ; Redemarrer.
 Tab et Maj+Tab : controle suivant ; F1 : aide. Parametres : /AUTO
@@ -709,6 +721,27 @@ traditionnels, composant Jeux de l'installation) :
   toujours faisables ; I indice, Ctrl+Z annuler, recommencer.
 Parametre /SEED:n (Klondike, Mahjongg) : donne reproductible.
 
+Multimedia (dossier Systeme OS/2, Multimedia)
+---------------------------------------------
+Audio numerique (DIGAUDIO.EXE, "Digital Audio" de MMPM/2) : jouer,
+enregistrer et modifier des sons WAV (PCM 8 ou 16 bits, mono ou
+stereo, 3 Mo au plus) ; forme d'onde, selection, couper, copier,
+coller, effets (inverser, amplifier, attenuer, fondus, echo, silence),
+conversion de type (11 025 / 22 050 / 44 100 Hz, 8/16 bits, mono/
+stereo), volume. Un fichier .WAV ouvert depuis un dossier du bureau
+s'ouvre dans Audio numerique.
+MDM.DLL : interface MCI (mciSendString, appareil waveaudio : open,
+play, record, stop, pause, resume, seek, status, set, save, close,
+info, capability, sysinfo ; mciGetErrorString) et flux audio.
+Pilotes (DLL a un point d'entree AUDIOSTRATEGY, paquet de requete) :
+  SBAUDIO.DLL  Sound Blaster 1.x/2.0/Pro/16 (DMA ISA ; variable BLASTER)
+  ICHAUDIO.DLL AC'97 Intel ICH a ICH7, nForce, AMD-8111 (PCI)
+  ESAUDIO.DLL  Ensoniq AudioPCI ES1370 / Sound Blaster PCI 64 (PCI)
+CONFIG.SYS : SET AUDIODRIVER=SBAUDIO, ICHAUDIO, ESAUDIO ou NONE (sans
+elle : detection, dans cet ordre : ICHAUDIO, ESAUDIO, SBAUDIO).
+QEMU : -audiodev pa,id=son -device sb16,audiodev=son (ou AC97, ES1370) ;
+-audiodev wav,id=son,path=sortie.wav enregistre le son produit.
+
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
 Le LaunchPad d'OS/2 Warp 3 (source LAUNCHPAD.PAS) est lance par
@@ -754,6 +787,12 @@ Limites
   lecteur de CD-ROM n'est pas une unite (C: est la partition HPFS) ;
   INSTALL.EXE n'affiche que six langues (le portugais, le suedois, le
   danois et le japonais en anglais).
+- Son : une seule carte et un seul flux a la fois (lecture ou
+  enregistrement) ; les pilotes n'utilisent pas les interruptions (la
+  position est lue dans la carte) ; Sound Blaster avant le 16 : 8 bits,
+  et le DSP 1.x est traite comme un 2.0 ; la Sound Blaster 16 de QEMU
+  n'enregistre pas (l'AC'97 et l'ES1370 de QEMU, oui) ; son de 3 Mo au
+  plus dans Audio numerique.
 - Les programmes s'executent en anneau 0. Le noyau est multitache : les
   processus et leurs fils s'executent en parallele ; la minuterie
   interrompt toutes les 30 ms une tache qui execute le code de son

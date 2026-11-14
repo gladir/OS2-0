@@ -145,8 +145,9 @@ Const
   OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16; OB_SETUP = 17; OB_SYSSET = 18; OB_MOUSE = 19; OB_COLORS = 20;
   OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19; OB_COUNTRY = 23; IC_GLOBE = 20;
   OB_GAMES = 24; OB_GAME = 25; IC_CARDS = 21; IC_CHESS = 22; IC_TILES = 23;
+  OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
-  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9;
+  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
   BS_PUSHBUTTON = 0; BS_AUTOCHECKBOX = 2; BS_AUTORADIOBUTTON = 4; SS_TEXT = 1; SS_GROUPBOX = 2;
@@ -750,6 +751,11 @@ Begin
   Begin
     Icon := IC_BATCH; Obj := OB_BATCH;
   End
+  Else If E = 'WAV' Then
+  Begin
+    { son numerique : ouvert par Audio numerique }
+    Icon := IC_WAVE; Obj := OB_SOUND;
+  End
   Else
   Begin
     Icon := IC_FILE; Obj := OB_DATA;
@@ -833,7 +839,7 @@ Begin
     OB_COUNTRY : Icon := IC_GLOBE;
     OB_COLORS : Icon := IC_PALETTE;
     OB_LANG : Icon := IC_LANG;
-    OB_GAMES : Icon := IC_FOLDER;
+    OB_GAMES, OB_MMFOLDER : Icon := IC_FOLDER;
   Else
     Icon := IC_FILE;
   End;
@@ -1010,6 +1016,16 @@ Begin
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
+        Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
+      End;
+    VK_MM :
+      Begin
+        { multimedia (composant de l'installation) : Audio numerique et les
+          sons du systeme }
+        If FileExists('C:\DIGAUDIO.EXE') Then
+          Dummy := NewItem(V, IC_AUDIO, OB_GAME, 'Audio numerique', 'C:\DIGAUDIO.EXE');
+        If FileExists('C:\DEMARRE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'DEMARRE.WAV', 'C:\DEMARRE.WAV');
+        If FileExists('C:\CLOCHE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'CLOCHE.WAV', 'C:\CLOCHE.WAV');
       End;
     VK_GAMES :
       Begin
@@ -1247,6 +1263,28 @@ Begin
         GBox(Hps, X + 19, Y + 16, X + 24, Y + 25, CLR_RED, DRO_OUTLINE);
         GLn(Hps, X + 21, Y + 13, X + 21, Y + 28, CLR_RED);
         GBox(Hps, X + 9, Y + 12, X + 12, Y + 15, CLR_DARKGREEN, DRO_FILL);
+      End;
+    IC_AUDIO :
+      Begin
+        { haut-parleur et ondes sonores }
+        FBox(Hps, X + 3, Y + 11, X + 9, Y + 21, CLR_DARKGRAY, CLR_BLACK);
+        GLn(Hps, X + 9, Y + 11, X + 16, Y + 4, CLR_BLACK);
+        GLn(Hps, X + 9, Y + 21, X + 16, Y + 28, CLR_BLACK);
+        GLn(Hps, X + 16, Y + 4, X + 16, Y + 28, CLR_BLACK);
+        GLn(Hps, X + 20, Y + 12, X + 20, Y + 20, CLR_BLUE);
+        GLn(Hps, X + 24, Y + 9, X + 24, Y + 23, CLR_BLUE);
+        GLn(Hps, X + 28, Y + 6, X + 28, Y + 26, CLR_BLUE);
+      End;
+    IC_WAVE :
+      Begin
+        { fichier son : page et forme d'onde }
+        FBox(Hps, X + 5, Y + 2, X + 26, Y + 29, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 8, Y + 8, X + 23, Y + 23, CLR_BLUE, DRO_FILL);
+        GLn(Hps, X + 9, Y + 15, X + 22, Y + 15, CLR_WHITE);
+        GLn(Hps, X + 11, Y + 11, X + 11, Y + 19, CLR_WHITE);
+        GLn(Hps, X + 14, Y + 9, X + 14, Y + 21, CLR_WHITE);
+        GLn(Hps, X + 17, Y + 12, X + 17, Y + 18, CLR_WHITE);
+        GLn(Hps, X + 20, Y + 14, X + 20, Y + 16, CLR_WHITE);
       End;
     IC_LANG :
       Begin
@@ -2024,7 +2062,7 @@ End;
 
 Procedure OpenNotebook(Tab : LongInt); Forward;
 Procedure OpenNb(Kind, Tab : LongInt); Forward;
-Procedure RunPm(P : String); Forward;
+Procedure RunPm(P, Params : String); Forward;
 
 Procedure OpenItem(K : LongInt);
 Var V : LongInt; P : String;
@@ -2060,7 +2098,10 @@ Begin
     OB_LANG : OpenNotebook(7);
     OB_COUNTRY : OpenNb(2, 0);
     OB_GAMES : OpenFolder(VK_GAMES, '', 'Jeux');
-    OB_GAME : RunPm(It(K)^.Path);
+    OB_GAME : RunPm(It(K)^.Path, '');
+    OB_MMFOLDER : OpenFolder(VK_MM, '', 'Multimedia');
+    OB_SOUND :
+      If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', It(K)^.Path) Else OpenViewer(It(K)^.Path);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
@@ -4205,14 +4246,15 @@ End;
 { Programme principal                                                   }
 { ==================================================================== }
 
-{ programme de PM (les jeux) : il s'execute dans la session de
-  Presentation Manager, en meme temps que le bureau }
-Procedure RunPm(P : String);
+{ programme de PM (jeux, Audio numerique) : il s'execute dans la session
+  de Presentation Manager, en meme temps que le bureau }
+Procedure RunPm(P, Params : String);
 Var Res : Array[0..1] Of LongInt; Rc : LongInt;
 Begin
+  { arguments : programme, nul, parametres, nul, nul }
   PutZ(LongInt(@ArgBuf), P);
-  WrB(LongInt(@ArgBuf) + Length(P) + 1, 0);
-  WrB(LongInt(@ArgBuf) + Length(P) + 2, 0);
+  PutZ(LongInt(@ArgBuf) + Length(P) + 1, Params);
+  WrB(LongInt(@ArgBuf) + Length(P) + Length(Params) + 2, 0);
   PutZ(LongInt(@NameZ2), P);
   Res[0] := 0; Res[1] := 0;
   Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));

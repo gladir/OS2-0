@@ -2894,6 +2894,7 @@ Type
     Owner  : LongInt;
     Shared : Boolean;
     Name   : String[63];     { \SHAREMEM\... pour la memoire nommee }
+    XPhys  : Boolean;        { grand bloc du noyau (KrnTaskCtl 15) }
   End;
   TSeg = Record
     Used   : Boolean;
@@ -2931,9 +2932,22 @@ Begin
   Pid := MyPid;
   For I := 0 To MaxMem - 1 Do
     If (Not MemObjs[I].Used) Or ((Not MemObjs[I].Shared) And (MemObjs[I].Owner <> Pid) And
-       (KHeapSize(1, 0, MemObjs[I].Base) < 0)) Then
+       (((Not MemObjs[I].XPhys) And (KHeapSize(1, 0, MemObjs[I].Base) < 0)) Or
+        (MemObjs[I].XPhys And (KTaskCtl(17, MemObjs[I].Base, 0, 0) = 0)))) Then
     Begin
-      If Shared Then A := SharedAlloc(Size) Else A := KHeapAlloc(1, 8, Size);
+      { 64 Ko et plus (memoire privee) : grand bloc du noyau, au-dela de
+        16 Mo (le tas du noyau est petit) ; sinon le tas du noyau }
+      A := 0;
+      MemObjs[I].XPhys := False;
+      If (Not Shared) And (Size >= 65536) Then
+      Begin
+        A := KTaskCtl(15, Size, 0, 0);
+        If A <> 0 Then MemObjs[I].XPhys := True;
+      End;
+      If A = 0 Then
+      Begin
+        If Shared Then A := SharedAlloc(Size) Else A := KHeapAlloc(1, 8, Size);
+      End;
       If A = 0 Then Exit;
       MemObjs[I].Used := True;
       MemObjs[I].Base := A;
@@ -3030,7 +3044,7 @@ Begin
 End;
 
 Function DosFreeMem(Pb : LongInt) : LongInt;
-Var M : LongInt;
+Var M, R : LongInt;
 Begin
   M := MemFind(Pb);
   If (M < 0) Or (MemObjs[M].Base <> Pb) Then
@@ -3038,8 +3052,10 @@ Begin
     DosFreeMem := ERROR_INVALID_ADDRESS;
     Exit;
   End;
-  If MemObjs[M].Shared Then KHeapFree(2, 0, Pb) Else KHeapFree(1, 0, Pb);
+  If MemObjs[M].XPhys Then R := KTaskCtl(16, Pb, 0, 0)
+  Else If MemObjs[M].Shared Then KHeapFree(2, 0, Pb) Else KHeapFree(1, 0, Pb);
   MemObjs[M].Used := False;
+  MemObjs[M].XPhys := False;
   DosFreeMem := NO_ERROR;
 End;
 

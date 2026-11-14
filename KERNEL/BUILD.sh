@@ -9,7 +9,8 @@
 #        OS2PC -COS2KRNL OS2KRNL.PAS   -> OS2KRNL  (noyau 32 bits)
 #  3. compile CMD.PAS et les commandes de la racine du depot (OS2PC -COS2) ;
 #     dont les jeux du dossier Jeux du bureau : KLONDIKE.PAS (Solitaire -
-#     Klondike), ECHECS.PAS (Echecs) et MAHJONGG.PAS (Mahjongg Solitaire) ;
+#     Klondike), ECHECS.PAS (Echecs) et MAHJONGG.PAS (Mahjongg Solitaire), et
+#     DIGAUDIO.PAS (Audio numerique, dossier Multimedia) ;
 #  4. compile les bibliotheques DLL/DOSCALLS.PAS (DOSCALLS.DLL),
 #     DLL/FKA.PAS (FKA.DLL), DLL/HPFS.PAS (HPFS.IFS, systeme de
 #     fichiers installable), DLL/VIOCALLS.PAS (VIOCALLS.DLL, video) et
@@ -29,12 +30,16 @@
 #     DLL/PMPIC.PAS (PMPIC.DLL, impression et conversion d'images),
 #     DLL/PMSHAPI.PAS (PMSHAPI.DLL, interface de l'interpreteur de PM),
 #     DLL/PMSPL.PAS (PMSPL.DLL, tampon d'impression de PM),
-#     DLL/PMVIOP.PAS (PMVIOP.DLL, bouclier VIO : fenetres OS/2)
-#     et leurs programmes d'essai TESTDOS, TESTFKA,
+#     DLL/PMVIOP.PAS (PMVIOP.DLL, bouclier VIO : fenetres OS/2),
+#     DLL/MDM.PAS (MDM.DLL, multimedia MMPM/2 : MCI, son numerique) et
+#     les pilotes des cartes son DLL/SBAUDIO.PAS (Sound Blaster),
+#     DLL/ICHAUDIO.PAS (AC'97 Intel ICH) et DLL/ESAUDIO.PAS (Ensoniq
+#     AudioPCI), et leurs programmes d'essai TESTDOS, TESTFKA,
 #     TESTHPFS, TESTVIO, TESTMOU, TESTNLS, TESTKBD, TESTMON, TESTMSG,
 #     TESTNMP, TESTSES, TESTQUE, TESTPFS, TESTRM, TESTSM, TESTHLP,
 #     TESTUNI, TESTDRG, TESTWIN, TESTGPI, TESTMRG, TESTPIC, TESTSHA,
-#     TESTSPL et TESTVIOP ;
+#     TESTSPL, TESTVIOP et TESTMDM ; les sons de IMAGE/SONS (WAV) sont
+#     copies sur le CD-ROM ;
 #  5. fabrique le CD-ROM : MAKEISO OS2CD.ISO /BOOT:OS2BOOT ... ;
 #  6. fabrique le CD-ROM d'installation IMAGE/OS2INST.ISO : memes fichiers,
 #     CONFIG.SYS de IMAGE/INSTALL (PROTSHELL=C:\INSTALL.EXE : INSTALL.PAS,
@@ -128,11 +133,15 @@ echo "== Bibliotheques DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.D
 "$W/os2pc" -Q "$ROOT/DLL/TESTSPL.PAS" "$W/cd/TESTSPL.EXE"
 "$W/os2pc" -Q "$ROOT/DLL/PMVIOP.PAS" "$W/cd/PMVIOP.DLL"
 "$W/os2pc" -Q "$ROOT/DLL/TESTVIOP.PAS" "$W/cd/TESTVIOP.EXE"
+echo "== Multimedia : MDM.DLL et pilotes SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL"
+for B in MDM SBAUDIO ICHAUDIO ESAUDIO; do "$W/os2pc" -Q "$ROOT/DLL/$B.PAS" "$W/cd/$B.DLL"; done
+"$W/os2pc" -Q "$ROOT/DLL/TESTMDM.PAS" "$W/cd/TESTMDM.EXE"
+cp "$ROOT"/IMAGE/SONS/*.WAV "$W/cd/"
 cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 
 echo "== CD-ROM amorcable"
 "$W/makeiso" "$ROOT/IMAGE/OS2CD.ISO" /BOOT:"$W/cd/OS2BOOT" /LABEL:OS2_0 "$W/cd/*"
-for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE PMSHELL.EXE LAUNCHPD.EXE DOSCALLS.DLL FKA.DLL HPFS.IFS VIOCALLS.DLL MOUCALLS.DLL NLS.DLL KBDCALLS.DLL MONCALLS.DLL MSG.DLL NAMPIPES.DLL SESMGR.DLL QUECALLS.DLL SPOOLCP.DLL RMINFO.DLL OS2SM.DLL HELPMGR.DLL LIBUNI.DLL PMDRAG.DLL PMWIN.DLL PMGPI.DLL PMMERGE.DLL PMPIC.DLL PMSHAPI.DLL PMSPL.DLL PMVIOP.DLL; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
+for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE PMSHELL.EXE LAUNCHPD.EXE DOSCALLS.DLL FKA.DLL HPFS.IFS VIOCALLS.DLL MOUCALLS.DLL NLS.DLL KBDCALLS.DLL MONCALLS.DLL MSG.DLL NAMPIPES.DLL SESMGR.DLL QUECALLS.DLL SPOOLCP.DLL RMINFO.DLL OS2SM.DLL HELPMGR.DLL LIBUNI.DLL PMDRAG.DLL PMWIN.DLL PMGPI.DLL PMMERGE.DLL PMPIC.DLL PMSHAPI.DLL PMSPL.DLL PMVIOP.DLL MDM.DLL SBAUDIO.DLL ICHAUDIO.DLL ESAUDIO.DLL; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
 echo "== CD-ROM d'installation"
 rm -rf "$W/cdinst"; mkdir -p "$W/cdinst"
 cp "$W/cd/"* "$W/cdinst/"
