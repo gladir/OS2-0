@@ -398,6 +398,7 @@ Function MouSetPtrPos(PPos, H : LongInt) : LongInt; External 'MOUCALLS' Name 'Mo
 Function MouDrawPtr(H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouDrawPtr';
 Function MouRemovePtr(PRect, H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouRemovePtr';
 Function VioSetCurPos(Row, Col, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioSetCurPos';
+Function VioSvgaUpdate : LongInt; External 'VIOCALLS' Name 'VIOSVGAUPDATE';
 Function VioSetCurType(PInfo, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioSetCurType';
 Function VioSetMode(PMode, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioSetMode';
 Function VioGetMode(PMode, H : LongInt) : LongInt; External 'VIOCALLS' Name 'VioGetMode';
@@ -6068,6 +6069,45 @@ Begin
   End;
 End;
 
+{ la porte derobee de VMware (port 5658h) repond-elle ? }
+Function VmwareBdoor : Boolean;
+Var A, B, D, V : LongInt; R : Boolean;
+Begin
+  A := 0; B := 0;
+  asm
+    push ebx
+    mov eax,1447909480
+    mov ebx,-1
+    mov ecx,10
+    mov edx,22104
+    in eax,dx
+    mov A,eax
+    mov B,ebx
+    pop ebx
+  end;
+  R := (B = 1447909480) And (A <> -1);
+  { VMware : la carte VMware SVGA II (PCI 15ADh:0405h) est toujours la ;
+    QEMU repond aussi a la porte derobee (vmport) sans etre VMware }
+  If R Then
+  Begin
+    R := False;
+    For D := 0 To 31 Do
+    Begin
+      V := $80000000 Or (D Shl 11);
+      asm
+        mov edx,3320
+        mov eax,V
+        out dx,eax
+        mov edx,3324
+        in eax,dx
+        mov V,eax
+      end;
+      If V = $040515AD Then R := True;
+    End;
+  End;
+  VmwareBdoor := R;
+End;
+
 { VirtualBox (VBOXGST.DLL) : l'hote demande une autre taille de l'ecran
   (fenetre redimensionnee, ajustement automatique, menu Ecran virtuel) ;
   verifie toutes les 300 ms par la session de PM ; l'ecran passe a la
@@ -6083,8 +6123,10 @@ Begin
   If VbxFn = 0 Then
   Begin
     VbxFn := -1;
-    If Not VmmDevOnPci Then Exit;
-    PutZ(LongInt(@VbxName), 'VBOXGST');
+    { VirtualBox (VBOXGST.DLL) ou VMware (VMWTOOLS.DLL) }
+    If VmmDevOnPci Then PutZ(LongInt(@VbxName), 'VBOXGST')
+    Else If VmwareBdoor Then PutZ(LongInt(@VbxName), 'VMWTOOLS')
+    Else Exit;
     H := 0; F := 0;
     If DcLoadModule(LongInt(@VbxErr), 64, LongInt(@VbxName), LongInt(@H)) = 0 Then
       If (DcQueryProcAddr(H, 1, 0, LongInt(@F)) = 0) And (F <> 0) Then
@@ -6092,6 +6134,11 @@ Begin
         VbxPk[0] := 1;
         If CallVb(F, LongInt(@VbxPk)) <> 0 Then VbxFn := F;
       End;
+    { VMware : ecran en 32 bits par pel (carte SVGA II : curseur de l'hote
+      cache, un seul pointeur) }
+    If (VbxFn <> -1) And (GBits < 32) And VmwareBdoor Then
+      If WinSetScreenMode(PmCurW, PmCurH, 32) <> 0 Then
+        Dummy := WinBroadcastMsg(HWND_DESKTOP, WM_SYSVALUECHANGED, 20, 21, 0);
   End;
   If VbxFn = -1 Then Exit;
   VbxPk[0] := 3;
@@ -6114,6 +6161,8 @@ Begin
   KeyInput(Q);
   MouseInput(Q);
   VBoxCheck;
+  { carte VMware SVGA II : l'hote recopie l'ecran }
+  If GMode <> 0 Then Dummy := VioSvgaUpdate;
 End;
 
 { Message suivant : postes et entrees, WM_PAINT, WM_TIMER ; Wait :

@@ -9,8 +9,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
               PMSPL.DLL, PMVIOP.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL,
-              ESAUDIO.DLL, VBOXGST.DLL, TCPIP32.DLL, E1000.DLL,
-              PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
+              ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL,
+              E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
               DIGAUDIO.EXE, DEVMGR.EXE, IFCONFIG.EXE, PING.EXE,
               HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
@@ -75,6 +75,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\ESAUDIO.PAS                     -> ESAUDIO.DLL (pilote Ensoniq AudioPCI)
   OS2PC DLL\TESTMDM.PAS                     -> TESTMDM.EXE (essai du son)
   OS2PC DLL\VBOXGST.PAS                     -> VBOXGST.DLL (Additions VirtualBox)
+  OS2PC DLL\VMWTOOLS.PAS                    -> VMWTOOLS.DLL (VMware Tools)
   OS2PC DLL\TCPIP32.PAS                     -> TCPIP32.DLL (pile TCP/IP, sockets)
   OS2PC DLL\E1000.PAS                       -> E1000.DLL (pilote Intel PRO/1000)
   OS2PC DLL\PCNET.PAS                       -> PCNET.DLL (pilote AMD PCnet)
@@ -760,6 +761,20 @@ redimensionnee, ajustement automatique) appliquee par PMWIN (verifiee
 toutes les 300 ms). Adaptateur graphique de VirtualBox, QEMU, Bochs :
 interface VBE DISPI (ports 1CEh/1CFh), toute resolution.
 
+VMware Workstation (VMWTOOLS.DLL)
+---------------------------------
+VMware Tools d'OS/2-0, charges par MOUCALLS.DLL et PMWIN.DLL si la
+porte derobee de VMware (port 5658h) repond et que la carte VMware
+SVGA II (PCI 15AD:0405) est la : souris absolue vmmouse (un seul
+pointeur, sans capture), canal GuestRPC (RPCI et TCLO) : version des
+Tools, capacites, ordre Resolution_Set de l'hote (fenetre
+redimensionnee, Ajuster l'invite, plein ecran) applique par PMWIN.
+Carte VMware SVGA II (VIOCALLS.DLL) : toute resolution en 32 bits par
+pel, file de commandes (UPDATE toutes les 30 ms au plus). Cartes
+reseau de VMware : vlance (PCNET.DLL), e1000 et e1000e (E1000.DLL) ;
+VMXNET3 n'a pas de pilote. QEMU : -vga vmware (SVGA II et vmmouse,
+sans GuestRPC).
+
 Reseau TCP/IP (TCPIP32.DLL)
 ---------------------------
 Pilotes : E1000.DLL (Intel PRO/1000 : 82540EM de VirtualBox et QEMU,
@@ -778,7 +793,9 @@ QEMU : -nic user,model=e1000 (ou pcnet).
 Gestionnaire de peripheriques (DEVMGR.EXE)
 ------------------------------------------
 Systeme OS/2, Configuration du systeme : le materiel par categorie (bus
-PCI, BIOS, disques), ses ressources, son pilote et son etat.
+PCI, BIOS, disques), ses ressources, son pilote et son etat. Sous
+VirtualBox : VBOXGST.DLL, souris VirtualBox ; sous VMware : VMware
+Tools d'OS/2-0, souris VMware (vmmouse), adaptateur VMware SVGA II.
 
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
@@ -830,6 +847,10 @@ Limites
   les trames quand un programme attend (pas d'interruption).
 - VirtualBox : un seul ecran ; pas de dossiers partages, de presse-
   papiers partage ni de mode transparent (seamless).
+- VMware : un seul ecran, 32 bits par pel sur la SVGA II ; pas de
+  dossiers partages, de presse-papiers partage, de glisser-deposer avec
+  l'hote, de synchronisation de l'heure ni de mode Unity ; pas de pilote
+  VMXNET3.
 - Son : une seule carte et un seul flux a la fois (lecture ou
   enregistrement) ; les pilotes n'utilisent pas les interruptions (la
   position est lue dans la carte) ; Sound Blaster avant le 16 : 8 bits,

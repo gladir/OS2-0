@@ -289,6 +289,11 @@ Var
   { adaptateur VirtualBox / Bochs / QEMU (VBE DISPI) : -1 pas encore vu,
     0 absent, 1 present ; memoire de la carte (octets) }
   BgaState, BgaMem : LongInt;
+  { carte VMware SVGA II (PCI 15ADh:0405h) : -1 pas encore vue, 0 absente,
+    1 presente ; ports, file de commandes (FIFO), memoire, possibilites,
+    taille maximale, derniere mise a jour de l'ecran }
+  SvgaState, SvgaIo, SvgaFifo, SvgaFifoSz, SvgaVram, SvgaCaps, SvgaMaxW, SvgaMaxH, SvgaLast : LongInt;
+  SvgaBuf : Array[0..15] Of LongInt;
   VesaNo, VesaW, VesaH, VesaB, VesaPitch, VesaLfb : Array[0..95] Of LongInt;
   SesAddr, HookOk : LongInt;               { etat des sessions du noyau }
   SesGr : Array[0..15] Of LongInt;         { mode graphique de chaque session }
@@ -299,6 +304,7 @@ Var
 { ==================================================================== }
 
 Function KGetStdHandle(N : LongInt) : LongInt; External 'DOSCALLS' Name 'GetStdHandle';
+Function KTicks : LongInt; External 'DOSCALLS' Name 'GetTickCount';
 Function KWriteConsoleA(H, Buf, N, PWritten, Res : LongInt) : LongInt; External 'DOSCALLS' Name 'WriteConsoleA';
 Function KSetConsoleCursorPosition(H, Coord : LongInt) : LongInt; External 'DOSCALLS' Name 'SetConsoleCursorPosition';
 Function KGetConsoleScreenBufferInfo(H, P : LongInt) : LongInt; External 'DOSCALLS' Name 'GetConsoleScreenBufferInfo';
@@ -1191,6 +1197,7 @@ Begin
   { la police courante est dans FontBuf (rechargee au retour au texte) ;
     un mode VESA est d'abord quitte par le BIOS }
   If GrMode = $10FFF Then DispiW(4, 0);
+  If GrMode = $10FFE Then SvgaW(1, 0);
   If GrMode >= $10000 Then Dummy := KVid(4, 3, 0);
   VgaLoad(K);
   GrClear;
@@ -1213,6 +1220,7 @@ Begin
   If GrMode = 0 Then Exit;
   { mode VESA : le BIOS rend le mode texte (INT 10h, 03h) }
   If GrMode = $10FFF Then DispiW(4, 0);
+  If GrMode = $10FFE Then SvgaW(1, 0);
   If GrMode >= $10000 Then Dummy := KVid(4, 3, 0);
   VgaLoad(0);
   If CellHeight <> 16 Then CrtcSet(9, (CrtcGet(9) And $E0) Or (CellHeight - 1));
@@ -1294,6 +1302,143 @@ Begin
   BgaPresent := BgaState = 1;
 End;
 
+{ --- carte VMware SVGA II (VMware Workstation, Player, ESXi ; QEMU -vga
+  vmware) : registres par les ports (index BAR0 + 0, valeur BAR0 + 1),
+  toute resolution en 32 bits par pel, memoire lineaire FB_START ; la
+  file de commandes (FIFO, BAR2) recoit SVGA_CMD_UPDATE (l'ecran est
+  recopie par l'hote) et un curseur materiel transparent : le pointeur
+  de l'hote ne se voit plus au-dessus de la machine (souris absolue des
+  VMware Tools : un seul pointeur, celui d'OS/2-0). Le mode est l'entree
+  BGASLOT de la table (numero VBE fictif FFEh). --- }
+Procedure OutL(P, V : LongInt);
+Begin
+  If Not Mine Then Exit;
+  asm
+    mov edx,P
+    mov eax,V
+    out dx,eax
+  end;
+End;
+
+Function InL(P : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := 0;
+  asm
+    mov edx,P
+    in eax,dx
+    mov R,eax
+  end;
+  InL := R;
+End;
+
+Procedure SvgaW(I, V : LongInt);
+Begin
+  OutL(SvgaIo, I);
+  OutL(SvgaIo + 1, V);
+End;
+
+Function SvgaR(I : LongInt) : LongInt;
+Begin
+  OutL(SvgaIo, I);
+  SvgaR := InL(SvgaIo + 1);
+End;
+
+Function SvgaPresent : Boolean;
+Var D, A, V : LongInt;
+Begin
+  If SvgaState < 0 Then
+  Begin
+    SvgaState := 0;
+    If Mine Then
+    Begin
+      A := 0;
+      For D := 0 To 31 Do
+      Begin
+        OutL($CF8, $80000000 Or (D Shl 11));
+        If (A = 0) And (InL($CFC) = $040515AD) Then A := $80000000 Or (D Shl 11);
+      End;
+      If A <> 0 Then
+      Begin
+        OutL($CF8, A Or $10); SvgaIo := InL($CFC) And $FFFC;
+        OutL($CF8, A Or 4); V := InL($CFC);
+        OutL($CF8, A Or 4); OutL($CFC, V Or 7);
+        { version 2 de l'interface }
+        SvgaW(0, $90000002);
+        If SvgaR(0) = $90000002 Then
+        Begin
+          SvgaVram := SvgaR(15); SvgaCaps := SvgaR(17);
+          SvgaMaxW := SvgaR(4); SvgaMaxH := SvgaR(5);
+          SvgaFifo := SvgaR(18); SvgaFifoSz := SvgaR(19);
+          If (SvgaFifo <> 0) And (SvgaFifoSz >= 4096) Then SvgaState := 1;
+        End;
+      End;
+    End;
+  End;
+  SvgaPresent := SvgaState = 1;
+End;
+
+{ une commande dans la file (apres vidage : SYNC, BUSY) }
+Procedure SvgaCmd(N : LongInt);
+Var K, P, Mn, Mx : LongInt;
+Begin
+  SvgaW(21, 1);
+  K := 0;
+  While (SvgaR(22) <> 0) And (K < 100000) Do Inc(K);
+  Mn := RdL(SvgaFifo); Mx := RdL(SvgaFifo + 4);
+  P := RdL(SvgaFifo + 8);
+  For K := 0 To N - 1 Do
+  Begin
+    WrL(SvgaFifo + P, SvgaBuf[K]);
+    P := P + 4;
+    If P >= Mx Then P := Mn;
+  End;
+  WrL(SvgaFifo + 8, P);
+End;
+
+Function SvgaSet(I : LongInt) : Boolean;
+Var W, H : LongInt;
+Begin
+  SvgaSet := False;
+  W := VesaW[I]; H := VesaH[I];
+  SvgaW(1, 0);
+  SvgaW(2, W); SvgaW(3, H); SvgaW(7, 32);
+  SvgaW(23, $5011);                             { invite : OS/2 }
+  SvgaW(1, 1);
+  If (SvgaR(2) <> W) Or (SvgaR(3) <> H) Then Exit;
+  VesaPitch[I] := SvgaR(12);
+  VesaLfb[I] := SvgaR(13) + SvgaR(14);
+  { file : MIN, MAX, NEXT_CMD, STOP (registres de la file : 16 octets) }
+  WrL(SvgaFifo, 16); WrL(SvgaFifo + 4, SvgaFifoSz);
+  WrL(SvgaFifo + 8, 16); WrL(SvgaFifo + 12, 16);
+  SvgaW(20, 1);                                 { CONFIG_DONE }
+  { curseur materiel transparent (1 x 1, masque ET a 1, OU exclusif a 0) }
+  If (SvgaCaps And $20) <> 0 Then
+  Begin
+    SvgaBuf[0] := 19; SvgaBuf[1] := 0; SvgaBuf[2] := 0; SvgaBuf[3] := 0; SvgaBuf[4] := 1; SvgaBuf[5] := 1;
+    SvgaBuf[6] := 1; SvgaBuf[7] := 1; SvgaBuf[8] := -1; SvgaBuf[9] := 0;
+    SvgaCmd(10);
+    SvgaW(24, 0); SvgaW(27, 1);
+  End;
+  SvgaLast := 0;
+  SvgaSet := True;
+End;
+
+{ VioSvgaUpdate (interne, ordinal 1006 : PMWIN.DLL) : l'hote recopie
+  l'ecran (SVGA_CMD_UPDATE), au plus toutes les 30 ms }
+Function VioSvgaUpdate : LongInt;
+Var T : LongInt;
+Begin
+  VioSvgaUpdate := 0;
+  If (GrMode <> $10FFE) Or Not Mine Then Exit;
+  T := KTicks;
+  If (SvgaLast <> 0) And (T - SvgaLast < 30) And (T - SvgaLast >= 0) Then Exit;
+  SvgaLast := T;
+  SvgaBuf[0] := 1; SvgaBuf[1] := 0; SvgaBuf[2] := 0; SvgaBuf[3] := GrW; SvgaBuf[4] := GrH;
+  SvgaCmd(5);
+  VioSvgaUpdate := 1;
+End;
+
 Function BgaSet(W, H, Bits : LongInt) : Boolean;
 Begin
   DispiW(4, 0);                                 { arret }
@@ -1310,6 +1455,16 @@ Var I, R, Bp : LongInt;
 Begin
   VesaLoad;
   R := -1;
+  { carte VMware SVGA II : 32 bits par pel, toute resolution (preferee :
+    curseur materiel de l'hote cache) }
+  If (Bits = 32) And (W >= 320) And (H >= 200) And SvgaPresent Then
+    If (W <= SvgaMaxW) And (H <= SvgaMaxH) And (W * H * 4 <= SvgaVram) Then
+    Begin
+      VesaNo[BGASLOT] := $FFE; VesaW[BGASLOT] := W; VesaH[BGASLOT] := H; VesaB[BGASLOT] := 32;
+      VesaPitch[BGASLOT] := W * 4;
+      VesaFind := BGASLOT;
+      Exit;
+    End;
   For I := VesaN - 1 DownTo 0 Do
     If (VesaW[I] = W) And (VesaH[I] = H) And (VesaB[I] = Bits) Then R := I;
   If (R < 0) And ((Bits = 8) Or (Bits = 15) Or (Bits = 16) Or (Bits = 24) Or (Bits = 32)) And (W >= 320) And
@@ -1334,6 +1489,7 @@ Begin
   For I := 0 To VesaN - 1 Do
     If VesaNo[I] + $10000 = Code Then R := I;
   If (Code = $10FFF) And (VesaNo[BGASLOT] = $FFF) Then R := BGASLOT;
+  If (Code = $10FFE) And (VesaNo[BGASLOT] = $FFE) Then R := BGASLOT;
   VesaOf := R;
 End;
 
@@ -1345,6 +1501,10 @@ Begin
   If VesaNo[I] = $FFF Then
   Begin
     If Not BgaSet(VesaW[I], VesaH[I], VesaB[I]) Then Exit;
+  End
+  Else If VesaNo[I] = $FFE Then
+  Begin
+    If Not SvgaSet(I) Then Exit;
   End
   Else If KVid(3, VesaNo[I], 0) <> 0 Then Exit;
   GrMode := $10000 + VesaNo[I]; GrW := VesaW[I]; GrH := VesaH[I]; GrBits := VesaB[I];
@@ -3955,7 +4115,8 @@ exports
   XVioCreateCA Index 74, VioCheckCharType Index 75, XVioGetCAState Index 76,
   VioSessSwitch Name 'VIOSESSSWITCH' Index 1001,
   VioQueryModes Name 'VIOQUERYMODES' Index 1002, VioQueryVbe Name 'VIOQUERYVBE' Index 1003,
-  VioAvioSize Name 'VIOAVIOSIZE' Index 1004, VioQueryAvioSize Name 'VIOQUERYAVIOSIZE' Index 1005;
+  VioAvioSize Name 'VIOAVIOSIZE' Index 1004, VioQueryAvioSize Name 'VIOQUERYAVIOSIZE' Index 1005,
+  VioSvgaUpdate Name 'VIOSVGAUPDATE' Index 1006;
 
 Var
   InitI : LongInt;
@@ -3974,6 +4135,6 @@ BEGIN
   For InitI := 1 To MaxPS Do PS[InitI].Used := False;
   For InitI := 1 To MaxCA Do CAs[InitI].Used := False;
   For InitI := 0 To MaxLvb - 1 Do Lvbs[InitI].Addr := 0;
-  VesaN := -1; BgaState := -1; BgaMem := 0;
+  VesaN := -1; BgaState := -1; BgaMem := 0; SvgaState := -1; SvgaLast := 0;
   HwCapture;
 END.

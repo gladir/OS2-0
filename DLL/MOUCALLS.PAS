@@ -454,18 +454,59 @@ Begin
   End;
 End;
 
+{ la porte derobee de VMware (port 5658h) repond-elle ? }
+Function VmwareBdoor : Boolean;
+Var A, B, D, V : LongInt; R : Boolean;
+Begin
+  A := 0; B := 0;
+  asm
+    push ebx
+    mov eax,1447909480
+    mov ebx,-1
+    mov ecx,10
+    mov edx,22104
+    in eax,dx
+    mov A,eax
+    mov B,ebx
+    pop ebx
+  end;
+  R := (B = 1447909480) And (A <> -1);
+  { VMware : la carte VMware SVGA II (PCI 15ADh:0405h) est toujours la ;
+    QEMU repond aussi a la porte derobee (vmport) sans etre VMware }
+  If R Then
+  Begin
+    R := False;
+    For D := 0 To 31 Do
+    Begin
+      V := $80000000 Or (D Shl 11);
+      asm
+        mov edx,3320
+        mov eax,V
+        out dx,eax
+        mov edx,3324
+        in eax,dx
+        mov V,eax
+      end;
+      If V = $040515AD Then R := True;
+    End;
+  End;
+  VmwareBdoor := R;
+End;
+
 { position absolue de la souris integree de VirtualBox (0..65535) ;
   faux si la machine n'est pas une machine VirtualBox ou si l'hote ne
   veut pas la souris absolue (souris capturee) }
-Function VBoxAbs(Var X, Y : LongInt) : Boolean;
+Function VBoxAbs(Var X, Y, Bt : LongInt) : Boolean;
 Var H, F, K : LongInt; S : String;
 Begin
   VBoxAbs := False;
   If VbFn = 0 Then
   Begin
     VbFn := -1;
-    If Not VmmDevOnPci Then Exit;
-    S := 'VBOXGST';
+    { VirtualBox (VMMDev sur le bus PCI) ou VMware (porte derobee) }
+    If VmmDevOnPci Then S := 'VBOXGST'
+    Else If VmwareBdoor Then S := 'VMWTOOLS'
+    Else Exit;
     For K := 1 To Length(S) Do VbName[K - 1] := Ord(S[K]);
     VbName[Length(S)] := 0;
     H := 0; F := 0;
@@ -477,9 +518,11 @@ Begin
       End;
   End;
   If VbFn = -1 Then Exit;
-  VbPk[0] := 2;
+  VbPk[0] := 2; VbPk[3] := 0; VbPk[4] := 0;
   If CallPtr1(VbFn, LongInt(@VbPk)) = 0 Then Exit;
   X := VbPk[1]; Y := VbPk[2];
+  { VMware : les boutons viennent aussi de la souris absolue }
+  If VbPk[4] <> 0 Then Bt := VbPk[3];
   VBoxAbs := True;
 End;
 
@@ -494,7 +537,7 @@ Begin
   Begin
     Dx := Accel(Pk[0]); Dy := Accel(Pk[1]); B := Pk[2]; T := Pk[3];
     Px := PosX; Py := PosY;
-    If VBoxAbs(Ax, Ay) Then
+    If VBoxAbs(Ax, Ay, B) Then
     Begin
       { VirtualBox : position absolue (le paquet PS/2 ne porte que les
         boutons) ; le pointeur d'OS/2-0 est sous celui de l'hote }
