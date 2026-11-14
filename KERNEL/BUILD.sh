@@ -33,11 +33,19 @@
 #     TESTNMP, TESTSES, TESTQUE, TESTPFS, TESTRM, TESTSM, TESTHLP,
 #     TESTUNI, TESTDRG, TESTWIN, TESTGPI, TESTMRG, TESTPIC, TESTSHA,
 #     TESTSPL et TESTVIOP ;
-#  5. fabrique le CD-ROM : MAKEISO OS2CD.ISO /BOOT:OS2BOOT ...
+#  5. fabrique le CD-ROM : MAKEISO OS2CD.ISO /BOOT:OS2BOOT ... ;
+#  6. fabrique le CD-ROM d'installation IMAGE/OS2INST.ISO : memes fichiers,
+#     CONFIG.SYS de IMAGE/INSTALL (PROTSHELL=C:\INSTALL.EXE : INSTALL.PAS,
+#     programme d'installation graphique sur un disque dur).
+#     KERNEL/HDBOOT.ASM (MBR du disque dur) est deja assemble dans
+#     INSTALL.PAS (tableau MbrCode : nasm -f bin HDBOOT.ASM).
 #
 # Variables : FPC (compilateur Free Pascal, defaut fpc), W (dossier de
 # travail, defaut BUILD a la racine du depot).
 # Test : qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d
+# Installation : qemu-img create -f raw disque.img 300M, puis
+#   qemu-system-i386 -m 64 -cdrom IMAGE/OS2INST.ISO -hda disque.img -boot d
+# et ensuite (demarrage du disque dur) : qemu-system-i386 -m 64 -hda disque.img
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
@@ -123,4 +131,9 @@ cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 echo "== CD-ROM amorcable"
 "$W/makeiso" "$ROOT/IMAGE/OS2CD.ISO" /BOOT:"$W/cd/OS2BOOT" /LABEL:OS2_0 "$W/cd/*"
 for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE PMSHELL.EXE LAUNCHPD.EXE DOSCALLS.DLL FKA.DLL HPFS.IFS VIOCALLS.DLL MOUCALLS.DLL NLS.DLL KBDCALLS.DLL MONCALLS.DLL MSG.DLL NAMPIPES.DLL SESMGR.DLL QUECALLS.DLL SPOOLCP.DLL RMINFO.DLL OS2SM.DLL HELPMGR.DLL LIBUNI.DLL PMDRAG.DLL PMWIN.DLL PMGPI.DLL PMMERGE.DLL PMPIC.DLL PMSHAPI.DLL PMSPL.DLL PMVIOP.DLL; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
-echo "Termine : $ROOT/IMAGE/OS2CD.ISO"
+echo "== CD-ROM d'installation"
+rm -rf "$W/cdinst"; mkdir -p "$W/cdinst"
+cp "$W/cd/"* "$W/cdinst/"
+cp "$ROOT/IMAGE/INSTALL/CONFIG.SYS" "$W/cdinst/CONFIG.SYS"
+"$W/makeiso" "$ROOT/IMAGE/OS2INST.ISO" /BOOT:"$W/cdinst/OS2BOOT" /LABEL:OS2_0_INSTALL "$W/cdinst/*"
+echo "Termine : $ROOT/IMAGE/OS2CD.ISO et $ROOT/IMAGE/OS2INST.ISO"

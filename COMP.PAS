@@ -393,11 +393,11 @@ BEGIN
  If TmpLanguage<>''Then Begin
   If TmpLanguage[1]='"'Then TmpLanguage:=Copy(TmpLanguage,2,255);
   If StrToUpper(Copy(TmpLanguage,1,2))='EN'Then Language:=_English Else
-  If StrToUpper(Copy(TmpLanguage,1,2))='DK'Then Language:=_Danish Else
+  If(StrToUpper(Copy(TmpLanguage,1,2))='DK')or(StrToUpper(Copy(TmpLanguage,1,3))='DNK')Then Language:=_Danish Else
   If StrToUpper(Copy(TmpLanguage,1,2))='GR'Then Language:=_Germany Else
   If StrToUpper(Copy(TmpLanguage,1,2))='IT'Then Language:=_Italian Else
-  If StrToUpper(Copy(TmpLanguage,1,2))='SE'Then Language:=_Swedish Else
-  If StrToUpper(Copy(TmpLanguage,1,2))='SP'Then Language:=_Spain Else
+  If(StrToUpper(Copy(TmpLanguage,1,2))='SE')or(StrToUpper(Copy(TmpLanguage,1,3))='SWE')Then Language:=_Swedish Else
+  If(StrToUpper(Copy(TmpLanguage,1,2))='SP')or(StrToUpper(Copy(TmpLanguage,1,2))='ES')Then Language:=_Spain Else
   If(StrToUpper(Copy(TmpLanguage,1,2))='SQ')or
     (StrToUpper(Copy(TmpLanguage,1,3))='ALB')Then Language:=_Albanian;
  End;

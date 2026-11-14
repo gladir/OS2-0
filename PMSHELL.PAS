@@ -143,7 +143,7 @@ Const
   OB_SYS = 1; OB_DRIVES = 2; OB_CMD = 3; OB_SHUTDOWN = 4; OB_WINLIST = 5; OB_INFO = 6; OB_HELP = 7;
   OB_DIR = 8; OB_EXE = 9; OB_BATCH = 10; OB_DATA = 11; OB_TEMPLATES = 12; OB_SHRED = 13;
   OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16; OB_SETUP = 17; OB_SYSSET = 18; OB_MOUSE = 19; OB_COLORS = 20;
-  OB_CMDWIN = 21;
+  OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
@@ -151,7 +151,7 @@ Const
   WS_GROUP = $00010000; WS_TABSTOP = $00020000;
   BM_QUERYCHECK = $0124; BM_SETCHECK = $0125; BN_CLICKED = 1; LN_SELECT = 1;
   SV_SWAPBUTTON = 0; SV_DBLCLKTIME = 1;
-  NbTabs = 7;              { carnet Systeme ; carnet Souris : 6 onglets }
+  NbTabs = 8;              { carnet Systeme ; carnet Souris : 6 onglets }
   WC_ENTRYFIELD = $FFFF0006; ES_AUTOSCROLL = 4; ES_MARGIN = 8; WM_BUTTON3CLICK = $0419;
   ShadowApp = 'PMSHELL_RACCOURCIS';
   { commandes des menus }
@@ -224,6 +224,7 @@ Var
   NbLblS : Array[0..15] Of String[60];
   NbMW, NbMH, NbMB : Array[0..127] Of LongInt;
   DeskDir : String[40];               { repertoire du bureau (C:\DESKTOP ou D:\DESKTOP) }
+  CfgIn, CfgOut : Array[0..8191] Of Byte;  { CONFIG.SYS (onglet Langue) }
 
 { --- DOSCALLS.DLL --- }
 Function DosExecPgm(PObj, CbObj, Flags, PArg, PEnv, PRes, PName : LongInt) : LongInt; External 'DOSCALLS';
@@ -248,6 +249,7 @@ Function DosCreateDir(PName, PEa : LongInt) : LongInt; External 'DOSCALLS';
 Function DosDeleteDir(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function DosWrite(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS';
 Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
+Function KSetEnv(PName, PValue : LongInt) : LongInt; External 'DOSCALLS' Name 'SetEnvironmentVariableA';
 
 { --- PMWIN.DLL --- }
 Function WinInitialize(Fl : LongInt) : LongInt; External 'PMWIN';
@@ -820,6 +822,7 @@ Begin
     OB_SYSSET : Icon := IC_SCREEN;
     OB_MOUSE : Icon := IC_MOUSE;
     OB_COLORS : Icon := IC_PALETTE;
+    OB_LANG : Icon := IC_LANG;
   Else
     Icon := IC_FILE;
   End;
@@ -1001,6 +1004,7 @@ Begin
         Dummy := NewItem(V, IC_SCREEN, OB_SYSSET, 'Systeme', '');
         Dummy := NewItem(V, IC_MOUSE, OB_MOUSE, MouseTitle, '');
         Dummy := NewItem(V, IC_PALETTE, OB_COLORS, 'Couleurs du bureau', '');
+        Dummy := NewItem(V, IC_LANG, OB_LANG, 'Langue', '');
       End;
     VK_DRIVES :
       Begin
@@ -1183,6 +1187,13 @@ Begin
         GBox(Hps, X + 5, Y + 9, X + 10, Y + 14, CLR_YELLOW, DRO_FILL);
         GBox(Hps, X + 13, Y + 9, X + 18, Y + 14, CLR_CYAN, DRO_FILL);
         GBox(Hps, X + 21, Y + 9, X + 26, Y + 14, CLR_DARKRED, DRO_FILL);
+      End;
+    IC_LANG :
+      Begin
+        FBox(Hps, X + 3, Y + 12, X + 17, Y + 29, CLR_WHITE, CLR_DARKBLUE);
+        GText(Hps, X + 6, Y + 13, 'A', CLR_DARKBLUE, CLR_WHITE);
+        FBox(Hps, X + 14, Y + 2, X + 28, Y + 19, CLR_YELLOW, CLR_DARKRED);
+        GText(Hps, X + 17, Y + 3, 'z', CLR_DARKRED, CLR_YELLOW);
       End;
     IC_INFO, IC_HELP :
       Begin
@@ -1985,6 +1996,7 @@ Begin
     OB_SYSSET : OpenNotebook(0);
     OB_MOUSE : OpenNb(1, 0);
     OB_COLORS : OpenNotebook(6);
+    OB_LANG : OpenNotebook(7);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
@@ -2309,7 +2321,15 @@ End;
 
 Const
   NbTabName : Array[0..NbTabs - 1] Of String[16] = ('Ecran', 'Confirmations', 'Titre', 'Fenetre', 'Entree', 'Logo',
-                                                     'General');
+                                                     'General', 'Langue');
+  { langue des programmes : SET LANGUAGE= de CONFIG.SYS (convention de
+    MSDOS-0, Pasdows95...) ; aussi reconnus : ES, DE, SQ, PRT, SWE, DNK,
+    JPN }
+  NLang = 10;
+  LangCodes : Array[0..NLang - 1] Of String[3] = ('FR', 'EN', 'GR', 'SP', 'IT', 'ALB', 'PT', 'SE', 'DK', 'JP');
+  LangNames : Array[0..NLang - 1] Of String[24] = ('Francais (FR)', 'English (EN)', 'Deutsch (GR)', 'Espanol (SP)',
+                                                   'Italiano (IT)', 'Shqip (ALB)', 'Portugues (PT)', 'Svenska (SE)',
+                                                   'Dansk (DK)', 'Nihongo, romaji (JP)');
   ClrName : Array[0..15] Of String[16] = ('Cyan fonce', 'Bleu fonce', 'Vert fonce', 'Rouge fonce', 'Magenta fonce',
                                           'Brun', 'Gris clair', 'Gris fonce', 'Bleu', 'Vert', 'Cyan', 'Rouge', 'Magenta',
                                           'Jaune', 'Blanc', 'Noir');
@@ -2537,6 +2557,94 @@ Var B : Array[0..127] Of Byte;
 Begin
   PutZ(LongInt(@B), S);
   Dummy := WinSendMsg(Lb, LM_INSERTITEM, -1, LongInt(@B));
+End;
+
+{ langue courante (variable LANGUAGE de l'environnement) }
+Function CurLang : LongInt;
+Var S : String; K, R : LongInt;
+Begin
+  S := UpStr(GetEnvS('LANGUAGE'));
+  If S = 'ES' Then S := 'SP';
+  If S = 'DE' Then S := 'GR';
+  If S = 'SQ' Then S := 'ALB';
+  If S = 'PRT' Then S := 'PT';
+  If S = 'SWE' Then S := 'SE';
+  If S = 'DNK' Then S := 'DK';
+  If S = 'JPN' Then S := 'JP';
+  R := 0;
+  For K := 0 To NLang - 1 Do
+    If S = LangCodes[K] Then R := K;
+  CurLang := R;
+End;
+
+{ nouvelle langue : environnement du systeme (programmes lances ensuite)
+  et ligne SET LANGUAGE= de C:\CONFIG.SYS (ajoutee au besoin) ; le
+  fichier est traite octet par octet (tampons CfgIn et CfgOut) }
+{ ligne S (et CR LF) ajoutee a CfgOut en Out }
+Procedure CfgLine(Var Out : LongInt; S : String);
+Var J : LongInt;
+Begin
+  PutZ(LongInt(@NameZ), S);
+  J := 0;
+  While (NameZ[J] <> 0) And (Out < 8180) Do
+  Begin
+    CfgOut[Out] := NameZ[J];
+    Inc(Out); Inc(J);
+  End;
+  CfgOut[Out] := 13; CfgOut[Out + 1] := 10; Out := Out + 2;
+End;
+
+Procedure SetLanguage(N : LongInt);
+Var H, A, Got, K, J, Out, St : LongInt; Found, Match : Boolean; Key, Ln : String;
+Begin
+  PutZ(LongInt(@NameZ2), LangCodes[N]);
+  Dummy := KSetEnv(Z('LANGUAGE'), LongInt(@NameZ2));
+  H := 0; A := 0; Got := 0;
+  If DosOpen(Z('C:\CONFIG.SYS'), LongInt(@H), LongInt(@A), 0, 0, 1, $40, 0) = 0 Then
+  Begin
+    Dummy := DosRead(H, LongInt(@CfgIn), 8000, LongInt(@Got));
+    Dummy := DosClose(H);
+  End;
+  If (Got < 0) Or (Got > 8000) Then Got := 0;
+  Key := 'SET LANGUAGE=';
+  Ln := 'SET LANGUAGE=' + LangCodes[N];
+  Out := 0; Found := False; K := 0;
+  While K < Got Do
+  Begin
+    St := K;
+    { la ligne commence-t-elle par SET LANGUAGE= ? }
+    Match := True;
+    For J := 1 To Length(Key) Do
+      If (St + J - 1 >= Got) Or (UpCase(Chr(CfgIn[St + J - 1])) <> Key[J]) Then Match := False;
+    While (K < Got) And (CfgIn[K] <> 10) Do Inc(K);
+    If K < Got Then Inc(K);
+    If Match And Not Found Then
+    Begin
+      Found := True;
+      CfgLine(Out, Ln);
+    End
+    Else
+      For J := St To K - 1 Do
+        If Out < 8180 Then
+        Begin
+          CfgOut[Out] := CfgIn[J];
+          Inc(Out);
+        End;
+  End;
+  If Not Found Then
+  Begin
+    If (Out > 0) And (CfgOut[Out - 1] <> 10) Then
+    Begin
+      CfgOut[Out] := 13; CfgOut[Out + 1] := 10; Out := Out + 2;
+    End;
+    CfgLine(Out, Ln);
+  End;
+  H := 0;
+  If DosOpen(Z('C:\CONFIG.SYS'), LongInt(@H), LongInt(@A), 0, 0, $12, $41, 0) = 0 Then
+  Begin
+    Dummy := DosWrite(H, LongInt(@CfgOut), Out, LongInt(@Got));
+    Dummy := DosClose(H);
+  End;
 End;
 
 Procedure NbClear;
@@ -2869,6 +2977,17 @@ Begin
         For K := 0 To 15 Do NbItem(Lb, ClrName[K]);
         Dummy := WinSendMsg(Lb, LM_SELECTITEM, CfgClr, 1);
       End;
+    7 :
+      Begin
+        NbText(0, 0, 330, 'Langue des programmes (SET LANGUAGE=) :');
+        Lb := NbList(10, 22, 220, 168, 380);
+        For K := 0 To NLang - 1 Do NbItem(Lb, LangNames[K]);
+        Dummy := WinSendMsg(Lb, LM_SELECTITEM, CurLang, 1);
+        Dummy := WinSetFocus(HWND_DESKTOP, Lb);
+        NbText(0, 200, 330, 'La langue est gardee dans CONFIG.SYS');
+        NbText(0, 218, 330, 'et sert aux programmes lances ensuite');
+        NbText(0, 236, 330, '(CMD.EXE et les commandes).');
+      End;
   End;
   Dummy := WinInvalidateRect(NbClient, 0, 1);
 End;
@@ -2936,6 +3055,11 @@ Procedure NbControl(Id, Code : LongInt);
 Var Sel : LongInt;
 Begin
   Case Id Of
+    380 : If (Code = LN_SELECT) Or (Code = LN_ENTER) Then
+          Begin
+            Sel := WinSendMsg(WinWindowFromID(NbClient, 380), LM_QUERYSELECTION, -1, 0);
+            If (Sel >= 0) And (Sel < NLang) And (Sel <> CurLang) Then SetLanguage(Sel);
+          End;
     300 : If Code = LN_ENTER Then
           Begin
             Sel := WinSendMsg(WinWindowFromID(NbClient, 300), LM_QUERYSELECTION, -1, 0);

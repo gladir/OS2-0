@@ -621,6 +621,7 @@ L'écran de Presentation Manager n'est plus limité au VGA 640 x 480 x 16 couleu
 	<tr><td>Entrée</td><td>Délai du double clic, boutons de la souris inversés (gaucher : SV_SWAPBUTTON, géré par PMWIN).</td></tr>
 	<tr><td>Logo</td><td>Logo au démarrage du bureau : aucun, 3 ou 5 secondes, jusqu'à un clic.</td></tr>
 	<tr><td>Général</td><td>Couleur du fond du bureau (16 couleurs).</td></tr>
+	<tr><td>Langue</td><td>Langue des programmes (<code>SET LANGUAGE=</code> de CONFIG.SYS et environnement du système) : français, anglais, allemand, espagnol, italien, albanais, portugais, suédois, danois, japonais (romaji). Aussi par l'objet Langue de Configuration du système.</td></tr>
 </table>
 
 Les réglages sont gardés dans OS2.INI (application PMSHELL). Le programme <b>DLL/TESTVIO.PAS</b> vérifie les modes VESA (800 x 600 x 256 et 1024 x 768 x 32 bits : pels de la mémoire linéaire, retour au texte) ; TESTGPI et TESTWIN passent aussi en 1024 x 768 x 32 bits. Une correction d'OS2PC a accompagné ce travail : dans les blocs asm, STOSW, MOVSW, LODSW, SCASW et CMPSW (avec ou sans REP) sont maintenant de vraies instructions sur des mots de 16 bits (préfixe 66h) au lieu de devenir STOSD, MOVSD...
@@ -664,10 +665,43 @@ Les dossiers, les programmes et les fichiers sont ouverts par le bureau : le Lau
 
 Pour que deux programmes de PM partagent l'écran, PMWIN.DLL remet maintenant la souris et le clavier à la file de la fenêtre visée, même quand c'est un autre processus qui a lu l'événement (une touche pour un autre processus lui est mise en attente : ses crochets, accélérateurs et procédures sont appelés par lui), et une fenêtre qui se dessine fait redessiner les fenêtres des autres processus placées au-dessus d'elle. Deux corrections d'OS2PC ont aussi été nécessaires : l'instruction <code>F(x)^.champ := valeur</code> (fonction qui rend un pointeur) était compilée comme un simple appel, et <code>GetMem(Pointer(v), n)</code> rangeait le pointeur ailleurs que dans <code>v</code>.
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+<h3>Installation sur un disque dur (INSTALL.PAS, CD-ROM IMAGE/OS2INST.ISO)</h3>
+
+Le fichier <b>INSTALL.PAS</b> est le programme OS/2 <b>INSTALL.EXE</b>, le programme d'installation graphique d'OS/2-0, à l'apparence de l'installation d'OS/2 Warp 3 (fenêtres de Presentation Manager sur fond turquoise). Le nouveau CD-ROM <b>IMAGE/OS2INST.ISO</b> contient les mêmes fichiers que <b>IMAGE/OS2CD.ISO</b>, avec le CONFIG.SYS de <b>IMAGE/INSTALL</b> (<code>PROTSHELL=C:\INSTALL.EXE</code>) : il démarre directement dans l'installation. Une fois OS/2-0 installé, l'ordinateur démarre du disque dur, sans CD-ROM, et la partition HPFS devient l'unité C:.
+
+<img width="640" height="480" alt="OS/2-0 : installation, page Bienvenue" src="IMAGE/INSTALL_BIENVENUE.png" />
+<img width="640" height="480" alt="OS/2-0 : installation, page Configuration du système (avec le choix de la langue)" src="IMAGE/INSTALL_CONFIG.png" />
+
+<table>
+	<tr><th>Étape</th><th>Rôle</th></tr>
+	<tr><td>Bienvenue</td><td>Installation facile (premier disque dur : partition HPFS existante, ou tout l'espace libre ; choix par défaut) ou avancée ; Quitter redémarre l'ordinateur.</td></tr>
+	<tr><td>Configuration du système</td><td>Le tableau de bord de Warp 3 : pays, clavier, <b>langue</b> (nouveau, français par défaut), souris, ports série, affichage principal (VGA 640 x 480 ou un mode VESA : <code>SET PMRESOLUTION=</code>), affichage secondaire, gestion de l'alimentation, PCMCIA, CD-ROM, imprimante, multimédia, SCSI. Un clic sur l'icône (ou le titre) d'un choix ouvre la liste de ses valeurs ; les champs à flèches changent de valeur. L'assistant change aussitôt de langue (français, anglais, allemand, espagnol, italien, albanais ; le portugais, le suédois, le danois et le japonais sont affichés en anglais), le pays et le clavier suivent.</td></tr>
+	<tr><td>Partitionnement du disque dur</td><td>Comme FDISK : disques IDE (modèle, taille), partitions principales et espaces libres ; création d'une partition HPFS (07h) dont on donne la taille en Mo (alignée sur 1 Mo, après les 4 premiers Mo du disque), suppression (après confirmation), choix de la partition. La table est écrite au secteur 0 du disque.</td></tr>
+	<tr><td>Formatage</td><td>HPFS (par HPFS.IFS : FS_FSCTL 8000h), avec le nom du volume ; FAT est affiché mais non disponible ; « Ne pas formater » garde les fichiers d'une partition HPFS existante (réinstallation).</td></tr>
+	<tr><td>Composants</td><td>Système de base et Presentation Manager (obligatoire), bureau et LaunchPad (sinon <code>PROTSHELL=C:\CMD.EXE</code>), utilitaires, programmes d'essai TEST*.EXE, disque virtuel de 4 Mo ; espace nécessaire et espace disponible.</td></tr>
+	<tr><td>Transfert des fichiers</td><td>Barre de progression aux logos OS/2, fichier courant ; copie des fichiers du CD-ROM, création de C:\DESKTOP et C:\AIDE, CONFIG.SYS du disque dur (<code>IFS=C:\HPFS.IFS /CACHE:64 /AUTOCHECK:C</code>, <code>SET LANGUAGE=</code>, <code>COUNTRY=</code>, <code>DEVINFO=KBD,...</code>, <code>SET PMRESOLUTION=</code>...), zone d'amorçage et secteur d'amorce principal.</td></tr>
+	<tr><td>Fin</td><td>Retirer le CD-ROM puis Redémarrer (les tampons des volumes sont vidés, puis remise à zéro par le contrôleur du clavier).</td></tr>
+</table>
+
+<img width="640" height="480" alt="OS/2-0 : installation, partitionnement du disque dur" src="IMAGE/INSTALL_DISQUE.png" />
+<img width="640" height="480" alt="OS/2-0 : installation, transfert des fichiers" src="IMAGE/INSTALL_COPIE.png" />
+
+Démarrage du disque dur : le secteur d'amorce principal (<b>KERNEL/HDBOOT.ASM</b>, assemblé une fois et recopié dans le tableau MbrCode de INSTALL.PAS) cherche la partition active, lit le répertoire de la <b>zone d'amorçage</b> (secteur 1 du disque : <code>OS20BOOT</code>, puis des entrées nom, LBA, taille) et charge OS2LDR en 2000:0000 ; la zone d'amorçage (secteurs 1 à 8191, avant la première partition) contient OS2LDR, OS2KRNL et HPFS.IFS. OS2LDR lit alors des secteurs de 512 octets au lieu de 2048, charge le noyau et recopie HPFS.IFS en 00600000h ; le bloc d'information d'amorçage reçoit <code>'HD'</code> (+34h), le début de la partition active (+38h) et l'adresse de HPFS.IFS (+40h). Le noyau charge ce pilote depuis la mémoire, monte la partition active en <b>C:</b> (HPFS), puis lit C:\CONFIG.SYS et les DLL sur le disque ; le lecteur de CD-ROM n'est plus nécessaire. Nouvelle API du noyau <b>KrnDiskCtl</b> (disques IDE : description, lecture et écriture de secteurs, formatage et montage d'une partition, démontage, vidage des tampons, redémarrage) et <b>SetEnvironmentVariableA</b> (environnement du système).
+
+<pre>qemu-img create -f raw disque.img 300M
+qemu-system-i386 -m 64 -cdrom IMAGE/OS2INST.ISO -hda disque.img -boot d
+qemu-system-i386 -m 64 -hda disque.img</pre>
+
+Langue : la variable <code>LANGUAGE</code> de CONFIG.SYS (convention commune avec MSDOS-0, Pasdows95...) vaut <code>FR</code> (français, par défaut), <code>EN</code> (anglais), <code>GR</code> (allemand), <code>SP</code> (espagnol), <code>IT</code> (italien), <code>ALB</code> ou <code>SQ</code> (albanais, shqip), <code>PT</code> ou <code>PRT</code> (portugais), <code>SE</code> ou <code>SWE</code> (suédois), <code>DK</code> ou <code>DNK</code> (danois), <code>JP</code> ou <code>JPN</code> (japonais en romaji) ; <code>ES</code> est aussi accepté pour l'espagnol. Après l'installation, elle se change dans <b>Système OS/2 → Configuration du système → Langue</b> (onglet Langue du carnet Système - Paramètres) : la ligne <code>SET LANGUAGE=</code> de C:\CONFIG.SYS est modifiée et l'environnement du système aussi (les programmes lancés ensuite, comme CMD.EXE et les commandes, utilisent la nouvelle langue).
+
+<img width="640" height="480" alt="OS/2-0 : onglet Langue du carnet Système - Paramètres" src="IMAGE/LANGUE.png" />
+
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
+
+Le même script fabrique aussi le CD-ROM d'installation <b>IMAGE/OS2INST.ISO</b>.
 
 Pour essayer HPFS sur un disque dur, ajouter une image disque dont une partition est de type 07h (<code>-hda disque.img</code>) : formatée HPFS, elle devient l'unité D: (le disque virtuel passe à E:).
 
