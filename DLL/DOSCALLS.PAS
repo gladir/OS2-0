@@ -4808,11 +4808,20 @@ Procedure BuildInfoBlocks(P : LongInt);
 Var B, Cmd, I, Q : LongInt; S, Prog, Args : String;
 Begin
   B := PRecs[P].Blk;
+  { programme LX : bornes de la pile posees par le noyau }
+  If KTaskCtl(18, 0, 0, 0) = B Then
+  Begin
+    I := PeekL(B + 4); Q := PeekL(B + 8);
+  End
+  Else
+  Begin
+    I := 0; Q := 0;
+  End;
   FillB(B, 512, 0);
   { TIB : pexchain, pstack, pstacklimit, ptib2, version, ordinal }
   PokeL(B, -1);
-  PokeL(B + 4, 0);
-  PokeL(B + 8, 0);
+  PokeL(B + 4, I);
+  PokeL(B + 8, Q);
   PokeL(B + 12, B + 24);
   PokeL(B + 16, 20);
   PokeL(B + 20, 1);
@@ -4878,6 +4887,8 @@ Begin
       Old := I; OldStamp := PRecs[I].Stamp;
     End;
   If PRecs[Old].Blk = 0 Then PRecs[Old].Blk := SharedAlloc(1024);
+  { programme LX : le bloc d'information de tache du noyau (FS:0) }
+  If KTaskCtl(18, 0, 0, 0) <> 0 Then PRecs[Old].Blk := KTaskCtl(18, 0, 0, 0);
   PRecs[Old].Used := True;
   PRecs[Old].Pid := Pid;
   PRecs[Old].Stamp := StampCnt;
@@ -4906,6 +4917,7 @@ Begin
   P := PRec;
   B := PRecs[P].Blk;
   PokeL(B + 24, CurTid);
+  PokeL(B + 12, B + 24);                { tib_ptib2 }
   PokeL(PPTib, B);
   PokeL(PPPib, B + 40);
   DosGetInfoBlocks := NO_ERROR;
@@ -7446,85 +7458,112 @@ End;
 { ==================================================================== }
 
 exports
-  ThrEntry32,
-  DosAcknowledgeSignalException, DosAddMuxWaitSem, DosAliasMem,
-  DosAllocHuge, DosAllocMem, DosAllocSeg, DosAllocSharedMem,
-  DosAllocShrSeg, DosAllocThreadLocalMemory, DosAsyncTimer, DosBeep,
-  DosBufReset, DosCallBack, DosCallNmPipe, DosCallNPipe,
-  DosCancelLockRequest, DosCancelLockRequestL, DosCaseMap, DosChDir,
-  DosChgFilePtr, DosCLIAccess, DosClose, DosCloseEventSem,
-  DosCloseMutexSem, DosCloseMuxWaitSem, DosCloseSem, DosCloseVDD,
-  DosConnectNmPipe, DosConnectNPipe, DosCopy, DosCreateCSAlias,
-  DosCreateDir, DosCreateEventSem, DosCreateMutexSem, DosCreateMuxWaitSem,
-  DosCreateNPipe, DosCreatePipe, DosCreateSem, DosCreateThread,
-  DosCreateThread2, DosCwait, DosDebug, DosDelete, DosDeleteDir,
-  DosDeleteMuxWaitSem, DosDevConfig, DosDevIOCtl, DosDevIOCtl2,
-  DosDisconnectNmPipe, DosDisConnectNPipe, DosDumpProcess, DosDupHandle,
-  DosEditName, DosEnterCritSec, DosEnterMustComplete, DosEnumAttribute,
-  DosErrClass, DosError, DosExecPgm, DosExit, DosExitCritSec, DosExitList,
-  DosExitMustComplete, DosFileIO, DosFileLocks, DosFindClose, DosFindFirst,
-  DosFindFirst2, DosFindNext, DosFlagProcess, DosForceDelete,
-  DosForceSystemDump, DosFreeMem, DosFreeModule, DosFreeResource,
-  DosFreeSeg, DosFreeThreadLocalMemory, DosFSAttach, DosFSCtl,
-  DosFSRamSemClear, DosFSRamSemRequest, DosGetCollate, DosGetCP,
-  DosGetCtryInfo, DosGetDateTime, DosGetDBCSEv, DosGetEnv, DosGetHugeShift,
-  DosGetInfoBlocks, DosGetInfoSeg, DosGetMachineMode, DosGetModHandle,
-  DosGetModName, DosGetNamedSharedMem, DosGetPID, DosGetPPID,
-  DosGetProcAddr, DosGetProcessorStatus, DosGetPrty, DosGetResource,
-  DosGetResource2, DosGetSeg, DosGetSharedMem, DosGetShrSeg, DosGetVersion,
-  DosGiveSeg, DosGiveSharedMem, DosHoldSignal, DosICreateThread,
-  DosIExecPgm, DosInsertMessage, DosInsMessage, DosIQueryMessageCP,
-  DosGetMessage, DosQueryMessageCP, NpAllocHandle, NpQueryHandle,
-  DosIRead, DosISemRequest, DosISemWait, DosISysSemClear, DosISysSemSet,
-  DosIWrite, DosKillProcess, DosKillThread, DosListIO, DosListIOL,
-  DosLoadModule, DosLockSeg, DosMakeNmPipe, DosMakePipe, DosMapCase,
-  DosMemAvail, DosMkDir, DosMkDir2, DosMonClose, DosMonOpen, DosMonRead,
-  DosMonReg, DosMonWrite, DosMove, DosMuxSemWait, DosNewSize, DosOpen,
-  DosOpen2, DosOpenEventSem, DosOpenL, DosOpenMutexSem, DosOpenMuxWaitSem,
-  DosOpenSem, DosOpenVDD, DosPeekNmPipe, DosPeekNPipe, DosPerfSysCall,
-  DosPhysicalDisk, DosPortAccess, DosPostEventSem, DosProtectClose,
-  DosProtectEnumAttribute, DosProtectOpen, DosProtectOpenL,
-  DosProtectQueryFHState, DosProtectQueryFileInfo, DosProtectRead,
-  DosProtectSetFHState, DosProtectSetFileInfo, DosProtectSetFileLocks,
-  DosProtectSetFileLocksL, DosProtectSetFilePtr, DosProtectSetFilePtrL,
-  DosProtectSetFileSize, DosProtectSetFileSizeL, DosProtectWrite,
-  DosPtrace, DosPutMessage, DosQAppType, DosQCurDir, DosQCurDisk,
-  DosQFHandState, DosQFileInfo, DosQFileMode, DosQFSAttach, DosQFSInfo,
-  DosQHandType, DosQNmPHandState, DosQNmPipeInfo, DosQNmPipeSemState,
-  DosQPathInfo, DosQSysInfo, DosQueryABIOSSupport, DosQueryAppType,
-  DosQueryCollate, DosQueryCp, DosQueryCtryInfo, DosQueryCurrentDir,
-  DosQueryCurrentDisk, DosQueryDBCSEnv, DosQueryEventSem,
-  DosQueryExtLIBPATH, DosQueryFHState, DosQueryFileInfo, DosQueryFSAttach,
-  DosQueryFSInfo, DosQueryHType, DosQueryMem, DosQueryMemState,
-  DosQueryModFromCS, DosQueryModFromEIP, DosQueryModuleHandle,
-  DosQueryModuleName, DosQueryMutexSem, DosQueryMuxWaitSem,
-  DosQueryNPHState, DosQueryNPipeInfo, DosQueryNPipeSemState,
-  DosQueryPathInfo, DosQueryProcAddr, DosQueryProcType,
-  DosQueryResourceSize, DosQuerySysInfo, DosQueryThreadAffinity,
-  DosQueryThreadContext, DosQueryVerify, DosQVerify, DosR2StackRealloc,
-  DosRaiseException, DosRead, DosReadAsync, DosReallocHuge, DosReallocSeg,
-  DosReleaseMutexSem, DosReplaceModule, DosRequestMutexSem, DosRequestVDD,
-  DosResetBuffer, DosResetEventSem, DosResumeThread, DosRmDir, DosScanEnv,
-  DosSearchPath, DosSelectDisk, DosSemClear, DosSemRequest, DosSemSet,
-  DosSemSetWait, DosSemWait, DosSendSignal, DosSendSignalException,
-  DosSetCP, DosSetCurrentDir, DosSetDateTime, DosSetDefaultDisk,
-  DosSetExceptionHandler, DosSetExtLIBPATH, DosSetFHandState,
-  DosSetFHState, DosSetFileInfo, DosSetFileLocks, DosSetFileLocksL,
-  DosSetFileMode, DosSetFilePtr, DosSetFilePtrL, DosSetFileSize,
-  DosSetFileSizeL, DosSetFSInfo, DosSetMaxFH, DosSetMem,
-  DosSetNmPHandState, DosSetNmPipeSem, DosSetNPHState, DosSetNPipeSem,
-  DosSetPathInfo, DosSetProcCP, DosSetProcessCp, DosSetProcessorStatus,
-  DosSetPriority, DosSetPrty, DosSetRelMaxFH, DosSetSigHandler,
-  DosSetSignalExceptionFocus, DosSetThreadAffinity, DosSetVec,
-  DosSetVerify, DosShutdown, DosSizeSeg, DosSleep, DosStartTimer,
-  DosStopTimer, DosSubAlloc, DosSubAllocMem, DosSubFree, DosSubFreeMem,
-  DosSubSet, DosSubSetMem, DosSubUnsetMem, DosSuppressPopUps,
-  DosSuspendThread, DosSystemService, DosSysTrace, DosTimerAsync,
-  DosTimerStart, DosTimerStop, DosTmrQueryFreq, DosTmrQueryTime,
-  DosTransactNmPipe, DosTransactNPipe, DosTrueGetMessage, DosUnlockSeg,
-  DosUnsetExceptionHandler, DosUnwindException, DosVerifyPidTid,
-  DosWaitChild, DosWaitEventSem, DosWaitMuxWaitSem, DosWaitNmPipe,
-  DosWaitNPipe, DosWaitThread, DosWrite, DosWriteAsync;
+  ThrEntry32, DosAcknowledgeSignalException Index 418,
+  DosAddMuxWaitSem Index 341, DosAliasMem Index 298, DosAllocHuge,
+  DosAllocMem Index 299, DosAllocSeg, DosAllocSharedMem Index 300,
+  DosAllocShrSeg, DosAllocThreadLocalMemory Index 454,
+  DosAsyncTimer Index 350, DosBeep Index 286, DosBufReset, DosCallBack,
+  DosCallNmPipe, DosCallNPipe Index 240, DosCancelLockRequest Index 429,
+  DosCancelLockRequestL, DosCaseMap, DosChDir, DosChgFilePtr, DosCLIAccess,
+  DosClose Index 257, DosCloseEventSem Index 326,
+  DosCloseMutexSem Index 333, DosCloseMuxWaitSem Index 339, DosCloseSem,
+  DosCloseVDD Index 310, DosConnectNmPipe, DosConnectNPipe Index 241,
+  DosCopy Index 258, DosCreateCSAlias, DosCreateDir Index 270,
+  DosCreateEventSem Index 324, DosCreateMutexSem Index 331,
+  DosCreateMuxWaitSem Index 337, DosCreateNPipe Index 243,
+  DosCreatePipe Index 239, DosCreateSem, DosCreateThread Index 311,
+  DosCreateThread2, DosCwait, DosDebug Index 317, DosDelete Index 259,
+  DosDeleteDir Index 226, DosDeleteMuxWaitSem Index 342,
+  DosDevConfig Index 231, DosDevIOCtl Index 284, DosDevIOCtl2,
+  DosDisconnectNmPipe, DosDisConnectNPipe Index 242, DosDumpProcess,
+  DosDupHandle Index 260, DosEditName Index 261, DosEnterCritSec Index 232,
+  DosEnterMustComplete Index 380, DosEnumAttribute Index 372,
+  DosErrClass Index 211, DosError Index 212, DosExecPgm Index 283,
+  DosExit Index 234, DosExitCritSec Index 233, DosExitList Index 296,
+  DosExitMustComplete Index 381, DosFileIO, DosFileLocks,
+  DosFindClose Index 263, DosFindFirst Index 264, DosFindFirst2,
+  DosFindNext Index 265, DosFlagProcess, DosForceDelete Index 110,
+  DosForceSystemDump, DosFreeMem Index 304, DosFreeModule Index 322,
+  DosFreeResource Index 353, DosFreeSeg,
+  DosFreeThreadLocalMemory Index 455, DosFSAttach Index 269,
+  DosFSCtl Index 285, DosFSRamSemClear, DosFSRamSemRequest, DosGetCollate,
+  DosGetCP, DosGetCtryInfo, DosGetDateTime Index 230, DosGetDBCSEv,
+  DosGetEnv, DosGetHugeShift, DosGetInfoBlocks Index 312, DosGetInfoSeg,
+  DosGetMachineMode, DosGetModHandle, DosGetModName,
+  DosGetNamedSharedMem Index 301, DosGetPID, DosGetPPID, DosGetProcAddr,
+  DosGetProcessorStatus, DosGetPrty, DosGetResource Index 352,
+  DosGetResource2, DosGetSeg, DosGetSharedMem Index 302, DosGetShrSeg,
+  DosGetVersion, DosGiveSeg, DosGiveSharedMem Index 303, DosHoldSignal,
+  DosICreateThread, DosIExecPgm, DosInsertMessage, DosInsMessage,
+  DosIQueryMessageCP, DosGetMessage, DosQueryMessageCP, NpAllocHandle,
+  NpQueryHandle, DosIRead, DosISemRequest, DosISemWait, DosISysSemClear,
+  DosISysSemSet, DosIWrite, DosKillProcess Index 235,
+  DosKillThread Index 111, DosListIO, DosListIOL, DosLoadModule Index 318,
+  DosLockSeg, DosMakeNmPipe, DosMakePipe, DosMapCase, DosMemAvail,
+  DosMkDir, DosMkDir2, DosMonClose, DosMonOpen, DosMonRead, DosMonReg,
+  DosMonWrite, DosMove Index 271, DosMuxSemWait, DosNewSize,
+  DosOpen Index 273, DosOpen2, DosOpenEventSem Index 325, DosOpenL,
+  DosOpenMutexSem Index 332, DosOpenMuxWaitSem Index 338, DosOpenSem,
+  DosOpenVDD Index 308, DosPeekNmPipe, DosPeekNPipe Index 244,
+  DosPerfSysCall, DosPhysicalDisk Index 287, DosPortAccess,
+  DosPostEventSem Index 328, DosProtectClose, DosProtectEnumAttribute,
+  DosProtectOpen, DosProtectOpenL, DosProtectQueryFHState,
+  DosProtectQueryFileInfo, DosProtectRead, DosProtectSetFHState,
+  DosProtectSetFileInfo, DosProtectSetFileLocks, DosProtectSetFileLocksL,
+  DosProtectSetFilePtr, DosProtectSetFilePtrL, DosProtectSetFileSize,
+  DosProtectSetFileSizeL, DosProtectWrite, DosPtrace, DosPutMessage,
+  DosQAppType, DosQCurDir, DosQCurDisk, DosQFHandState, DosQFileInfo,
+  DosQFileMode, DosQFSAttach, DosQFSInfo, DosQHandType, DosQNmPHandState,
+  DosQNmPipeInfo, DosQNmPipeSemState, DosQPathInfo, DosQSysInfo,
+  DosQueryABIOSSupport, DosQueryAppType Index 323, DosQueryCollate,
+  DosQueryCp Index 291, DosQueryCtryInfo, DosQueryCurrentDir Index 274,
+  DosQueryCurrentDisk Index 275, DosQueryDBCSEnv,
+  DosQueryEventSem Index 330, DosQueryExtLIBPATH,
+  DosQueryFHState Index 276, DosQueryFileInfo Index 279,
+  DosQueryFSAttach Index 277, DosQueryFSInfo Index 278,
+  DosQueryHType Index 224, DosQueryMem Index 306,
+  DosQueryMemState Index 307, DosQueryModFromCS, DosQueryModFromEIP,
+  DosQueryModuleHandle Index 319, DosQueryModuleName Index 320,
+  DosQueryMutexSem Index 336, DosQueryMuxWaitSem Index 343,
+  DosQueryNPHState Index 245, DosQueryNPipeInfo Index 248,
+  DosQueryNPipeSemState Index 249, DosQueryPathInfo Index 223,
+  DosQueryProcAddr Index 321, DosQueryProcType Index 586,
+  DosQueryResourceSize Index 572, DosQuerySysInfo Index 348,
+  DosQueryThreadAffinity, DosQueryThreadContext, DosQueryVerify Index 225,
+  DosQVerify, DosR2StackRealloc, DosRaiseException Index 356,
+  DosRead Index 281, DosReadAsync, DosReallocHuge, DosReallocSeg,
+  DosReleaseMutexSem Index 335, DosReplaceModule Index 417,
+  DosRequestMutexSem Index 334, DosRequestVDD Index 309,
+  DosResetBuffer Index 254, DosResetEventSem Index 327,
+  DosResumeThread Index 237, DosRmDir, DosScanEnv Index 227,
+  DosSearchPath Index 228, DosSelectDisk, DosSemClear, DosSemRequest,
+  DosSemSet, DosSemSetWait, DosSemWait, DosSendSignal,
+  DosSendSignalException Index 379, DosSetCP Index 288,
+  DosSetCurrentDir Index 255, DosSetDateTime Index 292,
+  DosSetDefaultDisk Index 220, DosSetExceptionHandler Index 354,
+  DosSetExtLIBPATH, DosSetFHandState, DosSetFHState Index 221,
+  DosSetFileInfo Index 218, DosSetFileLocks Index 428, DosSetFileLocksL,
+  DosSetFileMode, DosSetFilePtr Index 256, DosSetFilePtrL,
+  DosSetFileSize Index 272, DosSetFileSizeL, DosSetFSInfo Index 222,
+  DosSetMaxFH Index 209, DosSetMem Index 305, DosSetNmPHandState,
+  DosSetNmPipeSem, DosSetNPHState Index 250, DosSetNPipeSem Index 251,
+  DosSetPathInfo Index 219, DosSetProcCP, DosSetProcessCp Index 289,
+  DosSetProcessorStatus, DosSetPriority Index 236, DosSetPrty,
+  DosSetRelMaxFH Index 382, DosSetSigHandler,
+  DosSetSignalExceptionFocus Index 378, DosSetThreadAffinity, DosSetVec,
+  DosSetVerify Index 210, DosShutdown Index 415, DosSizeSeg,
+  DosSleep Index 229, DosStartTimer Index 351, DosStopTimer Index 290,
+  DosSubAlloc, DosSubAllocMem Index 345, DosSubFree,
+  DosSubFreeMem Index 346, DosSubSet, DosSubSetMem Index 344,
+  DosSubUnsetMem Index 347, DosSuppressPopUps, DosSuspendThread Index 238,
+  DosSystemService, DosSysTrace, DosTimerAsync, DosTimerStart,
+  DosTimerStop, DosTmrQueryFreq Index 362, DosTmrQueryTime Index 363,
+  DosTransactNmPipe, DosTransactNPipe Index 252, DosTrueGetMessage,
+  DosUnlockSeg, DosUnsetExceptionHandler Index 355,
+  DosUnwindException Index 357, DosVerifyPidTid, DosWaitChild Index 280,
+  DosWaitEventSem Index 329, DosWaitMuxWaitSem Index 340, DosWaitNmPipe,
+  DosWaitNPipe Index 253, DosWaitThread Index 349, DosWrite Index 282,
+  DosWriteAsync;
 
 { Initialisation de la DLL (executee une fois, au chargement par le noyau) }
 Var

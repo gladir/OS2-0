@@ -79,6 +79,7 @@ Var
 { --- noyau --- }
 Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
+Function KLxTib(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
 
 { --- fonctions de PMMERGE.DLL --- }
 Function X_ShePIInitialise : LongInt; External 'PMMERGE' Name 'ShePIInitialise';
@@ -233,7 +234,7 @@ End;
 { un programme OS2PC (charge en 00400000h) suit la convention Pascal }
 Function Call3(F, A1, A2, A3 : LongInt) : LongInt;
 Begin
-  If (F >= $00400000) And (F < $00800000) Then Call3 := CallPas3(F, A1, A2, A3)
+  If (F >= $00400000) And (F < $00800000) And (KLxTib(18, 0, 0, 0) = 0) Then Call3 := CallPas3(F, A1, A2, A3)
   Else Call3 := CallSys3(F, A1, A2, A3);
 End;
 

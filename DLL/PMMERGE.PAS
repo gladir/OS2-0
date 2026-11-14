@@ -133,6 +133,7 @@ Function DcQueryProcAddr(H, Ord, PName, PPfn : LongInt) : LongInt; External 'DOS
 Function DcQueryPathInfo(PName, Level, PInfo, Cb : LongInt) : LongInt; External 'DOSCALLS' Name 'DosQueryPathInfo';
 Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
+Function KLxTib(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
 Function KGetTickCount : LongInt; External 'DOSCALLS' Name 'GetTickCount';
 
 Var
@@ -887,7 +888,7 @@ End;
 
 Function Call4(F, A1, A2, A3, A4 : LongInt) : LongInt;
 Begin
-  If (F >= $00400000) And (F < $00800000) Then Call4 := CallPas4(F, A1, A2, A3, A4)
+  If (F >= $00400000) And (F < $00800000) And (KLxTib(18, 0, 0, 0) = 0) Then Call4 := CallPas4(F, A1, A2, A3, A4)
   Else Call4 := CallSys4(F, A1, A2, A3, A4);
 End;
 

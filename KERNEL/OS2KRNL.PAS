@@ -248,6 +248,10 @@ Type
     NextTid   : LongInt;     { prochain identificateur de fil }
     Sess      : LongInt;     { session (ecran et clavier) }
     ConSess   : LongInt;     { session de la console (sortie standard) }
+    IsLx      : Boolean;     { programme LX d'OS/2 (partie 13c) }
+    LxEip     : LongInt;     { point d'entree }
+    LxTib     : LongInt;     { bloc d'information de tache (FS:0) }
+    LxFs      : LongInt;     { selecteur de FS }
   End;
 
 Var
@@ -334,6 +338,8 @@ Var
   SwPde            : LongInt;       { entree 0 du repertoire de la tache reprise }
   SessNoPde        : Boolean;       { SessSwap sans changer l'entree 0 }
   TkEsp0           : Array[0..MaxTasks - 1] Of LongInt;  { pile de l'anneau 0 (TSS) }
+  TkFs             : Array[0..MaxTasks - 1] Of LongInt;  { selecteur FS (TIB des programmes LX) }
+  FsTmp            : LongInt;
   Tss              : Array[0..31] Of LongInt;            { TSS du processeur (InitTss) }
   TssBase          : LongInt;
   { machine virtuelle DOS (partie 13b) : en cours, sa tache, sa session,
@@ -768,6 +774,12 @@ Procedure VmSwitchIn; Forward;
 Procedure DosStop; Forward;
 Function IsDosFile(Path : String) : Boolean; Forward;
 Function LoadDosProgram(Path, CmdLine : String) : LongInt; Forward;
+{ chargeur LX (partie 13c) }
+Function LxHeader(Buf, Size : LongInt) : LongInt; Forward;
+Function LxLoadDll(Path : String; Buf, Size, M : LongInt) : Boolean; Forward;
+Function LxLoadExe(Path, CmdLine : String; Buf, Size : LongInt) : LongInt; Forward;
+Function LxLastErr : String; Forward;
+Procedure SelFree(Sel, N : LongInt); Forward;
 
 Procedure InitIdt;
 Var I : LongInt;
@@ -2745,6 +2757,7 @@ Var
   FlpSpc, FlpRes, FlpNFat, FlpRootN, FlpSpf, FlpRootLba, FlpDataLba, FlpClusN : LongInt;
   FlpFat, FlpSec, FlpSecLba : LongInt;      { FAT entiere ; secteur en cache }
   FlpLabel : String[11];
+  FlpSerial : LongInt;
 
 Procedure IrqFloppy; Interrupt;
 Begin
@@ -2863,9 +2876,12 @@ Begin
   End;
 End;
 
+{ debits essayes : 500 kbit/s (1,44 Mo), 1 Mbit/s (2,88 Mo), 250 (720 Ko),
+  300 (360 Ko) }
 Function FdRate3(I : LongInt) : LongInt;
 Begin
-  If I = 0 Then FdRate3 := 0 Else If I = 1 Then FdRate3 := 2 Else FdRate3 := 1;
+  If I = 0 Then FdRate3 := 0 Else If I = 1 Then FdRate3 := 3
+  Else If I = 2 Then FdRate3 := 2 Else FdRate3 := 1;
 End;
 
 { secteur 0 de la disquette : debit et geometrie ; False sans disquette }
@@ -2873,7 +2889,7 @@ Function FdProbe : Boolean;
 Var I : LongInt;
 Begin
   FdProbe := False;
-  For I := 0 To 2 Do
+  For I := 0 To 3 Do
   Begin
     FdRate := FdRate3(I);
     FdReset;
@@ -2927,6 +2943,11 @@ Begin
   If (FlpSpc = 0) Or (FlpSpf = 0) Or (FlpSpf > 12) Then Exit;
   FlpLabel := '';
   For I := 0 To 10 Do FlpLabel := FlpLabel + Chr(Mem[0:FlpSec + 43 + I]);
+  FlpSerial := MemL[0:FlpSec + 39];
+  If Mem[0:FlpSec + 38] <> $29 Then
+  Begin
+    FlpLabel := ''; FlpSerial := 0;
+  End;
   FlpRootLba := FlpRes + FlpNFat * FlpSpf;
   FlpDataLba := FlpRootLba + (FlpRootN * 32 + 511) Div 512;
   FlpClusN := (FdSecs - FlpDataLba) Div FlpSpc + 2;
@@ -5653,6 +5674,22 @@ Begin
   If Buf = 0 Then Buf := ReadWholeFile(Path, Size);
   If Buf = 0 Then Exit;
   LastError := ErrBadFormat;
+  { DLL d'OS/2 au format LX }
+  If LxHeader(Buf, Size) <> 0 Then
+  Begin
+    If LxLoadDll(Path, Buf, Size, M) Then
+    Begin
+      LastError := 0;
+      LoadModule := M;
+    End
+    Else
+    Begin
+      ConPutLn('SYS0191: ' + Path + ' : ' + LxLastErr + '.');
+      KLog('LX : ' + Path + ' : ' + LxLastErr);
+    End;
+    KFree(Buf);
+    Exit;
+  End;
   Pe := Buf + MemL[0:Buf + $3C];
   If (MemW[0:Buf] <> $5A4D) Or (MemL[0:Pe] <> $00004550) Or (MemW[0:Pe + 4] <> $014C) Then
   Begin
@@ -5796,6 +5833,13 @@ Begin
   Buf := ReadWholeFile(Path, Size);
   If Buf = 0 Then Exit;
   LastError := ErrBadFormat;
+  { programme d'OS/2 au format LX }
+  If LxHeader(Buf, Size) <> 0 Then
+  Begin
+    LoadProgram := LxLoadExe(Path, CmdLine, Buf, Size);
+    KFree(Buf);
+    Exit;
+  End;
   If (Size < 512) Or (MemW[0:Buf] <> $5A4D) Then
   Begin
     KFree(Buf);
@@ -5934,6 +5978,7 @@ Begin
     NextSess := -1;
   End;
   Procs[Pid].ConSess := Procs[Pid].Sess;
+  Procs[Pid].IsLx := False; Procs[Pid].LxFs := 0; Procs[Pid].LxTib := 0;
   ProcEntry[Pid] := ProcWinBase + Entry;
   ProcStack[Pid] := Phys + PhysSize - 16;
   LastError := 0;
@@ -6250,6 +6295,19 @@ Begin
   SwSave := LongInt(@TkEsp) + CurTask * 4;
   SwNew := TkEsp[N];
   If TkEsp0[N] <> 0 Then Tss[1] := TkEsp0[N];
+  { FS : TIB des programmes LX (sinon les donnees du noyau) }
+  asm
+    xor eax,eax
+    mov ax,fs
+    mov FsTmp,eax
+  end;
+  TkFs[CurTask] := FsTmp;
+  FsTmp := TkFs[N];
+  If FsTmp = 0 Then FsTmp := $10;
+  asm
+    mov eax,FsTmp
+    mov fs,ax
+  end;
   CurTask := N;
   CurProc := TkProc[N];
   LastError := TkLastErr[N];
@@ -6396,6 +6454,8 @@ Begin
   TkEsp[T] := E;
   TkProc[T] := Proc; TkStack[T] := StackBlk; TkLastErr[T] := 0; TkTid[T] := Tid;
   TkFn[T] := Fn; TkArg[T] := Arg;
+  TkFs[T] := 0;
+  If (Proc >= 0) And Procs[Proc].IsLx Then TkFs[T] := Procs[Proc].LxFs;
   asm
     cli
   end;
@@ -6442,6 +6502,15 @@ Begin
   Pid := CurProc;
   If Pid < 0 Then Exit;
   If VmOn And (Pid = VmPid) Then DosStop;
+  If Procs[Pid].IsLx And (Procs[Pid].LxFs <> 0) Then
+  Begin
+    SelFree(Procs[Pid].LxFs, 1);
+    Procs[Pid].LxFs := 0;
+    asm
+      mov ax,10h
+      mov fs,ax
+    end;
+  End;
   Procs[Pid].ExitCode := Code;
   KbdMode := 0;
   MonProcessExit(Procs[Pid].Serial);
@@ -6613,6 +6682,11 @@ Procedure KillOther(P, Code : LongInt);
 Var K : LongInt;
 Begin
   If VmOn And (P = VmPid) Then DosStop;
+  If Procs[P].IsLx And (Procs[P].LxFs <> 0) Then
+  Begin
+    SelFree(Procs[P].LxFs, 1);
+    Procs[P].LxFs := 0;
+  End;
   For K := 0 To MaxFiles - 1 Do
     If Files[K].Used And (Files[K].Owner = P) Then Files[K].Used := False;
   For K := 0 To MaxFinds - 1 Do
@@ -6745,6 +6819,7 @@ Begin
           Else KrnTaskCtl := -1;
         End;
    14 : If (CurProc >= 0) And (P1 > 1) Then Procs[CurProc].NextTid := P1;
+   18 : If (CurProc >= 0) And Procs[CurProc].IsLx Then KrnTaskCtl := Procs[CurProc].LxTib;
    { grands blocs de memoire du processus : 15 allouer (P1 octets),
      16 liberer (P1 adresse), 17 le bloc P1 existe-t-il ? }
    15 : If (CurProc >= 0) And (P1 > 0) Then
@@ -7223,6 +7298,22 @@ Var A, I, Sum, D : LongInt; S : String;
 Begin
   GetVolumeInformationA := 0;
   If PRoot <> 0 Then S := PStr(PRoot) Else S := CurDir;
+  If FlpPath(UpStr(S)) Then
+  Begin
+    { disquette A: : etiquette et numero de serie du BPB, FAT }
+    If Not FlpReady Then
+    Begin
+      LastError := ErrNotReady;
+      Exit;
+    End;
+    If PVol <> 0 Then PutPStr(PVol, Trim(FlpLabel), VolSize);
+    If PSerial <> 0 Then MemL[0:PSerial] := FlpSerial;
+    If PMaxComp <> 0 Then MemL[0:PMaxComp] := 12;
+    If PFlags <> 0 Then MemL[0:PFlags] := 0;
+    If PFs <> 0 Then PutPStr(PFs, 'FAT', FsSize);
+    GetVolumeInformationA := 1;
+    Exit;
+  End;
   D := IfsDrive(S);
   If D >= 0 Then
   Begin
@@ -15430,6 +15521,7 @@ Begin
     NextSess := -1;
   End;
   Procs[Pid].ConSess := Procs[Pid].Sess;
+  Procs[Pid].IsLx := False; Procs[Pid].LxFs := 0; Procs[Pid].LxTib := 0;
   ProcEntry[Pid] := LongInt(@DosMain);
   ProcStack[Pid] := Phys + PhysSize - 16;
   { arguments : la ligne de commande sans le nom du programme }
@@ -15476,6 +15568,1066 @@ Begin
 End;
 
 { VDM-FIN }
+
+{ LX-DEBUT }
+{ ==================================================================== }
+{ Partie 13c - Chargeur LX : programmes et DLL d'OS/2 2.x, 3 et 4      }
+{ ==================================================================== }
+{ Les vrais programmes d'OS/2 32 bits sont au format LX (Linear
+  eXecutable). Le chargeur place les objets (code, donnees) dans la
+  fenetre du processus (programme) ou dans la region des DLL, decompresse
+  les pages iterees (EXEPACK 1 et 2), applique les corrections (fixups)
+  internes et les importations (par ordinal ou par nom) vers les DLL
+  d'OS/2-0, dont les fonctions suivent la convention _System, et appelle
+  l'initialisation des DLL (_DLL_InitTerm). Le module recoit un en-tete
+  PE synthetique (MZ, PE, table d'exportation et repertoire des
+  ressources) : son handle (HMODULE) est utilisable par DosGetResource,
+  DosQueryProcAddr, WinLoadDlg... comme celui d'un module d'OS/2-0. Le
+  programme demarre comme sous OS/2 : [ESP] adresse de retour, puis
+  handle du module, 0, environnement et ligne de commande ; FS designe
+  son bloc d'information de tache (TIB, chaine des gestionnaires
+  d'exceptions en FS:[0]). }
+
+Const
+  LxMaxObj = 64;
+  LxMaxRes = 2048;
+
+Var
+  LxB, LxH, LxNObj : LongInt;          { image lue, en-tete LX, objets }
+  LxObjAdr, LxObjLin, LxObjSize, LxObjFl : Array[0..LxMaxObj - 1] Of LongInt;
+  LxModHdl : Array[0..255] Of LongInt; { modules importes (indice Mods, -1) }
+  LxEntAdr : LongInt;                  { adresses des ordinaux (tableau) }
+  LxNEnt : LongInt;
+  LxPath : String;
+  LxErr : String;
+
+Function LxL(O : LongInt) : LongInt;
+Begin
+  LxL := MemL[0:LxB + O];
+End;
+
+Function LxW(O : LongInt) : LongInt;
+Begin
+  LxW := MemW[0:LxB + O];
+End;
+
+Function LxBy(O : LongInt) : LongInt;
+Begin
+  LxBy := Mem[0:LxB + O];
+End;
+
+{ en-tete LX de l'image Buf (0 : pas un module LX) }
+Function LxHeader(Buf, Size : LongInt) : LongInt;
+Var H : LongInt;
+Begin
+  LxHeader := 0;
+  If Size < 64 Then Exit;
+  H := 0;
+  If MemW[0:Buf] = $5A4D Then H := MemL[0:Buf + $3C];
+  If (H < 0) Or (H + $B0 > Size) Then Exit;
+  If (Mem[0:Buf + H] = Ord('L')) And (Mem[0:Buf + H + 1] = Ord('X')) Then LxHeader := H;
+End;
+
+{ page iteree (EXEPACK 1) : enregistrements (repetitions, longueur,
+  donnees) }
+Procedure LxIter1(Src, N, Dst, Max : LongInt);
+Var P, Q, Cnt, L, K : LongInt;
+Begin
+  P := 0; Q := 0;
+  While P + 4 <= N Do
+  Begin
+    Cnt := MemW[0:Src + P]; L := MemW[0:Src + P + 2];
+    P := P + 4;
+    If (Cnt = 0) Or (L = 0) Then Break;
+    For K := 1 To Cnt Do
+    Begin
+      If Q + L > Max Then Exit;
+      MoveMem(Src + P, Dst + Q, L);
+      Q := Q + L;
+    End;
+    P := P + L;
+  End;
+End;
+
+{ page compressee (EXEPACK 2) : suites de commandes (litteraux, copies
+  d'une partie deja decompressee) }
+Procedure LxIter2(Src, N, Dst, Max : LongInt);
+Var P, Q, C, L, D, K, B2 : LongInt;
+Begin
+  P := 0; Q := 0;
+  While (P < N) And (Q < Max) Do
+  Begin
+    C := Mem[0:Src + P];
+    Case C And 3 Of
+      0 :
+        If C = 0 Then
+        Begin
+          { repetition d'un octet : 00 n b }
+          If P + 2 >= N Then Exit;
+          L := Mem[0:Src + P + 1];
+          If L = 0 Then Exit;
+          B2 := Mem[0:Src + P + 2];
+          For K := 0 To L - 1 Do If Q < Max Then
+          Begin
+            Mem[0:Dst + Q] := B2; Inc(Q);
+          End;
+          P := P + 3;
+        End
+        Else
+        Begin
+          { litteraux : C shr 2 octets }
+          L := C Shr 2;
+          For K := 0 To L - 1 Do If Q < Max Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Src + P + 1 + K]; Inc(Q);
+          End;
+          P := P + 1 + L;
+        End;
+      1 :
+        Begin
+          { 0-3 litteraux puis copie courte }
+          C := C Or (Mem[0:Src + P + 1] Shl 8);
+          L := (C Shr 2) And 3;
+          For K := 0 To L - 1 Do If Q < Max Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Src + P + 2 + K]; Inc(Q);
+          End;
+          P := P + 2 + L;
+          L := ((C Shr 4) And 7) + 3;
+          D := (C Shr 7) And $1FF;
+          For K := 0 To L - 1 Do If (Q < Max) And (Q - D >= 0) Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Dst + Q - D]; Inc(Q);
+          End;
+        End;
+      2 :
+        Begin
+          { copie courte sans litteraux }
+          C := C Or (Mem[0:Src + P + 1] Shl 8);
+          P := P + 2;
+          L := ((C Shr 2) And 3) + 3;
+          D := (C Shr 4) And $FFF;
+          For K := 0 To L - 1 Do If (Q < Max) And (Q - D >= 0) Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Dst + Q - D]; Inc(Q);
+          End;
+        End;
+      3 :
+        Begin
+          { 0-15 litteraux puis copie longue }
+          C := C Or (Mem[0:Src + P + 1] Shl 8) Or (Mem[0:Src + P + 2] Shl 16);
+          L := (C Shr 2) And $F;
+          For K := 0 To L - 1 Do If Q < Max Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Src + P + 3 + K]; Inc(Q);
+          End;
+          P := P + 3 + L;
+          L := (C Shr 6) And $3F;
+          D := (C Shr 12) And $FFF;
+          For K := 0 To L - 1 Do If (Q < Max) And (Q - D >= 0) Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Dst + Q - D]; Inc(Q);
+          End;
+        End;
+    End;
+  End;
+End;
+
+{ etat du chargeur (modules charges recursivement) }
+Function LxSave : LongInt;
+Var A, I : LongInt;
+Begin
+  A := KAlloc(LxMaxObj * 16 + 256 * 4 + 64);
+  If A = 0 Then
+  Begin
+    LxSave := 0;
+    Exit;
+  End;
+  For I := 0 To LxMaxObj - 1 Do
+  Begin
+    MemL[0:A + I * 16] := LxObjAdr[I]; MemL[0:A + I * 16 + 4] := LxObjLin[I];
+    MemL[0:A + I * 16 + 8] := LxObjSize[I]; MemL[0:A + I * 16 + 12] := LxObjFl[I];
+  End;
+  For I := 0 To 255 Do MemL[0:A + LxMaxObj * 16 + I * 4] := LxModHdl[I];
+  I := A + LxMaxObj * 16 + 1024;
+  MemL[0:I] := LxB; MemL[0:I + 4] := LxH; MemL[0:I + 8] := LxNObj;
+  MemL[0:I + 12] := LxEntAdr; MemL[0:I + 16] := LxNEnt;
+  LxSave := A;
+End;
+
+Procedure LxRestore(A : LongInt);
+Var I : LongInt;
+Begin
+  If A = 0 Then Exit;
+  For I := 0 To LxMaxObj - 1 Do
+  Begin
+    LxObjAdr[I] := MemL[0:A + I * 16]; LxObjLin[I] := MemL[0:A + I * 16 + 4];
+    LxObjSize[I] := MemL[0:A + I * 16 + 8]; LxObjFl[I] := MemL[0:A + I * 16 + 12];
+  End;
+  For I := 0 To 255 Do LxModHdl[I] := MemL[0:A + LxMaxObj * 16 + I * 4];
+  I := A + LxMaxObj * 16 + 1024;
+  LxB := MemL[0:I]; LxH := MemL[0:I + 4]; LxNObj := MemL[0:I + 8];
+  LxEntAdr := MemL[0:I + 12]; LxNEnt := MemL[0:I + 16];
+  KFree(A);
+End;
+
+{ module importe numero K (1..n) : indice dans Mods (charge au besoin) }
+Function LxImpMod(K : LongInt) : LongInt;
+Var P, I, L, Sv, M : LongInt; S : String;
+Begin
+  LxImpMod := -1;
+  If (K < 1) Or (K > 255) Then Exit;
+  If LxModHdl[K] <> -2 Then
+  Begin
+    LxImpMod := LxModHdl[K];
+    Exit;
+  End;
+  P := LxH + LxL(LxH + $70);
+  For I := 1 To K - 1 Do P := P + LxBy(P) + 1;
+  L := LxBy(P);
+  S := '';
+  For I := 1 To L Do S := S + Chr(LxBy(P + I));
+  S := UpStr(S);
+  If Pos('.', S) = 0 Then S := S + '.DLL';
+  { chargement d'une dependance (peut-etre un autre module LX) : etat du
+    chargeur sauve }
+  Sv := LxSave;
+  M := LoadModule(S);
+  LxRestore(Sv);
+  LxModHdl[K] := M;
+  If LxModHdl[K] < 0 Then LxErr := 'module ' + S + ' introuvable';
+  LxImpMod := LxModHdl[K];
+End;
+
+{ nom de procedure importee a l'offset O de la table des noms }
+Function LxImpName(O : LongInt) : String;
+Var P, I, L : LongInt; S : String;
+Begin
+  P := LxH + LxL(LxH + $78) + O;
+  L := LxBy(P);
+  S := '';
+  For I := 1 To L Do S := S + Chr(LxBy(P + I));
+  LxImpName := S;
+End;
+
+{ importations absentes : une souche par importation (PUSH n ; JMP
+  LxMissing) qui journalise le module et l'ordinal (ou le nom) et rend
+  ERROR_INVALID_FUNCTION (1) ; le programme continue }
+Var
+  LxMissN : LongInt;
+  LxMissName : Array[0..511] Of String[47];
+  LxMissBlk : LongInt;
+
+Procedure LxMissing;
+Var N, R : LongInt;
+Begin
+  asm
+    mov eax,[ebp+8]
+    mov N,eax
+  end;
+  If (N >= 0) And (N < LxMissN) Then KLog('LX : fonction absente appelee : ' + LxMissName[N]);
+End;
+
+Function LxStub(Nm : String) : LongInt;
+Var A, T : LongInt;
+Begin
+  LxStub := 0;
+  If LxMissN >= 512 Then Exit;
+  If LxMissBlk = 0 Then LxMissBlk := KAlloc(512 * 32 + 64);
+  If LxMissBlk = 0 Then Exit;
+  A := ((LxMissBlk + 15) And Not 15) + LxMissN * 32;
+  LxMissName[LxMissN] := Nm;
+  T := LongInt(@LxMissing);
+  { pushad ; push n ; call LxMissing ; add esp,4 ; popad ; mov eax,1 ; ret }
+  Mem[0:A] := $60;
+  Mem[0:A + 1] := $68; MemL[0:A + 2] := LxMissN;
+  Mem[0:A + 6] := $E8; MemL[0:A + 7] := T - (A + 11);
+  Mem[0:A + 11] := $83; Mem[0:A + 12] := $C4; Mem[0:A + 13] := 4;
+  Mem[0:A + 14] := $61;
+  Mem[0:A + 15] := $B8; MemL[0:A + 16] := 1;
+  Mem[0:A + 20] := $C3;
+  LxStub := A;
+  Inc(LxMissN);
+End;
+
+Function LxStubFor(Nm : String) : LongInt;
+Var I : LongInt;
+Begin
+  For I := 0 To LxMissN - 1 Do
+    If LxMissName[I] = Nm Then
+    Begin
+      LxStubFor := ((LxMissBlk + 15) And Not 15) + I * 32;
+      Exit;
+    End;
+  KLog('LX : importation absente : ' + Nm);
+  LxStubFor := LxStub(Nm);
+End;
+
+{ adresse de l'ordinal Ord du module en cours de chargement (0 : aucun) }
+Function LxSelfOrd(Ord : LongInt) : LongInt;
+Begin
+  LxSelfOrd := 0;
+  If (Ord >= 1) And (Ord <= LxNEnt) And (LxEntAdr <> 0) Then
+    LxSelfOrd := MemL[0:LxEntAdr + (Ord - 1) * 4];
+End;
+
+{ table des points d'entree : adresse de chaque ordinal ; les renvois
+  (forwarders) sont resolus vers le module cible }
+Procedure LxEntries;
+Var P, Cnt, Typ, Obj, K, Ord, A, Fl, MI, V, M : LongInt;
+Begin
+  { premier passage : nombre d'ordinaux }
+  P := LxH + LxL(LxH + $5C);
+  Ord := 0;
+  Repeat
+    Cnt := LxBy(P);
+    If Cnt = 0 Then Break;
+    Typ := LxBy(P + 1);
+    If Typ = 0 Then
+    Begin
+      Ord := Ord + Cnt;
+      P := P + 2;
+    End
+    Else
+    Begin
+      Ord := Ord + Cnt;
+      Case Typ Of
+        1 : P := P + 4 + Cnt * 3;
+        2 : P := P + 4 + Cnt * 5;
+        3 : P := P + 4 + Cnt * 5;
+        4 : P := P + 4 + Cnt * 7;
+      Else
+        Break;
+      End;
+    End;
+  Until False;
+  LxNEnt := Ord;
+  LxEntAdr := 0;
+  If Ord = 0 Then Exit;
+  LxEntAdr := KAlloc(Ord * 4 + 4);
+  FillMem(LxEntAdr, Ord * 4 + 4, 0);
+  P := LxH + LxL(LxH + $5C);
+  Ord := 0;
+  Repeat
+    Cnt := LxBy(P);
+    If Cnt = 0 Then Break;
+    Typ := LxBy(P + 1);
+    If Typ = 0 Then
+    Begin
+      Ord := Ord + Cnt;
+      P := P + 2;
+      Continue;
+    End;
+    Obj := LxW(P + 2);
+    P := P + 4;
+    For K := 1 To Cnt Do
+    Begin
+      Inc(Ord);
+      A := 0;
+      Case Typ Of
+        1 :
+          Begin
+            If (Obj >= 1) And (Obj <= LxNObj) Then A := LxObjLin[Obj - 1] + LxW(P + 1);
+            P := P + 3;
+          End;
+        2 :
+          Begin
+            If (Obj >= 1) And (Obj <= LxNObj) Then A := LxObjLin[Obj - 1] + LxW(P + 1);
+            P := P + 5;
+          End;
+        3 :
+          Begin
+            If (Obj >= 1) And (Obj <= LxNObj) Then A := LxObjLin[Obj - 1] + LxL(P + 1);
+            P := P + 5;
+          End;
+        4 :
+          Begin
+            Fl := LxBy(P);
+            MI := LxW(P + 1);
+            V := LxL(P + 3);
+            M := LxImpMod(MI);
+            If M >= 0 Then
+            Begin
+              If (Fl And 1) <> 0 Then A := ModuleExport(M, '', V)
+              Else A := ModuleExport(M, LxImpName(V), 0);
+            End;
+            P := P + 7;
+          End;
+      End;
+      MemL[0:LxEntAdr + (Ord - 1) * 4] := A;
+    End;
+  Until False;
+End;
+
+{ corrections d'une page (indice logique Pg, 0..) chargee a l'adresse
+  (noyau) PgAdr, vue par le programme en PgLin ; False : importation
+  introuvable }
+Function LxFixPage(Pg, PgAdr, PgLin : LongInt) : Boolean;
+Var Q, E, Src, Tf, Cnt, SrcOff, Typ, Obj, Ofs, M, Ord, T, Add, K, Lst, Sel, A : LongInt;
+    Nm : String;
+Begin
+  LxFixPage := True;
+  Q := LxH + LxL(LxH + $6C) + LxL(LxH + LxL(LxH + $68) + Pg * 4);
+  E := LxH + LxL(LxH + $6C) + LxL(LxH + LxL(LxH + $68) + Pg * 4 + 4);
+  While Q < E Do
+  Begin
+    Src := LxBy(Q); Tf := LxBy(Q + 1);
+    Q := Q + 2;
+    Cnt := 0; SrcOff := 0; Lst := 0;
+    If (Src And $20) <> 0 Then
+    Begin
+      Cnt := LxBy(Q);
+      Q := Q + 1;
+    End
+    Else
+    Begin
+      SrcOff := LxW(Q);
+      If SrcOff >= $8000 Then SrcOff := SrcOff - $10000;
+      Q := Q + 2;
+    End;
+    T := 0; Sel := $10;
+    Typ := Tf And 3;
+    If Typ = 0 Then
+    Begin
+      If (Tf And $40) <> 0 Then
+      Begin
+        Obj := LxW(Q); Q := Q + 2;
+      End
+      Else
+      Begin
+        Obj := LxBy(Q); Q := Q + 1;
+      End;
+      Ofs := 0;
+      If (Src And $F) <> 2 Then
+      Begin
+        If (Tf And $10) <> 0 Then
+        Begin
+          Ofs := LxL(Q); Q := Q + 4;
+        End
+        Else
+        Begin
+          Ofs := LxW(Q); Q := Q + 2;
+        End;
+      End;
+      If (Obj >= 1) And (Obj <= LxNObj) Then
+      Begin
+        T := LxObjLin[Obj - 1] + Ofs;
+        If (LxObjFl[Obj - 1] And 4) <> 0 Then Sel := $08;
+      End;
+    End
+    Else If Typ = 3 Then
+    Begin
+      If (Tf And $40) <> 0 Then
+      Begin
+        Ord := LxW(Q); Q := Q + 2;
+      End
+      Else
+      Begin
+        Ord := LxBy(Q); Q := Q + 1;
+      End;
+      T := LxSelfOrd(Ord);
+    End
+    Else
+    Begin
+      If (Tf And $40) <> 0 Then
+      Begin
+        M := LxW(Q); Q := Q + 2;
+      End
+      Else
+      Begin
+        M := LxBy(Q); Q := Q + 1;
+      End;
+      If Typ = 1 Then
+      Begin
+        If (Tf And $80) <> 0 Then
+        Begin
+          Ord := LxBy(Q); Q := Q + 1;
+        End
+        Else If (Tf And $10) <> 0 Then
+        Begin
+          Ord := LxL(Q); Q := Q + 4;
+        End
+        Else
+        Begin
+          Ord := LxW(Q); Q := Q + 2;
+        End;
+        K := LxImpMod(M);
+        If K >= 0 Then T := ModuleExport(K, '', Ord);
+        If T = 0 Then
+        Begin
+          If K >= 0 Then Nm := Mods^[K].Name Else Nm := 'module ' + IntStr(M);
+          Nm := Nm + '.' + IntStr(Ord);
+          T := LxStubFor(Nm);
+          If T = 0 Then LxFixPage := False;
+        End;
+        Sel := $08;
+      End
+      Else
+      Begin
+        If (Tf And $10) <> 0 Then
+        Begin
+          Ofs := LxL(Q); Q := Q + 4;
+        End
+        Else
+        Begin
+          Ofs := LxW(Q); Q := Q + 2;
+        End;
+        Nm := LxImpName(Ofs);
+        K := LxImpMod(M);
+        If K >= 0 Then T := ModuleExport(K, Nm, 0);
+        If T = 0 Then T := KernelExport(Nm);
+        If T = 0 Then
+        Begin
+          T := LxStubFor(Nm);
+          If T = 0 Then LxFixPage := False;
+        End;
+        Sel := $08;
+      End;
+    End;
+    Add := 0;
+    If (Tf And 4) <> 0 Then
+    Begin
+      If (Tf And $20) <> 0 Then
+      Begin
+        Add := LxL(Q); Q := Q + 4;
+      End
+      Else
+      Begin
+        Add := LxW(Q); Q := Q + 2;
+      End;
+    End;
+    T := T + Add;
+    If (Src And $20) <> 0 Then
+    Begin
+      Lst := Q;
+      Q := Q + Cnt * 2;
+    End
+    Else Cnt := 1;
+    For K := 0 To Cnt - 1 Do
+    Begin
+      If Lst <> 0 Then
+      Begin
+        SrcOff := LxW(Lst + K * 2);
+        If SrcOff >= $8000 Then SrcOff := SrcOff - $10000;
+      End;
+      A := PgAdr + SrcOff;
+      Case Src And $F Of
+        0 : Mem[0:A] := T And $FF;
+        2 : MemW[0:A] := Sel;
+        3 :
+          Begin
+            MemW[0:A] := T And $FFFF;
+            MemW[0:A + 2] := Sel;
+          End;
+        5 : MemW[0:A] := T And $FFFF;
+        6 :
+          Begin
+            MemL[0:A] := T;
+            MemW[0:A + 4] := Sel;
+          End;
+        7 : MemL[0:A] := T;
+        8 : MemL[0:A] := T - (PgLin + SrcOff + 4);
+      End;
+    End;
+  End;
+End;
+
+{ charger les objets de l'image (LxB) : Mem (noyau) et Lin (programme)
+  sont l'adresse de la zone ; Hdr octets reserves devant (en-tete PE
+  synthetique) ; rend False et LxErr en cas d'echec }
+Function LxLoadObjects(Mem0, Lin0, Hdr : LongInt) : Boolean;
+Var I, O, Vs, Fl, Pmi, Pmn, Pg, PO, PSz, PFl, A, Off, DataPg, Shift : LongInt;
+Begin
+  LxLoadObjects := False;
+  Off := Hdr;
+  For I := 0 To LxNObj - 1 Do
+  Begin
+    LxObjAdr[I] := Mem0 + Off;
+    LxObjLin[I] := Lin0 + Off;
+    Off := Off + ((LxObjSize[I] + 4095) And Not 4095);
+  End;
+  DataPg := LxL(LxH + $80);
+  Shift := LxL(LxH + $2C);
+  For I := 0 To LxNObj - 1 Do
+  Begin
+    O := LxH + LxL(LxH + $40) + I * 24;
+    Vs := LxL(O); Fl := LxL(O + 8); Pmi := LxL(O + 12); Pmn := LxL(O + 16);
+    FillMem(LxObjAdr[I], (Vs + 4095) And Not 4095, 0);
+    For Pg := 0 To Pmn - 1 Do
+    Begin
+      A := LxH + LxL(LxH + $48) + (Pmi - 1 + Pg) * 8;
+      PO := MemL[0:LxB + A]; PSz := MemW[0:LxB + A + 4]; PFl := MemW[0:LxB + A + 6];
+      If Pg * 4096 >= ((Vs + 4095) And Not 4095) Then Break;
+      Case PFl Of
+        0 : MoveMem(LxB + DataPg + (PO Shl Shift), LxObjAdr[I] + Pg * 4096, Min(PSz, 4096));
+        1 : LxIter1(LxB + DataPg + (PO Shl Shift), PSz, LxObjAdr[I] + Pg * 4096, 4096);
+        5 : LxIter2(LxB + DataPg + (PO Shl Shift), PSz, LxObjAdr[I] + Pg * 4096, 4096);
+      End;
+    End;
+  End;
+  LxEntries;
+  { corrections, page par page }
+  For I := 0 To LxNObj - 1 Do
+  Begin
+    O := LxH + LxL(LxH + $40) + I * 24;
+    Vs := LxL(O); Pmi := LxL(O + 12); Pmn := LxL(O + 16);
+    For Pg := 0 To Pmn - 1 Do
+      If Not LxFixPage(Pmi - 1 + Pg, LxObjAdr[I] + Pg * 4096, LxObjLin[I] + Pg * 4096) Then
+      Begin
+        LxLoadObjects := False;
+        Exit;
+      End;
+  End;
+  LxLoadObjects := True;
+End;
+
+{ nombre d'ordinaux de la table des points d'entree }
+Function LxCountEnt : LongInt;
+Var P, Cnt, Typ, Ord : LongInt;
+Begin
+  P := LxH + LxL(LxH + $5C);
+  Ord := 0;
+  Repeat
+    Cnt := LxBy(P);
+    If Cnt = 0 Then Break;
+    Typ := LxBy(P + 1);
+    Ord := Ord + Cnt;
+    Case Typ Of
+      0 : P := P + 2;
+      1 : P := P + 4 + Cnt * 3;
+      2, 3 : P := P + 4 + Cnt * 5;
+      4 : P := P + 4 + Cnt * 7;
+    Else
+      Break;
+    End;
+  Until False;
+  LxCountEnt := Ord;
+End;
+
+{ taille de l'en-tete PE synthetique : exportations et ressources }
+Function LxHdrSize : LongInt;
+Var N, P : LongInt;
+Begin
+  N := 4096;
+  P := LxH + LxL(LxH + $58);
+  While LxBy(P) <> 0 Do
+  Begin
+    N := N + LxBy(P) + 12;
+    P := P + LxBy(P) + 3;
+  End;
+  N := N + LxL(LxH + $8C) * 2;
+  N := N + LxCountEnt * 4;
+  N := N + LxL(LxH + $54) * 64;
+  LxHdrSize := (N + 4095) And Not 4095;
+End;
+
+Var
+  LxNmAdr, LxNmOrd : Array[0..4095] Of LongInt;   { noms exportes : adresse, ordinal }
+  LxNmN : LongInt;
+
+{ ajouter les noms d'une table de noms (residents ou non residents) ;
+  Q : ecriture des chaines (adresse noyau), QL : leur adresse lineaire }
+Procedure LxAddNames(P, Stop : LongInt; Var Q, QL : LongInt);
+Var L, I, O : LongInt; First : Boolean;
+Begin
+  First := True;
+  While (P < Stop) And (LxBy(P) <> 0) Do
+  Begin
+    L := LxBy(P);
+    O := LxW(P + 1 + L);
+    If Not First And (O <> 0) And (LxNmN < 4096) Then
+    Begin
+      For I := 0 To L - 1 Do Mem[0:Q + I] := UpCh(LxBy(P + 1 + I));
+      Mem[0:Q + L] := 0;
+      LxNmAdr[LxNmN] := QL; LxNmOrd[LxNmN] := O;
+      Inc(LxNmN);
+      Q := Q + L + 1; QL := QL + L + 1;
+    End;
+    First := False;
+    P := P + L + 3;
+  End;
+End;
+
+{ en-tete PE synthetique en Mem0 (vu en Lin0, le handle du module) :
+  MZ, PE, exportations (ordinaux et noms) et repertoire des ressources
+  (type, nom, langue unique) }
+Procedure LxBuildHdr(Mem0, Lin0, Size, Entry : LongInt);
+Var Pe, Opt, Ex, Q, QL, I, J, K, NRes, R, Typ, Nm, Obj, Ofs, Sz, Root, NT, D, E, T0 : LongInt;
+    Types : Array[0..63] Of LongInt;
+Begin
+  FillMem(Mem0, 1024, 0);
+  MemW[0:Mem0] := $5A4D;
+  MemL[0:Mem0 + $3C] := $40;
+  Pe := Mem0 + $40;
+  MemL[0:Pe] := $00004550;
+  MemW[0:Pe + 4] := $014C;
+  MemW[0:Pe + 20] := 224;
+  Opt := Pe + 24;
+  MemW[0:Opt] := $10B;
+  If Entry <> 0 Then MemL[0:Opt + 16] := Entry - Lin0;
+  MemL[0:Opt + 28] := Lin0;
+  MemL[0:Opt + 56] := Size;
+  MemL[0:Opt + 60] := 1024;
+  { exportations }
+  LxNmN := 0;
+  Q := Mem0 + 1024; QL := Lin0 + 1024;
+  LxAddNames(LxH + LxL(LxH + $58), LxH + LxL(LxH + $5C), Q, QL);
+  If LxL(LxH + $88) <> 0 Then
+    LxAddNames(LxL(LxH + $88), LxL(LxH + $88) + LxL(LxH + $8C), Q, QL);
+  Q := (Q + 3) And Not 3; QL := (QL + 3) And Not 3;
+  Ex := Q;
+  MemL[0:Opt + 96] := QL - Lin0;
+  MemL[0:Opt + 100] := 40;
+  FillMem(Ex, 40, 0);
+  MemL[0:Ex + 16] := 1;
+  MemL[0:Ex + 20] := LxNEnt;
+  MemL[0:Ex + 24] := LxNmN;
+  Q := Q + 40; QL := QL + 40;
+  MemL[0:Ex + 28] := QL - Lin0;
+  For I := 0 To LxNEnt - 1 Do
+  Begin
+    If MemL[0:LxEntAdr + I * 4] <> 0 Then MemL[0:Q + I * 4] := MemL[0:LxEntAdr + I * 4] - Lin0
+    Else MemL[0:Q + I * 4] := 0;
+  End;
+  Q := Q + LxNEnt * 4; QL := QL + LxNEnt * 4;
+  MemL[0:Ex + 32] := QL - Lin0;
+  For I := 0 To LxNmN - 1 Do MemL[0:Q + I * 4] := LxNmAdr[I] - Lin0;
+  Q := Q + LxNmN * 4; QL := QL + LxNmN * 4;
+  MemL[0:Ex + 36] := QL - Lin0;
+  For I := 0 To LxNmN - 1 Do MemW[0:Q + I * 2] := LxNmOrd[I] - 1;
+  Q := Q + LxNmN * 2 + 4; QL := QL + LxNmN * 2 + 4;
+  Q := (Q + 3) And Not 3; QL := (QL + 3) And Not 3;
+  { ressources : table LX (type, nom, taille, objet, deplacement) }
+  NRes := LxL(LxH + $54);
+  If NRes > 0 Then
+  Begin
+    R := LxH + LxL(LxH + $50);
+    NT := 0;
+    For I := 0 To NRes - 1 Do
+    Begin
+      Typ := LxW(R + I * 14);
+      K := 0;
+      For J := 0 To NT - 1 Do If Types[J] = Typ Then K := 1;
+      If (K = 0) And (NT < 64) Then
+      Begin
+        Types[NT] := Typ; Inc(NT);
+      End;
+    End;
+    Root := Q;
+    MemL[0:Opt + 112] := QL - Lin0;
+    MemL[0:Opt + 116] := 16;
+    FillMem(Root, 16 + NT * 8, 0);
+    MemW[0:Root + 14] := NT;
+    Q := Q + 16 + NT * 8;
+    For J := 0 To NT - 1 Do
+    Begin
+      { sous-repertoire des noms du type Types[J] }
+      D := Q;
+      K := 0;
+      For I := 0 To NRes - 1 Do If LxW(R + I * 14) = Types[J] Then Inc(K);
+      FillMem(D, 16 + K * 8, 0);
+      MemW[0:D + 14] := K;
+      MemL[0:Root + 16 + J * 8] := Types[J];
+      MemL[0:Root + 16 + J * 8 + 4] := (D - Root) Or LongInt($80000000);
+      Q := Q + 16 + K * 8;
+      K := 0;
+      For I := 0 To NRes - 1 Do
+        If LxW(R + I * 14) = Types[J] Then
+        Begin
+          Nm := LxW(R + I * 14 + 2); Sz := LxL(R + I * 14 + 4);
+          Obj := LxW(R + I * 14 + 8); Ofs := LxL(R + I * 14 + 10);
+          { langue : un repertoire d'une entree, puis la donnee }
+          E := Q;
+          FillMem(E, 16 + 8 + 16, 0);
+          MemW[0:E + 14] := 1;
+          MemL[0:E + 16] := 0;
+          MemL[0:E + 20] := E + 24 - Root;
+          T0 := 0;
+          If (Obj >= 1) And (Obj <= LxNObj) Then T0 := LxObjLin[Obj - 1] + Ofs;
+          MemL[0:E + 24] := T0 - Lin0;
+          MemL[0:E + 28] := Sz;
+          MemL[0:D + 16 + K * 8] := Nm;
+          MemL[0:D + 16 + K * 8 + 4] := (E - Root) Or LongInt($80000000);
+          Q := Q + 40;
+          Inc(K);
+        End;
+    End;
+  End;
+End;
+
+{ lire l'en-tete LX et la table des objets de l'image Buf ; taille
+  totale des objets (alignes a 4 Ko) }
+Function LxPrepare(Buf, Size : LongInt) : LongInt;
+Var I, O, T : LongInt;
+Begin
+  LxPrepare := -1;
+  LxB := Buf;
+  LxH := LxHeader(Buf, Size);
+  If LxH = 0 Then Exit;
+  LxNObj := LxL(LxH + $44);
+  If (LxNObj <= 0) Or (LxNObj > LxMaxObj) Then Exit;
+  T := 0;
+  For I := 0 To LxNObj - 1 Do
+  Begin
+    O := LxH + LxL(LxH + $40) + I * 24;
+    LxObjSize[I] := LxL(O);
+    LxObjFl[I] := LxL(O + 8);
+    T := T + ((LxObjSize[I] + 4095) And Not 4095);
+  End;
+  For I := 0 To 255 Do LxModHdl[I] := -2;
+  LxErr := '';
+  LxEntAdr := 0; LxNEnt := 0;
+  LxPrepare := T;
+End;
+
+{ point d'entree (objet:deplacement de l'en-tete) ; 0 : aucun }
+Function LxEip : LongInt;
+Var O : LongInt;
+Begin
+  LxEip := 0;
+  O := LxL(LxH + $18);
+  If (O >= 1) And (O <= LxNObj) Then LxEip := LxObjLin[O - 1] + LxL(LxH + $1C);
+End;
+
+{ DLL LX : objets dans la region des DLL ; module M (table des modules)
+  rempli ; False et LxErr en cas d'echec. L'initialisation
+  (_DLL_InitTerm(hmod, 0), convention _System) est appelee. }
+Function LxLoadDll(Path : String; Buf, Size, M : LongInt) : Boolean;
+Var T, Hdr, Base, E, R, H : LongInt;
+Begin
+  LxLoadDll := False;
+  T := LxPrepare(Buf, Size);
+  If T < 0 Then Exit;
+  Hdr := LxHdrSize;
+  Base := DllFindSpace(T + Hdr);
+  If Base = 0 Then
+  Begin
+    LxErr := 'plus de place dans la region des DLL';
+    Exit;
+  End;
+  { le module est inscrit avant les importations (dependances
+    circulaires) }
+  Mods^[M].Used := True;
+  Mods^[M].Name := UpStr(BaseName(Path));
+  Mods^[M].Path := Path;
+  Mods^[M].Base := Base;
+  Mods^[M].Size := T + Hdr;
+  Mods^[M].NExp := 0; Mods^[M].OrdBase := 1; Mods^[M].NFunc := 0;
+  FillMem(Base, Hdr, 0);
+  If Not LxLoadObjects(Base, Base, Hdr) Then
+  Begin
+    Mods^[M].Used := False;
+    Exit;
+  End;
+  E := LxEip;
+  LxBuildHdr(Base, Base, T + Hdr, E);
+  H := Base + MemL[0:Base + $40 + 24 + 96];
+  Mods^[M].NExp := MemL[0:H + 24];
+  Mods^[M].OrdBase := MemL[0:H + 16];
+  Mods^[M].NFunc := MemL[0:H + 20];
+  Mods^[M].Funcs := Base + MemL[0:H + 28];
+  Mods^[M].Names := Base + MemL[0:H + 32];
+  Mods^[M].Ords := Base + MemL[0:H + 36];
+  If LxEntAdr <> 0 Then KFree(LxEntAdr);
+  LxEntAdr := 0;
+  KLog(Mods^[M].Name + ' (module LX) charge en ' + HexStr(Base, 8) + 'h.');
+  If E <> 0 Then
+  Begin
+    R := 0;
+    asm
+      push ebx
+      push esi
+      push edi
+      push 0
+      mov eax,Base
+      push eax
+      mov eax,E
+      call eax
+      add esp,8
+      mov R,eax
+      pop edi
+      pop esi
+      pop ebx
+    end;
+    If R = 0 Then KLog(Mods^[M].Name + ' : _DLL_InitTerm a refuse le chargement.');
+  End;
+  LxLoadDll := True;
+End;
+
+{ fil 1 d'un programme LX : bloc d'information de tache (TIB, FS),
+  environnement et ligne de commande au format d'OS/2, puis le point
+  d'entree : EAX = main(hmod, 0, env, cmd) ; fin du processus au retour }
+Procedure LxStart;
+Var P, E, H, En, Cm, R, Tib, Sel, I, K : LongInt; Args : String;
+Begin
+  P := CurProc;
+  E := Procs[P].LxEip;
+  H := ProcWinBase;
+  Tib := (Procs[P].PhysBase + Procs[P].ImageSize + 4095) And Not 4095;
+  FillMem(Tib, 4096, 0);
+  MemL[0:Tib] := -1;                                  { fin de la chaine d'exceptions }
+  MemL[0:Tib + 4] := Tib + 4096;                      { bas de la pile }
+  MemL[0:Tib + 8] := Procs[P].PhysBase + Procs[P].PhysSize;
+  MemL[0:Tib + 12] := Tib + 24;                       { TIB2 }
+  MemL[0:Tib + 16] := 20;
+  MemL[0:Tib + 20] := 1;
+  MemL[0:Tib + 24] := 1;                              { identificateur du fil }
+  MemL[0:Tib + 28] := $200;
+  MemL[0:Tib + 32] := 20;
+  Procs[P].LxTib := Tib;
+  Sel := SelAlloc(1);
+  If Sel <> 0 Then
+  Begin
+    DescSet((Sel Shr 3) And $1FFF, Tib, $FFF, $92);
+    Sel := (Sel And $FFF8) Or 4;                      { LDT, anneau 0 }
+    Procs[P].LxFs := Sel;
+    TkFs[CurTask] := Sel;
+    asm
+      mov eax,Sel
+      mov fs,ax
+    end;
+  End;
+  { environnement : NOM=VALEUR#0...#0 }
+  En := Tib + 1024;
+  K := EnvSize;
+  If K > 2048 Then K := 2048;
+  MoveMem(LongInt(@EnvBlock), En, K);
+  Mem[0:En + K] := 0; Mem[0:En + K + 1] := 0;
+  { ligne de commande : programme#0 arguments#0#0 }
+  Cm := En + K + 4;
+  PutPStr(Cm, Procs[P].Path, 256);
+  I := Length(Procs[P].Path) + 1;
+  Args := Trim(Procs[P].CmdLine);
+  If (Length(Args) > 0) And (Args[1] = '"') Then
+  Begin
+    Args := Copy(Args, 2, 255);
+    K := Pos('"', Args);
+    If K > 0 Then Args := Copy(Args, K + 1, 255) Else Args := '';
+  End
+  Else
+  Begin
+    K := Pos(' ', Args);
+    If K > 0 Then Args := Copy(Args, K, 255) Else Args := '';
+  End;
+  Args := Trim(Args);
+  PutPStr(Cm + I, Args, 256);
+  Mem[0:Cm + I + Length(Args) + 1] := 0;
+  KLog('LX : demarrage de ' + Procs[P].Path + ' en ' + HexStr(E, 8) + 'h');
+  R := 0;
+  asm
+    mov eax,Cm
+    push eax
+    mov eax,En
+    push eax
+    push 0
+    mov eax,H
+    push eax
+    mov eax,E
+    call eax
+    add esp,16
+    mov R,eax
+  end;
+  KillCurrentProcess(R);
+End;
+
+{ programme LX : processus dont la fenetre (00400000h) contient
+  l'en-tete synthetique (le HMODULE du programme) puis les objets ; son
+  fil 1 commence par LxStart ; -1 en cas d'echec }
+Function LxLoadExe(Path, CmdLine : String; Buf, Size : LongInt) : LongInt;
+Var T, Hdr, Pid, I, Phys, PhysSize, Total, E : LongInt;
+Begin
+  LxLoadExe := -1;
+  LastError := ErrBadFormat;
+  T := LxPrepare(Buf, Size);
+  If T < 0 Then Exit;
+  Hdr := LxHdrSize;
+  Total := Hdr + T;
+  If Total > ProcWinSize Then
+  Begin
+    LastError := ErrNotEnoughMem;
+    Exit;
+  End;
+  Pid := -1;
+  For I := MaxProcs - 1 DownTo 0 Do
+    If Not Procs[I].Used Then Pid := I;
+  If Pid < 0 Then
+  Begin
+    LastError := 164;
+    Exit;
+  End;
+  PhysSize := Total + ProcStackSize;
+  Phys := PAlloc(PhysSize);
+  If Phys = 0 Then
+  Begin
+    LastError := ErrNotEnoughMem;
+    Exit;
+  End;
+  FillMem(Phys, PhysSize, 0);
+  { les importations peuvent charger des DLL : le processus est reserve }
+  Procs[Pid].Used := True;
+  Procs[Pid].Running := False;
+  Procs[Pid].MemLive := True;
+  If Not LxLoadObjects(Phys, ProcWinBase, Hdr) Then
+  Begin
+    ConPutLn('SYS0191: ' + Path + ' : ' + LxErr + '.');
+    KLog('LX : ' + Path + ' : ' + LxErr);
+    Procs[Pid].Used := False;
+    PFree(Phys);
+    If LxEntAdr <> 0 Then KFree(LxEntAdr);
+    LastError := 127;
+    Exit;
+  End;
+  E := LxEip;
+  LxBuildHdr(Phys, ProcWinBase, Total, E);
+  If LxEntAdr <> 0 Then KFree(LxEntAdr);
+  LxEntAdr := 0;
+  Procs[Pid].Parent := CurProc;
+  Procs[Pid].PhysBase := Phys;
+  Procs[Pid].PhysSize := PhysSize;
+  Procs[Pid].ImageSize := Total;
+  Procs[Pid].PtAlloc := KAlloc(8192);
+  Procs[Pid].PageTable := BuildPageTableAt(Procs[Pid].PtAlloc, Phys, Total);
+  Procs[Pid].ExitCode := 259;
+  Procs[Pid].Filter := 0;
+  Procs[Pid].CmdLine := CmdLine;
+  Procs[Pid].CmdBuf := KAlloc(Length(CmdLine) + 1);
+  PutPStr(Procs[Pid].CmdBuf, CmdLine, 256);
+  Procs[Pid].Name := BaseName(Path);
+  Procs[Pid].Path := Path;
+  If NextSerial < 2 Then NextSerial := 2;
+  Procs[Pid].Serial := NextSerial;
+  Inc(NextSerial);
+  Procs[Pid].StdOutH := 0;
+  If CurProc >= 0 Then Procs[Pid].StdOutH := Procs[CurProc].StdOutH;
+  Procs[Pid].CurDir := CurDir;
+  Procs[Pid].HandleOpen := False;
+  Procs[Pid].NoPreempt := False;
+  Procs[Pid].NextTid := 2;
+  Procs[Pid].Sess := 0;
+  If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
+  If (NextSess >= 0) And SUsed[NextSess] Then
+  Begin
+    Procs[Pid].Sess := NextSess;
+    SNew[NextSess] := False;
+    NextSess := -1;
+  End;
+  Procs[Pid].ConSess := Procs[Pid].Sess;
+  Procs[Pid].IsLx := True;
+  Procs[Pid].LxEip := E;
+  ProcEntry[Pid] := LongInt(@LxStart);
+  { pile : le haut du bloc physique (vue par son adresse physique, comme
+    les programmes d'OS/2-0) }
+  ProcStack[Pid] := Phys + PhysSize - 16;
+  KLog('LX : ' + Path + ' charge (' + IntStr(LxNObj) + ' objets, point d''entree ' + HexStr(E, 8) + 'h).');
+  LastError := 0;
+  LxLoadExe := Pid;
+End;
+
+Function LxLastErr : String;
+Begin
+  LxLastErr := LxErr;
+End;
+{ LX-FIN }
 
 Procedure Banner;
 Begin

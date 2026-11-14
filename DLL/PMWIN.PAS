@@ -766,9 +766,12 @@ Begin
   CallPas5 := R;
 End;
 
+{ procedure d'un programme OS2PC (convention Pascal) : dans la fenetre
+  du programme, sauf pour un programme LX d'OS/2 (C, convention _System ;
+  KrnTaskCtl 18 rend son bloc d'information de tache) }
 Function IsPasProc(F : LongInt) : Boolean;
 Begin
-  IsPasProc := (F >= $00400000) And (F < $00800000);
+  IsPasProc := (F >= $00400000) And (F < $00800000) And (KTask(18, 0, 0, 0) = 0);
 End;
 
 Function Call4(F, A1, A2, A3, A4 : LongInt) : LongInt;

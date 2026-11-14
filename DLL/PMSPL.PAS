@@ -186,6 +186,7 @@ Function DosQueryModuleHandle(PName, PH : LongInt) : LongInt; External 'DOSCALLS
 Function DosQueryProcAddr(H, Ord, PName, PP : LongInt) : LongInt; External 'DOSCALLS';
 Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
+Function KLxTib(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
 
 { --- PMWIN.DLL --- }
 Function WinSetErrorInfo(E, Fs : LongInt) : LongInt; External 'PMWIN';
@@ -421,7 +422,7 @@ End;
 
 Function Call1(F, A1 : LongInt) : LongInt;
 Begin
-  If (F >= $00400000) And (F < $00800000) Then Call1 := CallPas1(F, A1)
+  If (F >= $00400000) And (F < $00800000) And (KLxTib(18, 0, 0, 0) = 0) Then Call1 := CallPas1(F, A1)
   Else Call1 := CallSys1(F, A1);
 End;
 
