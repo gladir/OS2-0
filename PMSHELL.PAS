@@ -144,8 +144,9 @@ Const
   OB_DIR = 8; OB_EXE = 9; OB_BATCH = 10; OB_DATA = 11; OB_TEMPLATES = 12; OB_SHRED = 13;
   OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16; OB_SETUP = 17; OB_SYSSET = 18; OB_MOUSE = 19; OB_COLORS = 20;
   OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19; OB_COUNTRY = 23; IC_GLOBE = 20;
+  OB_GAMES = 24; OB_GAME = 25; IC_CARDS = 21; IC_CHESS = 22; IC_TILES = 23;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
-  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8;
+  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
   BS_PUSHBUTTON = 0; BS_AUTOCHECKBOX = 2; BS_AUTORADIOBUTTON = 4; SS_TEXT = 1; SS_GROUPBOX = 2;
@@ -832,6 +833,7 @@ Begin
     OB_COUNTRY : Icon := IC_GLOBE;
     OB_COLORS : Icon := IC_PALETTE;
     OB_LANG : Icon := IC_LANG;
+    OB_GAMES : Icon := IC_FOLDER;
   Else
     Icon := IC_FILE;
   End;
@@ -1007,6 +1009,16 @@ Begin
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
+        Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
+      End;
+    VK_GAMES :
+      Begin
+        { jeux installes (composant Jeux du programme d'installation) }
+        If FileExists('C:\MAHJONGG.EXE') Then
+          Dummy := NewItem(V, IC_TILES, OB_GAME, 'Mahjongg Solitaire', 'C:\MAHJONGG.EXE');
+        If FileExists('C:\ECHECS.EXE') Then Dummy := NewItem(V, IC_CHESS, OB_GAME, 'Echecs', 'C:\ECHECS.EXE');
+        If FileExists('C:\KLONDIKE.EXE') Then
+          Dummy := NewItem(V, IC_CARDS, OB_GAME, 'Solitaire - Klondike', 'C:\KLONDIKE.EXE');
       End;
     VK_SETUP :
       Begin
@@ -1205,6 +1217,36 @@ Begin
         FBox(Hps, X + 8, Y + 14, X + 14, Y + 23, CLR_GREEN, CLR_GREEN);
         FBox(Hps, X + 17, Y + 8, X + 23, Y + 15, CLR_GREEN, CLR_GREEN);
         GLn(Hps, X + 4, Y + 16, X + 27, Y + 16, CLR_CYAN);
+      End;
+    IC_CARDS :
+      Begin
+        { deux cartes : un as de pique sur un dos bleu }
+        FBox(Hps, X + 3, Y + 8, X + 19, Y + 29, CLR_DARKBLUE, CLR_BLACK);
+        FBox(Hps, X + 12, Y + 2, X + 28, Y + 23, CLR_WHITE, CLR_BLACK);
+        GText(Hps, X + 16, Y + 5, Chr(6), CLR_BLACK, CLR_WHITE);
+        GText(Hps, X + 13, Y + 9, 'A', CLR_RED, CLR_WHITE);
+      End;
+    IC_CHESS :
+      Begin
+        { un damier et un cavalier }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 2, Y + 16, X + 15, Y + 29, CLR_DARKCYAN, DRO_FILL);
+        GBox(Hps, X + 16, Y + 2, X + 29, Y + 15, CLR_DARKCYAN, DRO_FILL);
+        FBox(Hps, X + 9, Y + 5, X + 22, Y + 8, CLR_BLACK, CLR_BLACK);
+        FBox(Hps, X + 12, Y + 8, X + 20, Y + 19, CLR_BLACK, CLR_BLACK);
+        FBox(Hps, X + 8, Y + 17, X + 19, Y + 24, CLR_BLACK, CLR_BLACK);
+        FBox(Hps, X + 15, Y + 24, X + 19, Y + 27, CLR_BLACK, CLR_BLACK);
+      End;
+    IC_TILES :
+      Begin
+        { tuiles empilees }
+        FBox(Hps, X + 2, Y + 2, X + 17, Y + 21, CLR_DARKGRAY, CLR_BLACK);
+        FBox(Hps, X + 5, Y + 5, X + 20, Y + 24, CLR_WHITE, CLR_BLACK);
+        FBox(Hps, X + 11, Y + 8, X + 26, Y + 27, CLR_DARKGRAY, CLR_BLACK);
+        FBox(Hps, X + 14, Y + 11, X + 29, Y + 30, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 19, Y + 16, X + 24, Y + 25, CLR_RED, DRO_OUTLINE);
+        GLn(Hps, X + 21, Y + 13, X + 21, Y + 28, CLR_RED);
+        GBox(Hps, X + 9, Y + 12, X + 12, Y + 15, CLR_DARKGREEN, DRO_FILL);
       End;
     IC_LANG :
       Begin
@@ -1982,6 +2024,7 @@ End;
 
 Procedure OpenNotebook(Tab : LongInt); Forward;
 Procedure OpenNb(Kind, Tab : LongInt); Forward;
+Procedure RunPm(P : String); Forward;
 
 Procedure OpenItem(K : LongInt);
 Var V : LongInt; P : String;
@@ -2016,6 +2059,8 @@ Begin
     OB_COLORS : OpenNotebook(6);
     OB_LANG : OpenNotebook(7);
     OB_COUNTRY : OpenNb(2, 0);
+    OB_GAMES : OpenFolder(VK_GAMES, '', 'Jeux');
+    OB_GAME : RunPm(It(K)^.Path);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
@@ -4159,6 +4204,21 @@ End;
 { ==================================================================== }
 { Programme principal                                                   }
 { ==================================================================== }
+
+{ programme de PM (les jeux) : il s'execute dans la session de
+  Presentation Manager, en meme temps que le bureau }
+Procedure RunPm(P : String);
+Var Res : Array[0..1] Of LongInt; Rc : LongInt;
+Begin
+  PutZ(LongInt(@ArgBuf), P);
+  WrB(LongInt(@ArgBuf) + Length(P) + 1, 0);
+  WrB(LongInt(@ArgBuf) + Length(P) + 2, 0);
+  PutZ(LongInt(@NameZ2), P);
+  Res[0] := 0; Res[1] := 0;
+  Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
+  If Rc <> 0 Then
+    ShowMsg('SYS1041: Impossible de lancer ' + P + ' (erreur ' + IStr(Rc) + ').', 'Bureau', MB_OK Or MB_ERROR);
+End;
 
 { LaunchPad : programme de PM lance en arriere-plan dans la session de
   Presentation Manager (il s'execute en meme temps que le bureau) }

@@ -9,7 +9,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
               PMSPL.DLL, PMVIOP.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
-              INSTALL.EXE,
+              INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
@@ -59,6 +59,9 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC PMSHELL.PAS                         -> PMSHELL.EXE (le bureau, Workplace Shell)
   OS2PC LAUNCHPAD.PAS LAUNCHPD.EXE          -> LAUNCHPD.EXE (le LaunchPad)
   OS2PC INSTALL.PAS                         -> INSTALL.EXE (installation sur disque dur)
+  OS2PC KLONDIKE.PAS                        -> KLONDIKE.EXE (Solitaire - Klondike)
+  OS2PC ECHECS.PAS                          -> ECHECS.EXE (Echecs)
+  OS2PC MAHJONGG.PAS                        -> MAHJONGG.EXE (Mahjongg Solitaire)
   nasm -f bin KERNEL\HDBOOT.ASM             -> MBR du disque dur (deja dans INSTALL.PAS)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
@@ -632,7 +635,7 @@ apparence de l'installation de Warp 3) :
     libre, creer une partition HPFS (taille en Mo), supprimer, choisir ;
   Formatage HPFS (nom du volume) ou conservation des fichiers ;
   Composants : bureau et LaunchPad, utilitaires, programmes d'essai,
-    disque virtuel ;
+    disque virtuel, jeux ;
   Transfert des fichiers (barre aux logos OS/2), CONFIG.SYS du disque,
     zone d'amorcage et MBR ; Redemarrer.
 Tab et Maj+Tab : controle suivant ; F1 : aide. Parametres : /AUTO
@@ -688,6 +691,23 @@ sThousand, sDecimal, iDigits, iLzero, sCurrency, iCurrency). Le noyau
 met COUNTRY= dans l'environnement ; DOSCALLS.DLL le relit a chaque
 DosQueryCtryInfo. Les champs combines de PMWIN deroulent leur liste au
 clic.
+
+Jeux (dossier Systeme OS/2, Jeux)
+---------------------------------
+Jeux de Presentation Manager (realisations originales des jeux
+traditionnels, composant Jeux de l'installation) :
+  Solitaire - Klondike (KLONDIKE.EXE) : patience Klondike ; glisser ou
+  cliquer la carte puis sa destination, double clic vers la fondation ;
+  tirage de 1 ou 3 cartes ; F2 nouvelle partie, Ctrl+Z annuler,
+  Terminer automatiquement ; score.
+  Echecs (ECHECS.EXE) : regles completes (roque, prise en passant,
+  promotion, mat, pat, 50 coups) ; l'ordinateur (alpha-beta, niveaux
+  facile, moyen, difficile) joue les noirs, les blancs ou personne ;
+  coups en notation francaise ; Ctrl+Z annuler.
+  Mahjongg Solitaire (MAHJONGG.EXE) : 144 tuiles, disposition de la
+  tortue (5 etages) ; retirer les paires de tuiles libres ; donnes
+  toujours faisables ; I indice, Ctrl+Z annuler, recommencer.
+Parametre /SEED:n (Klondike, Mahjongg) : donne reproductible.
 
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
