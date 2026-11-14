@@ -9,9 +9,11 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
               PMSPL.DLL, PMVIOP.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL,
-              ESAUDIO.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
+              ESAUDIO.DLL, VBOXGST.DLL, TCPIP32.DLL, E1000.DLL,
+              PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
-              DIGAUDIO.EXE, DEMARRE.WAV, CLOCHE.WAV,
+              DIGAUDIO.EXE, DEVMGR.EXE, IFCONFIG.EXE, PING.EXE,
+              HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
@@ -72,6 +74,12 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\ICHAUDIO.PAS                    -> ICHAUDIO.DLL (pilote AC'97 Intel ICH)
   OS2PC DLL\ESAUDIO.PAS                     -> ESAUDIO.DLL (pilote Ensoniq AudioPCI)
   OS2PC DLL\TESTMDM.PAS                     -> TESTMDM.EXE (essai du son)
+  OS2PC DLL\VBOXGST.PAS                     -> VBOXGST.DLL (Additions VirtualBox)
+  OS2PC DLL\TCPIP32.PAS                     -> TCPIP32.DLL (pile TCP/IP, sockets)
+  OS2PC DLL\E1000.PAS                       -> E1000.DLL (pilote Intel PRO/1000)
+  OS2PC DLL\PCNET.PAS                       -> PCNET.DLL (pilote AMD PCnet)
+  OS2PC DEVMGR.PAS                          -> DEVMGR.EXE (Gestionnaire de peripheriques)
+  OS2PC IFCONFIG.PAS, PING.PAS, HOST.PAS, WGET.PAS -> commandes du reseau
   nasm -f bin KERNEL\HDBOOT.ASM             -> MBR du disque dur (deja dans INSTALL.PAS)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
@@ -647,7 +655,7 @@ apparence de l'installation de Warp 3) :
     libre, creer une partition HPFS (taille en Mo), supprimer, choisir ;
   Formatage HPFS (nom du volume) ou conservation des fichiers ;
   Composants : bureau et LaunchPad, utilitaires, programmes d'essai,
-    disque virtuel, jeux, multimedia ;
+    disque virtuel, jeux, multimedia, reseau TCP/IP ;
   Transfert des fichiers (barre aux logos OS/2), CONFIG.SYS du disque,
     zone d'amorcage et MBR ; Redemarrer.
 Tab et Maj+Tab : controle suivant ; F1 : aide. Parametres : /AUTO
@@ -742,6 +750,36 @@ elle : detection, dans cet ordre : ICHAUDIO, ESAUDIO, SBAUDIO).
 QEMU : -audiodev pa,id=son -device sb16,audiodev=son (ou AC97, ES1370) ;
 -audiodev wav,id=son,path=sortie.wav enregistre le son produit.
 
+VirtualBox (VBOXGST.DLL)
+------------------------
+Pilote du VMMDev (PCI 80EE:CAFE), charge par MOUCALLS.DLL et PMWIN.DLL
+s'il est la : informations de l'invite (version de l'hote), souris
+absolue (position lue a chaque paquet PS/2, pointeur de l'hote cache :
+un seul pointeur), taille de l'ecran demandee par l'hote (fenetre
+redimensionnee, ajustement automatique) appliquee par PMWIN (verifiee
+toutes les 300 ms). Adaptateur graphique de VirtualBox, QEMU, Bochs :
+interface VBE DISPI (ports 1CEh/1CFh), toute resolution.
+
+Reseau TCP/IP (TCPIP32.DLL)
+---------------------------
+Pilotes : E1000.DLL (Intel PRO/1000 : 82540EM de VirtualBox et QEMU,
+82543GC, 82545EM, 82544, 82574L), PCNET.DLL (AMD PCnet-PCI II et
+PCnet-FAST III). CONFIG.SYS : SET NETDRIVER=E1000, PCNET ou NONE ;
+adresse par DHCP, ou SET IP_ADDRESS=, IP_NETMASK=, IP_GATEWAY=, IP_DNS=.
+Pile : ARP, IPv4, ICMP, UDP, DHCP, DNS, TCP client ; sockets d'OS/2
+(socket, connect, send, recv, sendto, recvfrom, soclose,
+gethostbyname...). Commandes :
+  IFCONFIG [/RENEW]   etat de lan0 (carte, MAC, adresse, passerelle, DNS)
+  PING hote [n]       echo ICMP
+  HOST nom            adresse d'un nom (DNS)
+  WGET http://hote[:port]/chemin [fichier]
+QEMU : -nic user,model=e1000 (ou pcnet).
+
+Gestionnaire de peripheriques (DEVMGR.EXE)
+------------------------------------------
+Systeme OS/2, Configuration du systeme : le materiel par categorie (bus
+PCI, BIOS, disques), ses ressources, son pilote et son etat.
+
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
 Le LaunchPad d'OS/2 Warp 3 (source LAUNCHPAD.PAS) est lance par
@@ -787,6 +825,11 @@ Limites
   lecteur de CD-ROM n'est pas une unite (C: est la partition HPFS) ;
   INSTALL.EXE n'affiche que six langues (le portugais, le suedois, le
   danois et le japonais en anglais).
+- Reseau : une seule carte (lan0), IPv4 sans fragmentation, TCP client
+  (pas de listen ni accept), envoi segment par segment ; la pile lit
+  les trames quand un programme attend (pas d'interruption).
+- VirtualBox : un seul ecran ; pas de dossiers partages, de presse-
+  papiers partage ni de mode transparent (seamless).
 - Son : une seule carte et un seul flux a la fois (lecture ou
   enregistrement) ; les pilotes n'utilisent pas les interruptions (la
   position est lue dans la carte) ; Sound Blaster avant le 16 : 8 bits,

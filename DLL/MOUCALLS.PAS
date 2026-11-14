@@ -173,6 +173,11 @@ Var
   GrW, GrH  : LongInt;                   { mode graphique : pels (0 : texte) }
   InfoK     : Array[0..3] Of LongInt;
   FailName  : Array[0..63] Of Byte;
+  { souris integree de VirtualBox (VBOXGST.DLL) : 0 pas encore cherchee,
+    -1 absente, sinon adresse de VBOXGUESTREQUEST }
+  VbFn      : LongInt;
+  VbPk      : Array[0..7] Of LongInt;
+  VbName    : Array[0..15] Of Byte;
   RealDrv   : String;
 
 { ==================================================================== }
@@ -408,9 +413,79 @@ Begin
   Accel := D;
 End;
 
+{ appel d'une fonction d'une DLL par son adresse (un parametre) }
+Function CallPtr1(F, A1 : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  asm
+    push ebx
+    push esi
+    push edi
+    mov eax,A1
+    push eax
+    mov eax,F
+    call eax
+    add esp,4
+    mov R,eax
+    pop edi
+    pop esi
+    pop ebx
+  end;
+  CallPtr1 := R;
+End;
+
+{ le VMMDev de VirtualBox (PCI 80EEh:CAFEh) est-il sur le bus 0 ? }
+Function VmmDevOnPci : Boolean;
+Var D, V : LongInt;
+Begin
+  VmmDevOnPci := False;
+  For D := 0 To 31 Do
+  Begin
+    V := $80000000 Or (D Shl 11);
+    asm
+      mov edx,3320
+      mov eax,V
+      out dx,eax
+      mov edx,3324
+      in eax,dx
+      mov V,eax
+    end;
+    If V = $CAFE80EE Then VmmDevOnPci := True;
+  End;
+End;
+
+{ position absolue de la souris integree de VirtualBox (0..65535) ;
+  faux si la machine n'est pas une machine VirtualBox ou si l'hote ne
+  veut pas la souris absolue (souris capturee) }
+Function VBoxAbs(Var X, Y : LongInt) : Boolean;
+Var H, F, K : LongInt; S : String;
+Begin
+  VBoxAbs := False;
+  If VbFn = 0 Then
+  Begin
+    VbFn := -1;
+    If Not VmmDevOnPci Then Exit;
+    S := 'VBOXGST';
+    For K := 1 To Length(S) Do VbName[K - 1] := Ord(S[K]);
+    VbName[Length(S)] := 0;
+    H := 0; F := 0;
+    If DosLoadModule(LongInt(@FailName), 64, LongInt(@VbName), LongInt(@H)) = NO_ERROR Then
+      If (DosQueryProcAddr(H, 1, 0, LongInt(@F)) = NO_ERROR) And (F <> 0) Then
+      Begin
+        VbPk[0] := 1;
+        If CallPtr1(F, LongInt(@VbPk)) <> 0 Then VbFn := F;
+      End;
+  End;
+  If VbFn = -1 Then Exit;
+  VbPk[0] := 2;
+  If CallPtr1(VbFn, LongInt(@VbPk)) = 0 Then Exit;
+  X := VbPk[1]; Y := VbPk[2];
+  VBoxAbs := True;
+End;
+
 { Traiter les paquets en attente dans le noyau }
 Procedure Poll;
-Var Dx, Dy, B, T, Fs, OldR, OldC : LongInt; Moved : Boolean;
+Var Dx, Dy, B, T, Fs, OldR, OldC, Ax, Ay, Px, Py : LongInt; Moved : Boolean;
 Begin
   If Not Present Then Exit;
   ModeCheck;
@@ -418,10 +493,21 @@ Begin
   While KrnMouRead(LongInt(@Pk)) <> 0 Do
   Begin
     Dx := Accel(Pk[0]); Dy := Accel(Pk[1]); B := Pk[2]; T := Pk[3];
-    PosX := PosX + Dx;
-    PosY := PosY + Dy;
+    Px := PosX; Py := PosY;
+    If VBoxAbs(Ax, Ay) Then
+    Begin
+      { VirtualBox : position absolue (le paquet PS/2 ne porte que les
+        boutons) ; le pointeur d'OS/2-0 est sous celui de l'hote }
+      PosX := ColPos((Ax * MaxCols) Div 65536);
+      PosY := RowPos((Ay * MaxRows) Div 65536);
+    End
+    Else
+    Begin
+      PosX := PosX + Dx;
+      PosY := PosY + Dy;
+    End;
     ClampPos;
-    Moved := (Dx <> 0) Or (Dy <> 0);
+    Moved := (PosX <> Px) Or (PosY <> Py) Or (Dx <> 0) Or (Dy <> 0);
     { etat : bouton 1 = gauche (bit 0), 2 = droit (bit 1), 3 = milieu (bit 2) }
     Fs := 0;
     If Moved Then
@@ -1204,6 +1290,7 @@ Var
   InitI : LongInt;
 
 BEGIN
+  VbFn := 0;
   For InitI := 1 To MaxH Do HUsed[InitI] := False;
   OpenCount := 0;
   Shown := False;

@@ -125,6 +125,7 @@ Const
   MB_OK = 0; MB_OKCANCEL = 1; MB_YESNO = 4; MB_QUERY = $10; MB_WARNING = $20; MB_INFORMATION = $30;
   MB_ERROR = $40; MB_MOVEABLE = $4000;
   { clavier }
+  WM_SYSVALUECHANGED = $002D;
   KC_VIRTUALKEY = 2; KC_SHIFT = 8; KC_CTRL = $10; KC_ALT = $20; KC_KEYUP = $40; KC_CHAR = 1;
   VK_BACKSPACE = 5; VK_NEWLINE = 8; VK_ESC = $0F; VK_PAGEUP = $11; VK_PAGEDOWN = $12; VK_END = $13;
   VK_HOME = $14; VK_LEFT = $15; VK_UP = $16; VK_RIGHT = $17; VK_DOWN = $18; VK_DELETE = $1B;
@@ -145,7 +146,7 @@ Const
   OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16; OB_SETUP = 17; OB_SYSSET = 18; OB_MOUSE = 19; OB_COLORS = 20;
   OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19; OB_COUNTRY = 23; IC_GLOBE = 20;
   OB_GAMES = 24; OB_GAME = 25; IC_CARDS = 21; IC_CHESS = 22; IC_TILES = 23;
-  OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25;
+  OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10;
   { controles du carnet des parametres }
@@ -1042,6 +1043,9 @@ Begin
         Dummy := NewItem(V, IC_MOUSE, OB_MOUSE, MouseTitle, '');
         Dummy := NewItem(V, IC_PALETTE, OB_COLORS, 'Couleurs du bureau', '');
         Dummy := NewItem(V, IC_LANG, OB_LANG, 'Langue', '');
+        { (Pays reste le dernier objet du dossier) }
+        If FileExists('C:\DEVMGR.EXE') Then
+          Dummy := NewItem(V, IC_HARDWARE, OB_GAME, 'Gestionnaire de peripheriques', 'C:\DEVMGR.EXE');
         Dummy := NewItem(V, IC_GLOBE, OB_COUNTRY, CountryTitle, '');
       End;
     VK_DRIVES :
@@ -1263,6 +1267,15 @@ Begin
         GBox(Hps, X + 19, Y + 16, X + 24, Y + 25, CLR_RED, DRO_OUTLINE);
         GLn(Hps, X + 21, Y + 13, X + 21, Y + 28, CLR_RED);
         GBox(Hps, X + 9, Y + 12, X + 12, Y + 15, CLR_DARKGREEN, DRO_FILL);
+      End;
+    IC_HARDWARE :
+      Begin
+        { carte d'extension : circuit et connecteur }
+        FBox(Hps, X + 2, Y + 8, X + 29, Y + 25, CLR_DARKGREEN, CLR_BLACK);
+        FBox(Hps, X + 8, Y + 12, X + 18, Y + 21, CLR_BLACK, CLR_BLACK);
+        GBox(Hps, X + 21, Y + 18, X + 26, Y + 21, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 21, Y + 12, X + 26, Y + 15, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 5, Y + 4, X + 27, Y + 7, CLR_YELLOW, DRO_FILL);
       End;
     IC_AUDIO :
       Begin
@@ -4017,6 +4030,9 @@ Begin
         Vw(V)^.Stamp := Stamp;
       End;
     WM_PAINT : PaintView(V);
+    WM_SYSVALUECHANGED :
+      { taille de l'ecran changee par l'hote (VirtualBox) : le bureau suit }
+      If (H = Desk) And (Mp1 = 20) Then ScreenResized;
     WM_SIZE :
       If Vw(V)^.Kind <> VK_DESK Then
       Begin
