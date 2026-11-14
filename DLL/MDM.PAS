@@ -704,9 +704,21 @@ Begin
   End;
 End;
 
+{ le programme qui interroge le flux l'alimente aussi : un programme de
+  PM n'est pas preempte, et son fil principal peut priver le fil du flux
+  du processeur }
+Procedure Service;
+Begin
+  If (ThreadOn <> 0) And (Paused = 0) And (Done = 0) And (StopReq = 0) Then
+  Begin
+    If State = 1 Then PollPlay Else If State = 2 Then PollRecord;
+  End;
+End;
+
 { position (octets du son) : lecture, enregistrement }
 Function MdmPosition : LongInt;
 Begin
+  Service;
   If State = 1 Then MdmPosition := PlayPos * SrcFB
   Else If State = 2 Then MdmPosition := RecPos
   Else MdmPosition := -1;
@@ -715,6 +727,7 @@ End;
 { 0 arret, 1 lecture, 2 enregistrement ; + 2 en pause }
 Function MdmState : LongInt;
 Begin
+  Service;
   If (State <> 0) And (Paused <> 0) Then MdmState := State + 2 Else MdmState := State;
 End;
 
