@@ -22106,6 +22106,7 @@ Var
   Up      : TString;
   CaseVal : LongInt;
   RangeHi : LongInt;
+  LblRng  : TString;
   SI      : Integer;
 Begin
   EmitComment('case');
@@ -22186,12 +22187,15 @@ Begin
       Begin
         Inc(EP);  { consommer .. }
         RangeHi := ConstTokExprAt(EP);
+        { hors de la plage : essayer la valeur suivante de la liste
+          (a, b..c, d..e :), puis la branche suivante }
+        LblRng := LabelGen;
         EmitInstr('MOV EAX,DWORD PTR [ESP]');
         EmitInstr('CMP EAX,' + IntToStr_(CaseVal));
-        EmitInstr('JL ' + LblNext);
+        EmitInstr('JL ' + LblRng);
         EmitInstr('CMP EAX,' + IntToStr_(RangeHi));
         EmitInstr('JLE ' + LblHit);
-        EmitInstr('JMP ' + LblNext);
+        EmitLabel(LblRng);
       End
       Else
       Begin
@@ -28160,6 +28164,16 @@ Begin
     If ProcIntr[FI] And AsmNative Then
     Begin
       EmitInstr('PUSHAD');
+      If Opts.DestTarget = DEST_OS2KRNL Then
+      Begin
+        { noyau : l interruption peut survenir en mode virtuel 8086 ou
+          dans le code en anneau 3 d un client DPMI (DS et ES quelconques) }
+        EmitInstr('PUSH DS');
+        EmitInstr('PUSH ES');
+        EmitInstr('MOV AX,10h');
+        EmitInstr('MOV DS,AX');
+        EmitInstr('MOV ES,AX');
+      End;
       EmitInstr('CLD');
     End;
     { espace supplementaire : copies locales des parametres valeur chaine/agregat }
@@ -28256,6 +28270,11 @@ Begin
     Begin
       EmitInstr('MOV ESP,EBP');
       EmitInstr('POP EBP');
+      If Opts.DestTarget = DEST_OS2KRNL Then
+      Begin
+        EmitInstr('POP ES');
+        EmitInstr('POP DS');
+      End;
       EmitInstr('POPAD');
       EmitInstr('IRETD');
     End

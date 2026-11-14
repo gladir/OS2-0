@@ -268,10 +268,14 @@ Procedure ExtractCommand;
 Var
  I,J:Byte;
  Target:String;
- Add:Boolean;
+ Add,Path:Boolean;
 Begin
+ { chemin explicite (C:\REP\PROG, D:PROG.EXE) : le nom va jusqu'a
+   l'espace ou au premier caractere special }
+ Path:=(Length(CmdStr)>2)and(CmdStr[2]=':')and(CmdStr[3]<>' ');
  For I:=1 to Length(CmdStr)do Begin
-  If Not(CmdStr[I]in['A'..'Z','a'..'z','_','-','0'..'9'])Then Begin
+  If(Path and(CmdStr[I]in[' ','/','|','>','<',',',';','=']))or
+    (Not Path and Not(CmdStr[I]in['A'..'Z','a'..'z','_','-','0'..'9']))Then Begin
    CurrCommand:=StrToUpper(Copy(CmdStr,1,I-1));
    ParamList:=TrimL(Copy(CmdStr,I,255));
    For J:=1 to Length(ParamList)do Begin
