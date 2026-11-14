@@ -670,6 +670,25 @@ Systeme OS/2, Configuration du systeme, Souris :
   General : titre de l'objet, souris detectee.
 Reglages gardes dans OS2.INI (application PMSHELL).
 
+Pays (carnet Pays - Parametres)
+-------------------------------
+Systeme OS/2, Configuration du systeme, Pays :
+  Pays : pays (liste deroulante de 20 pays ; formats du pays, ligne
+  COUNTRY= de CONFIG.SYS et variable COUNTRY), mesures (metriques ou
+  anglo-saxonnes), separateur de liste ;
+  Heure : 12 ou 24 heures, AM et PM, separateur ;
+  Date : ordre (MM/JJ/AAAA, JJ/MM/AAAA, AAAA/MM/JJ), separateur ;
+  Nombres : separateurs des milliers et des decimales, decimales, zero
+  avant la virgule, symbole monetaire et sa position ;
+  General : titre de l'objet.
+Boutons Annuler, Par defaut, Aide ; exemple sur chaque onglet. Reglages
+gardes dans OS2.INI, application PM_National (cles d'OS/2 iCountry,
+iMeasurement, sList, iTime, s1159, s2359, sTime, iDate, sDate,
+sThousand, sDecimal, iDigits, iLzero, sCurrency, iCurrency). Le noyau
+met COUNTRY= dans l'environnement ; DOSCALLS.DLL le relit a chaque
+DosQueryCtryInfo. Les champs combines de PMWIN deroulent leur liste au
+clic.
+
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
 Le LaunchPad d'OS/2 Warp 3 (source LAUNCHPAD.PAS) est lance par

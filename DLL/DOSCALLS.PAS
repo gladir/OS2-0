@@ -6292,6 +6292,16 @@ Begin
     39 : Begin DateFmt := 1; Cur := 'EUR'; Th := '.'; Dc := ','; DS := '/'; CurFmt := 2; TimeFmt := 1; End;
     34 : Begin DateFmt := 1; Cur := 'EUR'; Th := '.'; Dc := ','; DS := '/'; CurFmt := 3; TimeFmt := 1; End;
     61 : Begin DateFmt := 1; End;
+    3  : Begin DateFmt := 1; DS := '/'; End;                                     { Amerique latine }
+    31 : Begin DateFmt := 1; Cur := 'EUR'; Th := '.'; Dc := ','; DS := '-'; CurFmt := 2; TimeFmt := 1; End;
+    45 : Begin DateFmt := 1; Cur := 'kr'; Th := '.'; Dc := ','; DS := '-'; TS := '.'; CurFmt := 2; TimeFmt := 1; End;
+    46 : Begin DateFmt := 2; Cur := 'kr'; Th := ' '; Dc := ','; DS := '-'; TS := '.'; CurFmt := 3; TimeFmt := 1; End;
+    47 : Begin DateFmt := 1; Cur := 'kr'; Th := ' '; Dc := ','; DS := '.'; CurFmt := 2; TimeFmt := 1; End;
+    55 : Begin DateFmt := 1; Cur := 'R$'; Th := '.'; Dc := ','; DS := '/'; CurFmt := 2; TimeFmt := 1; End;
+    81 : Begin DateFmt := 2; Cur := Chr($BE); { yen (page 850) } DS := '-'; Dec := 0; TimeFmt := 1; End;
+    351 : Begin DateFmt := 1; Cur := 'EUR'; Th := '.'; Dc := ','; DS := '-'; CurFmt := 3; TimeFmt := 1; End;
+    355 : Begin DateFmt := 1; Cur := 'Lek'; Th := ' '; Dc := ','; DS := '.'; CurFmt := 3; TimeFmt := 1; End;
+    358 : Begin DateFmt := 1; Cur := 'EUR'; Th := ' '; Dc := ','; DS := '.'; TS := '.'; CurFmt := 3; TimeFmt := 1; End;
   End;
   FillB(P, 44, 0);
   PokeL(P, Ctry);
@@ -6308,14 +6318,31 @@ Begin
   PutStr(P + 32, ';', 2);
 End;
 
-{ Pays connus : 1 Etats-Unis, 2 Canada francais, 32 Belgique, 33 France,
-  34 Espagne, 39 Italie, 41 Suisse, 44 Royaume-Uni, 49 Allemagne, 61 Australie }
+{ Pays connus : 1 Etats-Unis, 2 Canada francais, 3 Amerique latine,
+  31 Pays-Bas, 32 Belgique, 33 France, 34 Espagne, 39 Italie, 41 Suisse,
+  44 Royaume-Uni, 45 Danemark, 46 Suede, 47 Norvege, 49 Allemagne,
+  55 Bresil, 61 Australie, 81 Japon, 351 Portugal, 355 Albanie,
+  358 Finlande }
 Function CtryValid(C : LongInt) : Boolean;
 Begin
   Case C Of
-    1, 2, 32, 33, 34, 39, 41, 44, 49, 61 : CtryValid := True;
+    1, 2, 3, 31, 32, 33, 34, 39, 41, 44, 45, 46, 47, 49, 55, 61, 81, 351, 355, 358 : CtryValid := True;
   Else
     CtryValid := False;
+  End;
+End;
+
+{ pays courant : variable COUNTRY de l'environnement (ligne COUNTRY= de
+  CONFIG.SYS, ou carnet Pays de PMSHELL), sinon celui du chargement }
+Function CurCountry : LongInt;
+Var B : Array[0..15] Of Byte; N, V, E : LongInt;
+Begin
+  CurCountry := CtryDefault;
+  N := KGetEnvironmentVariableA(Z('COUNTRY', 1), LongInt(@B), 16);
+  If (N > 0) And (N < 16) Then
+  Begin
+    Val(GetStr(LongInt(@B)), V, E);
+    If (E = 0) And CtryValid(V) Then CurCountry := V;
   End;
 End;
 
@@ -6328,7 +6355,7 @@ Begin
     Ctry := PeekL(Pcc);
     Cp := PeekL(Pcc + 4);
   End;
-  If Ctry = 0 Then Ctry := CtryDefault;
+  If Ctry = 0 Then Ctry := CurCountry;
   If Cp = 0 Then Cp := CurCp;
   If Not CtryValid(Ctry) Then
   Begin

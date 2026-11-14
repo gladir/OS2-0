@@ -62,6 +62,7 @@ Library NLS;
   francais (863 850), 3 Amerique latine (850 437), 7 Russie (866 850),
   31 Pays-Bas, 32 Belgique, 33 France, 34 Espagne, 39 Italie, 41 Suisse,
   44 Royaume-Uni, 49 Allemagne, 55 Bresil, 358 Finlande (850 437),
+  355 Albanie (852 850 437),
   36 Hongrie, 38 Yougoslavie, 42 Tchecoslovaquie, 48 Pologne (852 850),
   45 Danemark, 47 Norvege (865 850), 46 Suede (850 437), 61 anglais
   international (437 850), 81 Japon (932 942 437 850), 82 Coree (949
@@ -307,6 +308,7 @@ Begin
   AddCtry(90, 1, 'TL', '.', ',', '/', ':', 1, 2, 1, ';', 857, 850, 0, 0);
   AddCtry(351, 1, 'EUR', '.', ',', '-', ':', 3, 2, 1, ';', 860, 850, 0, 0);
   AddCtry(354, 2, 'kr', '.', ',', '-', ':', 3, 2, 1, ';', 861, 850, 0, 0);
+  AddCtry(355, 1, 'Lek', ' ', ',', '.', ':', 3, 2, 1, ';', 852, 850, 437, 0);
   AddCtry(358, 1, 'EUR', ' ', ',', '.', '.', 3, 2, 1, ';', 850, 437, 0, 0);
 End;
 

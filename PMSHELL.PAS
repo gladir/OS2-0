@@ -143,7 +143,8 @@ Const
   OB_SYS = 1; OB_DRIVES = 2; OB_CMD = 3; OB_SHUTDOWN = 4; OB_WINLIST = 5; OB_INFO = 6; OB_HELP = 7;
   OB_DIR = 8; OB_EXE = 9; OB_BATCH = 10; OB_DATA = 11; OB_TEMPLATES = 12; OB_SHRED = 13;
   OB_TPLDIR = 14; OB_TPLDATA = 15; OB_TPLCMD = 16; OB_SETUP = 17; OB_SYSSET = 18; OB_MOUSE = 19; OB_COLORS = 20;
-  OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19;
+  OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19; OB_COUNTRY = 23; IC_GLOBE = 20;
+  WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
@@ -225,6 +226,11 @@ Var
   NbMW, NbMH, NbMB : Array[0..127] Of LongInt;
   DeskDir : String[40];               { repertoire du bureau (C:\DESKTOP ou D:\DESKTOP) }
   CfgIn, CfgOut : Array[0..8191] Of Byte;  { CONFIG.SYS (onglet Langue) }
+  { carnet Pays : valeurs (PM_National) et copie a l'ouverture (Annuler) }
+  NatN, UndoN : Array[0..6] Of LongInt;
+  NatS, UndoS : Array[0..7] Of String[8];
+  CountryTitle : String[40];
+  NbBusy : LongInt;
 
 { --- DOSCALLS.DLL --- }
 Function DosExecPgm(PObj, CbObj, Flags, PArg, PEnv, PRes, PName : LongInt) : LongInt; External 'DOSCALLS';
@@ -236,6 +242,8 @@ Function DosQuerySysInfo(IStart, ILast, PBuf, CbBuf : LongInt) : LongInt; Extern
 Function DosShutdown(Reserved : LongInt) : LongInt; External 'DOSCALLS';
 Function DosScanEnv(PName, PPValue : LongInt) : LongInt; External 'DOSCALLS';
 Function DosQueryPathInfo(PName, Level, PInfo, Cb : LongInt) : LongInt; External 'DOSCALLS';
+Function DosQueryCtryInfo(Cb, Pcc, Pci, PcbActual : LongInt) : LongInt; External 'DOSCALLS';
+Function DosGetDateTime(P : LongInt) : LongInt; External 'DOSCALLS';
 Function DosDelete(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function DosOpen(PName, PHf, PAct, Cb, Attr, Fl, Mode, PEa : LongInt) : LongInt; External 'DOSCALLS';
 Function DosRead(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS';
@@ -821,6 +829,7 @@ Begin
     OB_SETUP : Icon := IC_SETUP;
     OB_SYSSET : Icon := IC_SCREEN;
     OB_MOUSE : Icon := IC_MOUSE;
+    OB_COUNTRY : Icon := IC_GLOBE;
     OB_COLORS : Icon := IC_PALETTE;
     OB_LANG : Icon := IC_LANG;
   Else
@@ -1005,6 +1014,7 @@ Begin
         Dummy := NewItem(V, IC_MOUSE, OB_MOUSE, MouseTitle, '');
         Dummy := NewItem(V, IC_PALETTE, OB_COLORS, 'Couleurs du bureau', '');
         Dummy := NewItem(V, IC_LANG, OB_LANG, 'Langue', '');
+        Dummy := NewItem(V, IC_GLOBE, OB_COUNTRY, CountryTitle, '');
       End;
     VK_DRIVES :
       Begin
@@ -1187,6 +1197,14 @@ Begin
         GBox(Hps, X + 5, Y + 9, X + 10, Y + 14, CLR_YELLOW, DRO_FILL);
         GBox(Hps, X + 13, Y + 9, X + 18, Y + 14, CLR_CYAN, DRO_FILL);
         GBox(Hps, X + 21, Y + 9, X + 26, Y + 14, CLR_DARKRED, DRO_FILL);
+      End;
+    IC_GLOBE :
+      Begin
+        GBox(Hps, X + 4, Y + 4, X + 27, Y + 27, CLR_BLUE, DRO_FILL);
+        GBox(Hps, X + 4, Y + 4, X + 27, Y + 27, CLR_DARKBLUE, DRO_OUTLINE);
+        FBox(Hps, X + 8, Y + 14, X + 14, Y + 23, CLR_GREEN, CLR_GREEN);
+        FBox(Hps, X + 17, Y + 8, X + 23, Y + 15, CLR_GREEN, CLR_GREEN);
+        GLn(Hps, X + 4, Y + 16, X + 27, Y + 16, CLR_CYAN);
       End;
     IC_LANG :
       Begin
@@ -1997,6 +2015,7 @@ Begin
     OB_MOUSE : OpenNb(1, 0);
     OB_COLORS : OpenNotebook(6);
     OB_LANG : OpenNotebook(7);
+    OB_COUNTRY : OpenNb(2, 0);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
@@ -2340,6 +2359,15 @@ Const
     (mickeys par 8 pels : petit = rapide) }
   DblSlide : Array[0..8] Of LongInt = (1000, 850, 700, 600, 500, 420, 350, 280, 200);
   SpeedCs : Array[0..8] Of LongInt = (16, 12, 10, 8, 6, 5, 4, 3, 2);
+  CtyTabName : Array[0..4] Of String[16] = ('Pays', 'Heure', 'Date', 'Nombres', 'General');
+  { pays proposes (code de pays d'OS/2) }
+  NCty = 20;
+  CtyCodes : Array[0..NCty - 1] Of LongInt = (1, 2, 3, 31, 32, 33, 34, 39, 41, 44, 45, 46, 47, 49, 55, 61, 81, 351,
+                                              355, 358);
+  CtyNames : Array[0..NCty - 1] Of String[20] = ('Etats-Unis', 'Canada', 'Amerique latine', 'Pays-Bas', 'Belgique',
+                                                 'France', 'Espagne', 'Italie', 'Suisse', 'Royaume-Uni', 'Danemark',
+                                                 'Suede', 'Norvege', 'Allemagne', 'Bresil', 'Australie', 'Japon',
+                                                 'Portugal', 'Albanie', 'Finlande');
   MouTabName : Array[0..5] Of String[16] = ('Minutage', 'Configuration', 'Affectations', 'Pointeurs', 'Comete',
                                             'General');
   { fleche du pointeur (apercu) }
@@ -2594,11 +2622,11 @@ Begin
   CfgOut[Out] := 13; CfgOut[Out + 1] := 10; Out := Out + 2;
 End;
 
-Procedure SetLanguage(N : LongInt);
-Var H, A, Got, K, J, Out, St : LongInt; Found, Match : Boolean; Key, Ln : String;
+{ remplacer dans C:\CONFIG.SYS la ligne qui commence par Key (sans tenir
+  compte de la casse) par Ln, ou l'ajouter a la fin }
+Procedure SetCfgLine(Key, Ln : String);
+Var H, A, Got, K, J, Out, St : LongInt; Found, Match : Boolean;
 Begin
-  PutZ(LongInt(@NameZ2), LangCodes[N]);
-  Dummy := KSetEnv(Z('LANGUAGE'), LongInt(@NameZ2));
   H := 0; A := 0; Got := 0;
   If DosOpen(Z('C:\CONFIG.SYS'), LongInt(@H), LongInt(@A), 0, 0, 1, $40, 0) = 0 Then
   Begin
@@ -2606,13 +2634,11 @@ Begin
     Dummy := DosClose(H);
   End;
   If (Got < 0) Or (Got > 8000) Then Got := 0;
-  Key := 'SET LANGUAGE=';
-  Ln := 'SET LANGUAGE=' + LangCodes[N];
+  Key := UpStr(Key);
   Out := 0; Found := False; K := 0;
   While K < Got Do
   Begin
     St := K;
-    { la ligne commence-t-elle par SET LANGUAGE= ? }
     Match := True;
     For J := 1 To Length(Key) Do
       If (St + J - 1 >= Got) Or (UpCase(Chr(CfgIn[St + J - 1])) <> Key[J]) Then Match := False;
@@ -2647,6 +2673,329 @@ Begin
   End;
 End;
 
+Procedure SetLanguage(N : LongInt);
+Begin
+  PutZ(LongInt(@NameZ2), LangCodes[N]);
+  Dummy := KSetEnv(Z('LANGUAGE'), LongInt(@NameZ2));
+  SetCfgLine('SET LANGUAGE=', 'SET LANGUAGE=' + LangCodes[N]);
+End;
+
+{ ==================================================================== }
+{ Carnet "Pays - Parametres" (objet Pays de Configuration du systeme)   }
+{ ==================================================================== }
+{ Onglets : Pays (pays, mesures, separateur de liste), Heure (12 ou 24
+  heures, AM et PM, separateur), Date (ordre, separateur), Nombres
+  (separateurs des milliers et des decimales, decimales, zero initial,
+  symbole monetaire et sa position), General (titre). Valeurs gardees
+  dans OS2.INI, application PM_National (cles d'OS/2 : iCountry,
+  iMeasurement, sList, iTime, s1159, s2359, sTime, iDate, sDate,
+  sThousand, sDecimal, iDigits, iLzero, sCurrency, iCurrency) ; le pays
+  est aussi la ligne COUNTRY= de CONFIG.SYS et la variable COUNTRY de
+  l'environnement (DosQueryCtryInfo de DOSCALLS.DLL et NLS.DLL). }
+
+Function NatKeyN(K : LongInt) : String;
+Begin
+  Case K Of
+    0 : NatKeyN := 'iCountry';
+    1 : NatKeyN := 'iMeasurement';
+    2 : NatKeyN := 'iTime';
+    3 : NatKeyN := 'iDate';
+    4 : NatKeyN := 'iDigits';
+    5 : NatKeyN := 'iLzero';
+  Else
+    NatKeyN := 'iCurrency';
+  End;
+End;
+
+Function NatKeyS(K : LongInt) : String;
+Begin
+  Case K Of
+    0 : NatKeyS := 'sList';
+    1 : NatKeyS := 's1159';
+    2 : NatKeyS := 's2359';
+    3 : NatKeyS := 'sTime';
+    4 : NatKeyS := 'sDate';
+    5 : NatKeyS := 'sThousand';
+    6 : NatKeyS := 'sDecimal';
+  Else
+    NatKeyS := 'sCurrency';
+  End;
+End;
+
+Function CtyIndex(Code : LongInt) : LongInt;
+Var K, R : LongInt;
+Begin
+  R := -1;
+  For K := 0 To NCty - 1 Do
+    If CtyCodes[K] = Code Then R := K;
+  CtyIndex := R;
+End;
+
+{ valeurs d'un pays : COUNTRYINFO de DosQueryCtryInfo }
+Procedure CountryDefaults(Code : LongInt);
+Var Cc : Array[0..1] Of LongInt; Ci : Array[0..15] Of LongInt; N : LongInt;
+Begin
+  Cc[0] := Code; Cc[1] := 0;
+  FillChar(Ci, SizeOf(Ci), 0);
+  N := 0;
+  If DosQueryCtryInfo(44, LongInt(@Cc), LongInt(@Ci), LongInt(@N)) <> 0 Then
+  Begin
+    Ci[2] := 1; PutZ(LongInt(@Ci) + 12, '$'); PutZ(LongInt(@Ci) + 17, ','); PutZ(LongInt(@Ci) + 19, '.');
+    PutZ(LongInt(@Ci) + 21, '/'); PutZ(LongInt(@Ci) + 23, ':'); PutZ(LongInt(@Ci) + 32, ';');
+    WrB(LongInt(@Ci) + 25, 0); WrB(LongInt(@Ci) + 26, 2); WrB(LongInt(@Ci) + 27, 1);
+  End;
+  NatN[0] := Code;
+  If (Code = 1) Or (Code = 44) Then NatN[1] := 1 Else NatN[1] := 0;
+  NatN[2] := RdB(LongInt(@Ci) + 27) And 1;
+  NatN[3] := MinI(2, Ci[2]);
+  NatN[4] := RdB(LongInt(@Ci) + 26);
+  NatN[5] := 1;
+  NatN[6] := RdB(LongInt(@Ci) + 25) And 3;
+  NatS[0] := GetZ(LongInt(@Ci) + 32);
+  If NatS[0] = '' Then NatS[0] := ';';
+  NatS[1] := 'AM'; NatS[2] := 'PM';
+  NatS[3] := GetZ(LongInt(@Ci) + 23);
+  NatS[4] := GetZ(LongInt(@Ci) + 21);
+  NatS[5] := GetZ(LongInt(@Ci) + 17);
+  NatS[6] := GetZ(LongInt(@Ci) + 19);
+  NatS[7] := GetZ(LongInt(@Ci) + 12);
+End;
+
+Procedure CountrySave;
+Var K : LongInt;
+Begin
+  For K := 0 To 6 Do PrfSet('PM_National', NatKeyN(K), IStr(NatN[K]));
+  For K := 0 To 7 Do
+    If NatS[K] = '' Then PrfSet('PM_National', NatKeyS(K), ' ') Else PrfSet('PM_National', NatKeyS(K), NatS[K]);
+  PrfSet('PMSHELL', 'TITRE_PAYS', CountryTitle);
+End;
+
+{ lecture d'OS2.INI (PM_National) ; sinon les valeurs du pays courant }
+Procedure CountryLoad;
+Var K, V, E : LongInt; S : String;
+Begin
+  CountryTitle := PrfStr('PMSHELL', 'TITRE_PAYS');
+  If CountryTitle = '' Then CountryTitle := 'Pays';
+  V := 0;
+  S := GetEnvS('COUNTRY');
+  If S <> '' Then Val(S, V, E);
+  If CtyIndex(V) < 0 Then V := 2;
+  CountryDefaults(V);
+  S := PrfStr('PM_National', 'iCountry');
+  If S = '' Then Exit;
+  For K := 0 To 6 Do
+  Begin
+    S := PrfStr('PM_National', NatKeyN(K));
+    Val(S, V, E);
+    If (S <> '') And (E = 0) Then NatN[K] := V;
+  End;
+  For K := 0 To 7 Do
+  Begin
+    S := PrfStr('PM_National', NatKeyS(K));
+    If S = ' ' Then NatS[K] := '' Else If S <> '' Then NatS[K] := S;
+  End;
+End;
+
+Function Pad2(V : LongInt) : String;
+Begin
+  If V < 10 Then Pad2 := '0' + IStr(V) Else Pad2 := IStr(V);
+End;
+
+{ heure et date au format choisi }
+Function NatTime(H, M, S : LongInt) : String;
+Var T : String; H12 : LongInt;
+Begin
+  If NatN[2] = 1 Then T := Pad2(H) + NatS[3] + Pad2(M) + NatS[3] + Pad2(S)
+  Else
+  Begin
+    H12 := H Mod 12;
+    If H12 = 0 Then H12 := 12;
+    T := IStr(H12) + NatS[3] + Pad2(M) + NatS[3] + Pad2(S);
+    If H < 12 Then T := T + ' ' + NatS[1] Else T := T + ' ' + NatS[2];
+  End;
+  NatTime := T;
+End;
+
+Function NatDate(D, M, Y : LongInt) : String;
+Begin
+  Case NatN[3] Of
+    0 : NatDate := Pad2(M) + NatS[4] + Pad2(D) + NatS[4] + IStr(Y);
+    2 : NatDate := IStr(Y) + NatS[4] + Pad2(M) + NatS[4] + Pad2(D);
+  Else
+    NatDate := Pad2(D) + NatS[4] + Pad2(M) + NatS[4] + IStr(Y);
+  End;
+End;
+
+{ nombre entier avec le separateur des milliers }
+Function NatInt(V : LongInt) : String;
+Var S, R : String; N : LongInt;
+Begin
+  S := IStr(V);
+  R := ''; N := 0;
+  While Length(S) > 0 Do
+  Begin
+    If (N > 0) And (N Mod 3 = 0) And (S[Length(S)] <> '-') Then R := NatS[5] + R;
+    R := S[Length(S)] + R;
+    Delete(S, Length(S), 1);
+    Inc(N);
+  End;
+  NatInt := R;
+End;
+
+{ montant (centiemes) avec decimales et symbole monetaire }
+Function NatMoney(Cents : LongInt; WithCur : Boolean) : String;
+Var S, F : String; K : LongInt;
+Begin
+  S := NatInt(Cents Div 100);
+  If (S = '0') And (NatN[5] = 0) And (NatN[4] > 0) Then S := '';
+  If NatN[4] > 0 Then
+  Begin
+    F := Pad2(Cents Mod 100);
+    For K := 3 To NatN[4] Do F := F + '0';
+    S := S + NatS[6] + Copy(F, 1, NatN[4]);
+  End;
+  If WithCur Then
+    Case NatN[6] Of
+      0 : S := NatS[7] + S;
+      1 : S := S + NatS[7];
+      2 : S := NatS[7] + ' ' + S;
+    Else
+      S := S + ' ' + NatS[7];
+    End;
+  NatMoney := S;
+End;
+
+Procedure CountryApply(Code : LongInt);
+Begin
+  CountryDefaults(Code);
+  CountrySave;
+  SetCfgLine('COUNTRY=', 'COUNTRY=' + Copy(IStr(1000 + Code), 2, 3) + ',C:\COUNTRY.SYS');
+  PutZ(LongInt(@NameZ2), IStr(Code));
+  Dummy := KSetEnv(Z('COUNTRY'), LongInt(@NameZ2));
+End;
+
+Procedure NbCombo(X, YTop, W, Id : LongInt);
+Begin
+  Dummy := NbAdd(WC_COMBOBOX, WS_TABSTOP Or CBS_DROPDOWNLIST, X, YTop, W, 22, Id, '');
+End;
+
+Procedure NbComboItem(Id : LongInt; S : String);
+Begin
+  NbItem(WinWindowFromID(NbClient, Id), S);
+End;
+
+Procedure NbComboSel(Id, V : LongInt);
+Begin
+  Dummy := WinSendMsg(WinWindowFromID(NbClient, Id), LM_SELECTITEM, V, 1);
+End;
+
+Function NbEntryText(Id : LongInt) : String;
+Var B : Array[0..63] Of Byte;
+Begin
+  B[0] := 0;
+  Dummy := WinQueryWindowText(WinWindowFromID(NbClient, Id), 40, LongInt(@B));
+  NbEntryText := GetZ(LongInt(@B));
+End;
+
+Function NbEntry(X, YTop, W, Id : LongInt; S : String) : LongInt;
+Begin
+  NbEntry := NbAdd(WC_ENTRYFIELD, WS_TABSTOP Or ES_AUTOSCROLL Or ES_MARGIN, X, YTop, W, 20, Id, S);
+End;
+
+Procedure CountryBuild;
+Var K : LongInt;
+Begin
+  NbBusy := 1;
+  Case NbTab Of
+    0 :
+      Begin
+        NbText(0, 40, 200, 'Pays');
+        NbCombo(0, 60, 240, 500);
+        For K := 0 To NCty - 1 Do NbComboItem(500, CtyNames[K] + ' (' + IStr(CtyCodes[K]) + ')');
+        NbComboSel(500, MaxI(0, CtyIndex(NatN[0])));
+        NbText(0, 100, 200, 'Mesures');
+        NbCombo(0, 120, 240, 501);
+        NbComboItem(501, 'Metrique'); NbComboItem(501, 'Anglo-saxonnes');
+        NbComboSel(501, NatN[1]);
+        NbText(0, 166, 200, 'Separateur de liste :');
+        Dummy := NbEntry(184, 164, 40, 502, NatS[0]);
+      End;
+    1 :
+      Begin
+        NbText(0, 0, 330, 'Format de l''heure :');
+        Dummy := NbCheck(10, 22, 160, 510, '12 heures', NatN[2] = 0, BS_AUTORADIOBUTTON Or WS_GROUP);
+        Dummy := NbCheck(10, 44, 160, 511, '24 heures', NatN[2] = 1, BS_AUTORADIOBUTTON);
+        NbText(0, 84, 200, 'Avant midi (AM) :');
+        Dummy := NbEntry(184, 82, 60, 512, NatS[1]);
+        NbText(0, 112, 200, 'Apres midi (PM) :');
+        Dummy := NbEntry(184, 110, 60, 513, NatS[2]);
+        NbText(0, 140, 200, 'Separateur :');
+        Dummy := NbEntry(184, 138, 40, 514, NatS[3]);
+      End;
+    2 :
+      Begin
+        NbText(0, 0, 330, 'Ordre de la date :');
+        NbCombo(0, 20, 270, 520);
+        NbComboItem(520, 'Mois, jour, annee (MM/JJ/AAAA)');
+        NbComboItem(520, 'Jour, mois, annee (JJ/MM/AAAA)');
+        NbComboItem(520, 'Annee, mois, jour (AAAA/MM/JJ)');
+        NbComboSel(520, NatN[3]);
+        NbText(0, 70, 200, 'Separateur :');
+        Dummy := NbEntry(184, 68, 40, 521, NatS[4]);
+      End;
+    3 :
+      Begin
+        NbText(0, 2, 200, 'Separateur des milliers :');
+        Dummy := NbEntry(214, 0, 40, 530, NatS[5]);
+        NbText(0, 30, 200, 'Separateur decimal :');
+        Dummy := NbEntry(214, 28, 40, 531, NatS[6]);
+        NbText(0, 58, 200, 'Decimales :');
+        NbCombo(214, 56, 60, 532);
+        For K := 0 To 3 Do NbComboItem(532, IStr(K));
+        NbComboSel(532, MinI(3, NatN[4]));
+        Dummy := NbCheck(0, 84, 300, 533, 'Zero avant la virgule (0,5)', NatN[5] <> 0, BS_AUTOCHECKBOX);
+        NbText(0, 114, 200, 'Symbole monetaire :');
+        Dummy := NbEntry(214, 112, 60, 534, NatS[7]);
+        NbText(0, 142, 200, 'Position du symbole :');
+        NbCombo(214, 140, 100, 535);
+        NbComboItem(535, NatS[7] + '1'); NbComboItem(535, '1' + NatS[7]);
+        NbComboItem(535, NatS[7] + ' 1'); NbComboItem(535, '1 ' + NatS[7]);
+        NbComboSel(535, NatN[6]);
+      End;
+    4 :
+      Begin
+        NbText(0, 0, 330, 'Titre :');
+        Dummy := NbEntry(0, 22, 220, 540, CountryTitle);
+        Dummy := NbButton(226, 20, 80, 541, 'Changer');
+      End;
+  End;
+  If NbTab < 4 Then
+  Begin
+    Dummy := NbButton(0, 262, 80, 590, 'Annuler');
+    Dummy := NbButton(86, 262, 90, 591, 'Par defaut');
+    Dummy := NbButton(182, 262, 70, 592, 'Aide');
+  End;
+  NbBusy := 0;
+End;
+
+{ exemple de la page (dessine par NbPaint) }
+Procedure CountryPaint(Hps, W, H : LongInt);
+Var Dt : Array[0..15] Of Byte; Y : LongInt; S : String;
+Begin
+  FillChar(Dt, SizeOf(Dt), 0);
+  Dummy := DosGetDateTime(LongInt(@Dt));
+  Y := H - 18 - 230;
+  Case NbTab Of
+    0 : S := 'Exemple : 1' + NatS[0] + '2' + NatS[0] + '3';
+    1 : S := 'Exemple : ' + NatTime(Dt[0], Dt[1], Dt[2]);
+    2 : S := 'Exemple : ' + NatDate(Dt[4], Dt[5], Dt[6] Or (Dt[7] Shl 8));
+    3 : S := 'Exemple : ' + NatMoney(123456789, False) + '   ' + NatMoney(1234550, True);
+  Else
+    S := '';
+  End;
+  If S <> '' Then GText(Hps, 40, Y, S, CLR_BLACK, CLR_PALEGRAY);
+End;
+
 Procedure NbClear;
 Var K : LongInt;
 Begin
@@ -2658,12 +3007,13 @@ End;
 { onglets du carnet courant }
 Function TabCnt : LongInt;
 Begin
-  If NbKind = 1 Then TabCnt := 6 Else TabCnt := NbTabs;
+  If NbKind = 1 Then TabCnt := 6 Else If NbKind = 2 Then TabCnt := 5 Else TabCnt := NbTabs;
 End;
 
 Function TabName(K : LongInt) : String;
 Begin
-  If NbKind = 1 Then TabName := MouTabName[K] Else TabName := NbTabName[K];
+  If NbKind = 1 Then TabName := MouTabName[K] Else If NbKind = 2 Then TabName := CtyTabName[K]
+  Else TabName := NbTabName[K];
 End;
 
 { --- carnet Souris : curseurs (sliders), cadres, zone d'essai --- }
@@ -2902,6 +3252,12 @@ Begin
     Dummy := WinInvalidateRect(NbClient, 0, 1);
     Exit;
   End;
+  If NbKind = 2 Then
+  Begin
+    CountryBuild;
+    Dummy := WinInvalidateRect(NbClient, 0, 1);
+    Exit;
+  End;
   Case NbTab Of
     0 :
       Begin
@@ -3040,6 +3396,7 @@ Begin
   End;
   GText(Hps, Pr - 210, 8, TabName(NbTab) + ' - Page 1 sur 1', CLR_BLACK, CLR_PALEGRAY);
   If NbKind = 1 Then MousePaint(Hps, Rc[2], Rc[3]);
+  If NbKind = 2 Then CountryPaint(Hps, Rc[2], Rc[3]);
   { textes de la page }
   For K := 0 To NbLblN - 1 Do
     GText(Hps, 40 + NbLblX[K], Rc[3] - 18 - NbLblY[K] - 16, NbLblS[K], CLR_DARKBLUE, CLR_PALEGRAY);
@@ -3051,9 +3408,120 @@ Begin
   NbChecked := WinSendMsg(WinWindowFromID(NbClient, Id), BM_QUERYCHECK, 0, 0) <> 0;
 End;
 
+Procedure CountryControl(Id, Code : LongInt);
+Var Sel : LongInt; Changed : Boolean;
+Begin
+  If NbBusy <> 0 Then Exit;
+  Changed := False;
+  Case Id Of
+    500 : If Code = 3 Then
+          Begin
+            Sel := WinSendMsg(WinWindowFromID(NbClient, 500), LM_QUERYSELECTION, -1, 0);
+            If (Sel >= 0) And (Sel < NCty) And (CtyCodes[Sel] <> NatN[0]) Then
+            Begin
+              CountryApply(CtyCodes[Sel]);
+              NbBuild;
+              Dummy := WinSetFocus(HWND_DESKTOP, WinWindowFromID(NbClient, 500));
+              Exit;
+            End;
+          End;
+    501, 520, 532, 535 :
+      If Code = 3 Then
+      Begin
+        Sel := WinSendMsg(WinWindowFromID(NbClient, Id), LM_QUERYSELECTION, -1, 0);
+        If Sel >= 0 Then
+        Begin
+          Case Id Of
+            501 : NatN[1] := Sel;
+            520 : NatN[3] := Sel;
+            532 : NatN[4] := Sel;
+          Else
+            NatN[6] := Sel;
+          End;
+          Changed := True;
+        End;
+      End;
+    510, 511 :
+      Begin
+        If NbChecked(511) Then NatN[2] := 1 Else NatN[2] := 0;
+        Changed := True;
+      End;
+    533 :
+      Begin
+        NatN[5] := Ord(NbChecked(533));
+        Changed := True;
+      End;
+    502, 512, 513, 514, 521, 530, 531, 534 :
+      If Code = 4 Then
+      Begin
+        Case Id Of
+          502 : NatS[0] := NbEntryText(502);
+          512 : NatS[1] := NbEntryText(512);
+          513 : NatS[2] := NbEntryText(513);
+          514 : NatS[3] := NbEntryText(514);
+          521 : NatS[4] := NbEntryText(521);
+          530 : NatS[5] := NbEntryText(530);
+          531 : NatS[6] := NbEntryText(531);
+        Else
+          NatS[7] := NbEntryText(534);
+        End;
+        Changed := True;
+      End;
+  End;
+  If Changed Then
+  Begin
+    CountrySave;
+    Dummy := WinInvalidateRect(NbClient, 0, 1);
+  End;
+End;
+
+Procedure CountryCommand(Id : LongInt);
+Var K, Sel : LongInt; S : String;
+Begin
+  Case Id Of
+    590 :
+      Begin
+        For K := 0 To 6 Do NatN[K] := UndoN[K];
+        For K := 0 To 7 Do NatS[K] := UndoS[K];
+        CountrySave;
+        SetCfgLine('COUNTRY=', 'COUNTRY=' + Copy(IStr(1000 + NatN[0]), 2, 3) + ',C:\COUNTRY.SYS');
+        NbBuild;
+      End;
+    591 :
+      Begin
+        CountryApply(NatN[0]);
+        NbBuild;
+      End;
+    592 : ShowMsg('Pays : codes et formats du pays (ligne COUNTRY= de CONFIG.SYS). Heure, Date, Nombres : formats ' +
+                  'utilises par les programmes de Presentation Manager (OS2.INI, PM_National). Annuler : valeurs a ' +
+                  'l''ouverture du carnet ; Par defaut : valeurs du pays.', 'Aide - Pays', MB_OK Or MB_INFORMATION);
+    541 :
+      Begin
+        S := NbEntryText(540);
+        If S <> '' Then
+        Begin
+          CountryTitle := S;
+          CountrySave;
+          Dummy := WinSetWindowText(WinQueryWindow(NbClient, QW_PARENT), Z(CountryTitle + ' - Parametres'));
+          Sel := FindView(VK_SETUP, '');
+          If Sel >= 0 Then
+          Begin
+            Populate(Sel);
+            Dummy := WinInvalidateRect(Vw(Sel)^.Client, 0, 1);
+          End;
+        End;
+      End;
+  End;
+End;
+
 Procedure NbControl(Id, Code : LongInt);
 Var Sel : LongInt;
 Begin
+  If NbKind = 2 Then
+  Begin
+    CountryControl(Id, Code);
+    Exit;
+  End;
   Case Id Of
     380 : If (Code = LN_SELECT) Or (Code = LN_ENTER) Then
           Begin
@@ -3147,6 +3615,11 @@ End;
 Procedure NbCommand(Id : LongInt);
 Var Sel : LongInt; M : Array[0..3] Of LongInt; Vb : Array[0..31] Of LongInt; S : String;
 Begin
+  If NbKind = 2 Then
+  Begin
+    CountryCommand(Id);
+    Exit;
+  End;
   Case Id Of
     310 :
       Begin
@@ -3355,11 +3828,12 @@ Begin
   End;
 End;
 
-{ carnet Kind (0 : Systeme, 1 : Souris) ; un seul carnet ouvert a la fois }
+{ carnet Kind (0 : Systeme, 1 : Souris, 2 : Pays) ; un seul carnet ouvert
+  a la fois }
 Procedure OpenNb(Kind, Tab : LongInt);
-Var V : LongInt; P, T : String;
+Var V, K : LongInt; P, T : String;
 Begin
-  If Kind = 1 Then P := 'SOURIS' Else P := '';
+  If Kind = 1 Then P := 'SOURIS' Else If Kind = 2 Then P := 'PAYS' Else P := '';
   V := FindView(VK_NOTE, P);
   If V >= 0 Then
   Begin
@@ -3367,13 +3841,23 @@ Begin
     NbSelect(Tab);
     Exit;
   End;
-  If Kind = 1 Then V := FindView(VK_NOTE, '') Else V := FindView(VK_NOTE, 'SOURIS');
-  If V >= 0 Then CloseView(V);
-  If Kind = 1 Then T := MouseTitle + ' - Parametres' Else T := 'Systeme - Parametres';
+  For K := 0 To 2 Do
+  Begin
+    If K = 0 Then T := '' Else If K = 1 Then T := 'SOURIS' Else T := 'PAYS';
+    If T <> P Then
+    Begin
+      V := FindView(VK_NOTE, T);
+      If V >= 0 Then CloseView(V);
+    End;
+  End;
+  If Kind = 1 Then T := MouseTitle + ' - Parametres' Else If Kind = 2 Then T := CountryTitle + ' - Parametres'
+  Else T := 'Systeme - Parametres';
   V := NewView(VK_NOTE, P, T);
   If V < 0 Then Exit;
   NbKind := Kind; NbTab := Tab; NbN := 0; SlN := 0; GbN := 0; SlDrag := -1; TestOn := 0;
   UndoDbl := CfgDbl; UndoSpeed := CfgSpeed;
+  For K := 0 To 6 Do UndoN[K] := NatN[K];
+  For K := 0 To 7 Do UndoS[K] := NatS[K];
   If Not OpenFrame(V, 'WPNotebook', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON, MaxI(0, (ScrW - 500) Div 2),
                    MaxI(0, (ScrH - 440) Div 2), 500, 440) Then Exit;
   If NbN = 0 Then NbBuild;
@@ -3757,6 +4241,7 @@ BEGIN
     Halt(1);
   End;
   LoadSettings;
+  CountryLoad;
   SetDeskColor;
   ScrW := WinQuerySysValue(HWND_DESKTOP, 20); ScrH := WinQuerySysValue(HWND_DESKTOP, 21);
   If ScrW <= 0 Then ScrW := 640;

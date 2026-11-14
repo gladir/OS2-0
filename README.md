@@ -609,7 +609,7 @@ L'écran de Presentation Manager n'est plus limité au VGA 640 x 480 x 16 couleu
 	<tr><td>Noyau (OS2KRNL)</td><td>Appel d'une interruption du BIOS en mode réel depuis le mode protégé : le petit programme <b>KERNEL/BIOSCALL.ASM</b> (assemblé une fois, recopié en 0000:7000) sauve CR0/CR3/CR4, la GDT et l'IDT, repasse en mode réel (pagination coupée, IVT du BIOS, PIC en 08h/70h avec les IRQ masquées), exécute INT 10h puis revient. Au démarrage, le noyau relève les modes du VBE (4F00h, 4F01h) : modes graphiques à mémoire linéaire de 640 x 480 au moins, 8 bits (palette) ou 15, 16, 24, 32 bits (couleurs directes) ; QEMU en propose 67 (VBE 3.0, 16 Mo). API <b>KrnVideo</b> : liste des modes, passage à un mode VESA (4F02h avec mémoire linéaire) ou à un mode du BIOS (retour au texte).</td></tr>
 	<tr><td>VIOCALLS.DLL</td><td>VioSetMode accepte toute résolution VESA (hres, vres, bits par pel) ; VioGetMode donne l'adresse de la mémoire linéaire (buf_addr) et les octets par ligne (partial_length) ; le retour au mode texte, une fenêtre surgissante et la bascule des sessions quittent proprement le mode VESA.</td></tr>
 	<tr><td>PMWIN.DLL, PMGPI.DLL</td><td>Dessin dans la mémoire linéaire en 8, 15, 16, 24 ou 32 bits par pel (remplissages par REP STOS, défilement par REP MOVS, pointeur, curseur, texte) ; les bitmaps gardent leurs couleurs RVB ; PMGPI dessine sur l'écran VESA (cible TG_LFB). La résolution se choisit par <code>SET PMRESOLUTION=1024x768x32</code> dans CONFIG.SYS, par OS2.INI (PM_Display, RESOLUTION) ou à chaud par WINSETSCREENMODE (ordinal interne 1007) : les fenêtres sont ramenées dans l'écran et tout est redessiné ; le LaunchPad se replace.</td></tr>
-	<tr><td>PMSHELL.EXE</td><td>Carnet <b>Système - Paramètres</b> (Système OS/2 → Configuration du système → Système, Souris ou Couleurs du bureau ; ou le menu du bureau « Paramètres du système... ») : reliure à spirale et onglets comme sous Warp 3.</td></tr>
+	<tr><td>PMSHELL.EXE</td><td>Carnet <b>Système - Paramètres</b> (Système OS/2 → Configuration du système → Système, Souris, Couleurs du bureau, Langue ou Pays ; ou le menu du bureau « Paramètres du système... ») : reliure à spirale et onglets comme sous Warp 3.</td></tr>
 </table>
 
 <table>
@@ -645,6 +645,23 @@ L'objet <b>Souris</b> (Système OS/2 → Configuration du système) ouvre le car
 </table>
 
 Le pointeur de PMWIN est maintenant fait de « lutins » : les pels qu'ils couvrent sont gardés (valeur du périphérique en mémoire linéaire, couleur sur les plans du VGA) et rendus dans l'ordre inverse du dessin, ce qui permet la grande taille et la traînée.
+
+<h3>Carnet « Pays - Paramètres »</h3>
+
+L'objet <b>Pays</b> de Configuration du système (Système OS/2 → Configuration du système → Pays) ouvre le carnet « Pays - Paramètres » de Warp 3 : reliure à spirale, onglets, boutons Annuler (valeurs à l'ouverture du carnet), Par défaut (valeurs du pays) et Aide, et un exemple mis à jour à chaque changement.
+
+<img width="640" height="480" alt="OS/2-0 : carnet Pays - Paramètres, onglet Pays" src="IMAGE/PAYS.png" />
+
+<table>
+	<tr><th>Onglet</th><th>Réglages</th></tr>
+	<tr><td>Pays</td><td>Pays (liste déroulante : États-Unis, Canada, Amérique latine, Pays-Bas, Belgique, France, Espagne, Italie, Suisse, Royaume-Uni, Danemark, Suède, Norvège, Allemagne, Brésil, Australie, Japon, Portugal, Albanie, Finlande) : tous les formats prennent les valeurs du pays (DosQueryCtryInfo), la ligne <code>COUNTRY=</code> de CONFIG.SYS et la variable <code>COUNTRY</code> de l'environnement changent ; mesures (métriques ou anglo-saxonnes) ; séparateur de liste.</td></tr>
+	<tr><td>Heure</td><td>12 ou 24 heures, textes avant midi et après midi (AM, PM), séparateur.</td></tr>
+	<tr><td>Date</td><td>Ordre (mois-jour-année, jour-mois-année, année-mois-jour), séparateur.</td></tr>
+	<tr><td>Nombres</td><td>Séparateurs des milliers et des décimales, nombre de décimales, zéro avant la virgule, symbole monétaire et sa position (avant ou après le montant, avec ou sans espace).</td></tr>
+	<tr><td>Général</td><td>Titre de l'objet.</td></tr>
+</table>
+
+Les valeurs sont gardées dans OS2.INI, application <code>PM_National</code>, sous les clés d'OS/2 (<code>iCountry</code>, <code>iMeasurement</code>, <code>sList</code>, <code>iTime</code>, <code>s1159</code>, <code>s2359</code>, <code>sTime</code>, <code>iDate</code>, <code>sDate</code>, <code>sThousand</code>, <code>sDecimal</code>, <code>iDigits</code>, <code>iLzero</code>, <code>sCurrency</code>, <code>iCurrency</code>), que les programmes de Presentation Manager lisent par PrfQueryProfileString. Le noyau met la ligne <code>COUNTRY=</code> de CONFIG.SYS dans la variable <code>COUNTRY</code> ; DOSCALLS.DLL la relit à chaque DosQueryCtryInfo (le changement de pays vaut tout de suite) et connaît maintenant les 20 pays de la liste (NLS.DLL : Albanie ajoutée). Les champs combinés de PMWIN (classe <code>WC_COMBOBOX</code>) déroulent maintenant leur liste au clic : choix au clic ou par Entrée, fermeture par un clic ailleurs.
 
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 
