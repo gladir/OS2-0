@@ -122,6 +122,7 @@ Const
 Var
   CUse, CPid, CFrame, CClient, CSess, CRows, CCols, CCurR, CCurC, CStatus, CCp, CKbd, CFocus : Array[0..MaxCon - 1] Of LongInt;
   CLock, CMou, CFilter, CPtrR, CPtrC, CXlt, CKH, CKT, CPH, CPT, CMark, CMR1, CMC1, CMR2, CMC2 : Array[0..MaxCon - 1] Of LongInt;
+  CBtn : Array[0..MaxCon - 1] Of LongInt;   { boutons (fenetre DOS) }
   CPLen, CPPos, COldFrame, CSnapR, CSnapC, CFull, CVisR, CVisC, COrgR, COrgC : Array[0..MaxCon - 1] Of LongInt;
   CKV, CKX, CKTm : Array[0..MaxCon * 32 - 1] Of LongInt;      { evenements du clavier }
   CPF, CPTm, CPR, CPC : Array[0..MaxCon * 32 - 1] Of LongInt; { evenements de la souris }
@@ -740,7 +741,7 @@ Begin
 End;
 
 Function VioShieldWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
-Var I, Fl, Ch, Sc, Vk, Xt, Fs : LongInt;
+Var I, Fl, Ch, Sc, Vk, Xt, Fs : LongInt; Mv : Array[0..2] Of LongInt;
 Begin
   VioShieldWindowProc := 0;
   I := ConOfClient(H);
@@ -814,6 +815,21 @@ Begin
           WM_BUTTON3DOWN : Fs := 64;
         End;
         If Fs <> 0 Then PtrQueue(I, Fs);
+        { session DOS (machine virtuelle) : position et boutons au pilote
+          de souris de la machine (INT 33h) }
+        If CSess[I] >= 0 Then
+        Begin
+          Case Msg Of
+            WM_BUTTON1DOWN : CBtn[I] := CBtn[I] Or 1;
+            WM_BUTTON1UP : CBtn[I] := CBtn[I] And Not 1;
+            WM_BUTTON2DOWN : CBtn[I] := CBtn[I] Or 2;
+            WM_BUTTON2UP : CBtn[I] := CBtn[I] And Not 2;
+            WM_BUTTON3DOWN : CBtn[I] := CBtn[I] Or 4;
+            WM_BUTTON3UP : CBtn[I] := CBtn[I] And Not 4;
+          End;
+          Mv[0] := CPtrR[I]; Mv[1] := CPtrC[I]; Mv[2] := CBtn[I];
+          Dummy := KSes(21, CSess[I], LongInt(@Mv));
+        End;
         If Msg = WM_BUTTON1DOWN Then
         Begin
           Dummy := WinSetFocus(HWND_DESKTOP, H);
@@ -912,7 +928,7 @@ Begin
     CRows[F] := MinI(MaxRows, Inf[3]); CCols[F] := MinI(MaxCols, Inf[4]);
   End;
   CCurR[F] := 0; CCurC[F] := 0; CStatus[F] := 0; CCp[F] := 850; CKbd[F] := 0; CFocus[F] := 0; CLock[F] := 0;
-  CMou[F] := 0; CFilter[F] := 0; CPtrR[F] := 0; CPtrC[F] := 0; CXlt[F] := 0; CKH[F] := 0; CKT[F] := 0;
+  CMou[F] := 0; CFilter[F] := 0; CPtrR[F] := 0; CPtrC[F] := 0; CBtn[F] := 0; CXlt[F] := 0; CKH[F] := 0; CKT[F] := 0;
   CPH[F] := 0; CPT[F] := 0; CMark[F] := 0; CPLen[F] := 0; CPPos[F] := 0; CSnapR[F] := -1; CSnapC[F] := 0;
   CFull[F] := 1;
   If (Fl And CON_KBD) <> 0 Then CKbd[F] := 1;

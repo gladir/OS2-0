@@ -346,6 +346,9 @@ Var
     son processus, son premier Mo (memoire physique) }
   VmOn             : Boolean;
   VmTask, VmSess, VmPid, VmRamPhys : LongInt;
+  { session montree dans une fenetre de PM (PMVIOP lit son ecran) ; plein
+    ecran automatique d'un mode graphique }
+  VmWinSeen, VmAutoFs : Boolean;
   { memoire physique des processus : blocs tries par adresse }
   PBase, PSize     : Array[0..MaxPBlk - 1] Of LongInt;
   PCount           : LongInt;
@@ -767,6 +770,8 @@ Procedure IrqTimer; Interrupt; Forward;
 Procedure IrqKeyboard; Interrupt; Forward;
 { machine virtuelle DOS (partie 13b) }
 Procedure DosKeyIn(Up : Boolean; Sc : LongInt; Ext : Boolean; Ch : LongInt); Forward;
+Function VmRawScan(Sc : LongInt) : LongInt; Forward;
+Procedure DosMouAbs(R, C, Btn : LongInt); Forward;
 Procedure DosMouIn(Dx, Dy, Btn : LongInt); Forward;
 Procedure VmTick(B : LongInt); Forward;
 Procedure VmSwitchOut; Forward;
@@ -1953,8 +1958,26 @@ Begin
   End;
 End;
 
+Procedure PFree(Base : LongInt); Forward;
+Function PAlloc(Size : LongInt) : LongInt; Forward;
+
+Var
+  FBufs : Array[0..15] Of LongInt;   { tampons de FileAlloc (memoire physique) }
+
 Procedure KFree(A : LongInt);
+Var I : LongInt;
 Begin
+  { gros tampon en memoire physique (FileAlloc) }
+  If A >= PhysProcBase Then
+  Begin
+    For I := 0 To 15 Do
+      If FBufs[I] = A Then
+      Begin
+        FBufs[I] := 0;
+        PFree(A);
+      End;
+    Exit;
+  End;
   If (A < HeapStart + 16) Or (A >= HeapEnd) Then Exit;
   If MemL[0:A - 16] <> HeapMagicUsed Then Exit;
   MemL[0:A - 16] := HeapMagicFree;
@@ -5274,6 +5297,24 @@ Begin
 End;
 
 { Lire tout un fichier dans un bloc du tas ; rend l'adresse ou 0 }
+{ Tampon d'un fichier lu en entier : les gros fichiers (DLL de plus de
+  256 Ko) vont en memoire physique, le tas du noyau ne compte que quelques
+  Mo ; KFree rend les deux genres de blocs }
+Function FileAlloc(Size : LongInt) : LongInt;
+Var A, I : LongInt;
+Begin
+  A := 0;
+  If Size > 256 * 1024 Then
+    For I := 0 To 15 Do
+      If (A = 0) And (FBufs[I] = 0) Then
+      Begin
+        A := PAlloc(Size);
+        FBufs[I] := A;
+      End;
+  If A = 0 Then A := KAlloc(Size);
+  FileAlloc := A;
+End;
+
 Function ReadWholeFile(Path : String; Var Size : LongInt) : LongInt;
 Var Attr, Time, Lba, Ram, Buf, Done, A, N, H, Got : LongInt;
 Begin
@@ -5295,7 +5336,7 @@ Begin
       Exit;
     End;
     Size := MemL[0:LongInt(@Files[H].Sffsi) + 20];
-    Buf := KAlloc(Size + 1);
+    Buf := FileAlloc(Size + 1);
     If Buf <> 0 Then
     Begin
       N := IfsRW(H, Buf, Size, False, Got);
@@ -5323,7 +5364,7 @@ Begin
     LastError := ErrAccessDenied;
     Exit;
   End;
-  Buf := KAlloc(Size + 1);
+  Buf := FileAlloc(Size + 1);
   If Buf = 0 Then
   Begin
     LastError := ErrNotEnoughMem;
@@ -5331,6 +5372,16 @@ Begin
   End;
   If Ram >= 0 Then
     MoveMem(RamFiles[Ram].Data, Buf, Size)
+  Else If Ram = -3 Then
+  Begin
+    { disquette A: (FAT12) : Lba est le premier cluster }
+    If FlpRead(Lba, Size, 0, Buf, Size) <> Size Then
+    Begin
+      KFree(Buf);
+      LastError := ErrNotReady;
+      Exit;
+    End;
+  End
   Else
   Begin
     Done := 0;
@@ -7067,9 +7118,10 @@ End;
    18 ecran de la session p1 dans p2 : tampon video, ligne et colonne du
       curseur, lignes, colonnes, processus (PMVIOP.DLL)
    19 touche p2 (caractere + code Shl 8, etat) pour la session p1
-   20 terminer les processus de la session p1 (fenetre OS/2 fermee) }
+   20 terminer les processus de la session p1 (fenetre OS/2 fermee)
+   21 souris de la fenetre DOS p1 : p2 = ligne, colonne, boutons }
 Function KrnSesCtl(Op, P1, P2 : LongInt) : LongInt;
-Var S, Old : LongInt;
+Var S, Old, KsSave : LongInt;
 Begin
   KrnSesCtl := 0;
   Case Op Of
@@ -7140,6 +7192,7 @@ Begin
           { ecran d'une session (PMVIOP.DLL : fenetre OS/2) : tampon video
             (B8000h si elle est au premier plan), curseur, lignes, colonnes }
           If P1 = FgSess Then MemL[0:P2] := $B8000 Else MemL[0:P2] := SLvb[P1];
+          If VmOn And (P1 = VmSess) Then VmWinSeen := True;
           If P1 = CurSess Then
           Begin
             MemL[0:P2 + 4] := CurRow; MemL[0:P2 + 8] := CurCol;
@@ -7159,7 +7212,20 @@ Begin
           asm
             cli
           end;
-          If P1 = CurSess Then
+          If VmOn And (P1 = VmSess) Then
+          Begin
+            { session DOS dans une fenetre : enfoncement puis relachement }
+            S := VmRawScan((MemL[0:P2] Shr 8) And $FF);
+            { touches de controle du message de PM (WM_CHAR) : la touche
+              physique est souvent deja relachee }
+            KsSave := KbdState;
+            KbdState := (KbdState And Not $F) Or (MemL[0:P2 + 4] And $E);
+            DosKeyIn(False, S, (MemL[0:P2 + 4] And $10000) <> 0, MemL[0:P2] And $FF);
+            KbdState := KsSave;
+            DosKeyIn(True, S, (MemL[0:P2 + 4] And $10000) <> 0, 0);
+            KrnSesCtl := 1;
+          End
+          Else If P1 = CurSess Then
           Begin
             S := (KbdHead + 1) And 63;
             If S <> KbdTail Then
@@ -7196,6 +7262,13 @@ Begin
             End;
           KrnSesCtl := Old;
         End;
+    21 : If VmOn And (P1 = VmSess) And (P2 <> 0) Then
+         Begin
+           { souris d'une fenetre DOS (PMVIOP.DLL) : ligne, colonne, boutons
+             (1 gauche, 2 droit, 4 milieu) }
+           DosMouAbs(MemL[0:P2], MemL[0:P2 + 4], MemL[0:P2 + 8]);
+           KrnSesCtl := 1;
+         End;
   End;
 End;
 
@@ -8766,6 +8839,12 @@ Procedure VmSetCur(Pg, X, Y : LongInt);
 Begin
   Mem[0:VmBda($50 + Pg * 2)] := X;
   Mem[0:VmBda($51 + Pg * 2)] := Y;
+  If Pg <> (Mem[0:VmBda($62)] And 7) Then Exit;
+  { curseur de la console de la session (fenetre OS/2 : PMVIOP.DLL) }
+  If CurSess = VmSess Then
+  Begin
+    CurRow := Y; CurCol := X;
+  End;
 End;
 
 { Defiler la fenetre (R1,C1)-(R2,C2) de N lignes (0 : effacer) }
@@ -9148,6 +9227,37 @@ End;
 { Touche de la session de la machine au premier plan (interruption du
   clavier du noyau) : code de balayage (Up : relachement), prefixe E0h
   et caractere calcule par le noyau }
+{ Code de touche traduit (KbdCharIn d'OS/2, WM_CHAR de PM : Ctrl+F9 =
+  66h, Alt+1 = 78h...) vers le code materiel de la touche (fenetre DOS) }
+Function VmRawScan(Sc : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := Sc;
+  Case Sc Of
+    $54..$5D : R := Sc - $19;           { Maj+F1..F10 }
+    $5E..$67 : R := Sc - $23;           { Ctrl+F1..F10 }
+    $68..$71 : R := Sc - $2D;           { Alt+F1..F10 }
+    $85, $87, $89, $8B : R := $57;      { F11 }
+    $86, $88, $8A, $8C : R := $58;      { F12 }
+    $78..$83 : R := Sc - $76;           { Alt+1..Alt+= }
+    $73, $9B : R := $4B;
+    $74, $9D : R := $4D;
+    $75, $9F : R := $4F;
+    $76, $A1 : R := $51;
+    $77, $97 : R := $47;
+    $84, $99 : R := $49;
+    $8D, $98 : R := $48;
+    $91, $A0 : R := $50;
+    $92, $A2 : R := $52;
+    $93, $A3 : R := $53;
+    $8E : R := $4A;
+    $90 : R := $4E;
+    $94, $A5 : R := $0F;
+    $A6 : R := $1C;
+  End;
+  VmRawScan := R;
+End;
+
 Procedure DosKeyIn(Up : Boolean; Sc : LongInt; Ext : Boolean; Ch : LongInt);
 Var K, N : LongInt;
 Begin
@@ -9418,6 +9528,12 @@ End;
 Procedure VmHwCursor;
 Var P, Pg, Sh : LongInt;
 Begin
+  { curseur de la console de la session (fenetre OS/2 : PMVIOP.DLL) }
+  If CurSess = VmSess Then
+  Begin
+    Pg := Mem[0:VmBda($62)] And 7;
+    CurRow := Mem[0:VmBda($51 + Pg * 2)]; CurCol := Mem[0:VmBda($50 + Pg * 2)];
+  End;
   If Not VmIsFg Or VmGfx Then Exit;
   Pg := Mem[0:VmBda($62)] And 7;
   P := Pg * 2048 + Mem[0:VmBda($51 + Pg * 2)] * 80 + Mem[0:VmBda($50 + Pg * 2)];
@@ -9443,6 +9559,13 @@ Begin
   VgPlanar := VgMode In [$0D, $0E, $0F, $10, $11, $12];
   If VmGfx Then
   Begin
+    { session dans une fenetre (ou a l'arriere-plan) : plein ecran pour
+      le mode graphique, comme une fenetre DOS d'OS/2 }
+    If (FgSess <> VmSess) And VmWinSeen Then
+    Begin
+      PendSwitch := VmSess;
+      VmAutoFs := True;
+    End;
     VmFgWait;
     Ax := VR(fEax);
     VS(fEax, M And $FF);
@@ -9460,6 +9583,12 @@ Begin
       VmBiosVideo(0, 0);
       VS(fEax, Ax);
       VgHwGfx := False;
+    End;
+    { fin du mode graphique d'une fenetre DOS : retour a la fenetre }
+    If VmAutoFs And Not VmGfx Then
+    Begin
+      VmAutoFs := False;
+      If (FgSess = VmSess) And (PmSess >= 0) Then PendSwitch := PmSess;
     End;
   End;
 End;
@@ -12204,6 +12333,15 @@ Begin
     End;
   VmMouBtn := Btn;
   VmMouEv := VmMouEv Or Ev;
+End;
+
+{ Souris d'une fenetre DOS (PMVIOP.DLL, KrnSesCtl 21) : position
+  absolue en cellules (8 x 8 points virtuels par cellule en mode texte)
+  et boutons }
+Procedure DosMouAbs(R, C, Btn : LongInt);
+Begin
+  If Not VmOn Then Exit;
+  DosMouIn(C * 8 - VmMouX, R * 8 - VmMouY, Btn);
 End;
 
 { Appeler le gestionnaire d'evenements du programme (fonction 0Ch) }
@@ -15209,6 +15347,7 @@ Begin
   MemW[0:VmBda($1A)] := $1E; MemW[0:VmBda($1C)] := $1E;
   MemW[0:VmBda($80)] := $1E; MemW[0:VmBda($82)] := $3E;
   VgMode := 3; VgStart := 0; VgHwGfx := False; VgSaved := False;
+  VmWinSeen := False; VmAutoFs := False;
   VmGfx := False;
   { XMS, EMS, DPMI : souches HLT du serveur, nom du pilote EMS }
   VmDpmi := False; VmPM := False; VmSvN := 0;
@@ -15453,6 +15592,9 @@ Begin
       If Not KReadFile(H, LongInt(@B), 64, Got) Then Got := 0;
       If (Got >= 4) And (B[1] = $45) And ((B[0] = $50) Or
          ((B[0] = $4E) And (B[$36] <> 1))) Then
+        IsDosFile := False;
+      { programmes d'OS/2 2.x au format LX (et LE) }
+      If (Got >= 4) And (B[0] = $4C) And ((B[1] = $58) Or (B[1] = $45)) Then
         IsDosFile := False;
     End;
   End
@@ -16660,6 +16802,7 @@ BEGIN
   InitGdt;
   InitIdt;
   InitTss;
+  For I := 0 To 15 Do FBufs[I] := 0;
   InitPic;
   InitTimer;
   InitKeyboard;

@@ -147,7 +147,7 @@ Const
   OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19; OB_COUNTRY = 23; IC_GLOBE = 20;
   OB_GAMES = 24; OB_GAME = 25; IC_CARDS = 21; IC_CHESS = 22; IC_TILES = 23;
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
-  OB_DOSFS = 28;
+  OB_DOSFS = 28; OB_DOSWIN = 29;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10;
   { controles du carnet des parametres }
@@ -830,6 +830,7 @@ Begin
     OB_CMD : Icon := IC_CMD;
     OB_CMDWIN : Icon := IC_CMD;
     OB_DOSFS : Icon := IC_CMD;
+    OB_DOSWIN : Icon := IC_CMD;
     OB_SHUTDOWN : Icon := IC_SHUTDOWN;
     OB_WINLIST : Icon := IC_WINLIST;
     OB_INFO : Icon := IC_INFO;
@@ -1020,6 +1021,7 @@ Begin
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
+        Dummy := NewItem(V, IC_CMD, OB_DOSWIN, 'Fenetre DOS', '');
         Dummy := NewItem(V, IC_CMD, OB_DOSFS, 'DOS plein ecran', '');
       End;
     VK_MM :
@@ -1820,7 +1822,7 @@ End;
 { fenetre OS/2 : l'interpreteur de commandes dans une nouvelle session
   montree dans une fenetre de PM par PMVIOP.DLL (bouclier VIO) ; si la
   console ne peut etre creee, la session passe en plein ecran }
-Procedure RunWindow(Dir : String);
+Procedure RunWindowOf(Prog, Title, Dir : String);
 Var Res : Array[0..1] Of LongInt; Rc, K, S, Hc : LongInt; D : String;
 Begin
   If Dir <> '' Then
@@ -1830,24 +1832,24 @@ Begin
     If (Length(D) > 3) And (D[Length(D)] = '\') Then D := Copy(D, 1, Length(D) - 1);
     Dummy := DosSetCurrentDir(Z(D));
   End;
-  PutZ(LongInt(@ArgBuf), Comspec);
-  K := Length(Comspec) + 1;
+  PutZ(LongInt(@ArgBuf), Prog);
+  K := Length(Prog) + 1;
   WrB(LongInt(@ArgBuf) + K, 0); WrB(LongInt(@ArgBuf) + K + 1, 0);
-  S := KSes(4, Z('Fenetre OS/2'), 0);
+  S := KSes(4, Z(Title), 0);
   If S < 0 Then
   Begin
     ShowMsg('Trop de sessions : fermez un programme.', 'Bureau', MB_OK Or MB_WARNING);
     Exit;
   End;
   Dummy := KSes(12, S, 0);
-  PutZ(LongInt(@NameZ2), Comspec);
+  PutZ(LongInt(@NameZ2), Prog);
   Res[0] := 0; Res[1] := 0;
   Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
   If Rc <> 0 Then
   Begin
     Dummy := KSes(12, -1, 0);
     Dummy := KSes(17, S, 0);
-    ShowMsg('SYS1041: Impossible de lancer ' + Comspec + ' (erreur ' + IStr(Rc) + ').', 'Bureau', MB_OK Or MB_ERROR);
+    ShowMsg('SYS1041: Impossible de lancer ' + Prog + ' (erreur ' + IStr(Rc) + ').', 'Bureau', MB_OK Or MB_ERROR);
     Exit;
   End;
   If ShieldOk = 0 Then
@@ -1856,8 +1858,13 @@ Begin
     ShieldOk := 1;
   End;
   Hc := 0;
-  If WinCreateConsole(HWND_DESKTOP, Z('Fenetre OS/2'), 1 Or 2 Or (S Shl 8), LongInt(@Hc)) <> 0 Then
+  If WinCreateConsole(HWND_DESKTOP, Z(Title), 1 Or 2 Or (S Shl 8), LongInt(@Hc)) <> 0 Then
     Dummy := KSes(3, S, 0);
+End;
+
+Procedure RunWindow(Dir : String);
+Begin
+  RunWindowOf(Comspec, 'Fenetre OS/2', Dir);
 End;
 
 { ==================================================================== }
@@ -1920,6 +1927,7 @@ Begin
     OB_CMD : T := T + ' : ' + Comspec + ' (plein ecran).';
     OB_CMDWIN : T := T + ' : ' + Comspec + ' dans une fenetre de PM (PMVIOP.DLL).';
     OB_DOSFS : T := T + ' : session DOS plein ecran (machine virtuelle 8086, COMMAND.COM integre).';
+    OB_DOSWIN : T := T + ' : session DOS dans une fenetre de PM (machine virtuelle 8086 ; plein ecran pour les modes graphiques).';
   Else
     T := T + ' : objet du systeme.';
   End;
@@ -2105,6 +2113,13 @@ Begin
           de la machine virtuelle DOS (COMMAND.COM) }
         If Vw(V)^.Kind = VK_DIR Then P := Vw(V)^.Path Else P := '';
         RunProgram('C:\COMMAND.COM', '', P, False);
+      End;
+    OB_DOSWIN :
+      Begin
+        { session DOS dans une fenetre de PM (PMVIOP.DLL) : COMMAND.COM de
+          la machine virtuelle ; un mode graphique passe en plein ecran }
+        If Vw(V)^.Kind = VK_DIR Then P := Vw(V)^.Path Else P := '';
+        RunWindowOf('C:\COMMAND.COM', 'Fenetre DOS', P);
       End;
     OB_SHUTDOWN : Shutdown;
     OB_WINLIST : OpenWinList;

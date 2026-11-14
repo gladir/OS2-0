@@ -1244,7 +1244,8 @@ Var Spc, Bps, Free, Total : LongInt;
 Begin
   If Disk = 0 Then Disk := CurDrive;
   If Disk = 3 Then DriveExists := True
-  Else If (Disk < 4) Or (Disk > 26) Then DriveExists := False
+  Else If (Disk = 1) And (CurDrive = 1) Then DriveExists := True
+  Else If (Disk < 1) Or (Disk = 2) Or (Disk > 26) Then DriveExists := False
   Else DriveExists := KGetDiskFreeSpaceA(Z(DriveRoot(Disk), 0), LongInt(@Spc), LongInt(@Bps),
                                          LongInt(@Free), LongInt(@Total)) <> 0;
 End;
@@ -1277,6 +1278,8 @@ Function DosQueryCurrentDisk(PDisk, PLogical : LongInt) : LongInt;
 Var I, M : LongInt;
 Begin
   M := 1 Shl 2;
+  { A: : lecteur de disquettes (unite courante) }
+  If CurDrive = 1 Then M := M Or 1;
   For I := 4 To 26 Do
     If DriveExists(I) Then M := M Or (1 Shl (I - 1));
   PokeL(PDisk, CurDrive);
@@ -6239,6 +6242,14 @@ Begin
     Begin
       Flags := 2;                                   { fenetre texte (VIO) }
       If (PeekW(LongInt(@Scratch) + Lfa + 22) And $2000) <> 0 Then Flags := Flags Or $10;
+    End;
+  { programme ou DLL d'OS/2 2.x (LX) : type de l'en-tete (bits 8 a 10 des
+    drapeaux du module : 1 plein ecran, 2 fenetre VIO, 3 PM ; 8000h DLL) }
+  If (Lfa > 0) And (Lfa + 24 < Got) Then
+    If (PeekW(LongInt(@Scratch) + Lfa) And $FFFF) = $584C Then
+    Begin
+      Flags := (PeekL(LongInt(@Scratch) + Lfa + $10) Shr 8) And 7;
+      If (PeekL(LongInt(@Scratch) + Lfa + $10) And $8000) <> 0 Then Flags := Flags Or $10;
     End;
   PokeL(PFlags, Flags);
   DosQueryAppType := NO_ERROR;

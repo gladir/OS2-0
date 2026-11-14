@@ -806,7 +806,12 @@ Les programmes MS-DOS (.COM, .EXE sans en-tete PE ni NE) s'executent
 dans une machine virtuelle DOS en mode virtuel 8086 (moniteur, BIOS,
 DOS 5.00, souris, XMS, EMS et serveur DPMI repris de Pasdows 95) : on
 les lance depuis l'invite de commandes OS/2 ou le bureau, ou par
-Systeme OS/2, DOS plein ecran (interpreteur COMMAND.COM integre).
+Systeme OS/2, Fenetre DOS ou DOS plein ecran (interpreteur COMMAND.COM
+integre). Fenetre DOS : la session s'affiche dans une fenetre de PM
+(PMVIOP.DLL), avec le clavier et la souris ; un programme qui passe en
+mode graphique passe en plein ecran et revient dans sa fenetre au
+retour du mode texte. Alt+F4, Alt+F5, Alt+F9, Alt+F10 et F10 restent a
+PM (menus du programme a la place, par exemple Debug - User screen).
 Plein ecran : au premier plan, la carte VGA est utilisee directement
 (modes graphiques par le vrai BIOS) ; Ctrl+Echap et Alt+Echap changent
 de session (un programme graphique est alors suspendu, son ecran est
@@ -865,8 +870,8 @@ Limites
   les trames quand un programme attend (pas d'interruption).
 - VirtualBox : un seul ecran ; pas de dossiers partages, de presse-
   papiers partage ni de mode transparent (seamless).
-- Sessions DOS : une seule a la fois, plein ecran seulement (pas de
-  fenetre DOS), disquette en lecture seule, pas de carte son emulee
+- Sessions DOS : une seule a la fois, modes graphiques en plein ecran
+  seulement (pas dans une fenetre), disquette en lecture seule, pas de carte son emulee
   (haut-parleur seulement), pas de modes VESA pour les programmes DOS,
   pas de zone haute (HMA) ; clients DPMI 16 bits (Borland) essayes.
 - VMware : un seul ecran, 32 bits par pel sur la SVGA II ; pas de
