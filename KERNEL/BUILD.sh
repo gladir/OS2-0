@@ -42,7 +42,8 @@
 #     TESTHPFS, TESTVIO, TESTMOU, TESTNLS, TESTKBD, TESTMON, TESTMSG,
 #     TESTNMP, TESTSES, TESTQUE, TESTPFS, TESTRM, TESTSM, TESTHLP,
 #     TESTUNI, TESTDRG, TESTWIN, TESTGPI, TESTMRG, TESTPIC, TESTSHA,
-#     TESTSPL, TESTVIOP et TESTMDM ; les sons de IMAGE/SONS (WAV) sont
+#     TESTSPL, TESTVIOP et TESTMDM, et TESTVDM (programme MS-DOS 16 bits
+#     de la session DOS, OS2PC -CD) ; les sons de IMAGE/SONS (WAV) sont
 #     copies sur le CD-ROM ;
 #  5. fabrique le CD-ROM : MAKEISO OS2CD.ISO /BOOT:OS2BOOT ... ;
 #  6. fabrique le CD-ROM d'installation IMAGE/OS2INST.ISO : memes fichiers,
@@ -142,6 +143,8 @@ for B in VBOXGST VMWTOOLS TCPIP32 E1000 PCNET; do "$W/os2pc" -Q "$ROOT/DLL/$B.PA
 echo "== Multimedia : MDM.DLL et pilotes SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL"
 for B in MDM SBAUDIO ICHAUDIO ESAUDIO; do "$W/os2pc" -Q "$ROOT/DLL/$B.PAS" "$W/cd/$B.DLL"; done
 "$W/os2pc" -Q "$ROOT/DLL/TESTMDM.PAS" "$W/cd/TESTMDM.EXE"
+echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"
+"$W/os2pc" -Q -CD "$ROOT/DLL/TESTVDM.PAS" "$W/cd/TESTVDM.EXE"
 cp "$ROOT"/IMAGE/SONS/*.WAV "$W/cd/"
 cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 

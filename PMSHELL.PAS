@@ -147,6 +147,7 @@ Const
   OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19; OB_COUNTRY = 23; IC_GLOBE = 20;
   OB_GAMES = 24; OB_GAME = 25; IC_CARDS = 21; IC_CHESS = 22; IC_TILES = 23;
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
+  OB_DOSFS = 28;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10;
   { controles du carnet des parametres }
@@ -828,6 +829,7 @@ Begin
     OB_DRIVES : Icon := IC_DRIVES;
     OB_CMD : Icon := IC_CMD;
     OB_CMDWIN : Icon := IC_CMD;
+    OB_DOSFS : Icon := IC_CMD;
     OB_SHUTDOWN : Icon := IC_SHUTDOWN;
     OB_WINLIST : Icon := IC_WINLIST;
     OB_INFO : Icon := IC_INFO;
@@ -1018,6 +1020,7 @@ Begin
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
+        Dummy := NewItem(V, IC_CMD, OB_DOSFS, 'DOS plein ecran', '');
       End;
     VK_MM :
       Begin
@@ -1916,6 +1919,7 @@ Begin
     OB_DATA : T := T + ' : fichier de donnees ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
     OB_CMD : T := T + ' : ' + Comspec + ' (plein ecran).';
     OB_CMDWIN : T := T + ' : ' + Comspec + ' dans une fenetre de PM (PMVIOP.DLL).';
+    OB_DOSFS : T := T + ' : session DOS plein ecran (machine virtuelle 8086, COMMAND.COM integre).';
   Else
     T := T + ' : objet du systeme.';
   End;
@@ -2094,6 +2098,13 @@ Begin
       Begin
         If Vw(V)^.Kind = VK_DIR Then P := Vw(V)^.Path Else P := '';
         RunWindow(P);
+      End;
+    OB_DOSFS :
+      Begin
+        { session DOS plein ecran : l'interpreteur de commandes integre
+          de la machine virtuelle DOS (COMMAND.COM) }
+        If Vw(V)^.Kind = VK_DIR Then P := Vw(V)^.Path Else P := '';
+        RunProgram('C:\COMMAND.COM', '', P, False);
       End;
     OB_SHUTDOWN : Shutdown;
     OB_WINLIST : OpenWinList;

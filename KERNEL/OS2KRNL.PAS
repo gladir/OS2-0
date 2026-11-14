@@ -189,6 +189,7 @@ Type
     Name     : String[127];
     IsIfs    : Boolean;      { fichier d'un volume IFS (HPFS.IFS...) }
     IfsDrv   : LongInt;      { unite (3 = D:) }
+    IsFlp    : Boolean;      { fichier de la disquette A: (Lba = 1er cluster) }
     Sffsi    : Array[0..63] Of Byte;   { SFT : partie du noyau }
     Sffsd    : Array[0..31] Of Byte;   { SFT : partie du pilote }
   End;
@@ -203,6 +204,8 @@ Type
     Owner    : LongInt;
     IsIfs    : Boolean;      { recherche sur un volume IFS }
     IfsDrv   : LongInt;
+    IsFlp    : Boolean;      { recherche sur la disquette A: (IsoIdx : entree) }
+    FlpClus  : LongInt;      { cluster du repertoire (0 : racine) }
     Fsfsi    : Array[0..7] Of Byte;
     Fsfsd    : Array[0..31] Of Byte;
   End;
@@ -2722,12 +2725,403 @@ End;
 Function IfsDrive(Path : String) : LongInt; Forward;
 Function IfsStat(Path : String; Var Attr, Size, Time : LongInt) : LongInt; Forward;
 
+{ ==================================================================== }
+{ Partie 10b - Lecteur de disquettes A: (765, DMA, FAT12)              }
+{ ==================================================================== }
+{ Le lecteur A: (declare dans le CMOS, registre 10h) : controleur 765
+  (ports 3F0h-3F7h, IRQ 6), DMA canal 2 par un tampon de 512 octets du
+  tas du noyau (sous 16 Mo, sans traverser une page de 64 Ko) ; debit
+  essaye a 500 kbit/s (1,44 Mo), puis 250 (720 Ko) et 300 (360 Ko),
+  geometrie d'apres le BPB (pilote repris de Pasdows 95). Systeme de
+  fichiers FAT12 (et FAT16) en lecture : repertoires, chaines de
+  clusters ; un changement de disquette (ligne DSKCHG, port 3F7h) est
+  detecte a chaque acces et le volume est relu. Les fichiers de A: sont
+  vus par toutes les API de fichiers du noyau (CMD, sessions DOS). }
+
+Var
+  FdOk, FdMounted, FdIrqF, Fat16 : Boolean;
+  FdRate, FdSpt, FdHeads, FdSecs, FdLastCyl, FdBuf, FdBlk : LongInt;
+  FdRes : Array[0..6] Of LongInt;
+  FlpSpc, FlpRes, FlpNFat, FlpRootN, FlpSpf, FlpRootLba, FlpDataLba, FlpClusN : LongInt;
+  FlpFat, FlpSec, FlpSecLba : LongInt;      { FAT entiere ; secteur en cache }
+  FlpLabel : String[11];
+
+Procedure IrqFloppy; Interrupt;
+Begin
+  FdIrqF := True;
+  Port[$20] := $20;
+End;
+
+Function FdWaitIrq : Boolean;
+Var T : LongInt;
+Begin
+  T := Ticks + 150;
+  While Not FdIrqF And (Ticks - T < 0) Do Idle;
+  FdWaitIrq := FdIrqF;
+  FdIrqF := False;
+End;
+
+Function FdOut(B : LongInt) : Boolean;
+Var N : LongInt;
+Begin
+  FdOut := False;
+  N := 0;
+  While (Port[$3F4] And $C0) <> $80 Do
+  Begin
+    Inc(N);
+    If N > 200000 Then Exit;
+  End;
+  Port[$3F5] := B;
+  FdOut := True;
+End;
+
+Function FdIn : LongInt;
+Var N : LongInt;
+Begin
+  FdIn := -1;
+  N := 0;
+  While (Port[$3F4] And $C0) <> $C0 Do
+  Begin
+    Inc(N);
+    If N > 200000 Then Exit;
+  End;
+  FdIn := Port[$3F5];
+End;
+
+Procedure FdSense;
+Begin
+  FdOut($08);
+  FdRes[0] := FdIn;
+  FdRes[1] := FdIn;
+End;
+
+Procedure FdReset;
+Var I : LongInt;
+Begin
+  FdIrqF := False;
+  Port[$3F2] := 0;
+  For I := 1 To 1000 Do Port[$80] := 0;
+  Port[$3F2] := $1C;
+  FdWaitIrq;
+  For I := 1 To 4 Do FdSense;
+  Port[$3F7] := FdRate;
+  FdOut($03); FdOut($DF); FdOut($02);
+  FdLastCyl := -1;
+End;
+
+Function FdSeek(C, H : LongInt) : Boolean;
+Begin
+  FdIrqF := False;
+  If C = 0 Then
+  Begin
+    FdOut($07); FdOut(0);
+  End
+  Else
+  Begin
+    FdOut($0F); FdOut(H Shl 2); FdOut(C);
+  End;
+  FdWaitIrq;
+  FdSense;
+  FdSeek := (FdRes[0] And $C0) = 0;
+  If (FdRes[0] And $C0) = 0 Then FdLastCyl := C Else FdLastCyl := -1;
+End;
+
+{ un secteur Lba lu par le tampon DMA }
+Function FdXfer(Lba, Buf : LongInt) : Boolean;
+Var C, H, S, T, I : LongInt;
+Begin
+  FdXfer := False;
+  If (FdSpt <= 0) Or (FdHeads <= 0) Then Exit;
+  C := Lba Div (FdSpt * FdHeads);
+  H := (Lba Div FdSpt) Mod FdHeads;
+  S := Lba Mod FdSpt + 1;
+  For T := 1 To 3 Do
+  Begin
+    If FdLastCyl <> C Then FdSeek(C, H);
+    { DMA canal 2 : 512 octets en FdBuf }
+    Port[$0A] := 6;
+    Port[$0C] := 0;
+    Port[$0B] := $46;
+    Port[$04] := FdBuf And $FF; Port[$04] := (FdBuf Shr 8) And $FF;
+    Port[$81] := (FdBuf Shr 16) And $FF;
+    Port[$05] := $FF; Port[$05] := 1;
+    Port[$0A] := 2;
+    FdIrqF := False;
+    FdOut($E6);
+    FdOut(H Shl 2);
+    FdOut(C); FdOut(H); FdOut(S); FdOut(2);
+    FdOut(FdSpt); FdOut($1B); FdOut($FF);
+    FdWaitIrq;
+    For I := 0 To 6 Do FdRes[I] := FdIn;
+    If (FdRes[0] And $C0) = 0 Then
+    Begin
+      MoveMem(FdBuf, Buf, 512);
+      FdXfer := True;
+      Exit;
+    End;
+    FdReset;
+  End;
+End;
+
+Function FdRate3(I : LongInt) : LongInt;
+Begin
+  If I = 0 Then FdRate3 := 0 Else If I = 1 Then FdRate3 := 2 Else FdRate3 := 1;
+End;
+
+{ secteur 0 de la disquette : debit et geometrie ; False sans disquette }
+Function FdProbe : Boolean;
+Var I : LongInt;
+Begin
+  FdProbe := False;
+  For I := 0 To 2 Do
+  Begin
+    FdRate := FdRate3(I);
+    FdReset;
+    FdSpt := 18; FdHeads := 2;
+    FdSeek(0, 0);
+    If FdXfer(0, FlpSec) Then
+    Begin
+      If (MemW[0:FlpSec + 11] = 512) And (MemW[0:FlpSec + 24] >= 8) And
+         (MemW[0:FlpSec + 24] <= 36) And (MemW[0:FlpSec + 26] >= 1) And
+         (MemW[0:FlpSec + 26] <= 2) Then
+      Begin
+        FdSpt := MemW[0:FlpSec + 24];
+        FdHeads := MemW[0:FlpSec + 26];
+        FdSecs := MemW[0:FlpSec + 19];
+        FdProbe := True;
+      End;
+      Exit;
+    End;
+  End;
+End;
+
+Procedure FdInit;
+Begin
+  FdOk := (CmosRead($10) Shr 4) <> 0;
+  FdMounted := False;
+  If Not FdOk Then Exit;
+  FdBlk := KAlloc(2048);
+  FdBuf := (FdBlk + 511) And Not 511;
+  If (FdBuf And $FFFF) > $FE00 Then FdBuf := FdBuf + 512;
+  FlpSec := KAlloc(512);
+  FlpFat := KAlloc(512 * 12);
+  FlpSecLba := -1;
+  FdRate := 0;
+  SetGate($26, LongInt(@IrqFloppy));
+  Port[$21] := Port[$21] And Not $40;
+End;
+
+{ monter la disquette : BPB et FAT }
+Function FlpMount : Boolean;
+Var I : LongInt;
+Begin
+  FlpMount := False;
+  FdMounted := False;
+  FlpSecLba := -1;
+  If Not FdProbe Then Exit;
+  FlpSpc := Mem[0:FlpSec + 13];
+  FlpRes := MemW[0:FlpSec + 14];
+  FlpNFat := Mem[0:FlpSec + 16];
+  FlpRootN := MemW[0:FlpSec + 17];
+  FlpSpf := MemW[0:FlpSec + 22];
+  If (FlpSpc = 0) Or (FlpSpf = 0) Or (FlpSpf > 12) Then Exit;
+  FlpLabel := '';
+  For I := 0 To 10 Do FlpLabel := FlpLabel + Chr(Mem[0:FlpSec + 43 + I]);
+  FlpRootLba := FlpRes + FlpNFat * FlpSpf;
+  FlpDataLba := FlpRootLba + (FlpRootN * 32 + 511) Div 512;
+  FlpClusN := (FdSecs - FlpDataLba) Div FlpSpc + 2;
+  Fat16 := FlpClusN > 4085;
+  For I := 0 To FlpSpf - 1 Do
+    If Not FdXfer(FlpRes + I, FlpFat + I * 512) Then Exit;
+  FdMounted := True;
+  FlpMount := True;
+End;
+
+{ disquette changee (ligne DSKCHG) ou pas encore lue : la relire }
+Function FlpReady : Boolean;
+Begin
+  FlpReady := False;
+  If Not FdOk Then Exit;
+  Port[$3F2] := $1C;
+  If (Port[$3F7] And $80) <> 0 Then
+  Begin
+    FdMounted := False;
+    FdSeek(1, 0);
+    FdSeek(0, 0);
+  End;
+  If Not FdMounted Then FlpMount;
+  FlpReady := FdMounted;
+End;
+
+Function FlpSector(Lba : LongInt) : LongInt;
+Begin
+  FlpSector := 0;
+  If FlpSecLba <> Lba Then
+  Begin
+    FlpSecLba := -1;
+    If Not FdXfer(Lba, FlpSec) Then Exit;
+    FlpSecLba := Lba;
+  End;
+  FlpSector := FlpSec;
+End;
+
+Function FlpNext(C : LongInt) : LongInt;
+Var O, V : LongInt;
+Begin
+  If Fat16 Then FlpNext := MemW[0:FlpFat + C * 2]
+  Else
+  Begin
+    O := C * 3 Div 2;
+    V := Mem[0:FlpFat + O] Or (Mem[0:FlpFat + O + 1] Shl 8);
+    If (C And 1) <> 0 Then V := V Shr 4 Else V := V And $FFF;
+    If V >= $FF8 Then V := $FFFF;
+    FlpNext := V;
+  End;
+End;
+
+{ entree Idx (32 octets) d'un repertoire (Clus 0 : racine) ; adresse
+  ou 0 a la fin }
+Function FlpDirEnt(Clus, Idx : LongInt) : LongInt;
+Var Lba, N, C, A : LongInt;
+Begin
+  FlpDirEnt := 0;
+  If Clus = 0 Then
+  Begin
+    If Idx >= FlpRootN Then Exit;
+    Lba := FlpRootLba + Idx Div 16;
+  End
+  Else
+  Begin
+    N := Idx Div (16 * FlpSpc);
+    C := Clus;
+    While (N > 0) And (C >= 2) And (C < $FF0) Do
+    Begin
+      C := FlpNext(C);
+      Dec(N);
+    End;
+    If (C < 2) Or (C >= $FF0) Then Exit;
+    Lba := FlpDataLba + (C - 2) * FlpSpc + (Idx Div 16) Mod FlpSpc;
+  End;
+  A := FlpSector(Lba);
+  If A = 0 Then Exit;
+  A := A + (Idx Mod 16) * 32;
+  If Mem[0:A] = 0 Then Exit;
+  FlpDirEnt := A;
+End;
+
+Function FlpEntName(A : LongInt) : String;
+Var N, E : String; I : LongInt;
+Begin
+  N := ''; E := '';
+  For I := 0 To 7 Do If Mem[0:A + I] <> 32 Then N := N + Chr(Mem[0:A + I]);
+  For I := 8 To 10 Do If Mem[0:A + I] <> 32 Then E := E + Chr(Mem[0:A + I]);
+  If Mem[0:A] = 5 Then N[1] := Chr($E5);
+  If E <> '' Then N := N + '.' + E;
+  FlpEntName := N;
+End;
+
+{ entree utilisable (pas supprimee, pas d'etiquette ni de nom long) }
+Function FlpEntOk(A : LongInt) : Boolean;
+Begin
+  FlpEntOk := (Mem[0:A] <> $E5) And ((Mem[0:A + 11] And 8) = 0);
+End;
+
+{ chercher A:\X\Y : cluster, attributs, taille, date ; Path complet }
+Function FlpLookup(Path : String; Var Clus, Attr, Size, Time : LongInt) : Boolean;
+Var Rest, Comp : String; P, I, A, C : LongInt; Found : Boolean;
+Begin
+  FlpLookup := False;
+  If Not FlpReady Then Exit;
+  Clus := 0; Attr := $10; Size := 0; Time := 0;
+  Rest := Copy(Path, 4, 255);
+  While Rest <> '' Do
+  Begin
+    P := Pos('\', Rest);
+    If P > 0 Then
+    Begin
+      Comp := Copy(Rest, 1, P - 1);
+      Rest := Copy(Rest, P + 1, 255);
+    End
+    Else
+    Begin
+      Comp := Rest;
+      Rest := '';
+    End;
+    If Comp = '' Then Continue;
+    If (Attr And $10) = 0 Then Exit;
+    C := Clus;
+    Found := False;
+    I := 0;
+    A := FlpDirEnt(C, I);
+    While (A <> 0) And Not Found Do
+    Begin
+      If FlpEntOk(A) And (FlpEntName(A) = Comp) Then
+      Begin
+        Found := True;
+        Clus := MemW[0:A + 26];
+        Attr := Mem[0:A + 11];
+        Size := MemL[0:A + 28];
+        Time := (MemW[0:A + 24] Shl 16) Or MemW[0:A + 22];
+      End
+      Else
+      Begin
+        Inc(I);
+        A := FlpDirEnt(C, I);
+      End;
+    End;
+    If Not Found Then Exit;
+  End;
+  FlpLookup := True;
+End;
+
+Function FlpPath(Path : String) : Boolean;
+Begin
+  FlpPath := FdOk And (Length(Path) >= 2) And (Path[1] = 'A') And (Path[2] = ':');
+End;
+
+{ lire N octets du fichier (1er cluster Clus, taille Size) a Pos }
+Function FlpRead(Clus, Size, P0, Buf, N : LongInt) : LongInt;
+Var Got, CB, K, C, Ofs, Chunk, A, Lba : LongInt;
+Begin
+  FlpRead := -1;
+  If Not FlpReady Then Exit;
+  If P0 + N > Size Then N := Size - P0;
+  Got := 0;
+  CB := FlpSpc * 512;
+  While Got < N Do
+  Begin
+    K := (P0 + Got) Div CB;
+    C := Clus;
+    While (K > 0) And (C >= 2) And (C < $FF0) Do
+    Begin
+      C := FlpNext(C);
+      Dec(K);
+    End;
+    If (C < 2) Or (C >= $FF0) Then Break;
+    Ofs := (P0 + Got) Mod CB;
+    Lba := FlpDataLba + (C - 2) * FlpSpc + Ofs Div 512;
+    A := FlpSector(Lba);
+    If A = 0 Then Exit;
+    Chunk := 512 - Ofs Mod 512;
+    If Chunk > N - Got Then Chunk := N - Got;
+    MoveMem(A + Ofs Mod 512, Buf + Got, Chunk);
+    Got := Got + Chunk;
+  End;
+  FlpRead := Got;
+End;
+
 { Existence d'un chemin (volume IFS, ou disque virtuel puis CD-ROM) }
 Function PathInfo(Path : String; Var Attr, Size, Time, Lba, RamIdx : LongInt) : Boolean;
 Var R : LongInt;
 Begin
   PathInfo := False;
   RamIdx := -1; Lba := 0;
+  If FlpPath(Path) Then
+  Begin
+    RamIdx := -3;
+    PathInfo := FlpLookup(Path, Lba, Attr, Size, Time);
+    Exit;
+  End;
   If IfsDrive(Path) >= 0 Then
   Begin
     RamIdx := -2;
@@ -2927,7 +3321,8 @@ End;
 { Unite C: (CD-ROM + disque virtuel) et volumes IFS montes }
 Function DriveOk(Path : String) : Boolean;
 Begin
-  DriveOk := ((Length(Path) >= 3) And (Path[1] = 'C')) Or (IfsDrive(Path) >= 0);
+  DriveOk := ((Length(Path) >= 3) And (Path[1] = 'C')) Or (IfsDrive(Path) >= 0) Or
+             ((Length(Path) >= 3) And FlpPath(Path) And FlpReady);
 End;
 
 Function FileSlot(H : LongInt) : LongInt;
@@ -2952,6 +3347,7 @@ Begin
       Files[I].Owner := CurProc;
       Files[I].Name := '';
       Files[I].IsIfs := False;
+      Files[I].IsFlp := False;
       NewFileSlot := I;
       Exit;
     End;
@@ -3783,9 +4179,17 @@ Begin
     LastError := ErrFileExists;
     Exit;
   End;
+  If FlpPath(Path) And (Not Exists Or Wr Or (Disp = 2) Or (Disp = 5)) Then
+  Begin
+    { disquette A: : lecture seule }
+    Files[H].Used := False;
+    If Exists Then LastError := 19 Else LastError := ErrFileNotFound;
+    Exit;
+  End;
   If Exists And (Ram < 0) Then
   Begin
-    { fichier du CD-ROM : lecture seule }
+    { fichier du CD-ROM ou de la disquette : lecture seule }
+    Files[H].IsFlp := Ram = -3;
     If Wr Or (Disp = 2) Or (Disp = 5) Then
     Begin
       Files[H].Used := False;
@@ -3905,6 +4309,17 @@ Begin
     End
     Else If Files[F].IsNul Or Files[F].IsPrn Then
       Got := 0
+    Else If Files[F].IsFlp Then
+    Begin
+      Got := FlpRead(Files[F].Lba, Files[F].Size, Files[F].Pos, Buf, N);
+      If Got < 0 Then
+      Begin
+        Got := 0;
+        LastError := ErrNotReady;
+        ReadFile := 0;
+      End;
+      Files[F].Pos := Files[F].Pos + Got;
+    End
     Else If Files[F].IsRam Then
     Begin
       Ram := Files[F].RamIdx;
@@ -4182,6 +4597,11 @@ Var Path : String; R, D, A : LongInt;
 Begin
   SetFileAttributesA := 0;
   Path := FullPath(PStr(PName));
+  If FlpPath(Path) Then
+  Begin
+    LastError := 19;          { disquette protegee en ecriture (lecture seule) }
+    Exit;
+  End;
   D := IfsDrive(Path);
   If D >= 0 Then
   Begin
@@ -4209,6 +4629,11 @@ Var Path : String; R, I : LongInt;
 Begin
   DeleteFileA := 0;
   Path := FullPath(PStr(PName));
+  If FlpPath(Path) Then
+  Begin
+    LastError := 19;          { disquette protegee en ecriture (lecture seule) }
+    Exit;
+  End;
   If IfsDrive(Path) >= 0 Then
   Begin
     R := IfsPathOp(Ifss[IfsOf(IfsDrive(Path))].FDelete, FullPathOf(PName));
@@ -4244,6 +4669,11 @@ Begin
   MoveFileA := 0;
   Src := FullPath(PStr(PSrc));
   Dst := FullPath(PStr(PDst));
+  If FlpPath(Src) Or FlpPath(Dst) Then
+  Begin
+    LastError := 19;          { disquette protegee en ecriture (lecture seule) }
+    Exit;
+  End;
   If (IfsDrive(Src) >= 0) Or (IfsDrive(Dst) >= 0) Then
   Begin
     If IfsDrive(Src) <> IfsDrive(Dst) Then
@@ -4287,6 +4717,11 @@ Var Path : String; A, S, T, L, R : LongInt;
 Begin
   CreateDirectoryA := 0;
   Path := FullPath(PStr(PName));
+  If FlpPath(Path) Then
+  Begin
+    LastError := 19;          { disquette protegee en ecriture (lecture seule) }
+    Exit;
+  End;
   If IfsDrive(Path) >= 0 Then
   Begin
     IfsPrep(IfsDrive(Path), FullPathOf(PName));
@@ -4324,6 +4759,11 @@ Var Path, Pfx : String; R, I : LongInt;
 Begin
   RemoveDirectoryA := 0;
   Path := FullPath(PStr(PName));
+  If FlpPath(Path) Then
+  Begin
+    LastError := 19;          { disquette protegee en ecriture (lecture seule) }
+    Exit;
+  End;
   If IfsDrive(Path) >= 0 Then
   Begin
     If UpStr(Path) = UpStr(CurDir) Then
@@ -4415,6 +4855,20 @@ Var Root : String;
 Begin
   GetDiskFreeSpaceA := 0;
   If PRoot <> 0 Then Root := UpStr(PStr(PRoot)) Else Root := CurDir;
+  If FlpPath(Root) Then
+  Begin
+    If Not FlpReady Then
+    Begin
+      LastError := ErrNotReady;
+      Exit;
+    End;
+    If PSpc <> 0 Then MemL[0:PSpc] := FlpSpc;
+    If PBps <> 0 Then MemL[0:PBps] := 512;
+    If PFree <> 0 Then MemL[0:PFree] := 0;
+    If PTotal <> 0 Then MemL[0:PTotal] := FlpClusN - 2;
+    GetDiskFreeSpaceA := 1;
+    Exit;
+  End;
   If IfsDrive(Root) >= 0 Then
   Begin
     IfsArg[0] := 0; IfsArg[1] := IfsDrive(Root); IfsArg[2] := LongInt(@IfsInfo);
@@ -4463,6 +4917,28 @@ Function FindStep(F, P : LongInt) : Boolean;
 Var Nm, Pfx, Rest : String; Lba, Size, Attr, Time, DLba, DSize, DAttr, DTime, I : LongInt;
 Begin
   FindStep := False;
+  { disquette A: }
+  If Finds[F].IsFlp Then
+  Begin
+    If Not FlpReady Then Exit;
+    I := FlpDirEnt(Finds[F].FlpClus, Finds[F].IsoIdx);
+    While I <> 0 Do
+    Begin
+      Inc(Finds[F].IsoIdx);
+      If FlpEntOk(I) Then
+      Begin
+        Nm := FlpEntName(I);
+        If (Nm <> '.') And (Nm <> '..') And MatchMask(Nm, Finds[F].Mask) Then
+        Begin
+          FillFindData(P, Nm, Mem[0:I + 11], MemL[0:I + 28], (MemW[0:I + 24] Shl 16) Or MemW[0:I + 22]);
+          FindStep := True;
+          Exit;
+        End;
+      End;
+      I := FlpDirEnt(Finds[F].FlpClus, Finds[F].IsoIdx);
+    End;
+    Exit;
+  End;
   { 1) entrees du CD-ROM }
   If Finds[F].IsoIdx >= 0 Then
   Begin
@@ -4540,7 +5016,7 @@ Begin
 End;
 
 Function FindFirstFileA(PName, P : LongInt) : LongInt;
-Var Path, Dir, Mask : String; F, I : LongInt;
+Var Path, Dir, Mask : String; F, I, C1, A1, S1, T1 : LongInt;
 Begin
   FindFirstFileA := -1;
   Path := FullPath(PStr(PName));
@@ -4577,6 +5053,13 @@ Begin
   End;
   Finds[F].Used := True;
   Finds[F].IsIfs := False;
+  Finds[F].IsFlp := False;
+  If FlpPath(Dir) Then
+  Begin
+    Finds[F].IsFlp := True;
+    Finds[F].FlpClus := 0;
+    If FlpLookup(Dir, C1, A1, S1, T1) Then Finds[F].FlpClus := C1;
+  End;
   Finds[F].Dir := Dir;
   Finds[F].Mask := Mask;
   Finds[F].IsoIdx := 0;
@@ -7655,6 +8138,7 @@ Function GetLogicalDrives : LongInt;
 Var R, D : LongInt;
 Begin
   R := 4;
+  If FdOk Then R := R Or 1;
   For D := 0 To 25 Do
     If IfsVols[D].Mounted Then R := R Or (1 Shl D);
   GetLogicalDrives := R;
@@ -9692,7 +10176,7 @@ End;
 { Ouvrir un fichier (Disp de CreateFile) ; entree de la table ou -1
   (VmLastErr) }
 Function VmOpen(Path : String; Mode, Disp : LongInt) : LongInt;
-Var D, H : LongInt; Wr : Boolean;
+Var D, H, S : LongInt; Wr : Boolean;
 Begin
   VmOpen := -1;
   D := VmDevName(Path);
@@ -9703,14 +10187,13 @@ Begin
   End;
   If D > 0 Then
   Begin
-    VmOpen := SftNew(0, D, Mode);
-    If VmOpen < 0 Then VmLastErr := 4;
+    S := SftNew(0, D, Mode);
+    VmOpen := S;
+    If S < 0 Then VmLastErr := 4;
     Exit;
   End;
   Wr := ((Mode And 3) <> 0) Or (Disp <> 3);
-  If VmTrace Then VmLog('OPEN1 ' + Path);
   H := KOpenFile(Path, Wr, Disp);
-  If VmTrace Then VmLog('OPEN2 ' + IntStr(H));
   If (H = INVALID_HANDLE) And ((Mode And 3) = 2) And (Disp = 3) Then
   Begin
     { lecture et ecriture refusees (CD-ROM...) : lecture seule }
@@ -9722,8 +10205,9 @@ Begin
     VmLastErr := VmErrOf(2);
     Exit;
   End;
-  VmOpen := SftNew(H, 0, Mode);
-  If VmOpen < 0 Then VmLastErr := 4;
+  S := SftNew(H, 0, Mode);
+  VmOpen := S;
+  If S < 0 Then VmLastErr := 4;
 End;
 
 Procedure VmOpenH(Path : String; Mode, Disp : LongInt);
@@ -10825,7 +11309,15 @@ Begin
   If Mem[0:A + $11] = 0 Then
   Begin
     Mem[0:A + $11] := 1;
-    VmConStr(#13#10 + VmL('Tapez EXIT pour revenir au programme.',
+    If VmCurPsp = VmTopPsp Then
+      { session DOS (DOS plein ecran du bureau, COMMAND de CMD.EXE) }
+      VmConStr(#13#10 + VmL('Session DOS d''OS/2-0 (DOS 5.00). Tapez EXIT pour la fermer.',
+               'OS/2-0 DOS session (DOS 5.00). Type EXIT to close it.',
+               'DOS-Sitzung von OS/2-0 (DOS 5.00). EXIT beendet sie.',
+               'Sessione DOS di OS/2-0 (DOS 5.00). Digitare EXIT per chiuderla.',
+               'Sesion DOS de OS/2-0 (DOS 5.00). Escriba EXIT para cerrarla.') + #13#10)
+    Else
+      VmConStr(#13#10 + VmL('Tapez EXIT pour revenir au programme.',
              'Type EXIT to return to the program.',
              'Geben Sie EXIT ein, um zurueckzukehren.',
              'Digitare EXIT per tornare al programma.',
@@ -15056,6 +15548,7 @@ BEGIN
   InitPaging;
   InitSessions;
   VmGrabFont;
+  FdInit;
   InitExports;
   RootLba := MemL[0:BootInfo + 4];
   RootSize := MemL[0:BootInfo + 8];
