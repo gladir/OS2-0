@@ -482,7 +482,7 @@ Begin
     CF_PCMCIA : S := TxtNone;
     CF_CDROM :
       Case V Of
-        0 : S := 'IDE (ATAPI)';
+        0 : S := 'IDE/SATA (ATAPI)';
         1 : S := L('Autre', 'Other', 'Andere', 'Otro', 'Altro', 'Tjet'#137'r');
       Else
         S := L('Aucun', 'None', 'Keines', 'Ninguno', 'Nessuno', 'Asnj'#137);
@@ -1280,9 +1280,9 @@ Begin
     'Instalim i thjesht'#137': disku i par'#137' dhe zgjedhjet e paracaktuara. Instalim i avancuar: ju ndani diskun '
     + 'dhe zgjidhni formatimin dhe p'#137'rb'#137'r'#137'sit.'), CLR_BLACK);
   If NDiskT = 0 Then
-    H := WrapAt(Hps, 30, CH - 110, (CW - 60) Div 8, L('Aucun disque dur IDE n''a '#130't'#130' trouv'#130'.',
-         'No IDE hard disk was found.', 'Keine IDE-Festplatte gefunden.', 'No se encontr'#162' ning'#163'n disco duro IDE.',
-         'Nessun disco fisso IDE trovato.', 'Nuk u gjet asnj'#137' disk IDE.'), CLR_DARKRED);
+    H := WrapAt(Hps, 30, CH - 110, (CW - 60) Div 8, L('Aucun disque dur IDE ou SATA n''a '#130't'#130' trouv'#130'.',
+         'No IDE or SATA hard disk was found.', 'Keine IDE- oder SATA-Festplatte gefunden.', 'No se encontr'#162' ning'#163'n disco duro IDE o SATA.',
+         'Nessun disco fisso IDE o SATA trovato.', 'Nuk u gjet asnj'#137' disk IDE ose SATA.'), CLR_DARKRED);
 End;
 
 Procedure PaintConfig(Hps : LongInt);
@@ -1341,8 +1341,8 @@ Begin
     + 'hap'#137'sir'#137' t'#137' lir'#137', shkruani madh'#137'sin'#137' n'#137' MB dhe zgjidhni Krijo.'), CLR_DARKBLUE);
   If NDiskT = 0 Then
   Begin
-    TextAt(Hps, 16, 60, L('Aucun disque dur IDE.', 'No IDE hard disk.', 'Keine IDE-Festplatte.', 'Ning'#163'n disco duro IDE.',
-           'Nessun disco fisso IDE.', 'Asnj'#137' disk IDE.'), CLR_DARKRED, CLR_PALEGRAY);
+    TextAt(Hps, 16, 60, L('Aucun disque dur IDE ou SATA.', 'No IDE or SATA hard disk.', 'Keine IDE- oder SATA-Festplatte.', 'Ning'#163'n disco duro IDE o SATA.',
+           'Nessun disco fisso IDE o SATA.', 'Asnj'#137' disk IDE ose SATA.'), CLR_DARKRED, CLR_PALEGRAY);
     Exit;
   End;
   S := L('Disque ', 'Disk ', 'Platte ', 'Disco ', 'Disco ', 'Disku ') + IStr(DiskCur + 1) + ' / ' + IStr(NDiskT) + ' : ' +
@@ -1754,9 +1754,9 @@ Begin
   ScanDisks;
   If NDiskT = 0 Then
   Begin
-    CopyErr := L('Aucun disque dur IDE n''a '#130't'#130' trouv'#130'.', 'No IDE hard disk was found.',
-                 'Keine IDE-Festplatte gefunden.', 'No se encontr'#162' ning'#163'n disco duro IDE.',
-                 'Nessun disco fisso IDE trovato.', 'Nuk u gjet asnj'#137' disk IDE.');
+    CopyErr := L('Aucun disque dur IDE ou SATA n''a '#130't'#130' trouv'#130'.', 'No IDE or SATA hard disk was found.',
+                 'Keine IDE- oder SATA-Festplatte gefunden.', 'No se encontr'#162' ning'#163'n disco duro IDE o SATA.',
+                 'Nessun disco fisso IDE o SATA trovato.', 'Nuk u gjet asnj'#137' disk IDE ose SATA.');
     Exit;
   End;
   DiskCur := 0;
