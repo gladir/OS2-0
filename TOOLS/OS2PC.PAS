@@ -3476,6 +3476,20 @@ Begin
       SymAdd := Dup;
       Exit;
     End
+    { Variable du RTL (TextAttr, FileMode...) redeclaree par le programme : }
+    { la declaration du programme la remplace (stockage propre)           }
+    Else If (SymTab[Dup].UnitName = 'RTLVAR') And (SymTab[Dup].Kind = SK_VAR) Then
+    Begin
+      SymTab[Dup].MangledName := SymMangle(Up, Kind);
+      SymTab[Dup].Kind        := Kind;
+      SymTab[Dup].TypeIdx     := TIdx;
+      SymTab[Dup].Offset      := 0;
+      SymTab[Dup].IsGlobal    := (CurScopeLevel = 0);
+      SymTab[Dup].UnitName    := '';
+      SymTab[Dup].ImmVal      := 0;
+      SymAdd := Dup;
+      Exit;
+    End
     { Permettre qu un proc/func masque un type pre-declare }
     Else If (SymTab[Dup].Kind = SK_TYPE) And
             (Kind In [SK_PROC, SK_FUNC, SK_VAR]) Then
@@ -3589,6 +3603,19 @@ Var
     Begin
       SymTab[R].IsGlobal  := True;
       SymTab[R].IsExternal := True;
+    End;
+  End;
+
+  { Registrer une variable du RTL sur une donnee du runtime (Label) }
+  Procedure RegRtlVar(Const Name, Lbl : TString; TIdx : Integer);
+  Var R : Integer;
+  Begin
+    R := SymAdd(Name, SK_VAR, TIdx);
+    If R >= 0 Then
+    Begin
+      SymTab[R].MangledName := Lbl;
+      SymTab[R].IsGlobal    := True;
+      SymTab[R].UnitName    := 'RTLVAR';
     End;
   End;
 
@@ -3844,6 +3871,22 @@ Begin
     SymTab[DosSymIdx].MangledName := 'DOSERROR';
     SymTab[DosSymIdx].IsGlobal    := True;
   End;
+
+  { Variables des unites System et Crt, sur les donnees du runtime :  }
+  { WindMax et TextAttr sont tenues a jour par Window, TextColor...  }
+  { (sinon : variables implicites a 0, Hi(WindMax) = 0 pour MORE).    }
+  { Un programme qui declare une variable du meme nom la remplace     }
+  { (le noyau a son propre TextAttr) : voir SymAdd, marque RTLVAR.    }
+  RegRtlVar('TEXTATTR', 'TEXTATTR', TY_IDX_BYTE);
+  RegRtlVar('WINDMIN', 'WINDMIN', TY_IDX_WORD);
+  RegRtlVar('WINDMAX', 'WINDMAX', TY_IDX_WORD);
+  RegRtlVar('LASTMODE', 'LASTMODE', TY_IDX_WORD);
+  RegRtlVar('DIRECTVIDEO', 'DIRECTVIDEO', TY_IDX_BOOLEAN);
+  RegRtlVar('CHECKBREAK', 'CHECKBREAK', TY_IDX_BOOLEAN);
+  RegRtlVar('CHECKEOF', 'CHECKEOF', TY_IDX_BOOLEAN);
+  RegRtlVar('CHECKSNOW', 'CHECKSNOW', TY_IDX_BOOLEAN);
+  RegRtlVar('FILEMODE', 'FILEMODE', TY_IDX_BYTE);
+  RegRtlVar('INOUTRES', 'FILE_IOERR', TY_IDX_INTEGER);
 
   { ---------------------------------------------------------- }
   { Procedures et fonctions de l unite Graph (TODO 20)         }
@@ -7234,14 +7277,19 @@ Begin
                (StrUpperCase(TokenPool[I].Val) = 'OF') Then
               Inc(I);
             BaseTN := 'BYTE';
-            If (I < TokenCount) And
+            BTIdx := -1;
+            If TokIsPunct(I, '(') Then
+              { SET OF (a, b, c) : les valeurs de l'enumeration sont des }
+              { constantes (0, 1, 2...), comme pour TYPE T = (a, b, c)   }
+              BTIdx := ParseTypeExprAt(I)
+            Else If (I < TokenCount) And
                ((TokenPool[I].Kind = TK_IDENT) Or
                 (TokenPool[I].Kind = TK_KEYWORD)) Then
             Begin
               BaseTN := StrUpperCase(TokenPool[I].Val);
               Inc(I);
             End;
-            BTIdx := TypeFindByName(BaseTN);
+            If BTIdx < 0 Then BTIdx := TypeFindByName(BaseTN);
             If BTIdx < 0 Then BTIdx := TY_IDX_BYTE;
             TIdx := TypeAdd(TYK_SET, '', 32, 4, False, BTIdx);
 
@@ -9416,14 +9464,18 @@ Begin
               Inc(I);
 
             BaseTN := 'BYTE';
-            If (I < TokenCount) And
+            BTIdx := -1;
+            If TokIsPunct(I, '(') Then
+              { SET OF (a, b, c) : valeurs de l'enumeration declarees }
+              BTIdx := ParseTypeExprAt(I)
+            Else If (I < TokenCount) And
                ((TokenPool[I].Kind = TK_IDENT) Or
                 (TokenPool[I].Kind = TK_KEYWORD)) Then
             Begin
               BaseTN := StrUpperCase(TokenPool[I].Val);
               Inc(I);
             End;
-            BTIdx := TypeFindByName(BaseTN);
+            If BTIdx < 0 Then BTIdx := TypeFindByName(BaseTN);
             If BTIdx < 0 Then BTIdx := TY_IDX_BYTE;
 
             TIdx := TypeAdd(TYK_SET, TName, 32, 4, False, BTIdx);
@@ -30279,7 +30331,15 @@ Begin
   EmitInstr('JNE ' + TP_RT_PFX + 'TF_FO_NR');
   EmitInstr('CMP DWORD PTR [EBX+' + IntToStr_(TFR_RECSIZE) + '],0');
   EmitInstr('JE ' + TP_RT_PFX + 'TF_FO_GO');
+  EmitComment('fichier type ou non type : acces selon FileMode (0 lecture, 1 ecriture, 2 les deux)');
   EmitInstr('MOV ESI,0C0000000h');
+  EmitInstr('CMP BYTE PTR [FILEMODE],0');
+  EmitInstr('JNE ' + TP_RT_PFX + 'TF_FO_FM1');
+  EmitInstr('MOV ESI,80000000h');
+  EmitLabel(TP_RT_PFX + 'TF_FO_FM1');
+  EmitInstr('CMP BYTE PTR [FILEMODE],1');
+  EmitInstr('JNE ' + TP_RT_PFX + 'TF_FO_GO');
+  EmitInstr('MOV ESI,40000000h');
   EmitInstr('JMP ' + TP_RT_PFX + 'TF_FO_GO');
   EmitLabel(TP_RT_PFX + 'TF_FO_NR');
   EmitInstr('MOV ESI,40000000h');
@@ -42068,6 +42128,7 @@ Begin
   BcDefineDataLabel('FILE_WRHND');  BcDataD(0);
   BcDefineDataLabel('FILE_WRFLG');  BcDataD(0);
   BcDefineDataLabel('FILE_IOERR');  BcDataD(0);
+  BcDefineDataLabel('FILEMODE');    BcDataD(2);   { FileMode : 0 lecture, 1 ecriture, 2 les deux }
   BcDefineDataLabel('STDIN_EOF');    BcDataD(0);
   BcDefineDataLabel('DIR_NAMEBUF');   For I := 1 To 260 Do BcDataB(0);
   BcDefineDataLabel('DIR_DRVBUF');    BcDataD(0);
