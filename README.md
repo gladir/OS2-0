@@ -105,6 +105,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Cette commande permet de trier une fichier texte ASCII et de retourner le résultat. Cette commande est un équivalent de la commande du DOS.</td>
 		</tr>
 		<tr>
+			<td><b>TASKMGR.PAS</b></td>
+			<td>Gestionnaire des tâches de Presentation Manager : applications, processus, performances (processeur et mémoire), réseau et utilisateurs, dans le style du Gestionnaire des tâches de Windows XP avec l'apparence d'OS/2 Warp 3.</td>
+		</tr>
+		<tr>
 			<td><b>TREE.PAS</b></td>
 			<td>Cette commande permet d'afficher un arbre de répertoire.</td>
 		</tr>
@@ -797,7 +801,49 @@ Pour exécuter les vrais programmes d'OS/2 (pas seulement ceux compilés par OS2
 	<tr><td><b>NE</b> (OS/2 1.x, 16 bits ; partie 13d du noyau et <b>DLL/API16.PAS</b>)</td><td>Comme OS/2 2.x, OS/2-0 exécute les programmes 16 bits d'OS/2 1.x : segments (normaux et itérés) dans la fenêtre du processus, un sélecteur de la LDT (16 bits, anneau 3) par segment, corrections internes et importations (DOSHUGEINCR et DOSHUGESHIFT sont des constantes). Le programme s'exécute à l'<b>anneau 3</b> (pile de l'anneau 0 par fil dans la TSS) ; chaque fonction du système qu'il importe reçoit une souche 16 bits (<code>mov ax,n ; call far porte:0 ; retf taille</code>) et une <b>porte d'appel</b> de la LDT mène au noyau, qui appelle la fonction de <b>API16.DLL</b> : arguments lus sur la pile 16 bits (convention Pascal), pointeurs 16:16 convertis (KrnTaskCtl 30), structures de 16 bits traduites (FILESTATUS, FILEFINDBUF...), puis appel des fonctions 32 bits de DOSCALLS, VIOCALLS, KBDCALLS, NLS et MSG. DosAllocSeg, DosReallocSeg, DosFreeSeg, DosCreateThread (fils 16 bits, DS et ES du créateur) et DosExit sont faits par le noyau ; sémaphores en mémoire (DosSemSet, DosSemClear, DosSemWait), fichiers (DosOpen2, DosRead, DosWrite, DosChgFilePtr, DosFindFirst2, DosQPathInfo, DosSetFileInfo...), messages liés au programme (DosGetMessage avec segment de messages), écran et clavier VIO. Environ 50 fonctions sont fournies ; une fonction absente est signalée dans le journal du noyau.</td></tr>
 </table>
 
-<b>IBM Works</b> (Footprint Works, disquettes WORKS01 à WORKS05) sert d'essai : son <b>INSTALL.EXE</b> (LX, Presentation Manager) démarre depuis la disquette A: et affiche ses boîtes de dialogue, extrait son décompresseur <b>FPWTUPCK.EXE</b> — un programme <b>16 bits</b> d'OS/2 1.x avec trois fils et des sémaphores — qui décompresse INSTALL.IN_ (FPWinsts.exe, FPWipii.dll, FPWidlds.exe, aides, messages...), puis lance l'utilitaire d'installation <b>FPWIDLDS.EXE</b> par DosStartSession. Il manque encore, pour aller au bout : les objets <b>16:16</b> des programmes LX et les transitions 32 bits ↔ 16 bits (DosFlatToSel, DosSelToFlat, sélecteurs « en tuiles »), puis, pour le bureau d'IBM Works, les classes SOM du Workplace Shell (PMWP.DLL : WinCreateObject, WinSetObjectData...). Le travail continue ; chaque étape franchie est vérifiée par la régression.
+<h3>IBM Works sous OS/2-0</h3>
+
+<b>IBM Works</b> (Footprint Works, disquettes WORKS01 à WORKS05), la suite bureautique livrée avec OS/2 Warp 3, sert d'essai grandeur nature pour les vrais programmes d'OS/2. Ses archives <code>.@</code> se décompressent sous OS/2-0 avec son propre décompresseur <b>FPWTUPCK.EXE</b> — un programme <b>16 bits</b> d'OS/2 1.x avec trois fils et des sémaphores — puis son gestionnaire d'informations personnelles <b>FPWPIM.EXE</b> (LX, Presentation Manager, avec ses DLL FEN20PDE, FPWPIMR...) s'exécute sur le bureau d'OS/2-0, dans ses cinq modes : carnet de rendez-vous (<code>-M</code>), bottin (<code>-P</code>), bloc-notes (<code>-N</code>), agenda (<code>-G</code>) et liste des tâches (<code>-T</code>).
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/IBMWORKS_RDV.png" width="400" alt="IBM Works : carnet de rendez-vous"><br><i>FPWPIM -M : carnet de rendez-vous de la semaine</i></td>
+		<td align="center"><img src="IMAGE/IBMWORKS_AGENDA.png" width="400" alt="IBM Works : agenda"><br><i>FPWPIM -G : agenda du mois (alarmes, tâches, lancements)</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/IBMWORKS_TACHES.png" width="400" alt="IBM Works : liste des tâches"><br><i>FPWPIM -T : liste des tâches</i></td>
+		<td align="center"><img src="IMAGE/IBMWORKS_BOTTIN.png" width="400" alt="IBM Works : bottin"><br><i>FPWPIM -P : bottin (carnet d'adresses)</i></td>
+	</tr>
+</table>
+
+Pour y arriver, OS/2-0 a reçu : les programmes NE 16 bits (ci-dessus) et <b>API16.DLL</b> (dont DosGetMessage avec les segments de messages MSGBIND), les tables d'aide à 8 octets de <b>HELPMGR.DLL</b>, les tables de couleurs logiques (GpiCreateLogColorTable) dans PMWIN, <b>PMWP.DLL</b> (objets du Workplace Shell : WinCreateObject, WinSetObjectData, WinQueryObject, WinOpenObject, WinLoadFileIcon..., objets conservés dans OS2.INI), <b>PMCTLS.DLL</b> (dialogues standard WinFileDlg et WinFontDlg), SplQueryQueue et SplEnumQueue dans PMSPL, <code>LIBPATH=.;C:\;</code> dans CONFIG.SYS, les fichiers de commandes de CMD.EXE et la copie avec * et ?. L'installation (<b>INSTALL.EXE</b>) démarre depuis la disquette A:, décompresse ses fichiers et lance <b>FPWIDLDS.EXE</b>, qui demande encore les objets <b>16:16</b> des programmes LX (DosFlatToSel, DosSelToFlat) ; le traitement de texte et le tableur d'IBM Works (FPWWP, FPWSS) demandent en plus les classes SOM du Workplace Shell. Le travail continue ; chaque étape franchie est vérifiée par la régression.
+
+<h3>Gestionnaire des tâches (TASKMGR.PAS)</h3>
+
+L'OS/2 d'origine n'avait <b>pas de gestionnaire des tâches</b> : la Liste des fenêtres (Ctrl+Échap) permettait seulement de passer d'un programme à l'autre ou d'en fermer un, sans rien dire de l'occupation du processeur ni de la mémoire. OS/2-0 en ajoute un : <b>TASKMGR.PAS</b> (TASKMGR.EXE) reprend la présentation et les fonctions du Gestionnaire des tâches de Windows XP, avec l'apparence d'OS/2 Warp 3 (fond gris, reliefs, onglets de carnet, cadres de groupe gravés, boutons de PM). On l'ouvre par le menu contextuel du bureau (<b>Gestionnaire des tâches</b>) ou par son objet du dossier <b>Système OS/2</b> (icône d'un moniteur avec sa courbe).
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/TASKMGR_PERF.png" width="400" alt="Gestionnaire des tâches : Performances"><br><i>Performances : utilisation du processeur (temps du noyau en rouge) et de la mémoire, pendant le lancement de Klondike puis de Mahjongg</i></td>
+		<td align="center"><img src="IMAGE/TASKMGR_PROC.png" width="400" alt="Gestionnaire des tâches : Processus"><br><i>Processus : nom, PID, processeur, mémoire, fils et session de chaque processus, triés par colonne</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/TASKMGR_RESEAU.png" width="400" alt="Gestionnaire des tâches : Réseau"><br><i>Réseau : trames par seconde de l'interface lan0 (carte Intel PRO/1000, adresse obtenue par DHCP)</i></td>
+		<td></td>
+	</tr>
+</table>
+
+<table>
+	<tr><th>Onglet</th><th>Contenu</th></tr>
+	<tr><td><b>Applications</b></td><td>Fenêtres principales des programmes (cadres de PMWIN avec un titre) et sessions plein écran. <b>Fin de tâche</b> (WM_CLOSE à la fenêtre, ou arrêt des processus de la session), <b>Basculer vers</b> (double clic, Entrée), <b>Nouvelle tâche...</b> (dialogue « Créer une nouvelle tâche » : le programme est cherché dans le répertoire courant, le PATH et C:\ ; un programme de PM démarre dans la session de PM, les autres dans une nouvelle session ; .CMD et .BAT par CMD.EXE).</td></tr>
+	<tr><td><b>Processus</b></td><td>Nom de l'image et type (PM, VIO, LX, DOS), PID, utilisation du processeur (%), mémoire (fenêtre du processus, blocs du tas du noyau, grands blocs), nombre de fils, session ; le <b>Processus inactif</b> et le noyau (<b>OS2KRNL</b>) ; tri en cliquant les titres des colonnes. <b>Terminer le processus</b> (Suppr), après confirmation : DosKillProcess.</td></tr>
+	<tr><td><b>Performances</b></td><td>Jauge et historique de l'utilisation du processeur (vert vif sur grille vert sombre qui défile ; temps du noyau en rouge : menu Affichage), jauge et historique de la mémoire utilisée (jaune) ; <b>Totaux</b> (handles, fils, processus), <b>Mémoire physique</b> (totale, disponible, disque virtuel), <b>Charge dédiée</b> (totale, limite, maximale), <b>Mémoire du noyau</b> (totale, tas des processus, noyau).</td></tr>
+	<tr><td><b>Réseau</b></td><td>Historique des trames par seconde de l'interface lan0 (échelle automatique), carte et pilote, adresse MAC, état de la liaison et adresse IP, trames reçues et envoyées (TCPIP32.DLL).</td></tr>
+	<tr><td><b>Utilisateurs</b></td><td>Sessions de l'utilisateur : numéro, état (actif au premier plan, arrière-plan, inactif) et titre ; <b>Basculer vers</b>, <b>Fermer la session</b> (arrête ses programmes).</td></tr>
+	<tr><td>Menus et barre d'état</td><td>Fichier (Nouvelle tâche, Quitter), Affichage (Actualiser maintenant F5, fréquence d'actualisation haute 0,5 s, normale 1 s, basse 4 s ou suspendue, temps du noyau), Aide ; barre d'état : processus, utilisation du processeur, charge dédiée. Ctrl+Tab change d'onglet.</td></tr>
+</table>
+
+Le multitâche du noyau existait (tâches, ordonnanceur préemptif, sessions) ; pour le Gestionnaire des tâches, le noyau compte maintenant le temps du processeur à chaque interruption de la minuterie (100 Hz) : temps <b>inactif</b> (processeur arrêté par hlt dans la boucle d'attente), temps de chaque <b>processus</b>, temps du <b>noyau</b> (code interrompu hors du programme : noyau et DLL du système). Deux nouvelles fonctions le donnent aux programmes : <b>KrnTaskCtl 34</b> (état du système : tops, temps inactif et du noyau, mémoire physique et disponible, tas du noyau, fils, processus, handles, disque virtuel) et <b>KrnTaskCtl 35</b> (un processus : PID, parent, fils, temps du processeur, mémoire, session, type, nom et chemin). PMWIN détruit maintenant les fenêtres d'un processus terminé de force (au plus une fois par seconde, pendant l'attente des messages) et efface le curseur d'une fenêtre détruite. Les graphiques utilisent des couleurs RGB (GpiCreateLogColorTable, LCOLF_RGB) quand l'écran a plus de 16 couleurs.
 
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 
@@ -849,7 +895,7 @@ Langue : la variable <code>LANGUAGE</code> de CONFIG.SYS (convention commune ave
 
 <img width="640" height="480" alt="OS/2-0 : onglet Langue du carnet Système - Paramètres" src="IMAGE/LANGUE.png" />
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, DIGAUDIO.EXE, DEVMGR.EXE, IFCONFIG.EXE, PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE, TESTVDM.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL, PMCTLS.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, IFCONFIG.EXE, PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE, TESTVDM.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>

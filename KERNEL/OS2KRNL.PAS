@@ -339,6 +339,12 @@ Var
   SessNoPde        : Boolean;       { SessSwap sans changer l'entree 0 }
   TkEsp0           : Array[0..MaxTasks - 1] Of LongInt;  { pile de l'anneau 0 (TSS) }
   TkFs             : Array[0..MaxTasks - 1] Of LongInt;  { selecteur FS (TIB des programmes LX) }
+  { temps du processeur (Gestionnaire des taches, KrnTaskCtl 34 et 35) :
+    tops de la minuterie passes processeur arrete (hlt), dans le noyau,
+    et par processus (PrCpuSer : PID auquel le compte appartient) }
+  InHlt            : Boolean;
+  IdleTicks, KrnTicks, SysTicks, TmpEip : LongInt;
+  PrCpu, PrCpuSer  : Array[0..MaxProcs - 1] Of LongInt;
   FsTmp            : LongInt;
   Tss              : Array[0..31] Of LongInt;            { TSS du processeur (InitTss) }
   TssBase          : LongInt;
@@ -791,6 +797,7 @@ Function NeLoadExe(Path, CmdLine : String; Buf, Size : LongInt) : LongInt; Forwa
 Procedure NeKill(Pid : LongInt); Forward;
 Procedure NeBoot; Forward;
 Function NeFlat(Sel, Ofs : LongInt) : LongInt; Forward;
+Function GetLogicalDrives : LongInt; Forward;
 
 Procedure InitIdt;
 Var I : LongInt;
@@ -836,6 +843,26 @@ Begin
     mov eax,ebp
     mov TmpIntEbp,eax
   end;
+  { temps du processeur : inactif (hlt), par processus, et temps du noyau
+    (code interrompu hors du programme : noyau et DLL du systeme) }
+  If InHlt Then Inc(IdleTicks)
+  Else
+  Begin
+    If (CurProc >= 0) And (CurProc < MaxProcs) Then
+    Begin
+      If PrCpuSer[CurProc] <> Procs[CurProc].Serial Then
+      Begin
+        PrCpuSer[CurProc] := Procs[CurProc].Serial;
+        PrCpu[CurProc] := 0;
+      End;
+      Inc(PrCpu[CurProc]);
+    End
+    Else Inc(SysTicks);
+    TmpEip := MemL[0:TmpIntEbp + 44];
+    If Not (((TmpEip >= ProcWinBase) And (TmpEip < ProcWinBase + ProcWinSize)) Or
+            ((MemL[0:TmpIntEbp + 48] And 3) = 3) Or ((MemL[0:TmpIntEbp + 52] And $20000) <> 0)) Then
+      Inc(KrnTicks);
+  End;
   { code 16 bits de la machine virtuelle DOS (mode V86) ou de son client
     DPMI (anneau 3) : interruptions virtuelles, puis partage du temps }
   If VmOn And (CurTask = VmTask) And (((MemL[0:TmpIntEbp + 52] And $20000) <> 0) Or
@@ -871,18 +898,24 @@ Begin
     If IdleStreak > NTasks * 2 Then
     Begin
       IdleStreak := 0;
+      InHlt := True;
       asm
         sti
         hlt
       end;
+      InHlt := False;
     End
     Else Yield;
   End
   Else
+  Begin
+    InHlt := True;
     asm
       sti
       hlt
     end;
+    InHlt := False;
+  End;
 End;
 
 { Attendre Ms millisecondes }
@@ -6938,6 +6971,98 @@ Begin
    { programmes 16 bits (API16.DLL) : adresse lineaire d'un pointeur
      16:16 (p1 selecteur, p2 deplacement) }
    30 : KrnTaskCtl := NeFlat(P1, P2);
+   { unites presentes (bit 0 : A:, sans lire la disquette) }
+   32 : KrnTaskCtl := GetLogicalDrives;
+   { Gestionnaire des taches : 34 etat du systeme (P1 : 16 LongInt),
+     35 processus de l'entree P1 (P2 : 256 octets) ; 1 si l'entree est
+     un processus en cours }
+   34 : If P1 <> 0 Then
+        Begin
+          For K := 0 To 15 Do MemL[0:P1 + K * 4] := 0;
+          MemL[0:P1] := Ticks;
+          MemL[0:P1 + 4] := IdleTicks;
+          MemL[0:P1 + 8] := KrnTicks;
+          MemL[0:P1 + 12] := MemTotalKb;
+          MemL[0:P1 + 16] := PhysFree Div 1024;
+          MemL[0:P1 + 20] := (PhysTop - PhysProcBase) Div 1024;
+          MemL[0:P1 + 24] := HeapEnd - HeapStart;
+          { tas du noyau : octets utilises, dont ceux des processus }
+          P := HeapStart; S := 0; Sz := 0;
+          While P < HeapEnd Do
+          Begin
+            K := MemL[0:P + 4];
+            If K <= 0 Then Break;
+            If MemL[0:P] = HeapMagicUsed Then
+            Begin
+              S := S + K;
+              If MemL[0:P + 8] >= 0 Then Sz := Sz + K;
+            End;
+            P := P + K;
+          End;
+          MemL[0:P1 + 28] := S;
+          MemL[0:P1 + 32] := Sz;
+          MemL[0:P1 + 36] := NTasks;
+          S := 0;
+          For K := 0 To MaxProcs - 1 Do
+            If Procs[K].Used And Procs[K].Running Then Inc(S);
+          MemL[0:P1 + 40] := S;
+          { handles : fichiers ouverts, recherches, processus, fils }
+          S := S + NTasks;
+          For K := 0 To MaxFiles - 1 Do
+            If Files[K].Used Then Inc(S);
+          For K := 0 To MaxFinds - 1 Do
+            If Finds[K].Used Then Inc(S);
+          MemL[0:P1 + 44] := S;
+          S := 0;
+          For K := 0 To MaxRamFiles - 1 Do
+            If RamFiles[K].Used Then S := S + RamFiles[K].Size;
+          MemL[0:P1 + 48] := S;
+          MemL[0:P1 + 52] := PCount;
+          MemL[0:P1 + 56] := SysTicks;
+          KrnTaskCtl := 1;
+        End;
+   35 : If (P1 >= 0) And (P1 < MaxProcs) And (P2 <> 0) Then
+          If Procs[P1].Used And Procs[P1].Running Then
+          Begin
+            For K := 0 To 63 Do MemL[0:P2 + K * 4] := 0;
+            MemL[0:P2] := Procs[P1].Serial;
+            If (Procs[P1].Parent >= 0) And (Procs[P1].Parent < MaxProcs) Then
+              MemL[0:P2 + 4] := Procs[Procs[P1].Parent].Serial;
+            S := 0;
+            For K := 1 To MaxTasks - 1 Do
+              If (TkUsed[K] = 1) And (TkProc[K] = P1) Then Inc(S);
+            MemL[0:P2 + 8] := S;
+            If PrCpuSer[P1] = Procs[P1].Serial Then MemL[0:P2 + 12] := PrCpu[P1];
+            { memoire : fenetre du processus, blocs du tas, grands blocs }
+            Sz := 0;
+            If Procs[P1].MemLive Then Sz := Procs[P1].PhysSize;
+            P := HeapStart;
+            While P < HeapEnd Do
+            Begin
+              K := MemL[0:P + 4];
+              If K <= 0 Then Break;
+              If (MemL[0:P] = HeapMagicUsed) And (MemL[0:P + 8] = P1) Then Sz := Sz + K;
+              P := P + K;
+            End;
+            For K := 0 To MaxXBlk - 1 Do
+              If (XBase[K] <> 0) And (XOwner[K] = P1) Then
+              Begin
+                For S := 0 To PCount - 1 Do
+                  If PBase[S] = XBase[K] Then Sz := Sz + PSize[S];
+              End;
+            MemL[0:P2 + 16] := Sz;
+            MemL[0:P2 + 20] := Procs[P1].Sess;
+            S := 0;
+            If Procs[P1].IsLx Then S := S Or 1;
+            If Procs[P1].NoPreempt Then S := S Or 2;
+            If VmOn And (P1 = VmPid) Then S := S Or 4;
+            If P1 = CurProc Then S := S Or 8;
+            MemL[0:P2 + 24] := S;
+            MemL[0:P2 + 28] := Procs[P1].ImageSize;
+            PutPStr(P2 + 32, Procs[P1].Name, 63);
+            PutPStr(P2 + 96, Procs[P1].Path, 127);
+            KrnTaskCtl := 1;
+          End;
   End;
 End;
 

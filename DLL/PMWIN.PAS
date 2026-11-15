@@ -336,6 +336,7 @@ Var
   GMode : LongInt;                        { 1 : ecran graphique }
   Susp, SuspPid, SuspTook : LongInt;      { ecran prete a un programme (WINSUSPENDSCREEN) }
   SesAddr, PmEpoch : LongInt;              { sessions du noyau (KrnSesCtl 15) }
+  LastClean : LongInt;                     { dernier nettoyage des processus termines (ms) }
   ScrCols, ScrRows, ScrCX, ScrCY : LongInt;
   GCx1, GCy1, GCx2, GCy2 : LongInt;       { decoupage (pels de l'ecran, x2 et y2 exclus) }
   GFont : Array[0..4095] Of Byte;         { police 8 x 16 }
@@ -772,6 +773,13 @@ End;
 Function IsPasProc(F : LongInt) : Boolean;
 Begin
   IsPasProc := (F >= $00400000) And (F < $00800000) And (KTask(18, 0, 0, 0) = 0);
+End;
+
+{ procedure dans la fenetre d'un programme (00400000h-007FFFFFh) : propre
+  a son processus, elle ne peut etre appelee depuis un autre }
+Function InProgWin(F : LongInt) : Boolean;
+Begin
+  InProgWin := (F >= $00400000) And (F < $00800000);
 End;
 
 Function Call4(F, A1, A2, A3, A4 : LongInt) : LongInt;
@@ -2385,6 +2393,8 @@ End;
 Procedure StopTimersOf(I : LongInt); Forward;
 Procedure ReleasePSOf(I : LongInt); Forward;
 
+Procedure ShowHwCursor; Forward;
+
 Procedure DestroyIdx(I : LongInt);
 Var J, H, X1, Y1, X2, Y2 : LongInt; WasShown : Boolean;
 Begin
@@ -2420,7 +2430,12 @@ Begin
   If ActiveWin = I Then ActiveWin := 0;
   If CaptureWin = I Then CaptureWin := 0;
   If SysModalWin = I Then SysModalWin := 0;
-  If CursorWin = I Then CursorWin := 0;
+  { curseur de la fenetre detruite : efface de l'ecran }
+  If CursorWin = I Then
+  Begin
+    CursorWin := 0;
+    ShowHwCursor;
+  End;
   If ClOwner = H Then ClOwner := 0;
   If ClViewer = H Then ClViewer := 0;
   StopTimersOf(I);
@@ -4024,6 +4039,47 @@ Begin
 End;
 
 { --- dessin --- }
+{ couleur d'un espace de presentation de PMGPI (table de couleurs logique
+  chargee par GpiCreateLogColorTable : index au-dela des 16 couleurs de
+  base) -> RVB, par GpiQueryRGBColor (PMGPI.DLL est charge a la demande :
+  il importe lui-meme PMWIN.DLL) }
+Var GpiQRgb : LongInt;
+    GpiModZ : Array[0..7] Of Byte;
+
+Function LogClr(Hps, Clr : LongInt) : LongInt;
+Var M, F, R : LongInt;
+Begin
+  LogClr := Clr;
+  If (Clr < 16) Or (Clr > 255) Then Exit;
+  If GpiQRgb = 0 Then
+  Begin
+    GpiModZ[0] := Ord('P'); GpiModZ[1] := Ord('M'); GpiModZ[2] := Ord('G');
+    GpiModZ[3] := Ord('P'); GpiModZ[4] := Ord('I'); GpiModZ[5] := 0;
+    M := 0;
+    If DcLoadModule(0, 0, LongInt(@GpiModZ), LongInt(@M)) = 0 Then
+      If DcQueryProcAddr(M, 479, 0, LongInt(@F)) = 0 Then GpiQRgb := F;
+    If GpiQRgb = 0 Then GpiQRgb := -1;
+  End;
+  If GpiQRgb = -1 Then Exit;
+  F := GpiQRgb;
+  R := -1;
+  asm
+    mov eax,Clr
+    push eax
+    push 0
+    mov eax,Hps
+    push eax
+    mov eax,F
+    call eax
+    add esp,12
+    mov R,eax
+  end;
+  If R < 0 Then Exit;
+  { une valeur RVB inferieure a 16 serait prise pour un index }
+  If R < 16 Then R := -1;
+  LogClr := R;
+End;
+
 Function WinFillRect(Hps, P, Clr : LongInt) : LongInt;
 Var K : LongInt;
 Begin
@@ -4031,7 +4087,7 @@ Begin
   If (K < 0) Or (P = 0) Then WinFillRect := 0
   Else
   Begin
-    FillPS(K, RdL(P), RdL(P + 4), RdL(P + 8), RdL(P + 12), 32, Attr(-17, Clr));
+    FillPS(K, RdL(P), RdL(P + 4), RdL(P + 8), RdL(P + 12), 32, Attr(-17, LogClr(Hps, Clr)));
     WinFillRect := 1;
   End;
 End;
@@ -4150,6 +4206,7 @@ Begin
   WinDrawText := 0;
   K := PsIdx(Hps);
   If (K < 0) Or (PRcl = 0) Then Exit;
+  Fg := LogClr(Hps, Fg); Bg := LogClr(Hps, Bg);
   S := GetN(P, Cch);
   X1 := RdL(PRcl); Y1 := RdL(PRcl + 4); X2 := RdL(PRcl + 8); Y2 := RdL(PRcl + 12);
   { texte affiche (sans les ~ des mnemoniques) }
@@ -5025,7 +5082,7 @@ Var K : LongInt;
 Begin
   For K := MaxHook - 1 DownTo 0 Do
     If (HkUse[K] <> 0) And (HkType[K] = Typ) And ((HkQ[K] = -1) Or (HkQ[K] = CurQ)) And
-       ((HkUse[K] = MyPid) Or Not IsPasProc(HkProc[K])) Then
+       ((HkUse[K] = MyPid) Or Not InProgWin(HkProc[K])) Then
     Begin
       If A1 = 0 Then A1 := $00010001 + MaxI(CurHab, 0);
       Dummy := Call3(HkProc[K], A1, A2, A3);
@@ -5039,7 +5096,7 @@ Begin
   R := False;
   For K := MaxHook - 1 DownTo 0 Do
     If (Not R) And (HkUse[K] <> 0) And (HkType[K] = Typ) And ((HkQ[K] = -1) Or (HkQ[K] = CurQ)) And
-       ((HkUse[K] = MyPid) Or Not IsPasProc(HkProc[K])) Then
+       ((HkUse[K] = MyPid) Or Not InProgWin(HkProc[K])) Then
       If Call3(HkProc[K], A1, A2, A3) <> 0 Then R := True;
   HookBool3 := R;
 End;
@@ -5120,7 +5177,7 @@ Function CallProcOf(I, Msg, Mp1, Mp2 : LongInt) : LongInt;
 Var P : LongInt;
 Begin
   P := WProc[I];
-  If (P = 0) Or (IsPasProc(P) And (WPid[I] <> MyPid)) Then CallProcOf := 0
+  If (P = 0) Or (InProgWin(P) And (WPid[I] <> MyPid)) Then CallProcOf := 0
   Else If P = SysProc Then CallProcOf := SysProcI(HwOf(I), Msg, Mp1, Mp2)
   Else If P = DefProcAddr Then CallProcOf := DefWP(HwOf(I), Msg, Mp1, Mp2)
   Else If P = DefDlgAddr Then CallProcOf := DefDlgI(HwOf(I), Msg, Mp1, Mp2)
@@ -6215,6 +6272,13 @@ Begin
           Else TmUse[K] := 0;
         End;
     End;
+    { fenetres d'un processus termine (DosKillProcess, Gestionnaire des
+      taches) : detruites au plus une fois par seconde }
+    If (Not Got) And Wait And (KGetTickCount - LastClean >= 1000) Then
+    Begin
+      LastClean := KGetTickCount;
+      CleanupDead;
+    End;
     If (Not Got) And Wait Then Dummy := DcSleep(10);
   Until Got Or Not Wait;
   If Got Then
@@ -6941,6 +7005,7 @@ Begin
   If WCls[I] >= 0 Then P := CProc[WCls[I]];
   If P = SysProc Then ClassProcCall := SysProcI(HwOf(I), Msg, Mp1, Mp2)
   Else If (P = 0) Or (P = DefProcAddr) Or (P = DefDlgAddr) Then ClassProcCall := DefWP(HwOf(I), Msg, Mp1, Mp2)
+  Else If InProgWin(P) And (WPid[I] <> MyPid) Then ClassProcCall := 0
   Else ClassProcCall := Call4(P, HwOf(I), Msg, Mp1, Mp2);
 End;
 
@@ -15064,5 +15129,6 @@ BEGIN
   AtbUse[0] := 1;
   MyMod := 0;
   InitDone := 0;
+  GpiQRgb := 0;
   EnsureInit;
 END.

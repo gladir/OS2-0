@@ -2318,8 +2318,22 @@ Begin
   If Pfn = 0 Then SplRing3 := 0 Else SplRing3 := Call1(Pfn, Prm);
 End;
 
+{ API 32 bits d'OS/2 2.x (PMSPL 397, 399) : files d'attente, ordinateur
+  local seulement (pszComputerName nul ou vide) }
+Function SplQueryQueue(PComp, PQueue, Lvl, PBuf, Cb, PNeed : LongInt) : LongInt;
+Begin
+  SplQueryQueue := SplQmQueryQInfo(PQueue, Lvl, PBuf, Cb, PNeed);
+End;
+
+Function SplEnumQueue(PComp, Lvl, PBuf, Cb, PRet, PTot, PNeed, PRes : LongInt) : LongInt;
+Begin
+  SplEnumQueue := SplQmListQueues(Lvl, PBuf, Cb, PRet, PTot, PNeed);
+End;
+
 Exports
   SplQmOpen Index 1 Name 'SPLQMOPEN',
+  SplQueryQueue Index 397 Name 'SplQueryQueue',
+  SplEnumQueue Index 399 Name 'SplEnumQueue',
   SplQmStartDoc Index 2 Name 'SPLQMSTARTDOC',
   SplQmEndDoc Index 3 Name 'SPLQMENDDOC',
   SplQmWrite Index 4 Name 'SPLQMWRITE',
