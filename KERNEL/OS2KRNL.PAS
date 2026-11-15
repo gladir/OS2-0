@@ -248,6 +248,10 @@ Type
     NextTid   : LongInt;     { prochain identificateur de fil }
     Sess      : LongInt;     { session (ecran et clavier) }
     ConSess   : LongInt;     { session de la console (sortie standard) }
+    IsLx      : Boolean;     { programme LX d'OS/2 (partie 13c) }
+    LxEip     : LongInt;     { point d'entree }
+    LxTib     : LongInt;     { bloc d'information de tache (FS:0) }
+    LxFs      : LongInt;     { selecteur de FS }
   End;
 
 Var
@@ -334,12 +338,17 @@ Var
   SwPde            : LongInt;       { entree 0 du repertoire de la tache reprise }
   SessNoPde        : Boolean;       { SessSwap sans changer l'entree 0 }
   TkEsp0           : Array[0..MaxTasks - 1] Of LongInt;  { pile de l'anneau 0 (TSS) }
+  TkFs             : Array[0..MaxTasks - 1] Of LongInt;  { selecteur FS (TIB des programmes LX) }
+  FsTmp            : LongInt;
   Tss              : Array[0..31] Of LongInt;            { TSS du processeur (InitTss) }
   TssBase          : LongInt;
   { machine virtuelle DOS (partie 13b) : en cours, sa tache, sa session,
     son processus, son premier Mo (memoire physique) }
   VmOn             : Boolean;
   VmTask, VmSess, VmPid, VmRamPhys : LongInt;
+  { session montree dans une fenetre de PM (PMVIOP lit son ecran) ; plein
+    ecran automatique d'un mode graphique }
+  VmWinSeen, VmAutoFs : Boolean;
   { memoire physique des processus : blocs tries par adresse }
   PBase, PSize     : Array[0..MaxPBlk - 1] Of LongInt;
   PCount           : LongInt;
@@ -761,6 +770,8 @@ Procedure IrqTimer; Interrupt; Forward;
 Procedure IrqKeyboard; Interrupt; Forward;
 { machine virtuelle DOS (partie 13b) }
 Procedure DosKeyIn(Up : Boolean; Sc : LongInt; Ext : Boolean; Ch : LongInt); Forward;
+Function VmRawScan(Sc : LongInt) : LongInt; Forward;
+Procedure DosMouAbs(R, C, Btn : LongInt); Forward;
 Procedure DosMouIn(Dx, Dy, Btn : LongInt); Forward;
 Procedure VmTick(B : LongInt); Forward;
 Procedure VmSwitchOut; Forward;
@@ -768,6 +779,18 @@ Procedure VmSwitchIn; Forward;
 Procedure DosStop; Forward;
 Function IsDosFile(Path : String) : Boolean; Forward;
 Function LoadDosProgram(Path, CmdLine : String) : LongInt; Forward;
+{ chargeur LX (partie 13c) }
+Function LxHeader(Buf, Size : LongInt) : LongInt; Forward;
+Function LxLoadDll(Path : String; Buf, Size, M : LongInt) : Boolean; Forward;
+Function LxLoadExe(Path, CmdLine : String; Buf, Size : LongInt) : LongInt; Forward;
+Function LxLastErr : String; Forward;
+Procedure SelFree(Sel, N : LongInt); Forward;
+{ programmes 16 bits (partie 13d) }
+Function NeIsOs2(Buf, Size : LongInt) : LongInt; Forward;
+Function NeLoadExe(Path, CmdLine : String; Buf, Size : LongInt) : LongInt; Forward;
+Procedure NeKill(Pid : LongInt); Forward;
+Procedure NeBoot; Forward;
+Function NeFlat(Sel, Ofs : LongInt) : LongInt; Forward;
 
 Procedure InitIdt;
 Var I : LongInt;
@@ -824,7 +847,8 @@ Begin
   End;
   If (NTasks > 1) And (CurTask > 0) And (Ticks - SliceStart >= 3) Then
   Begin
-    If (MemL[0:TmpIntEbp + 44] >= ProcWinBase) And (MemL[0:TmpIntEbp + 44] < ProcWinBase + ProcWinSize) Then
+    If ((MemL[0:TmpIntEbp + 44] >= ProcWinBase) And (MemL[0:TmpIntEbp + 44] < ProcWinBase + ProcWinSize)) Or
+       ((MemL[0:TmpIntEbp + 48] And 3) = 3) Then
       Preempt;
   End;
 End;
@@ -1941,8 +1965,26 @@ Begin
   End;
 End;
 
+Procedure PFree(Base : LongInt); Forward;
+Function PAlloc(Size : LongInt) : LongInt; Forward;
+
+Var
+  FBufs : Array[0..15] Of LongInt;   { tampons de FileAlloc (memoire physique) }
+
 Procedure KFree(A : LongInt);
+Var I : LongInt;
 Begin
+  { gros tampon en memoire physique (FileAlloc) }
+  If A >= PhysProcBase Then
+  Begin
+    For I := 0 To 15 Do
+      If FBufs[I] = A Then
+      Begin
+        FBufs[I] := 0;
+        PFree(A);
+      End;
+    Exit;
+  End;
   If (A < HeapStart + 16) Or (A >= HeapEnd) Then Exit;
   If MemL[0:A - 16] <> HeapMagicUsed Then Exit;
   MemL[0:A - 16] := HeapMagicFree;
@@ -2026,7 +2068,7 @@ End;
 Procedure MapWindow(Pid : LongInt);
 Begin
   If (Pid >= 0) And Procs[Pid].Used Then
-    MemL[0:PageDir + 4] := Procs[Pid].PageTable Or $03
+    MemL[0:PageDir + 4] := Procs[Pid].PageTable Or $07
   Else
     MemL[0:PageDir + 4] := 0;
   FlushTlb;
@@ -2745,6 +2787,7 @@ Var
   FlpSpc, FlpRes, FlpNFat, FlpRootN, FlpSpf, FlpRootLba, FlpDataLba, FlpClusN : LongInt;
   FlpFat, FlpSec, FlpSecLba : LongInt;      { FAT entiere ; secteur en cache }
   FlpLabel : String[11];
+  FlpSerial : LongInt;
 
 Procedure IrqFloppy; Interrupt;
 Begin
@@ -2863,9 +2906,12 @@ Begin
   End;
 End;
 
+{ debits essayes : 500 kbit/s (1,44 Mo), 1 Mbit/s (2,88 Mo), 250 (720 Ko),
+  300 (360 Ko) }
 Function FdRate3(I : LongInt) : LongInt;
 Begin
-  If I = 0 Then FdRate3 := 0 Else If I = 1 Then FdRate3 := 2 Else FdRate3 := 1;
+  If I = 0 Then FdRate3 := 0 Else If I = 1 Then FdRate3 := 3
+  Else If I = 2 Then FdRate3 := 2 Else FdRate3 := 1;
 End;
 
 { secteur 0 de la disquette : debit et geometrie ; False sans disquette }
@@ -2873,7 +2919,7 @@ Function FdProbe : Boolean;
 Var I : LongInt;
 Begin
   FdProbe := False;
-  For I := 0 To 2 Do
+  For I := 0 To 3 Do
   Begin
     FdRate := FdRate3(I);
     FdReset;
@@ -2927,6 +2973,11 @@ Begin
   If (FlpSpc = 0) Or (FlpSpf = 0) Or (FlpSpf > 12) Then Exit;
   FlpLabel := '';
   For I := 0 To 10 Do FlpLabel := FlpLabel + Chr(Mem[0:FlpSec + 43 + I]);
+  FlpSerial := MemL[0:FlpSec + 39];
+  If Mem[0:FlpSec + 38] <> $29 Then
+  Begin
+    FlpLabel := ''; FlpSerial := 0;
+  End;
   FlpRootLba := FlpRes + FlpNFat * FlpSpf;
   FlpDataLba := FlpRootLba + (FlpRootN * 32 + 511) Div 512;
   FlpClusN := (FdSecs - FlpDataLba) Div FlpSpc + 2;
@@ -3205,6 +3256,22 @@ Begin
     MatchMask := Glob(N, M);
 End;
 
+{ Contenu d'un fichier du disque virtuel : tas du noyau, ou memoire
+  physique pour les gros fichiers (le tas ne compte que quelques Mo) }
+Function RamAlloc(N : LongInt) : LongInt;
+Var A : LongInt;
+Begin
+  A := 0;
+  If N >= 65536 Then A := PAlloc(N);
+  If A = 0 Then A := KAlloc(N);
+  RamAlloc := A;
+End;
+
+Procedure RamFree(A : LongInt);
+Begin
+  If A >= PhysProcBase Then PFree(A) Else KFree(A);
+End;
+
 { Agrandir le contenu d'un fichier du disque virtuel }
 Function RamReserve(R, NewSize : LongInt) : Boolean;
 Var NewCap, NewData : LongInt;
@@ -3214,7 +3281,7 @@ Begin
   NewCap := RamFiles[R].Cap * 2;
   If NewCap < NewSize Then NewCap := NewSize;
   If NewCap < 1024 Then NewCap := 1024;
-  NewData := KAlloc(NewCap);
+  NewData := RamAlloc(NewCap);
   If NewData = 0 Then
   Begin
     RamReserve := False;
@@ -3224,7 +3291,7 @@ Begin
   If RamFiles[R].Data <> 0 Then
   Begin
     MoveMem(RamFiles[R].Data, NewData, RamFiles[R].Size);
-    KFree(RamFiles[R].Data);
+    RamFree(RamFiles[R].Data);
   End;
   RamFiles[R].Data := NewData;
   RamFiles[R].Cap := NewCap;
@@ -4658,7 +4725,7 @@ Begin
       LastError := 32;     { partage }
       Exit;
     End;
-  If RamFiles[R].Data <> 0 Then KFree(RamFiles[R].Data);
+  If RamFiles[R].Data <> 0 Then RamFree(RamFiles[R].Data);
   RamFiles[R].Used := False;
   DeleteFileA := 1;
 End;
@@ -5253,6 +5320,24 @@ Begin
 End;
 
 { Lire tout un fichier dans un bloc du tas ; rend l'adresse ou 0 }
+{ Tampon d'un fichier lu en entier : les gros fichiers (DLL de plus de
+  256 Ko) vont en memoire physique, le tas du noyau ne compte que quelques
+  Mo ; KFree rend les deux genres de blocs }
+Function FileAlloc(Size : LongInt) : LongInt;
+Var A, I : LongInt;
+Begin
+  A := 0;
+  If Size > 256 * 1024 Then
+    For I := 0 To 15 Do
+      If (A = 0) And (FBufs[I] = 0) Then
+      Begin
+        A := PAlloc(Size);
+        FBufs[I] := A;
+      End;
+  If A = 0 Then A := KAlloc(Size);
+  FileAlloc := A;
+End;
+
 Function ReadWholeFile(Path : String; Var Size : LongInt) : LongInt;
 Var Attr, Time, Lba, Ram, Buf, Done, A, N, H, Got : LongInt;
 Begin
@@ -5274,7 +5359,7 @@ Begin
       Exit;
     End;
     Size := MemL[0:LongInt(@Files[H].Sffsi) + 20];
-    Buf := KAlloc(Size + 1);
+    Buf := FileAlloc(Size + 1);
     If Buf <> 0 Then
     Begin
       N := IfsRW(H, Buf, Size, False, Got);
@@ -5302,7 +5387,7 @@ Begin
     LastError := ErrAccessDenied;
     Exit;
   End;
-  Buf := KAlloc(Size + 1);
+  Buf := FileAlloc(Size + 1);
   If Buf = 0 Then
   Begin
     LastError := ErrNotEnoughMem;
@@ -5310,6 +5395,16 @@ Begin
   End;
   If Ram >= 0 Then
     MoveMem(RamFiles[Ram].Data, Buf, Size)
+  Else If Ram = -3 Then
+  Begin
+    { disquette A: (FAT12) : Lba est le premier cluster }
+    If FlpRead(Lba, Size, 0, Buf, Size) <> Size Then
+    Begin
+      KFree(Buf);
+      LastError := ErrNotReady;
+      Exit;
+    End;
+  End
   Else
   Begin
     Done := 0;
@@ -5653,6 +5748,22 @@ Begin
   If Buf = 0 Then Buf := ReadWholeFile(Path, Size);
   If Buf = 0 Then Exit;
   LastError := ErrBadFormat;
+  { DLL d'OS/2 au format LX }
+  If LxHeader(Buf, Size) <> 0 Then
+  Begin
+    If LxLoadDll(Path, Buf, Size, M) Then
+    Begin
+      LastError := 0;
+      LoadModule := M;
+    End
+    Else
+    Begin
+      ConPutLn('SYS0191: ' + Path + ' : ' + LxLastErr + '.');
+      KLog('LX : ' + Path + ' : ' + LxLastErr);
+    End;
+    KFree(Buf);
+    Exit;
+  End;
   Pe := Buf + MemL[0:Buf + $3C];
   If (MemW[0:Buf] <> $5A4D) Or (MemL[0:Pe] <> $00004550) Or (MemW[0:Pe + 4] <> $014C) Then
   Begin
@@ -5796,6 +5907,20 @@ Begin
   Buf := ReadWholeFile(Path, Size);
   If Buf = 0 Then Exit;
   LastError := ErrBadFormat;
+  { programme 16 bits d'OS/2 1.x (NE) }
+  If NeIsOs2(Buf, Size) <> 0 Then
+  Begin
+    LoadProgram := NeLoadExe(Path, CmdLine, Buf, Size);
+    KFree(Buf);
+    Exit;
+  End;
+  { programme d'OS/2 au format LX }
+  If LxHeader(Buf, Size) <> 0 Then
+  Begin
+    LoadProgram := LxLoadExe(Path, CmdLine, Buf, Size);
+    KFree(Buf);
+    Exit;
+  End;
   If (Size < 512) Or (MemW[0:Buf] <> $5A4D) Then
   Begin
     KFree(Buf);
@@ -5934,6 +6059,7 @@ Begin
     NextSess := -1;
   End;
   Procs[Pid].ConSess := Procs[Pid].Sess;
+  Procs[Pid].IsLx := False; Procs[Pid].LxFs := 0; Procs[Pid].LxTib := 0;
   ProcEntry[Pid] := ProcWinBase + Entry;
   ProcStack[Pid] := Phys + PhysSize - 16;
   LastError := 0;
@@ -6250,6 +6376,19 @@ Begin
   SwSave := LongInt(@TkEsp) + CurTask * 4;
   SwNew := TkEsp[N];
   If TkEsp0[N] <> 0 Then Tss[1] := TkEsp0[N];
+  { FS : TIB des programmes LX (sinon les donnees du noyau) }
+  asm
+    xor eax,eax
+    mov ax,fs
+    mov FsTmp,eax
+  end;
+  TkFs[CurTask] := FsTmp;
+  FsTmp := TkFs[N];
+  If FsTmp = 0 Then FsTmp := $10;
+  asm
+    mov eax,FsTmp
+    mov fs,ax
+  end;
   CurTask := N;
   CurProc := TkProc[N];
   LastError := TkLastErr[N];
@@ -6396,6 +6535,8 @@ Begin
   TkEsp[T] := E;
   TkProc[T] := Proc; TkStack[T] := StackBlk; TkLastErr[T] := 0; TkTid[T] := Tid;
   TkFn[T] := Fn; TkArg[T] := Arg;
+  TkFs[T] := 0; TkEsp0[T] := 0;
+  If (Proc >= 0) And Procs[Proc].IsLx Then TkFs[T] := Procs[Proc].LxFs;
   asm
     cli
   end;
@@ -6442,6 +6583,16 @@ Begin
   Pid := CurProc;
   If Pid < 0 Then Exit;
   If VmOn And (Pid = VmPid) Then DosStop;
+  NeKill(Pid);
+  If Procs[Pid].IsLx And (Procs[Pid].LxFs <> 0) Then
+  Begin
+    SelFree(Procs[Pid].LxFs, 1);
+    Procs[Pid].LxFs := 0;
+    asm
+      mov ax,10h
+      mov fs,ax
+    end;
+  End;
   Procs[Pid].ExitCode := Code;
   KbdMode := 0;
   MonProcessExit(Procs[Pid].Serial);
@@ -6515,11 +6666,16 @@ Begin
   Path := FindProgram(Prog);
   If Path = '' Then
   Begin
+    KLog('Programme introuvable : ' + Prog);
     LastError := ErrFileNotFound;
     Exit;
   End;
   Pid := LoadProgram(Path, CmdS);
-  If Pid < 0 Then Exit;
+  If Pid < 0 Then
+  Begin
+    KLog('Impossible de charger ' + Path + ' (erreur ' + IntStr(LastError) + ')');
+    Exit;
+  End;
   If Dir <> 0 Then Procs[Pid].CurDir := FullPath(PStr(Dir));
   If PInfo <> 0 Then
   Begin
@@ -6613,6 +6769,12 @@ Procedure KillOther(P, Code : LongInt);
 Var K : LongInt;
 Begin
   If VmOn And (P = VmPid) Then DosStop;
+  NeKill(P);
+  If Procs[P].IsLx And (Procs[P].LxFs <> 0) Then
+  Begin
+    SelFree(Procs[P].LxFs, 1);
+    Procs[P].LxFs := 0;
+  End;
   For K := 0 To MaxFiles - 1 Do
     If Files[K].Used And (Files[K].Owner = P) Then Files[K].Used := False;
   For K := 0 To MaxFinds - 1 Do
@@ -6745,6 +6907,7 @@ Begin
           Else KrnTaskCtl := -1;
         End;
    14 : If (CurProc >= 0) And (P1 > 1) Then Procs[CurProc].NextTid := P1;
+   18 : If (CurProc >= 0) And Procs[CurProc].IsLx Then KrnTaskCtl := Procs[CurProc].LxTib;
    { grands blocs de memoire du processus : 15 allouer (P1 octets),
      16 liberer (P1 adresse), 17 le bloc P1 existe-t-il ? }
    15 : If (CurProc >= 0) And (P1 > 0) Then
@@ -6772,6 +6935,9 @@ Begin
           End;
    17 : For K := 0 To MaxXBlk - 1 Do
           If (P1 <> 0) And (XBase[K] = P1) Then KrnTaskCtl := 1;
+   { programmes 16 bits (API16.DLL) : adresse lineaire d'un pointeur
+     16:16 (p1 selecteur, p2 deplacement) }
+   30 : KrnTaskCtl := NeFlat(P1, P2);
   End;
 End;
 
@@ -6992,9 +7158,10 @@ End;
    18 ecran de la session p1 dans p2 : tampon video, ligne et colonne du
       curseur, lignes, colonnes, processus (PMVIOP.DLL)
    19 touche p2 (caractere + code Shl 8, etat) pour la session p1
-   20 terminer les processus de la session p1 (fenetre OS/2 fermee) }
+   20 terminer les processus de la session p1 (fenetre OS/2 fermee)
+   21 souris de la fenetre DOS p1 : p2 = ligne, colonne, boutons }
 Function KrnSesCtl(Op, P1, P2 : LongInt) : LongInt;
-Var S, Old : LongInt;
+Var S, Old, KsSave : LongInt;
 Begin
   KrnSesCtl := 0;
   Case Op Of
@@ -7065,6 +7232,7 @@ Begin
           { ecran d'une session (PMVIOP.DLL : fenetre OS/2) : tampon video
             (B8000h si elle est au premier plan), curseur, lignes, colonnes }
           If P1 = FgSess Then MemL[0:P2] := $B8000 Else MemL[0:P2] := SLvb[P1];
+          If VmOn And (P1 = VmSess) Then VmWinSeen := True;
           If P1 = CurSess Then
           Begin
             MemL[0:P2 + 4] := CurRow; MemL[0:P2 + 8] := CurCol;
@@ -7084,7 +7252,20 @@ Begin
           asm
             cli
           end;
-          If P1 = CurSess Then
+          If VmOn And (P1 = VmSess) Then
+          Begin
+            { session DOS dans une fenetre : enfoncement puis relachement }
+            S := VmRawScan((MemL[0:P2] Shr 8) And $FF);
+            { touches de controle du message de PM (WM_CHAR) : la touche
+              physique est souvent deja relachee }
+            KsSave := KbdState;
+            KbdState := (KbdState And Not $F) Or (MemL[0:P2 + 4] And $E);
+            DosKeyIn(False, S, (MemL[0:P2 + 4] And $10000) <> 0, MemL[0:P2] And $FF);
+            KbdState := KsSave;
+            DosKeyIn(True, S, (MemL[0:P2 + 4] And $10000) <> 0, 0);
+            KrnSesCtl := 1;
+          End
+          Else If P1 = CurSess Then
           Begin
             S := (KbdHead + 1) And 63;
             If S <> KbdTail Then
@@ -7121,6 +7302,13 @@ Begin
             End;
           KrnSesCtl := Old;
         End;
+    21 : If VmOn And (P1 = VmSess) And (P2 <> 0) Then
+         Begin
+           { souris d'une fenetre DOS (PMVIOP.DLL) : ligne, colonne, boutons
+             (1 gauche, 2 droit, 4 milieu) }
+           DosMouAbs(MemL[0:P2], MemL[0:P2 + 4], MemL[0:P2 + 8]);
+           KrnSesCtl := 1;
+         End;
   End;
 End;
 
@@ -7223,6 +7411,22 @@ Var A, I, Sum, D : LongInt; S : String;
 Begin
   GetVolumeInformationA := 0;
   If PRoot <> 0 Then S := PStr(PRoot) Else S := CurDir;
+  If FlpPath(UpStr(S)) Then
+  Begin
+    { disquette A: : etiquette et numero de serie du BPB, FAT }
+    If Not FlpReady Then
+    Begin
+      LastError := ErrNotReady;
+      Exit;
+    End;
+    If PVol <> 0 Then PutPStr(PVol, Trim(FlpLabel), VolSize);
+    If PSerial <> 0 Then MemL[0:PSerial] := FlpSerial;
+    If PMaxComp <> 0 Then MemL[0:PMaxComp] := 12;
+    If PFlags <> 0 Then MemL[0:PFlags] := 0;
+    If PFs <> 0 Then PutPStr(PFs, 'FAT', FsSize);
+    GetVolumeInformationA := 1;
+    Exit;
+  End;
   D := IfsDrive(S);
   If D >= 0 Then
   Begin
@@ -8675,6 +8879,12 @@ Procedure VmSetCur(Pg, X, Y : LongInt);
 Begin
   Mem[0:VmBda($50 + Pg * 2)] := X;
   Mem[0:VmBda($51 + Pg * 2)] := Y;
+  If Pg <> (Mem[0:VmBda($62)] And 7) Then Exit;
+  { curseur de la console de la session (fenetre OS/2 : PMVIOP.DLL) }
+  If CurSess = VmSess Then
+  Begin
+    CurRow := Y; CurCol := X;
+  End;
 End;
 
 { Defiler la fenetre (R1,C1)-(R2,C2) de N lignes (0 : effacer) }
@@ -9057,6 +9267,37 @@ End;
 { Touche de la session de la machine au premier plan (interruption du
   clavier du noyau) : code de balayage (Up : relachement), prefixe E0h
   et caractere calcule par le noyau }
+{ Code de touche traduit (KbdCharIn d'OS/2, WM_CHAR de PM : Ctrl+F9 =
+  66h, Alt+1 = 78h...) vers le code materiel de la touche (fenetre DOS) }
+Function VmRawScan(Sc : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := Sc;
+  Case Sc Of
+    $54..$5D : R := Sc - $19;           { Maj+F1..F10 }
+    $5E..$67 : R := Sc - $23;           { Ctrl+F1..F10 }
+    $68..$71 : R := Sc - $2D;           { Alt+F1..F10 }
+    $85, $87, $89, $8B : R := $57;      { F11 }
+    $86, $88, $8A, $8C : R := $58;      { F12 }
+    $78..$83 : R := Sc - $76;           { Alt+1..Alt+= }
+    $73, $9B : R := $4B;
+    $74, $9D : R := $4D;
+    $75, $9F : R := $4F;
+    $76, $A1 : R := $51;
+    $77, $97 : R := $47;
+    $84, $99 : R := $49;
+    $8D, $98 : R := $48;
+    $91, $A0 : R := $50;
+    $92, $A2 : R := $52;
+    $93, $A3 : R := $53;
+    $8E : R := $4A;
+    $90 : R := $4E;
+    $94, $A5 : R := $0F;
+    $A6 : R := $1C;
+  End;
+  VmRawScan := R;
+End;
+
 Procedure DosKeyIn(Up : Boolean; Sc : LongInt; Ext : Boolean; Ch : LongInt);
 Var K, N : LongInt;
 Begin
@@ -9327,6 +9568,12 @@ End;
 Procedure VmHwCursor;
 Var P, Pg, Sh : LongInt;
 Begin
+  { curseur de la console de la session (fenetre OS/2 : PMVIOP.DLL) }
+  If CurSess = VmSess Then
+  Begin
+    Pg := Mem[0:VmBda($62)] And 7;
+    CurRow := Mem[0:VmBda($51 + Pg * 2)]; CurCol := Mem[0:VmBda($50 + Pg * 2)];
+  End;
   If Not VmIsFg Or VmGfx Then Exit;
   Pg := Mem[0:VmBda($62)] And 7;
   P := Pg * 2048 + Mem[0:VmBda($51 + Pg * 2)] * 80 + Mem[0:VmBda($50 + Pg * 2)];
@@ -9352,6 +9599,13 @@ Begin
   VgPlanar := VgMode In [$0D, $0E, $0F, $10, $11, $12];
   If VmGfx Then
   Begin
+    { session dans une fenetre (ou a l'arriere-plan) : plein ecran pour
+      le mode graphique, comme une fenetre DOS d'OS/2 }
+    If (FgSess <> VmSess) And VmWinSeen Then
+    Begin
+      PendSwitch := VmSess;
+      VmAutoFs := True;
+    End;
     VmFgWait;
     Ax := VR(fEax);
     VS(fEax, M And $FF);
@@ -9369,6 +9623,12 @@ Begin
       VmBiosVideo(0, 0);
       VS(fEax, Ax);
       VgHwGfx := False;
+    End;
+    { fin du mode graphique d'une fenetre DOS : retour a la fenetre }
+    If VmAutoFs And Not VmGfx Then
+    Begin
+      VmAutoFs := False;
+      If (FgSess = VmSess) And (PmSess >= 0) Then PendSwitch := PmSess;
     End;
   End;
 End;
@@ -12113,6 +12373,15 @@ Begin
     End;
   VmMouBtn := Btn;
   VmMouEv := VmMouEv Or Ev;
+End;
+
+{ Souris d'une fenetre DOS (PMVIOP.DLL, KrnSesCtl 21) : position
+  absolue en cellules (8 x 8 points virtuels par cellule en mode texte)
+  et boutons }
+Procedure DosMouAbs(R, C, Btn : LongInt);
+Begin
+  If Not VmOn Then Exit;
+  DosMouIn(C * 8 - VmMouX, R * 8 - VmMouY, Btn);
 End;
 
 { Appeler le gestionnaire d'evenements du programme (fonction 0Ch) }
@@ -15118,6 +15387,7 @@ Begin
   MemW[0:VmBda($1A)] := $1E; MemW[0:VmBda($1C)] := $1E;
   MemW[0:VmBda($80)] := $1E; MemW[0:VmBda($82)] := $3E;
   VgMode := 3; VgStart := 0; VgHwGfx := False; VgSaved := False;
+  VmWinSeen := False; VmAutoFs := False;
   VmGfx := False;
   { XMS, EMS, DPMI : souches HLT du serveur, nom du pilote EMS }
   VmDpmi := False; VmPM := False; VmSvN := 0;
@@ -15335,7 +15605,7 @@ End;
   1.x des programmes DPMI de Borland se lance par son talon MS-DOS) ;
   C:\COMMAND.COM absent : l'interpreteur integre de la machine }
 Function IsDosFile(Path : String) : Boolean;
-Var H, Got, L : LongInt; B : Array[0..63] Of Byte; Ext : String;
+Var H, Got, L, Buf : LongInt; B : Array[0..63] Of Byte; Ext : String;
 Begin
   IsDosFile := False;
   If UpStr(BaseName(Path)) = 'COMMAND.COM' Then
@@ -15363,10 +15633,25 @@ Begin
       If (Got >= 4) And (B[1] = $45) And ((B[0] = $50) Or
          ((B[0] = $4E) And (B[$36] <> 1))) Then
         IsDosFile := False;
+      { NE d'OS/2 1.x : programme OS/2 sauf s'il vient de Borland Pascal (RTM) }
+      If (Got >= 4) And (B[0] = $4E) And (B[1] = $45) And (B[$36] = 1) Then
+      Begin
+        CloseHandle(H);
+        H := INVALID_HANDLE;
+        Buf := ReadWholeFile(Path, L);
+        If Buf <> 0 Then
+        Begin
+          If NeIsOs2(Buf, L) <> 0 Then IsDosFile := False;
+          KFree(Buf);
+        End;
+      End;
+      { programmes d'OS/2 2.x au format LX (et LE) }
+      If (Got >= 4) And (B[0] = $4C) And ((B[1] = $58) Or (B[1] = $45)) Then
+        IsDosFile := False;
     End;
   End
   Else IsDosFile := Ext = '.COM';
-  CloseHandle(H);
+  If H <> INVALID_HANDLE Then CloseHandle(H);
 End;
 
 { Charger un programme MS-DOS : processus (une seule machine a la fois)
@@ -15430,6 +15715,7 @@ Begin
     NextSess := -1;
   End;
   Procs[Pid].ConSess := Procs[Pid].Sess;
+  Procs[Pid].IsLx := False; Procs[Pid].LxFs := 0; Procs[Pid].LxTib := 0;
   ProcEntry[Pid] := LongInt(@DosMain);
   ProcStack[Pid] := Phys + PhysSize - 16;
   { arguments : la ligne de commande sans le nom du programme }
@@ -15477,6 +15763,1916 @@ End;
 
 { VDM-FIN }
 
+{ LX-DEBUT }
+{ ==================================================================== }
+{ Partie 13c - Chargeur LX : programmes et DLL d'OS/2 2.x, 3 et 4      }
+{ ==================================================================== }
+{ Les vrais programmes d'OS/2 32 bits sont au format LX (Linear
+  eXecutable). Le chargeur place les objets (code, donnees) dans la
+  fenetre du processus (programme) ou dans la region des DLL, decompresse
+  les pages iterees (EXEPACK 1 et 2), applique les corrections (fixups)
+  internes et les importations (par ordinal ou par nom) vers les DLL
+  d'OS/2-0, dont les fonctions suivent la convention _System, et appelle
+  l'initialisation des DLL (_DLL_InitTerm). Le module recoit un en-tete
+  PE synthetique (MZ, PE, table d'exportation et repertoire des
+  ressources) : son handle (HMODULE) est utilisable par DosGetResource,
+  DosQueryProcAddr, WinLoadDlg... comme celui d'un module d'OS/2-0. Le
+  programme demarre comme sous OS/2 : [ESP] adresse de retour, puis
+  handle du module, 0, environnement et ligne de commande ; FS designe
+  son bloc d'information de tache (TIB, chaine des gestionnaires
+  d'exceptions en FS:[0]). }
+
+Const
+  LxMaxObj = 64;
+  LxMaxRes = 2048;
+
+Var
+  LxB, LxH, LxNObj : LongInt;          { image lue, en-tete LX, objets }
+  LxObjAdr, LxObjLin, LxObjSize, LxObjFl : Array[0..LxMaxObj - 1] Of LongInt;
+  LxModHdl : Array[0..255] Of LongInt; { modules importes (indice Mods, -1) }
+  LxEntAdr : LongInt;                  { adresses des ordinaux (tableau) }
+  LxNEnt : LongInt;
+  LxPath : String;
+  LxErr : String;
+
+Function LxL(O : LongInt) : LongInt;
+Begin
+  LxL := MemL[0:LxB + O];
+End;
+
+Function LxW(O : LongInt) : LongInt;
+Begin
+  LxW := MemW[0:LxB + O];
+End;
+
+Function LxBy(O : LongInt) : LongInt;
+Begin
+  LxBy := Mem[0:LxB + O];
+End;
+
+{ en-tete LX de l'image Buf (0 : pas un module LX) }
+Function LxHeader(Buf, Size : LongInt) : LongInt;
+Var H : LongInt;
+Begin
+  LxHeader := 0;
+  If Size < 64 Then Exit;
+  H := 0;
+  If MemW[0:Buf] = $5A4D Then H := MemL[0:Buf + $3C];
+  If (H < 0) Or (H + $B0 > Size) Then Exit;
+  If (Mem[0:Buf + H] = Ord('L')) And (Mem[0:Buf + H + 1] = Ord('X')) Then LxHeader := H;
+End;
+
+{ page iteree (EXEPACK 1) : enregistrements (repetitions, longueur,
+  donnees) }
+Procedure LxIter1(Src, N, Dst, Max : LongInt);
+Var P, Q, Cnt, L, K : LongInt;
+Begin
+  P := 0; Q := 0;
+  While P + 4 <= N Do
+  Begin
+    Cnt := MemW[0:Src + P]; L := MemW[0:Src + P + 2];
+    P := P + 4;
+    If (Cnt = 0) Or (L = 0) Then Break;
+    For K := 1 To Cnt Do
+    Begin
+      If Q + L > Max Then Exit;
+      MoveMem(Src + P, Dst + Q, L);
+      Q := Q + L;
+    End;
+    P := P + L;
+  End;
+End;
+
+{ page compressee (EXEPACK 2) : suites de commandes (litteraux, copies
+  d'une partie deja decompressee) }
+Procedure LxIter2(Src, N, Dst, Max : LongInt);
+Var P, Q, C, L, D, K, B2 : LongInt;
+Begin
+  P := 0; Q := 0;
+  While (P < N) And (Q < Max) Do
+  Begin
+    C := Mem[0:Src + P];
+    Case C And 3 Of
+      0 :
+        If C = 0 Then
+        Begin
+          { repetition d'un octet : 00 n b }
+          If P + 2 >= N Then Exit;
+          L := Mem[0:Src + P + 1];
+          If L = 0 Then Exit;
+          B2 := Mem[0:Src + P + 2];
+          For K := 0 To L - 1 Do If Q < Max Then
+          Begin
+            Mem[0:Dst + Q] := B2; Inc(Q);
+          End;
+          P := P + 3;
+        End
+        Else
+        Begin
+          { litteraux : C shr 2 octets }
+          L := C Shr 2;
+          For K := 0 To L - 1 Do If Q < Max Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Src + P + 1 + K]; Inc(Q);
+          End;
+          P := P + 1 + L;
+        End;
+      1 :
+        Begin
+          { 0-3 litteraux puis copie courte }
+          C := C Or (Mem[0:Src + P + 1] Shl 8);
+          L := (C Shr 2) And 3;
+          For K := 0 To L - 1 Do If Q < Max Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Src + P + 2 + K]; Inc(Q);
+          End;
+          P := P + 2 + L;
+          L := ((C Shr 4) And 7) + 3;
+          D := (C Shr 7) And $1FF;
+          For K := 0 To L - 1 Do If (Q < Max) And (Q - D >= 0) Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Dst + Q - D]; Inc(Q);
+          End;
+        End;
+      2 :
+        Begin
+          { copie courte sans litteraux }
+          C := C Or (Mem[0:Src + P + 1] Shl 8);
+          P := P + 2;
+          L := ((C Shr 2) And 3) + 3;
+          D := (C Shr 4) And $FFF;
+          For K := 0 To L - 1 Do If (Q < Max) And (Q - D >= 0) Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Dst + Q - D]; Inc(Q);
+          End;
+        End;
+      3 :
+        Begin
+          { 0-15 litteraux puis copie longue }
+          C := C Or (Mem[0:Src + P + 1] Shl 8) Or (Mem[0:Src + P + 2] Shl 16);
+          L := (C Shr 2) And $F;
+          For K := 0 To L - 1 Do If Q < Max Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Src + P + 3 + K]; Inc(Q);
+          End;
+          P := P + 3 + L;
+          L := (C Shr 6) And $3F;
+          D := (C Shr 12) And $FFF;
+          For K := 0 To L - 1 Do If (Q < Max) And (Q - D >= 0) Then
+          Begin
+            Mem[0:Dst + Q] := Mem[0:Dst + Q - D]; Inc(Q);
+          End;
+        End;
+    End;
+  End;
+End;
+
+{ etat du chargeur (modules charges recursivement) }
+Function LxSave : LongInt;
+Var A, I : LongInt;
+Begin
+  A := KAlloc(LxMaxObj * 16 + 256 * 4 + 64);
+  If A = 0 Then
+  Begin
+    LxSave := 0;
+    Exit;
+  End;
+  For I := 0 To LxMaxObj - 1 Do
+  Begin
+    MemL[0:A + I * 16] := LxObjAdr[I]; MemL[0:A + I * 16 + 4] := LxObjLin[I];
+    MemL[0:A + I * 16 + 8] := LxObjSize[I]; MemL[0:A + I * 16 + 12] := LxObjFl[I];
+  End;
+  For I := 0 To 255 Do MemL[0:A + LxMaxObj * 16 + I * 4] := LxModHdl[I];
+  I := A + LxMaxObj * 16 + 1024;
+  MemL[0:I] := LxB; MemL[0:I + 4] := LxH; MemL[0:I + 8] := LxNObj;
+  MemL[0:I + 12] := LxEntAdr; MemL[0:I + 16] := LxNEnt;
+  LxSave := A;
+End;
+
+Procedure LxRestore(A : LongInt);
+Var I : LongInt;
+Begin
+  If A = 0 Then Exit;
+  For I := 0 To LxMaxObj - 1 Do
+  Begin
+    LxObjAdr[I] := MemL[0:A + I * 16]; LxObjLin[I] := MemL[0:A + I * 16 + 4];
+    LxObjSize[I] := MemL[0:A + I * 16 + 8]; LxObjFl[I] := MemL[0:A + I * 16 + 12];
+  End;
+  For I := 0 To 255 Do LxModHdl[I] := MemL[0:A + LxMaxObj * 16 + I * 4];
+  I := A + LxMaxObj * 16 + 1024;
+  LxB := MemL[0:I]; LxH := MemL[0:I + 4]; LxNObj := MemL[0:I + 8];
+  LxEntAdr := MemL[0:I + 12]; LxNEnt := MemL[0:I + 16];
+  KFree(A);
+End;
+
+{ module importe numero K (1..n) : indice dans Mods (charge au besoin) }
+Function LxImpMod(K : LongInt) : LongInt;
+Var P, I, L, Sv, M : LongInt; S : String;
+Begin
+  LxImpMod := -1;
+  If (K < 1) Or (K > 255) Then Exit;
+  If LxModHdl[K] <> -2 Then
+  Begin
+    LxImpMod := LxModHdl[K];
+    Exit;
+  End;
+  P := LxH + LxL(LxH + $70);
+  For I := 1 To K - 1 Do P := P + LxBy(P) + 1;
+  L := LxBy(P);
+  S := '';
+  For I := 1 To L Do S := S + Chr(LxBy(P + I));
+  S := UpStr(S);
+  If Pos('.', S) = 0 Then S := S + '.DLL';
+  { chargement d'une dependance (peut-etre un autre module LX) : etat du
+    chargeur sauve }
+  Sv := LxSave;
+  M := LoadModule(S);
+  LxRestore(Sv);
+  LxModHdl[K] := M;
+  If LxModHdl[K] < 0 Then LxErr := 'module ' + S + ' introuvable';
+  LxImpMod := LxModHdl[K];
+End;
+
+{ nom de procedure importee a l'offset O de la table des noms }
+Function LxImpName(O : LongInt) : String;
+Var P, I, L : LongInt; S : String;
+Begin
+  P := LxH + LxL(LxH + $78) + O;
+  L := LxBy(P);
+  S := '';
+  For I := 1 To L Do S := S + Chr(LxBy(P + I));
+  LxImpName := S;
+End;
+
+{ importations absentes : une souche par importation (PUSH n ; JMP
+  LxMissing) qui journalise le module et l'ordinal (ou le nom) et rend
+  ERROR_INVALID_FUNCTION (1) ; le programme continue }
+Var
+  LxMissN : LongInt;
+  LxMissName : Array[0..511] Of String[47];
+  LxMissBlk : LongInt;
+
+Procedure LxMissing;
+Var N, R : LongInt;
+Begin
+  asm
+    mov eax,[ebp+8]
+    mov N,eax
+  end;
+  If (N >= 0) And (N < LxMissN) Then KLog('LX : fonction absente appelee : ' + LxMissName[N]);
+End;
+
+Function LxStub(Nm : String) : LongInt;
+Var A, T : LongInt;
+Begin
+  LxStub := 0;
+  If LxMissN >= 512 Then Exit;
+  If LxMissBlk = 0 Then LxMissBlk := KAlloc(512 * 32 + 64);
+  If LxMissBlk = 0 Then Exit;
+  A := ((LxMissBlk + 15) And Not 15) + LxMissN * 32;
+  LxMissName[LxMissN] := Nm;
+  T := LongInt(@LxMissing);
+  { pushad ; push n ; call LxMissing ; add esp,4 ; popad ; mov eax,1 ; ret }
+  Mem[0:A] := $60;
+  Mem[0:A + 1] := $68; MemL[0:A + 2] := LxMissN;
+  Mem[0:A + 6] := $E8; MemL[0:A + 7] := T - (A + 11);
+  Mem[0:A + 11] := $83; Mem[0:A + 12] := $C4; Mem[0:A + 13] := 4;
+  Mem[0:A + 14] := $61;
+  Mem[0:A + 15] := $B8; MemL[0:A + 16] := 1;
+  Mem[0:A + 20] := $C3;
+  LxStub := A;
+  Inc(LxMissN);
+End;
+
+Function LxStubFor(Nm : String) : LongInt;
+Var I : LongInt;
+Begin
+  For I := 0 To LxMissN - 1 Do
+    If LxMissName[I] = Nm Then
+    Begin
+      LxStubFor := ((LxMissBlk + 15) And Not 15) + I * 32;
+      Exit;
+    End;
+  KLog('LX : importation absente : ' + Nm);
+  LxStubFor := LxStub(Nm);
+End;
+
+{ adresse de l'ordinal Ord du module en cours de chargement (0 : aucun) }
+Function LxSelfOrd(Ord : LongInt) : LongInt;
+Begin
+  LxSelfOrd := 0;
+  If (Ord >= 1) And (Ord <= LxNEnt) And (LxEntAdr <> 0) Then
+    LxSelfOrd := MemL[0:LxEntAdr + (Ord - 1) * 4];
+End;
+
+{ table des points d'entree : adresse de chaque ordinal ; les renvois
+  (forwarders) sont resolus vers le module cible }
+Procedure LxEntries;
+Var P, Cnt, Typ, Obj, K, Ord, A, Fl, MI, V, M : LongInt;
+Begin
+  { premier passage : nombre d'ordinaux }
+  P := LxH + LxL(LxH + $5C);
+  Ord := 0;
+  Repeat
+    Cnt := LxBy(P);
+    If Cnt = 0 Then Break;
+    Typ := LxBy(P + 1);
+    If Typ = 0 Then
+    Begin
+      Ord := Ord + Cnt;
+      P := P + 2;
+    End
+    Else
+    Begin
+      Ord := Ord + Cnt;
+      Case Typ Of
+        1 : P := P + 4 + Cnt * 3;
+        2 : P := P + 4 + Cnt * 5;
+        3 : P := P + 4 + Cnt * 5;
+        4 : P := P + 4 + Cnt * 7;
+      Else
+        Break;
+      End;
+    End;
+  Until False;
+  LxNEnt := Ord;
+  LxEntAdr := 0;
+  If Ord = 0 Then Exit;
+  LxEntAdr := KAlloc(Ord * 4 + 4);
+  FillMem(LxEntAdr, Ord * 4 + 4, 0);
+  P := LxH + LxL(LxH + $5C);
+  Ord := 0;
+  Repeat
+    Cnt := LxBy(P);
+    If Cnt = 0 Then Break;
+    Typ := LxBy(P + 1);
+    If Typ = 0 Then
+    Begin
+      Ord := Ord + Cnt;
+      P := P + 2;
+      Continue;
+    End;
+    Obj := LxW(P + 2);
+    P := P + 4;
+    For K := 1 To Cnt Do
+    Begin
+      Inc(Ord);
+      A := 0;
+      Case Typ Of
+        1 :
+          Begin
+            If (Obj >= 1) And (Obj <= LxNObj) Then A := LxObjLin[Obj - 1] + LxW(P + 1);
+            P := P + 3;
+          End;
+        2 :
+          Begin
+            If (Obj >= 1) And (Obj <= LxNObj) Then A := LxObjLin[Obj - 1] + LxW(P + 1);
+            P := P + 5;
+          End;
+        3 :
+          Begin
+            If (Obj >= 1) And (Obj <= LxNObj) Then A := LxObjLin[Obj - 1] + LxL(P + 1);
+            P := P + 5;
+          End;
+        4 :
+          Begin
+            Fl := LxBy(P);
+            MI := LxW(P + 1);
+            V := LxL(P + 3);
+            M := LxImpMod(MI);
+            If M >= 0 Then
+            Begin
+              If (Fl And 1) <> 0 Then A := ModuleExport(M, '', V)
+              Else A := ModuleExport(M, LxImpName(V), 0);
+            End;
+            P := P + 7;
+          End;
+      End;
+      MemL[0:LxEntAdr + (Ord - 1) * 4] := A;
+    End;
+  Until False;
+End;
+
+{ corrections d'une page (indice logique Pg, 0..) chargee a l'adresse
+  (noyau) PgAdr, vue par le programme en PgLin ; False : importation
+  introuvable }
+Function LxFixPage(Pg, PgAdr, PgLin : LongInt) : Boolean;
+Var Q, E, Src, Tf, Cnt, SrcOff, Typ, Obj, Ofs, M, Ord, T, Add, K, Lst, Sel, A : LongInt;
+    Nm : String;
+Begin
+  LxFixPage := True;
+  Q := LxH + LxL(LxH + $6C) + LxL(LxH + LxL(LxH + $68) + Pg * 4);
+  E := LxH + LxL(LxH + $6C) + LxL(LxH + LxL(LxH + $68) + Pg * 4 + 4);
+  While Q < E Do
+  Begin
+    Src := LxBy(Q); Tf := LxBy(Q + 1);
+    Q := Q + 2;
+    Cnt := 0; SrcOff := 0; Lst := 0;
+    If (Src And $20) <> 0 Then
+    Begin
+      Cnt := LxBy(Q);
+      Q := Q + 1;
+    End
+    Else
+    Begin
+      SrcOff := LxW(Q);
+      If SrcOff >= $8000 Then SrcOff := SrcOff - $10000;
+      Q := Q + 2;
+    End;
+    T := 0; Sel := $10;
+    Typ := Tf And 3;
+    If Typ = 0 Then
+    Begin
+      If (Tf And $40) <> 0 Then
+      Begin
+        Obj := LxW(Q); Q := Q + 2;
+      End
+      Else
+      Begin
+        Obj := LxBy(Q); Q := Q + 1;
+      End;
+      Ofs := 0;
+      If (Src And $F) <> 2 Then
+      Begin
+        If (Tf And $10) <> 0 Then
+        Begin
+          Ofs := LxL(Q); Q := Q + 4;
+        End
+        Else
+        Begin
+          Ofs := LxW(Q); Q := Q + 2;
+        End;
+      End;
+      If (Obj >= 1) And (Obj <= LxNObj) Then
+      Begin
+        T := LxObjLin[Obj - 1] + Ofs;
+        If (LxObjFl[Obj - 1] And 4) <> 0 Then Sel := $08;
+      End;
+    End
+    Else If Typ = 3 Then
+    Begin
+      If (Tf And $40) <> 0 Then
+      Begin
+        Ord := LxW(Q); Q := Q + 2;
+      End
+      Else
+      Begin
+        Ord := LxBy(Q); Q := Q + 1;
+      End;
+      T := LxSelfOrd(Ord);
+    End
+    Else
+    Begin
+      If (Tf And $40) <> 0 Then
+      Begin
+        M := LxW(Q); Q := Q + 2;
+      End
+      Else
+      Begin
+        M := LxBy(Q); Q := Q + 1;
+      End;
+      If Typ = 1 Then
+      Begin
+        If (Tf And $80) <> 0 Then
+        Begin
+          Ord := LxBy(Q); Q := Q + 1;
+        End
+        Else If (Tf And $10) <> 0 Then
+        Begin
+          Ord := LxL(Q); Q := Q + 4;
+        End
+        Else
+        Begin
+          Ord := LxW(Q); Q := Q + 2;
+        End;
+        K := LxImpMod(M);
+        If K >= 0 Then T := ModuleExport(K, '', Ord);
+        If T = 0 Then
+        Begin
+          If K >= 0 Then Nm := Mods^[K].Name Else Nm := 'module ' + IntStr(M);
+          Nm := Nm + '.' + IntStr(Ord);
+          T := LxStubFor(Nm);
+          If T = 0 Then LxFixPage := False;
+        End;
+        Sel := $08;
+      End
+      Else
+      Begin
+        If (Tf And $10) <> 0 Then
+        Begin
+          Ofs := LxL(Q); Q := Q + 4;
+        End
+        Else
+        Begin
+          Ofs := LxW(Q); Q := Q + 2;
+        End;
+        Nm := LxImpName(Ofs);
+        K := LxImpMod(M);
+        If K >= 0 Then T := ModuleExport(K, Nm, 0);
+        If T = 0 Then T := KernelExport(Nm);
+        If T = 0 Then
+        Begin
+          T := LxStubFor(Nm);
+          If T = 0 Then LxFixPage := False;
+        End;
+        Sel := $08;
+      End;
+    End;
+    Add := 0;
+    If (Tf And 4) <> 0 Then
+    Begin
+      If (Tf And $20) <> 0 Then
+      Begin
+        Add := LxL(Q); Q := Q + 4;
+      End
+      Else
+      Begin
+        Add := LxW(Q); Q := Q + 2;
+      End;
+    End;
+    T := T + Add;
+    If (Src And $20) <> 0 Then
+    Begin
+      Lst := Q;
+      Q := Q + Cnt * 2;
+    End
+    Else Cnt := 1;
+    For K := 0 To Cnt - 1 Do
+    Begin
+      If Lst <> 0 Then
+      Begin
+        SrcOff := LxW(Lst + K * 2);
+        If SrcOff >= $8000 Then SrcOff := SrcOff - $10000;
+      End;
+      A := PgAdr + SrcOff;
+      Case Src And $F Of
+        0 : Mem[0:A] := T And $FF;
+        2 : MemW[0:A] := Sel;
+        3 :
+          Begin
+            MemW[0:A] := T And $FFFF;
+            MemW[0:A + 2] := Sel;
+          End;
+        5 : MemW[0:A] := T And $FFFF;
+        6 :
+          Begin
+            MemL[0:A] := T;
+            MemW[0:A + 4] := Sel;
+          End;
+        7 : MemL[0:A] := T;
+        8 : MemL[0:A] := T - (PgLin + SrcOff + 4);
+      End;
+    End;
+  End;
+End;
+
+{ charger les objets de l'image (LxB) : Mem (noyau) et Lin (programme)
+  sont l'adresse de la zone ; Hdr octets reserves devant (en-tete PE
+  synthetique) ; rend False et LxErr en cas d'echec }
+Function LxLoadObjects(Mem0, Lin0, Hdr : LongInt) : Boolean;
+Var I, O, Vs, Fl, Pmi, Pmn, Pg, PO, PSz, PFl, A, Off, DataPg, Shift : LongInt;
+Begin
+  LxLoadObjects := False;
+  Off := Hdr;
+  For I := 0 To LxNObj - 1 Do
+  Begin
+    LxObjAdr[I] := Mem0 + Off;
+    LxObjLin[I] := Lin0 + Off;
+    Off := Off + ((LxObjSize[I] + 4095) And Not 4095);
+  End;
+  DataPg := LxL(LxH + $80);
+  Shift := LxL(LxH + $2C);
+  For I := 0 To LxNObj - 1 Do
+  Begin
+    O := LxH + LxL(LxH + $40) + I * 24;
+    Vs := LxL(O); Fl := LxL(O + 8); Pmi := LxL(O + 12); Pmn := LxL(O + 16);
+    FillMem(LxObjAdr[I], (Vs + 4095) And Not 4095, 0);
+    For Pg := 0 To Pmn - 1 Do
+    Begin
+      A := LxH + LxL(LxH + $48) + (Pmi - 1 + Pg) * 8;
+      PO := MemL[0:LxB + A]; PSz := MemW[0:LxB + A + 4]; PFl := MemW[0:LxB + A + 6];
+      If Pg * 4096 >= ((Vs + 4095) And Not 4095) Then Break;
+      Case PFl Of
+        0 : MoveMem(LxB + DataPg + (PO Shl Shift), LxObjAdr[I] + Pg * 4096, Min(PSz, 4096));
+        1 : LxIter1(LxB + DataPg + (PO Shl Shift), PSz, LxObjAdr[I] + Pg * 4096, 4096);
+        5 : LxIter2(LxB + DataPg + (PO Shl Shift), PSz, LxObjAdr[I] + Pg * 4096, 4096);
+      End;
+    End;
+  End;
+  LxEntries;
+  { corrections, page par page }
+  For I := 0 To LxNObj - 1 Do
+  Begin
+    O := LxH + LxL(LxH + $40) + I * 24;
+    Vs := LxL(O); Pmi := LxL(O + 12); Pmn := LxL(O + 16);
+    For Pg := 0 To Pmn - 1 Do
+      If Not LxFixPage(Pmi - 1 + Pg, LxObjAdr[I] + Pg * 4096, LxObjLin[I] + Pg * 4096) Then
+      Begin
+        LxLoadObjects := False;
+        Exit;
+      End;
+  End;
+  LxLoadObjects := True;
+End;
+
+{ nombre d'ordinaux de la table des points d'entree }
+Function LxCountEnt : LongInt;
+Var P, Cnt, Typ, Ord : LongInt;
+Begin
+  P := LxH + LxL(LxH + $5C);
+  Ord := 0;
+  Repeat
+    Cnt := LxBy(P);
+    If Cnt = 0 Then Break;
+    Typ := LxBy(P + 1);
+    Ord := Ord + Cnt;
+    Case Typ Of
+      0 : P := P + 2;
+      1 : P := P + 4 + Cnt * 3;
+      2, 3 : P := P + 4 + Cnt * 5;
+      4 : P := P + 4 + Cnt * 7;
+    Else
+      Break;
+    End;
+  Until False;
+  LxCountEnt := Ord;
+End;
+
+{ taille de l'en-tete PE synthetique : exportations et ressources }
+Function LxHdrSize : LongInt;
+Var N, P : LongInt;
+Begin
+  N := 4096;
+  P := LxH + LxL(LxH + $58);
+  While LxBy(P) <> 0 Do
+  Begin
+    N := N + LxBy(P) + 12;
+    P := P + LxBy(P) + 3;
+  End;
+  N := N + LxL(LxH + $8C) * 2;
+  N := N + LxCountEnt * 4;
+  N := N + LxL(LxH + $54) * 64;
+  LxHdrSize := (N + 4095) And Not 4095;
+End;
+
+Var
+  LxNmAdr, LxNmOrd : Array[0..4095] Of LongInt;   { noms exportes : adresse, ordinal }
+  LxNmN : LongInt;
+
+{ ajouter les noms d'une table de noms (residents ou non residents) ;
+  Q : ecriture des chaines (adresse noyau), QL : leur adresse lineaire }
+Procedure LxAddNames(P, Stop : LongInt; Var Q, QL : LongInt);
+Var L, I, O : LongInt; First : Boolean;
+Begin
+  First := True;
+  While (P < Stop) And (LxBy(P) <> 0) Do
+  Begin
+    L := LxBy(P);
+    O := LxW(P + 1 + L);
+    If Not First And (O <> 0) And (LxNmN < 4096) Then
+    Begin
+      For I := 0 To L - 1 Do Mem[0:Q + I] := UpCh(LxBy(P + 1 + I));
+      Mem[0:Q + L] := 0;
+      LxNmAdr[LxNmN] := QL; LxNmOrd[LxNmN] := O;
+      Inc(LxNmN);
+      Q := Q + L + 1; QL := QL + L + 1;
+    End;
+    First := False;
+    P := P + L + 3;
+  End;
+End;
+
+{ en-tete PE synthetique en Mem0 (vu en Lin0, le handle du module) :
+  MZ, PE, exportations (ordinaux et noms) et repertoire des ressources
+  (type, nom, langue unique) }
+Procedure LxBuildHdr(Mem0, Lin0, Size, Entry : LongInt);
+Var Pe, Opt, Ex, Q, QL, I, J, K, NRes, R, Typ, Nm, Obj, Ofs, Sz, Root, NT, D, E, T0 : LongInt;
+    Types : Array[0..63] Of LongInt;
+Begin
+  FillMem(Mem0, 1024, 0);
+  MemW[0:Mem0] := $5A4D;
+  MemL[0:Mem0 + $3C] := $40;
+  Pe := Mem0 + $40;
+  MemL[0:Pe] := $00004550;
+  MemW[0:Pe + 4] := $014C;
+  MemW[0:Pe + 20] := 224;
+  Opt := Pe + 24;
+  MemW[0:Opt] := $10B;
+  If Entry <> 0 Then MemL[0:Opt + 16] := Entry - Lin0;
+  MemL[0:Opt + 28] := Lin0;
+  MemL[0:Opt + 56] := Size;
+  MemL[0:Opt + 60] := 1024;
+  { exportations }
+  LxNmN := 0;
+  Q := Mem0 + 1024; QL := Lin0 + 1024;
+  LxAddNames(LxH + LxL(LxH + $58), LxH + LxL(LxH + $5C), Q, QL);
+  If LxL(LxH + $88) <> 0 Then
+    LxAddNames(LxL(LxH + $88), LxL(LxH + $88) + LxL(LxH + $8C), Q, QL);
+  Q := (Q + 3) And Not 3; QL := (QL + 3) And Not 3;
+  Ex := Q;
+  MemL[0:Opt + 96] := QL - Lin0;
+  MemL[0:Opt + 100] := 40;
+  FillMem(Ex, 40, 0);
+  MemL[0:Ex + 16] := 1;
+  MemL[0:Ex + 20] := LxNEnt;
+  MemL[0:Ex + 24] := LxNmN;
+  Q := Q + 40; QL := QL + 40;
+  MemL[0:Ex + 28] := QL - Lin0;
+  For I := 0 To LxNEnt - 1 Do
+  Begin
+    If MemL[0:LxEntAdr + I * 4] <> 0 Then MemL[0:Q + I * 4] := MemL[0:LxEntAdr + I * 4] - Lin0
+    Else MemL[0:Q + I * 4] := 0;
+  End;
+  Q := Q + LxNEnt * 4; QL := QL + LxNEnt * 4;
+  MemL[0:Ex + 32] := QL - Lin0;
+  For I := 0 To LxNmN - 1 Do MemL[0:Q + I * 4] := LxNmAdr[I] - Lin0;
+  Q := Q + LxNmN * 4; QL := QL + LxNmN * 4;
+  MemL[0:Ex + 36] := QL - Lin0;
+  For I := 0 To LxNmN - 1 Do MemW[0:Q + I * 2] := LxNmOrd[I] - 1;
+  Q := Q + LxNmN * 2 + 4; QL := QL + LxNmN * 2 + 4;
+  Q := (Q + 3) And Not 3; QL := (QL + 3) And Not 3;
+  { ressources : table LX (type, nom, taille, objet, deplacement) }
+  NRes := LxL(LxH + $54);
+  If NRes > 0 Then
+  Begin
+    R := LxH + LxL(LxH + $50);
+    NT := 0;
+    For I := 0 To NRes - 1 Do
+    Begin
+      Typ := LxW(R + I * 14);
+      K := 0;
+      For J := 0 To NT - 1 Do If Types[J] = Typ Then K := 1;
+      If (K = 0) And (NT < 64) Then
+      Begin
+        Types[NT] := Typ; Inc(NT);
+      End;
+    End;
+    Root := Q;
+    MemL[0:Opt + 112] := QL - Lin0;
+    MemL[0:Opt + 116] := 16;
+    FillMem(Root, 16 + NT * 8, 0);
+    MemW[0:Root + 14] := NT;
+    Q := Q + 16 + NT * 8;
+    For J := 0 To NT - 1 Do
+    Begin
+      { sous-repertoire des noms du type Types[J] }
+      D := Q;
+      K := 0;
+      For I := 0 To NRes - 1 Do If LxW(R + I * 14) = Types[J] Then Inc(K);
+      FillMem(D, 16 + K * 8, 0);
+      MemW[0:D + 14] := K;
+      MemL[0:Root + 16 + J * 8] := Types[J];
+      MemL[0:Root + 16 + J * 8 + 4] := (D - Root) Or LongInt($80000000);
+      Q := Q + 16 + K * 8;
+      K := 0;
+      For I := 0 To NRes - 1 Do
+        If LxW(R + I * 14) = Types[J] Then
+        Begin
+          Nm := LxW(R + I * 14 + 2); Sz := LxL(R + I * 14 + 4);
+          Obj := LxW(R + I * 14 + 8); Ofs := LxL(R + I * 14 + 10);
+          { langue : un repertoire d'une entree, puis la donnee }
+          E := Q;
+          FillMem(E, 16 + 8 + 16, 0);
+          MemW[0:E + 14] := 1;
+          MemL[0:E + 16] := 0;
+          MemL[0:E + 20] := E + 24 - Root;
+          T0 := 0;
+          If (Obj >= 1) And (Obj <= LxNObj) Then T0 := LxObjLin[Obj - 1] + Ofs;
+          MemL[0:E + 24] := T0 - Lin0;
+          MemL[0:E + 28] := Sz;
+          MemL[0:D + 16 + K * 8] := Nm;
+          MemL[0:D + 16 + K * 8 + 4] := (E - Root) Or LongInt($80000000);
+          Q := Q + 40;
+          Inc(K);
+        End;
+    End;
+  End;
+End;
+
+{ lire l'en-tete LX et la table des objets de l'image Buf ; taille
+  totale des objets (alignes a 4 Ko) }
+Function LxPrepare(Buf, Size : LongInt) : LongInt;
+Var I, O, T : LongInt;
+Begin
+  LxPrepare := -1;
+  LxB := Buf;
+  LxH := LxHeader(Buf, Size);
+  If LxH = 0 Then Exit;
+  LxNObj := LxL(LxH + $44);
+  If (LxNObj <= 0) Or (LxNObj > LxMaxObj) Then Exit;
+  T := 0;
+  For I := 0 To LxNObj - 1 Do
+  Begin
+    O := LxH + LxL(LxH + $40) + I * 24;
+    LxObjSize[I] := LxL(O);
+    LxObjFl[I] := LxL(O + 8);
+    T := T + ((LxObjSize[I] + 4095) And Not 4095);
+  End;
+  For I := 0 To 255 Do LxModHdl[I] := -2;
+  LxErr := '';
+  LxEntAdr := 0; LxNEnt := 0;
+  LxPrepare := T;
+End;
+
+{ point d'entree (objet:deplacement de l'en-tete) ; 0 : aucun }
+Function LxEip : LongInt;
+Var O : LongInt;
+Begin
+  LxEip := 0;
+  O := LxL(LxH + $18);
+  If (O >= 1) And (O <= LxNObj) Then LxEip := LxObjLin[O - 1] + LxL(LxH + $1C);
+End;
+
+{ DLL LX : objets dans la region des DLL ; module M (table des modules)
+  rempli ; False et LxErr en cas d'echec. L'initialisation
+  (_DLL_InitTerm(hmod, 0), convention _System) est appelee. }
+Function LxLoadDll(Path : String; Buf, Size, M : LongInt) : Boolean;
+Var T, Hdr, Base, E, R, H : LongInt;
+Begin
+  LxLoadDll := False;
+  T := LxPrepare(Buf, Size);
+  If T < 0 Then Exit;
+  Hdr := LxHdrSize;
+  Base := DllFindSpace(T + Hdr);
+  If Base = 0 Then
+  Begin
+    LxErr := 'plus de place dans la region des DLL';
+    Exit;
+  End;
+  { le module est inscrit avant les importations (dependances
+    circulaires) }
+  Mods^[M].Used := True;
+  Mods^[M].Name := UpStr(BaseName(Path));
+  Mods^[M].Path := Path;
+  Mods^[M].Base := Base;
+  Mods^[M].Size := T + Hdr;
+  Mods^[M].NExp := 0; Mods^[M].OrdBase := 1; Mods^[M].NFunc := 0;
+  FillMem(Base, Hdr, 0);
+  If Not LxLoadObjects(Base, Base, Hdr) Then
+  Begin
+    Mods^[M].Used := False;
+    Exit;
+  End;
+  E := LxEip;
+  LxBuildHdr(Base, Base, T + Hdr, E);
+  H := Base + MemL[0:Base + $40 + 24 + 96];
+  Mods^[M].NExp := MemL[0:H + 24];
+  Mods^[M].OrdBase := MemL[0:H + 16];
+  Mods^[M].NFunc := MemL[0:H + 20];
+  Mods^[M].Funcs := Base + MemL[0:H + 28];
+  Mods^[M].Names := Base + MemL[0:H + 32];
+  Mods^[M].Ords := Base + MemL[0:H + 36];
+  If LxEntAdr <> 0 Then KFree(LxEntAdr);
+  LxEntAdr := 0;
+  KLog(Mods^[M].Name + ' (module LX) charge en ' + HexStr(Base, 8) + 'h.');
+  If E <> 0 Then
+  Begin
+    R := 0;
+    asm
+      push ebx
+      push esi
+      push edi
+      push 0
+      mov eax,Base
+      push eax
+      mov eax,E
+      call eax
+      add esp,8
+      mov R,eax
+      pop edi
+      pop esi
+      pop ebx
+    end;
+    If R = 0 Then KLog(Mods^[M].Name + ' : _DLL_InitTerm a refuse le chargement.');
+  End;
+  LxLoadDll := True;
+End;
+
+{ fil 1 d'un programme LX : bloc d'information de tache (TIB, FS),
+  environnement et ligne de commande au format d'OS/2, puis le point
+  d'entree : EAX = main(hmod, 0, env, cmd) ; fin du processus au retour }
+Procedure LxStart;
+Var P, E, H, En, Cm, R, Tib, Sel, I, K : LongInt; Args : String;
+Begin
+  P := CurProc;
+  E := Procs[P].LxEip;
+  H := ProcWinBase;
+  Tib := (Procs[P].PhysBase + Procs[P].ImageSize + 4095) And Not 4095;
+  FillMem(Tib, 4096, 0);
+  MemL[0:Tib] := -1;                                  { fin de la chaine d'exceptions }
+  MemL[0:Tib + 4] := Tib + 4096;                      { bas de la pile }
+  MemL[0:Tib + 8] := Procs[P].PhysBase + Procs[P].PhysSize;
+  MemL[0:Tib + 12] := Tib + 24;                       { TIB2 }
+  MemL[0:Tib + 16] := 20;
+  MemL[0:Tib + 20] := 1;
+  MemL[0:Tib + 24] := 1;                              { identificateur du fil }
+  MemL[0:Tib + 28] := $200;
+  MemL[0:Tib + 32] := 20;
+  Procs[P].LxTib := Tib;
+  Sel := SelAlloc(1);
+  If Sel <> 0 Then
+  Begin
+    DescSet((Sel Shr 3) And $1FFF, Tib, $FFF, $92);
+    Sel := (Sel And $FFF8) Or 4;                      { LDT, anneau 0 }
+    Procs[P].LxFs := Sel;
+    TkFs[CurTask] := Sel;
+    asm
+      mov eax,Sel
+      mov fs,ax
+    end;
+  End;
+  { environnement : NOM=VALEUR#0...#0 }
+  En := Tib + 1024;
+  K := EnvSize;
+  If K > 2048 Then K := 2048;
+  MoveMem(LongInt(@EnvBlock), En, K);
+  Mem[0:En + K] := 0; Mem[0:En + K + 1] := 0;
+  { ligne de commande : programme#0 arguments#0#0 }
+  Cm := En + K + 4;
+  PutPStr(Cm, Procs[P].Path, 256);
+  I := Length(Procs[P].Path) + 1;
+  Args := Trim(Procs[P].CmdLine);
+  If (Length(Args) > 0) And (Args[1] = '"') Then
+  Begin
+    Args := Copy(Args, 2, 255);
+    K := Pos('"', Args);
+    If K > 0 Then Args := Copy(Args, K + 1, 255) Else Args := '';
+  End
+  Else
+  Begin
+    K := Pos(' ', Args);
+    If K > 0 Then Args := Copy(Args, K, 255) Else Args := '';
+  End;
+  Args := Trim(Args);
+  PutPStr(Cm + I, Args, 256);
+  Mem[0:Cm + I + Length(Args) + 1] := 0;
+  KLog('LX : demarrage de ' + Procs[P].Path + ' en ' + HexStr(E, 8) + 'h');
+  R := 0;
+  asm
+    mov eax,Cm
+    push eax
+    mov eax,En
+    push eax
+    push 0
+    mov eax,H
+    push eax
+    mov eax,E
+    call eax
+    add esp,16
+    mov R,eax
+  end;
+  KillCurrentProcess(R);
+End;
+
+{ programme LX : processus dont la fenetre (00400000h) contient
+  l'en-tete synthetique (le HMODULE du programme) puis les objets ; son
+  fil 1 commence par LxStart ; -1 en cas d'echec }
+Function LxLoadExe(Path, CmdLine : String; Buf, Size : LongInt) : LongInt;
+Var T, Hdr, Pid, I, Phys, PhysSize, Total, E : LongInt;
+Begin
+  LxLoadExe := -1;
+  LastError := ErrBadFormat;
+  T := LxPrepare(Buf, Size);
+  If T < 0 Then Exit;
+  Hdr := LxHdrSize;
+  Total := Hdr + T;
+  If Total > ProcWinSize Then
+  Begin
+    LastError := ErrNotEnoughMem;
+    Exit;
+  End;
+  Pid := -1;
+  For I := MaxProcs - 1 DownTo 0 Do
+    If Not Procs[I].Used Then Pid := I;
+  If Pid < 0 Then
+  Begin
+    LastError := 164;
+    Exit;
+  End;
+  PhysSize := Total + ProcStackSize;
+  Phys := PAlloc(PhysSize);
+  If Phys = 0 Then
+  Begin
+    LastError := ErrNotEnoughMem;
+    Exit;
+  End;
+  FillMem(Phys, PhysSize, 0);
+  { les importations peuvent charger des DLL : le processus est reserve }
+  Procs[Pid].Used := True;
+  Procs[Pid].Running := False;
+  Procs[Pid].MemLive := True;
+  If Not LxLoadObjects(Phys, ProcWinBase, Hdr) Then
+  Begin
+    ConPutLn('SYS0191: ' + Path + ' : ' + LxErr + '.');
+    KLog('LX : ' + Path + ' : ' + LxErr);
+    Procs[Pid].Used := False;
+    PFree(Phys);
+    If LxEntAdr <> 0 Then KFree(LxEntAdr);
+    LastError := 127;
+    Exit;
+  End;
+  E := LxEip;
+  LxBuildHdr(Phys, ProcWinBase, Total, E);
+  If LxEntAdr <> 0 Then KFree(LxEntAdr);
+  LxEntAdr := 0;
+  Procs[Pid].Parent := CurProc;
+  Procs[Pid].PhysBase := Phys;
+  Procs[Pid].PhysSize := PhysSize;
+  Procs[Pid].ImageSize := Total;
+  Procs[Pid].PtAlloc := KAlloc(8192);
+  Procs[Pid].PageTable := BuildPageTableAt(Procs[Pid].PtAlloc, Phys, Total);
+  Procs[Pid].ExitCode := 259;
+  Procs[Pid].Filter := 0;
+  Procs[Pid].CmdLine := CmdLine;
+  Procs[Pid].CmdBuf := KAlloc(Length(CmdLine) + 1);
+  PutPStr(Procs[Pid].CmdBuf, CmdLine, 256);
+  Procs[Pid].Name := BaseName(Path);
+  Procs[Pid].Path := Path;
+  If NextSerial < 2 Then NextSerial := 2;
+  Procs[Pid].Serial := NextSerial;
+  Inc(NextSerial);
+  Procs[Pid].StdOutH := 0;
+  If CurProc >= 0 Then Procs[Pid].StdOutH := Procs[CurProc].StdOutH;
+  Procs[Pid].CurDir := CurDir;
+  Procs[Pid].HandleOpen := False;
+  Procs[Pid].NoPreempt := False;
+  Procs[Pid].NextTid := 2;
+  Procs[Pid].Sess := 0;
+  If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
+  If (NextSess >= 0) And SUsed[NextSess] Then
+  Begin
+    Procs[Pid].Sess := NextSess;
+    SNew[NextSess] := False;
+    NextSess := -1;
+  End;
+  Procs[Pid].ConSess := Procs[Pid].Sess;
+  Procs[Pid].IsLx := True;
+  Procs[Pid].LxEip := E;
+  ProcEntry[Pid] := LongInt(@LxStart);
+  { pile : le haut du bloc physique (vue par son adresse physique, comme
+    les programmes d'OS/2-0) }
+  ProcStack[Pid] := Phys + PhysSize - 16;
+  KLog('LX : ' + Path + ' charge (' + IntStr(LxNObj) + ' objets, point d''entree ' + HexStr(E, 8) + 'h).');
+  LastError := 0;
+  LxLoadExe := Pid;
+End;
+
+Function LxLastErr : String;
+Begin
+  LxLastErr := LxErr;
+End;
+{ LX-FIN }
+{ NE-DEBUT }
+{ ==================================================================== }
+{ Partie 13d - Programmes OS/2 16 bits (format NE, OS/2 1.x)           }
+{ ==================================================================== }
+
+{ Comme OS/2 2.x, OS/2-0 execute les programmes 16 bits d'OS/2 1.x (en-tete
+  NE, systeme cible 1) : leurs segments sont places dans la fenetre du
+  processus (00400000h) et decrits par des selecteurs de la LDT (anneau
+  3, 16 bits). Le programme s'execute a l'anneau 3 ; ses appels aux
+  bibliotheques du systeme (DOSCALLS, VIOCALLS, KBDCALLS, MOUCALLS, NLS,
+  MSG, SESMGR, QUECALLS : appels FAR, convention Pascal) passent par une
+  petite souche 16 bits par fonction (mov ax,n ; call far porte:0 ;
+  retf taille des arguments) et une porte d'appel de la LDT vers
+  NeDispatch (anneau 0), qui appelle la fonction de API16.DLL (traduction
+  des pointeurs 16:16 et des structures, puis appel des fonctions 32 bits
+  d'OS/2-0). La gestion des segments (DosAllocSeg, DosReallocSeg,
+  DosFreeSeg), les fils (DosCreateThread) et DosExit sont faits ici. }
+
+Const
+  NeMaxImp = 512;
+  NeMaxTh  = 32;
+
+Var
+  NeImpMod  : Array[0..NeMaxImp - 1] Of LongInt;   { numero du module (API16) }
+  NeImpOrd  : Array[0..NeMaxImp - 1] Of LongInt;
+  NeImpFn   : Array[0..NeMaxImp - 1] Of LongInt;   { fonction de API16.DLL }
+  NeImpArgs : Array[0..NeMaxImp - 1] Of LongInt;   { octets d'arguments }
+  NeImpN    : LongInt;
+  NeApi     : LongInt;                             { module API16 (-2 : pas charge) }
+  NeArgsFn  : LongInt;                             { API16ARGS }
+  NeSelPid  : Array[0..2047] Of LongInt;           { processus + 1 proprietaire }
+  NeGateSel, NeGateCode, NeEnterCode : LongInt;
+  NeFrame   : Array[0..11] Of LongInt;             { entree a l'anneau 3 }
+  { par processus }
+  NeIs      : Array[0..MaxProcs - 1] Of Boolean;
+  NeCs, NeIp, NeSs, NeSp, NeDs, NeEnv, NeCmd, NeDsz : Array[0..MaxProcs - 1] Of LongInt;
+  NeHeap, NeHeapEnd : Array[0..MaxProcs - 1] Of LongInt;   { deplacements dans la fenetre }
+  { fils 16 bits en attente de demarrage }
+  NeThCs, NeThIp, NeThSs, NeThSp, NeThDs, NeThStk : Array[0..NeMaxTh - 1] Of LongInt;
+  NeThUsed : Array[0..NeMaxTh - 1] Of Boolean;
+  NeThEs : Array[0..NeMaxTh - 1] Of LongInt;
+  NeCurF : LongInt;                     { trame de l'appel en cours }
+  NeErr : String;
+  { chargement en cours }
+  NeB, NeH, NeAlign, NeNSeg, NeNMod : LongInt;
+  NeSegSel, NeSegLin, NeSegSize : Array[0..254] Of LongInt;
+  NeModName : Array[0..63] Of String[12];
+
+Function NeHdrW(O : LongInt) : LongInt;
+Begin
+  NeHdrW := MemW[0:NeB + NeH + O];
+End;
+
+{ numero du module (meme liste que API16.DLL) }
+Function NeModCode(Nm : String) : LongInt;
+Var U : String;
+Begin
+  U := UpStr(Nm);
+  If U = 'DOSCALLS' Then NeModCode := 1
+  Else If U = 'KBDCALLS' Then NeModCode := 2
+  Else If U = 'VIOCALLS' Then NeModCode := 3
+  Else If U = 'NLS' Then NeModCode := 4
+  Else If U = 'MSG' Then NeModCode := 5
+  Else If U = 'MOUCALLS' Then NeModCode := 6
+  Else If U = 'SESMGR' Then NeModCode := 7
+  Else If U = 'QUECALLS' Then NeModCode := 8
+  Else NeModCode := 0;
+End;
+
+{ ------------------------------------------------------------------ }
+{ Code genere : porte d'appel, entree a l'anneau 3                    }
+{ ------------------------------------------------------------------ }
+
+Procedure NeDispatch; Forward;
+
+{ au demarrage du noyau }
+Procedure NeBoot;
+Var I : LongInt;
+Begin
+  NeGateCode := 0; NeGateSel := 0; NeEnterCode := 0; NeImpN := 0; NeApi := -2;
+  For I := 0 To MaxProcs - 1 Do NeIs[I] := False;
+End;
+
+Procedure NeInit;
+Var A, I, T : LongInt;
+Begin
+  If NeGateCode <> 0 Then Exit;
+  NeApi := -2;
+  NeImpN := 0;
+  For I := 0 To 2047 Do NeSelPid[I] := 0;
+  For I := 0 To NeMaxTh - 1 Do NeThUsed[I] := False;
+  A := KAlloc(128);
+  If A = 0 Then Exit;
+  A := (A + 15) And Not 15;
+  NeGateCode := A;
+  { push ds ; push es ; pushad ; mov ax,10h ; mov ds,ax ; mov es,ax ;
+    push esp ; call NeDispatch ; add esp,4 ; popad ; pop es ; pop ds ;
+    retf }
+  Mem[0:A] := $1E; Mem[0:A + 1] := $06; Mem[0:A + 2] := $60;
+  Mem[0:A + 3] := $66; Mem[0:A + 4] := $B8; MemW[0:A + 5] := SelData;
+  Mem[0:A + 7] := $8E; Mem[0:A + 8] := $D8;
+  Mem[0:A + 9] := $8E; Mem[0:A + 10] := $C0;
+  Mem[0:A + 11] := $54;
+  T := LongInt(@NeDispatch);
+  Mem[0:A + 12] := $E8; MemL[0:A + 13] := T - (A + 17);
+  Mem[0:A + 17] := $83; Mem[0:A + 18] := $C4; Mem[0:A + 19] := 4;
+  Mem[0:A + 20] := $61; Mem[0:A + 21] := $07; Mem[0:A + 22] := $1F;
+  Mem[0:A + 23] := $CB;
+  { entree a l'anneau 3 (NeFrame : eip, cs, eflags, esp, ss, ax, bx, cx,
+    ds, es) : mov esi,NeFrame ; push [esi+16] ; push [esi+12] ;
+    push [esi+8] ; push [esi+4] ; push [esi] ; mov ebx,[esi+24] ;
+    mov ecx,[esi+28] ; mov edx,[esi+20] ; mov edi,[esi+36] ;
+    mov eax,[esi+32] ; xor esi,esi ; xor ebp,ebp ; mov ds,ax ; mov es,di ;
+    xor eax,eax ; mov fs,ax ; mov gs,ax ; mov eax,edx ; xor edx,edx ;
+    xor edi,edi ; iretd }
+  A := A + 32;
+  NeEnterCode := A;
+  Mem[0:A] := $BE; MemL[0:A + 1] := LongInt(@NeFrame);
+  Mem[0:A + 5] := $FF; Mem[0:A + 6] := $76; Mem[0:A + 7] := 16;
+  Mem[0:A + 8] := $FF; Mem[0:A + 9] := $76; Mem[0:A + 10] := 12;
+  Mem[0:A + 11] := $FF; Mem[0:A + 12] := $76; Mem[0:A + 13] := 8;
+  Mem[0:A + 14] := $FF; Mem[0:A + 15] := $76; Mem[0:A + 16] := 4;
+  Mem[0:A + 17] := $FF; Mem[0:A + 18] := $36;
+  Mem[0:A + 19] := $8B; Mem[0:A + 20] := $5E; Mem[0:A + 21] := 24;
+  Mem[0:A + 22] := $8B; Mem[0:A + 23] := $4E; Mem[0:A + 24] := 28;
+  Mem[0:A + 25] := $8B; Mem[0:A + 26] := $56; Mem[0:A + 27] := 20;
+  Mem[0:A + 28] := $8B; Mem[0:A + 29] := $7E; Mem[0:A + 30] := 36;
+  Mem[0:A + 31] := $8B; Mem[0:A + 32] := $46; Mem[0:A + 33] := 32;
+  Mem[0:A + 34] := $31; Mem[0:A + 35] := $F6;
+  Mem[0:A + 36] := $31; Mem[0:A + 37] := $ED;
+  Mem[0:A + 38] := $8E; Mem[0:A + 39] := $D8;
+  Mem[0:A + 40] := $8E; Mem[0:A + 41] := $C7;
+  Mem[0:A + 42] := $31; Mem[0:A + 43] := $C0;
+  Mem[0:A + 44] := $8E; Mem[0:A + 45] := $E0;
+  Mem[0:A + 46] := $8E; Mem[0:A + 47] := $E8;
+  Mem[0:A + 48] := $89; Mem[0:A + 49] := $D0;
+  Mem[0:A + 50] := $31; Mem[0:A + 51] := $D2;
+  Mem[0:A + 52] := $31; Mem[0:A + 53] := $FF;
+  Mem[0:A + 54] := $CF;
+  { porte d'appel 32 bits (anneau 3 -> anneau 0) dans la LDT }
+  NeGateSel := SelAlloc(1);
+  If NeGateSel <> 0 Then
+  Begin
+    I := (NeGateSel Shr 3) And $1FFF;
+    Ldt[I * 2] := (NeGateCode And $FFFF) Or (SelCode Shl 16);
+    Ldt[I * 2 + 1] := (NeGateCode And LongInt($FFFF0000)) Or $EC00;
+  End;
+End;
+
+{ selecteur de la LDT pour Lin (deplacement dans la fenetre), anneau 3 }
+Function NeSel(Pid, Lin, Size, Acc : LongInt) : LongInt;
+Var S : LongInt;
+Begin
+  NeSel := 0;
+  S := SelAlloc(1);
+  If S = 0 Then Exit;
+  If Size <= 0 Then Size := 1;
+  DescSet((S Shr 3) And $1FFF, ProcWinBase + Lin, Size - 1, Acc);
+  NeSelPid[(S Shr 3) And $1FFF] := Pid + 1;
+  NeSel := S;
+End;
+
+{ bloc de la fenetre du processus (aligne sur 16 octets) ; -1 si plein }
+Function NeAlloc(Pid, Size : LongInt) : LongInt;
+Var A : LongInt;
+Begin
+  NeAlloc := -1;
+  A := (NeHeap[Pid] + 15) And Not 15;
+  If A + Size > NeHeapEnd[Pid] Then Exit;
+  NeHeap[Pid] := A + Size;
+  FillMem(Procs[Pid].PhysBase + A, Size, 0);
+  NeAlloc := A;
+End;
+
+{ selecteur 16:16 -> adresse lineaire (0 pour un pointeur nul) }
+Function NeFlat(Sel, Ofs : LongInt) : LongInt;
+Begin
+  NeFlat := 0;
+  If (Sel And $FFF8) = 0 Then Exit;
+  NeFlat := SelBase(Sel) + (Ofs And $FFFF);
+End;
+
+{ Fin d'un processus 16 bits : ses selecteurs sont rendus }
+Procedure NeKill(Pid : LongInt);
+Var I : LongInt;
+Begin
+  If NeGateCode = 0 Then Exit;
+  If (Pid < 0) Or (Pid >= MaxProcs) Or Not NeIs[Pid] Then Exit;
+  NeIs[Pid] := False;
+  For I := 1 To 2047 Do
+    If NeSelPid[I] = Pid + 1 Then
+    Begin
+      NeSelPid[I] := 0;
+      SelFree((I Shl 3) Or 7, 1);
+    End;
+End;
+
+{ API16.DLL : fonction d'un module (code) et d'un ordinal }
+Function NeApiFn(Code, Ord : LongInt; Var Args : LongInt) : LongInt;
+Var F, R : LongInt; Nm : String;
+Begin
+  NeApiFn := 0;
+  Args := -1;
+  If NeApi = -2 Then
+  Begin
+    NeApi := LoadModule('API16');
+    NeArgsFn := 0;
+    If NeApi >= 0 Then NeArgsFn := ModuleExport(NeApi, 'API16ARGS', 0);
+  End;
+  If (NeApi < 0) Or (NeArgsFn = 0) Then Exit;
+  F := NeArgsFn;
+  R := -1;
+  asm
+    mov eax,Ord
+    push eax
+    mov eax,Code
+    push eax
+    mov eax,F
+    call eax
+    add esp,8
+    mov R,eax
+  end;
+  Args := R;
+  If R < 0 Then Exit;
+  Nm := 'F' + IntStr(Code) + '_' + IntStr(Ord);
+  NeApiFn := ModuleExport(NeApi, Nm, 0);
+End;
+
+{ indice de la souche d'une importation (module, ordinal) }
+Function NeImport(Mn : String; Ord : LongInt) : LongInt;
+Var I, C, A, F : LongInt;
+Begin
+  C := NeModCode(Mn);
+  For I := 0 To NeImpN - 1 Do
+    If (NeImpMod[I] = C) And (NeImpOrd[I] = Ord) Then
+    Begin
+      NeImport := I;
+      Exit;
+    End;
+  NeImport := -1;
+  If NeImpN >= NeMaxImp Then Exit;
+  I := NeImpN;
+  Inc(NeImpN);
+  NeImpMod[I] := C; NeImpOrd[I] := Ord;
+  F := 0; A := -1;
+  { faites par le noyau : DosExit, segments, fils }
+  If (C = 1) And (Ord = 5) Then A := 4
+  Else If (C = 1) And (Ord = 34) Then A := 8
+  Else If (C = 1) And (Ord = 38) Then A := 4
+  Else If (C = 1) And (Ord = 39) Then A := 2
+  Else If (C = 1) And (Ord = 145) Then A := 12
+  Else If C <> 0 Then F := NeApiFn(C, Ord, A);
+  If A < 0 Then
+  Begin
+    KLog('NE : fonction absente ' + Mn + '.' + IntStr(Ord));
+    A := 0;
+  End;
+  NeImpFn[I] := F;
+  NeImpArgs[I] := A;
+  NeImport := I;
+End;
+
+{ ------------------------------------------------------------------ }
+{ Appels des programmes 16 bits                                       }
+{ ------------------------------------------------------------------ }
+
+Procedure NeThreadStart; Forward;
+
+{ DosCreateThread(pfn, ptid, pstack) }
+Function NeCreateThread(A : LongInt) : LongInt;
+Var I, Stk, T, P, Tid : LongInt;
+Begin
+  NeCreateThread := 8;
+  P := CurProc;
+  I := 0;
+  While (I < NeMaxTh) And NeThUsed[I] Do Inc(I);
+  If I >= NeMaxTh Then Exit;
+  Stk := PAlloc(8192);
+  If Stk = 0 Then Exit;
+  NeThUsed[I] := True;
+  NeThIp[I] := MemW[0:A + 8]; NeThCs[I] := MemW[0:A + 10];
+  NeThSp[I] := MemW[0:A]; NeThSs[I] := MemW[0:A + 2];
+  { DS et ES du fil createur (comme OS/2 1.x) }
+  NeThDs[I] := MemL[0:NeCurF + 36] And $FFFF;
+  NeThEs[I] := MemL[0:NeCurF + 32] And $FFFF;
+  NeThStk[I] := Stk;
+  Tid := Procs[P].NextTid;
+  Inc(Procs[P].NextTid);
+  T := NewTask(P, LongInt(@NeThreadStart), I, Stk + 8192 - 16, Stk, Tid);
+  If T < 0 Then
+  Begin
+    NeThUsed[I] := False;
+    PFree(Stk);
+    Exit;
+  End;
+  If NeFlat(MemW[0:A + 6], MemW[0:A + 4]) <> 0 Then
+    MemW[0:NeFlat(MemW[0:A + 6], MemW[0:A + 4])] := Tid;
+  NeCreateThread := 0;
+End;
+
+{ DosAllocSeg(cb, psel, flags) }
+Function NeAllocSeg(A : LongInt) : LongInt;
+Var Sz, L, S, P : LongInt;
+Begin
+  NeAllocSeg := 8;
+  P := CurProc;
+  Sz := MemW[0:A + 6];
+  If Sz = 0 Then Sz := 65536;
+  L := NeAlloc(P, Sz);
+  If L < 0 Then Exit;
+  S := NeSel(P, L, Sz, $F2);
+  If S = 0 Then Exit;
+  If NeFlat(MemW[0:A + 4], MemW[0:A + 2]) <> 0 Then
+    MemW[0:NeFlat(MemW[0:A + 4], MemW[0:A + 2])] := S;
+  NeAllocSeg := 0;
+End;
+
+{ DosReallocSeg(cb, sel) : nouveau bloc si le segment grandit }
+Function NeReallocSeg(A : LongInt) : LongInt;
+Var Sz, Sel, Old, OldSz, L, I : LongInt;
+Begin
+  NeReallocSeg := 0;
+  Sz := MemW[0:A + 2];
+  If Sz = 0 Then Sz := 65536;
+  Sel := MemW[0:A];
+  If Not SelValid(Sel) Then
+  Begin
+    NeReallocSeg := 5;
+    Exit;
+  End;
+  I := (Sel Shr 3) And $1FFF;
+  Old := SelBase(Sel);
+  OldSz := SelLimit(Sel) + 1;
+  If Sz > OldSz Then
+  Begin
+    L := NeAlloc(CurProc, Sz);
+    If L < 0 Then
+    Begin
+      NeReallocSeg := 8;
+      Exit;
+    End;
+    MoveMem(Old, ProcWinBase + L, OldSz);
+    DescSet(I, ProcWinBase + L, Sz - 1, (Ldt[I * 2 + 1] Shr 8) And $FF);
+  End
+  Else
+    DescSet(I, Old, Sz - 1, (Ldt[I * 2 + 1] Shr 8) And $FF);
+End;
+
+Function NeFreeSeg(A : LongInt) : LongInt;
+Var Sel, I : LongInt;
+Begin
+  NeFreeSeg := 0;
+  Sel := MemW[0:A];
+  I := (Sel Shr 3) And $1FFF;
+  If (I > 0) And (I < 2048) And (NeSelPid[I] = CurProc + 1) Then
+  Begin
+    NeSelPid[I] := 0;
+    SelFree(Sel, 1);
+  End
+  Else NeFreeSeg := 5;
+End;
+
+{ Appel d'une fonction du systeme par un programme 16 bits : trame
+  (pushad, es, ds, eip, cs, esp, ss de l'anneau 3) a [ebp+8] }
+Procedure NeDispatch;
+Var F, Idx, Args, Fn, R, Code : LongInt;
+Begin
+  asm
+    mov eax,[ebp+8]
+    mov F,eax
+  end;
+  Idx := MemL[0:F + 28] And $FFFF;
+  NeCurF := F;
+  { arguments : pile de l'anneau 3, apres l'adresse de retour FAR }
+  Args := SelBase(MemL[0:F + 52]) + (MemL[0:F + 48] And $FFFF) + 4;
+  R := 1;
+  If (Idx >= 0) And (Idx < NeImpN) Then
+  Begin
+    Code := NeImpMod[Idx] * 1000 + NeImpOrd[Idx];
+    If Code = 1005 Then
+    Begin
+      { DosExit(action, code) }
+      If MemW[0:Args + 2] = 1 Then KillCurrentProcess(MemW[0:Args])
+      Else EndThread(MemW[0:Args]);
+    End
+    Else If Code = 1034 Then R := NeAllocSeg(Args)
+    Else If Code = 1038 Then R := NeReallocSeg(Args)
+    Else If Code = 1039 Then R := NeFreeSeg(Args)
+    Else If Code = 1145 Then R := NeCreateThread(Args)
+    Else
+    Begin
+      Fn := NeImpFn[Idx];
+      If Fn <> 0 Then
+      Begin
+        asm
+          mov eax,Args
+          push eax
+          mov eax,Fn
+          call eax
+          add esp,4
+          mov R,eax
+        end;
+      End
+      Else KLog('NE : appel d''une fonction absente (module ' + IntStr(NeImpMod[Idx]) +
+                ', ordinal ' + IntStr(NeImpOrd[Idx]) + ')');
+    End;
+  End;
+  MemL[0:F + 28] := (MemL[0:F + 28] And LongInt($FFFF0000)) Or (R And $FFFF);
+End;
+
+{ Entree a l'anneau 3 (sans retour) }
+Procedure NeEnter(Cs, Ip, Ss, Sp, Ds, Es, Ax, Bx, Cx, Esp0 : LongInt);
+Var S : LongInt;
+Begin
+  { trame globale : pas de changement de tache jusqu'a IRETD }
+  asm
+    cli
+  end;
+  TkEsp0[CurTask] := Esp0;
+  Tss[1] := Esp0;
+  NeFrame[0] := Ip; NeFrame[1] := Cs; NeFrame[2] := $202;
+  NeFrame[3] := Sp; NeFrame[4] := Ss;
+  NeFrame[5] := Ax; NeFrame[6] := Bx; NeFrame[7] := Cx;
+  NeFrame[8] := Ds; NeFrame[9] := Es;
+  S := NeEnterCode;
+  asm
+    cli
+    mov eax,S
+    jmp eax
+  end;
+End;
+
+Procedure NeThreadStart;
+Var I, P, Cs, Ip, Ss, Sp, Ds, Es, Stk : LongInt;
+Begin
+  asm
+    mov eax,[ebp+8]
+    mov I,eax
+  end;
+  P := I;
+  asm
+    cli
+  end;
+  Cs := NeThCs[P]; Ip := NeThIp[P]; Ss := NeThSs[P]; Sp := NeThSp[P];
+  Ds := NeThDs[P]; Es := NeThEs[P]; Stk := NeThStk[P];
+  NeThUsed[P] := False;
+  NeEnter(Cs, Ip, Ss, Sp, Ds, Es, 0, 0, 0, Stk + 8192 - 16);
+End;
+
+Procedure NeStart;
+Var P : LongInt;
+Begin
+  P := CurProc;
+  KLog('NE : demarrage de ' + Procs[P].Path + ' en ' + HexStr(NeCs[P], 4) + ':' + HexStr(NeIp[P], 4));
+  NeEnter(NeCs[P], NeIp[P], NeSs[P], NeSp[P], NeDs[P], 0, NeEnv[P], NeCmd[P], NeDsz[P],
+          ProcStack[P] + 12);
+End;
+
+{ ------------------------------------------------------------------ }
+{ Chargement                                                         }
+{ ------------------------------------------------------------------ }
+
+Function NeStrAt(A : LongInt) : String;
+Var S : String; I, N : LongInt;
+Begin
+  S := '';
+  N := Mem[0:A];
+  For I := 1 To N Do S := S + Chr(Mem[0:A + I]);
+  NeStrAt := S;
+End;
+
+Function NeIsOs2(Buf, Size : LongInt) : LongInt;
+Var H, N, I : LongInt; M : String;
+Begin
+  NeIsOs2 := 0;
+  If (Size < 64) Or (MemW[0:Buf] <> $5A4D) Then Exit;
+  H := MemL[0:Buf + $3C];
+  If (H < 64) Or (H + 64 > Size) Then Exit;
+  If (Mem[0:Buf + H] = Ord('N')) And (Mem[0:Buf + H + 1] = Ord('E')) And
+     (Mem[0:Buf + H + $36] = 1) Then
+  Begin
+    { les programmes en mode protege de Borland Pascal (RTM, DPMI 16 bits)
+      sont marques OS/2 mais importent RTM ou KERNEL : programmes DOS }
+    N := MemW[0:Buf + H + $1E];
+    For I := 0 To N - 1 Do
+    Begin
+      M := NeStrAt(Buf + H + MemW[0:Buf + H + $2A] + MemW[0:Buf + H + MemW[0:Buf + H + $28] + I * 2]);
+      If (UpStr(M) = 'RTM') Or (UpStr(M) = 'KERNEL') Then Exit;
+    End;
+    NeIsOs2 := H;
+  End;
+End;
+
+{ deplacement d'un point d'entree (ordinal) : segment et deplacement }
+Function NeEntry(Ord : LongInt; Var Seg, Ofs : LongInt) : Boolean;
+Var P, N, T, K, E : LongInt;
+Begin
+  NeEntry := False;
+  P := NeB + NeH + NeHdrW($04);
+  E := 1;
+  While True Do
+  Begin
+    N := Mem[0:P];
+    If N = 0 Then Exit;
+    T := Mem[0:P + 1];
+    P := P + 2;
+    If T = 0 Then E := E + N
+    Else
+    Begin
+      For K := 0 To N - 1 Do
+      Begin
+        If E = Ord Then
+        Begin
+          If T = $FF Then
+          Begin
+            Seg := Mem[0:P + 3]; Ofs := MemW[0:P + 4];
+          End
+          Else
+          Begin
+            Seg := T; Ofs := MemW[0:P + 1];
+          End;
+          NeEntry := True;
+          Exit;
+        End;
+        Inc(E);
+        If T = $FF Then P := P + 6 Else P := P + 3;
+      End;
+    End;
+  End;
+End;
+
+
+{ Corrections d'un segment (I = 0..) ; Thunk : deplacement de la zone des
+  souches dans la fenetre, Pid }
+Function NeFixSeg(I, Pid, ThunkLin, ThunkSel : LongInt) : Boolean;
+Var Fo, Fl, Lng, R, N, K, St, Ft, So, A1, A2, Sel, Ofs, Idx, Dst, Nx, Guard : LongInt;
+    Mn : String; Abs16, Skip : Boolean;
+Begin
+  NeFixSeg := True;
+  Fo := MemW[0:NeB + NeH + NeHdrW($22) + I * 8];
+  Lng := MemW[0:NeB + NeH + NeHdrW($22) + I * 8 + 2];
+  Fl := MemW[0:NeB + NeH + NeHdrW($22) + I * 8 + 4];
+  If ((Fl And $100) = 0) Or (Fo = 0) Then Exit;
+  If Lng = 0 Then Lng := 65536;
+  R := NeB + (Fo Shl NeAlign) + Lng;
+  N := MemW[0:R];
+  Dst := Procs[Pid].PhysBase + NeSegLin[I];
+  For K := 0 To N - 1 Do
+  Begin
+    St := Mem[0:R + 2 + K * 8];
+    Ft := Mem[0:R + 3 + K * 8];
+    So := MemW[0:R + 4 + K * 8];
+    A1 := MemW[0:R + 6 + K * 8];
+    A2 := MemW[0:R + 8 + K * 8];
+    Sel := 0; Ofs := 0; Abs16 := False; Skip := False;
+    Case Ft And 3 Of
+      0 : Begin
+            If A1 = $FF Then
+            Begin
+              If Not NeEntry(A2, A1, Ofs) Then A1 := 0;
+            End
+            Else Ofs := A2;
+            If (A1 >= 1) And (A1 <= NeNSeg) Then Sel := NeSegSel[A1 - 1];
+          End;
+      1, 2 :
+          Begin
+            If (A1 >= 1) And (A1 <= NeNMod) Then Mn := NeModName[A1 - 1] Else Mn := '?';
+            If (Ft And 3) = 2 Then
+            Begin
+              { importation par nom : seuls les ordinaux sont connus }
+              KLog('NE : importation par nom ' + Mn + '.' + NeStrAt(NeB + NeH + NeHdrW($2A) + A2));
+              Idx := NeImport(Mn, 0);
+            End
+            Else If (UpStr(Mn) = 'DOSCALLS') And ((A2 = 135) Or (A2 = 136)) Then
+            Begin
+              { DOSHUGESHIFT, DOSHUGEINCR : constantes }
+              Abs16 := True;
+              If A2 = 135 Then Ofs := 3 Else Ofs := 8;
+              Idx := -1;
+            End
+            Else Idx := NeImport(Mn, A2);
+            If Idx >= 0 Then
+            Begin
+              Sel := ThunkSel; Ofs := Idx * 12;
+            End;
+          End;
+      3 : Skip := True;    { corrections du coprocesseur }
+    End;
+    If Abs16 Then Sel := Ofs;
+    { chaine des corrections (non additives) }
+    Guard := 0;
+    If Skip Then Guard := 4096;
+    While (So < 65536) And (Guard < 4096) Do
+    Begin
+      Inc(Guard);
+      Nx := MemW[0:Dst + So];
+      Case St Of
+        0 : If (Ft And 4) <> 0 Then Mem[0:Dst + So] := (Mem[0:Dst + So] + Ofs) And $FF
+            Else Mem[0:Dst + So] := Ofs And $FF;
+        2 : If (Ft And 4) <> 0 Then MemW[0:Dst + So] := (MemW[0:Dst + So] + Sel) And $FFFF
+            Else MemW[0:Dst + So] := Sel;
+        3 : If (Ft And 4) <> 0 Then
+            Begin
+              MemW[0:Dst + So] := (MemW[0:Dst + So] + Ofs) And $FFFF;
+              MemW[0:Dst + So + 2] := Sel;
+            End
+            Else
+            Begin
+              MemW[0:Dst + So] := Ofs;
+              MemW[0:Dst + So + 2] := Sel;
+            End;
+        5 : If Abs16 Then MemW[0:Dst + So] := Sel
+            Else If (Ft And 4) <> 0 Then MemW[0:Dst + So] := (MemW[0:Dst + So] + Ofs) And $FFFF
+            Else MemW[0:Dst + So] := Ofs;
+        11 : Begin
+               MemL[0:Dst + So] := Ofs;
+               MemW[0:Dst + So + 4] := Sel;
+             End;
+        13 : MemL[0:Dst + So] := Ofs;
+      Else
+        NeErr := 'correction de type ' + IntStr(St) + ' non prise en charge';
+        NeFixSeg := False;
+        Exit;
+      End;
+      If ((Ft And 4) <> 0) Or (Nx = $FFFF) Or (St = 11) Or (St = 13) Then Break;
+      So := Nx;
+    End;
+  End;
+End;
+
+{ segment itere : enregistrements (repetitions, longueur, donnees) }
+Procedure NeIter(Src, N, Dst, Max : LongInt);
+Var P, Q, Cnt, Ln, K : LongInt;
+Begin
+  P := 0; Q := 0;
+  While P + 4 <= N Do
+  Begin
+    Cnt := MemW[0:Src + P];
+    Ln := MemW[0:Src + P + 2];
+    P := P + 4;
+    If P + Ln > N Then Exit;
+    For K := 1 To Cnt Do
+    Begin
+      If Q + Ln > Max Then Exit;
+      MoveMem(Src + P, Dst + Q, Ln);
+      Q := Q + Ln;
+    End;
+    P := P + Ln;
+  End;
+End;
+
+Function NeLoadExe(Path, CmdLine : String; Buf, Size : LongInt) : LongInt;
+Var Pid, I, K, Phys, Fo, Lng, Fl, Ma, Sz, Lin, Ds, Auto, Heap, Stk, E, Cm,
+    ThLin, ThSel, Ss, Sp, J, Ac : LongInt; Args : String;
+Begin
+  NeLoadExe := -1;
+  LastError := ErrBadFormat;
+  NeInit;
+  If NeGateSel = 0 Then Exit;
+  NeB := Buf;
+  NeH := NeIsOs2(Buf, Size);
+  If NeH = 0 Then Exit;
+  If (NeHdrW($0C) And $8000) <> 0 Then Exit;       { DLL }
+  NeAlign := NeHdrW($32);
+  If NeAlign = 0 Then NeAlign := 9;
+  NeNSeg := NeHdrW($1C);
+  NeNMod := NeHdrW($1E);
+  If (NeNSeg <= 0) Or (NeNSeg > 254) Or (NeNMod > 63) Then Exit;
+  For I := 0 To NeNMod - 1 Do
+    NeModName[I] := NeStrAt(NeB + NeH + NeHdrW($2A) + MemW[0:NeB + NeH + NeHdrW($28) + I * 2]);
+  Pid := -1;
+  For I := MaxProcs - 1 DownTo 0 Do
+    If Not Procs[I].Used Then Pid := I;
+  If Pid < 0 Then
+  Begin
+    LastError := 164;
+    Exit;
+  End;
+  Phys := PAlloc(ProcWinSize);
+  If Phys = 0 Then
+  Begin
+    LastError := ErrNotEnoughMem;
+    Exit;
+  End;
+  FillMem(Phys, ProcWinSize, 0);
+  Procs[Pid].Used := True;
+  Procs[Pid].Running := False;
+  Procs[Pid].MemLive := True;
+  Procs[Pid].PhysBase := Phys;
+  Procs[Pid].PhysSize := ProcWinSize;
+  NeIs[Pid] := True;
+  NeHeap[Pid] := 4096;                     { page 0 : environnement }
+  NeHeapEnd[Pid] := ProcWinSize - 65536;   { haut : pile de l'anneau 0 }
+  Auto := NeHdrW($0E);
+  Heap := NeHdrW($10);
+  Stk := NeHdrW($12);
+  { segments }
+  For I := 0 To NeNSeg - 1 Do
+  Begin
+    Fo := MemW[0:NeB + NeH + NeHdrW($22) + I * 8];
+    Lng := MemW[0:NeB + NeH + NeHdrW($22) + I * 8 + 2];
+    Fl := MemW[0:NeB + NeH + NeHdrW($22) + I * 8 + 4];
+    Ma := MemW[0:NeB + NeH + NeHdrW($22) + I * 8 + 6];
+    If (Lng = 0) And (Fo <> 0) Then Lng := 65536;
+    If Ma = 0 Then Ma := 65536;
+    If Ma < Lng Then Ma := Lng;
+    Sz := Ma;
+    If I + 1 = Auto Then
+    Begin
+      Sz := Ma + Heap + Stk;
+      If Sz > 65536 Then Sz := 65536;
+    End;
+    Lin := NeAlloc(Pid, Sz);
+    If Lin < 0 Then
+    Begin
+      NeErr := 'memoire insuffisante';
+      NeKill(Pid);
+      Procs[Pid].Used := False;
+      PFree(Phys);
+      LastError := ErrNotEnoughMem;
+      Exit;
+    End;
+    If (Fo <> 0) And ((Fo Shl NeAlign) + Lng <= Size) Then
+    Begin
+      If (Fl And 8) <> 0 Then NeIter(NeB + (Fo Shl NeAlign), Lng, Phys + Lin, Sz)
+      Else MoveMem(NeB + (Fo Shl NeAlign), Phys + Lin, Lng);
+    End;
+    If (Fl And 1) = 0 Then Ac := $FA Else Ac := $F2;
+    NeSegLin[I] := Lin;
+    NeSegSize[I] := Sz;
+    NeSegSel[I] := NeSel(Pid, Lin, Sz, Ac);
+  End;
+  { souches des importations : 12 octets par fonction connue du systeme
+    (toutes les importations, pour des indices globaux) }
+  ThLin := NeAlloc(Pid, NeMaxImp * 12);
+  ThSel := NeSel(Pid, ThLin, NeMaxImp * 12, $FA);
+  NeErr := '';
+  For I := 0 To NeNSeg - 1 Do
+    If Not NeFixSeg(I, Pid, ThLin, ThSel) Then
+    Begin
+      ConPutLn('SYS0191: ' + Path + ' : ' + NeErr + '.');
+      NeKill(Pid);
+      Procs[Pid].Used := False;
+      PFree(Phys);
+      Exit;
+    End;
+  For J := 0 To NeImpN - 1 Do
+  Begin
+    E := Phys + ThLin + J * 12;
+    Mem[0:E] := $B8; MemW[0:E + 1] := J;
+    Mem[0:E + 3] := $9A; MemW[0:E + 4] := 0; MemW[0:E + 6] := NeGateSel;
+    Mem[0:E + 8] := $CA; MemW[0:E + 9] := NeImpArgs[J];
+  End;
+  { environnement (page 0) : NOM=VALEUR#0...#0, programme#0 arguments#0#0 }
+  K := EnvSize;
+  If K > 2048 Then K := 2048;
+  MoveMem(LongInt(@EnvBlock), Phys, K);
+  Mem[0:Phys + K] := 0; Mem[0:Phys + K + 1] := 0;
+  Cm := K + 2;
+  PutPStr(Phys + Cm, Path, 256);
+  I := Cm + Length(Path) + 1;
+  Args := Trim(CmdLine);
+  If (Length(Args) > 0) And (Args[1] = '"') Then
+  Begin
+    Args := Copy(Args, 2, 255);
+    K := Pos('"', Args);
+    If K > 0 Then Args := Copy(Args, K + 1, 255) Else Args := '';
+  End
+  Else
+  Begin
+    K := Pos(' ', Args);
+    If K > 0 Then Args := Copy(Args, K, 255) Else Args := '';
+  End;
+  Args := Trim(Args);
+  PutPStr(Phys + I, Args, 256);
+  Mem[0:Phys + I + Length(Args) + 1] := 0;
+  NeEnv[Pid] := NeSel(Pid, 0, 4096, $F2);
+  NeCmd[Pid] := Cm;
+  { registres de depart }
+  I := NeHdrW($16);
+  If (I >= 1) And (I <= NeNSeg) Then NeCs[Pid] := NeSegSel[I - 1] Else NeCs[Pid] := 0;
+  NeIp[Pid] := NeHdrW($14);
+  I := NeHdrW($1A);
+  Sp := NeHdrW($18);
+  If (I >= 1) And (I <= NeNSeg) Then
+  Begin
+    Ss := NeSegSel[I - 1];
+    If Sp = 0 Then Sp := NeSegSize[I - 1] And $FFFE;
+    If Sp = 0 Then Sp := $FFFE;
+  End
+  Else Ss := 0;
+  NeSs[Pid] := Ss; NeSp[Pid] := Sp;
+  If (Auto >= 1) And (Auto <= NeNSeg) Then
+  Begin
+    NeDs[Pid] := NeSegSel[Auto - 1];
+    NeDsz[Pid] := NeSegSize[Auto - 1];
+  End
+  Else
+  Begin
+    NeDs[Pid] := 0; NeDsz[Pid] := 0;
+  End;
+  If (NeCs[Pid] = 0) Or (Ss = 0) Then
+  Begin
+    ConPutLn('SYS0191: ' + Path + ' : point d''entree ou pile absents.');
+    NeKill(Pid);
+    Procs[Pid].Used := False;
+    PFree(Phys);
+    Exit;
+  End;
+  { processus }
+  Procs[Pid].Parent := CurProc;
+  Procs[Pid].ImageSize := NeHeap[Pid];
+  Procs[Pid].PtAlloc := KAlloc(8192);
+  Procs[Pid].PageTable := BuildPageTableAt(Procs[Pid].PtAlloc, Phys, ProcWinSize);
+  For I := 0 To 1023 Do
+    MemL[0:Procs[Pid].PageTable + I * 4] := MemL[0:Procs[Pid].PageTable + I * 4] Or 4;
+  Procs[Pid].ExitCode := 259;
+  Procs[Pid].Filter := 0;
+  Procs[Pid].CmdLine := CmdLine;
+  Procs[Pid].CmdBuf := KAlloc(Length(CmdLine) + 1);
+  PutPStr(Procs[Pid].CmdBuf, CmdLine, 256);
+  Procs[Pid].Name := BaseName(Path);
+  Procs[Pid].Path := Path;
+  If NextSerial < 2 Then NextSerial := 2;
+  Procs[Pid].Serial := NextSerial;
+  Inc(NextSerial);
+  Procs[Pid].StdOutH := 0;
+  If CurProc >= 0 Then Procs[Pid].StdOutH := Procs[CurProc].StdOutH;
+  Procs[Pid].CurDir := CurDir;
+  Procs[Pid].HandleOpen := False;
+  Procs[Pid].NoPreempt := False;
+  Procs[Pid].NextTid := 2;
+  Procs[Pid].Sess := 0;
+  If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
+  If (NextSess >= 0) And SUsed[NextSess] Then
+  Begin
+    Procs[Pid].Sess := NextSess;
+    SNew[NextSess] := False;
+    NextSess := -1;
+  End;
+  Procs[Pid].ConSess := Procs[Pid].Sess;
+  Procs[Pid].IsLx := False;
+  ProcEntry[Pid] := LongInt(@NeStart);
+  { pile de l'anneau 0 : le haut de la fenetre (adresse physique) }
+  ProcStack[Pid] := Phys + ProcWinSize - 16;
+  KLog('NE : ' + Path + ' charge (' + IntStr(NeNSeg) + ' segments, ' + IntStr(NeImpN) + ' fonctions du systeme connues).');
+  LastError := 0;
+  NeLoadExe := Pid;
+End;
+{ NE-FIN }
+
 Procedure Banner;
 Begin
   TextAttr := $1F;
@@ -15508,6 +17704,8 @@ BEGIN
   InitGdt;
   InitIdt;
   InitTss;
+  For I := 0 To 15 Do FBufs[I] := 0;
+  NeBoot;
   InitPic;
   InitTimer;
   InitKeyboard;

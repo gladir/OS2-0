@@ -637,12 +637,12 @@ End;
 { ==================================================================== }
 
 exports
-  WinCreateHelpInstance Index 1 Name 'WINCREATEHELPINSTANCE',
-  WinDestroyHelpInstance Index 2 Name 'WINDESTROYHELPINSTANCE',
-  WinQueryHelpInstance Index 3 Name 'WINQUERYHELPINSTANCE',
-  WinAssociateHelpInstance Index 4 Name 'WINASSOCIATEHELPINSTANCE',
-  WinLoadHelpTable Index 5 Name 'WINLOADHELPTABLE',
-  WinCreateHelpTable Index 6 Name 'WINCREATEHELPTABLE',
+  WinCreateHelpInstance Index 51 Name 'WINCREATEHELPINSTANCE',
+  WinDestroyHelpInstance Index 52 Name 'WINDESTROYHELPINSTANCE',
+  WinQueryHelpInstance Index 53 Name 'WINQUERYHELPINSTANCE',
+  WinAssociateHelpInstance Index 54 Name 'WINASSOCIATEHELPINSTANCE',
+  WinLoadHelpTable Index 55 Name 'WINLOADHELPTABLE',
+  WinCreateHelpTable Index 56 Name 'WINCREATEHELPTABLE',
   HmQueryPanelId Index 100 Name 'HMQUERYPANELID',
   HmQueryInstanceInfo Index 101 Name 'HMQUERYINSTANCEINFO';
 

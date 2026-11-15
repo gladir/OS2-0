@@ -268,11 +268,11 @@ BEGIN
   { --- module, ordinaux --- }
   R := DosQueryModuleHandle(Z('HELPMGR'), LongInt(@H));
   Check('DosQueryModuleHandle HELPMGR', R = 0);
-  Check('ordinaux 1 a 6', OrdIs(1, 'WINCREATEHELPINSTANCE') And OrdIs(2, 'WINDESTROYHELPINSTANCE') And
-        OrdIs(3, 'WINQUERYHELPINSTANCE') And OrdIs(4, 'WINASSOCIATEHELPINSTANCE') And
-        OrdIs(5, 'WINLOADHELPTABLE') And OrdIs(6, 'WINCREATEHELPTABLE'));
-  Check('ordinaux internes 100 et 101 ; ordinal 7 inexistant', OrdIs(100, 'HMQUERYPANELID') And
-        OrdIs(101, 'HMQUERYINSTANCEINFO') And (DosQueryProcAddr(H, 7, 0, LongInt(@A)) <> 0));
+  Check('ordinaux 51 a 56 (ceux d''OS/2)', OrdIs(51, 'WINCREATEHELPINSTANCE') And OrdIs(52, 'WINDESTROYHELPINSTANCE') And
+        OrdIs(53, 'WINQUERYHELPINSTANCE') And OrdIs(54, 'WINASSOCIATEHELPINSTANCE') And
+        OrdIs(55, 'WINLOADHELPTABLE') And OrdIs(56, 'WINCREATEHELPTABLE'));
+  Check('ordinaux internes 100 et 101 ; ordinal 57 inexistant', OrdIs(100, 'HMQUERYPANELID') And
+        OrdIs(101, 'HMQUERYINSTANCEINFO') And (DosQueryProcAddr(H, 57, 0, LongInt(@A)) <> 0));
 
   { --- bibliotheques d'aide --- }
   R := MakeFile('C:\ESSAI.HLP', 'HSP');
