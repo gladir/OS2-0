@@ -737,6 +737,10 @@ OS/2-0 reconnaît maintenant le matériel des machines virtuelles de <b>VirtualB
 
 Réglages conseillés de la machine virtuelle : type « OS/2 Warp 3 » (ou « Autre »), contrôleur graphique VBoxVGA ou VMSVGA, carte réseau Intel PRO/1000 MT Desktop ou PCnet-FAST III en NAT, souris PS/2. Les Additions ne demandent aucune installation : VBOXGST.DLL est chargé dès qu'il trouve le VMMDev.
 
+<img width="804" height="671" alt="OS/2-0 dans VirtualBox 7 sous Windows : le bureau et le dossier Système OS/2" src="IMAGE/VIRTUALBOX.png" />
+
+<i>OS/2-0 dans <b>VirtualBox 7.0</b> sous Windows (VirtualBox au-dessus de Hyper-V) : le bureau, le dossier Système OS/2 et le LaunchPad.</i>
+
 <b>Installation depuis VirtualBox.</b> Le CD-ROM d'installation s'arrêtait dès le démarrage du noyau : « OS/2-0 OS2LDR...... » restait affiché et plus rien ne se passait. Trois causes ont été trouvées et corrigées :
 
 <table>

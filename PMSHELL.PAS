@@ -1397,21 +1397,23 @@ Begin
   End;
 End;
 
-{ etiquette : deux lignes de 14 caracteres au plus }
+{ etiquette : premiere ligne de 13 caracteres au plus (la cellule en
+  contient 14 : un espace reste entre deux etiquettes voisines, sinon
+  "Navigateur Web" et "Aide du bureau" se touchent), seconde de 14 }
 Procedure SplitLabel(S : String; Var L1, L2 : String);
 Var K : LongInt;
 Begin
   L2 := '';
-  If Length(S) <= 14 Then
+  If Length(S) <= 13 Then
   Begin
     L1 := S;
     Exit;
   End;
-  K := 15;
+  K := 14;
   While (K > 1) And (S[K] <> ' ') Do Dec(K);
   If K <= 1 Then
   Begin
-    L1 := Copy(S, 1, 14); L2 := Copy(S, 15, 255);
+    L1 := Copy(S, 1, 13); L2 := Copy(S, 14, 255);
   End
   Else
   Begin
