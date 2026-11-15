@@ -111,6 +111,12 @@ Const
   ModFirstCap   = 16;          { table des modules : 16 entrees, doublee au besoin }
   DllAlign      = $00010000;   { placement des DLL relogees : 64 Ko }
 
+  { Memoire physique geree : les adresses sont des LongInt signes ; au-dela
+    de 2 Go, PhysTop (MemTotalKb * 1024) devenait negatif et le noyau se
+    bloquait au demarrage (VirtualBox propose souvent 2 a 4 Go). Le reste
+    de la memoire est ignore. }
+  MaxPhysKb     = 1792 * 1024;
+
   { Tas du noyau }
   HeapMagicUsed = $55534544;   { 'DESU' }
   HeapMagicFree = $45455246;   { 'FREE' }
@@ -295,6 +301,7 @@ Var
   { Memoire }
   HeapStart, HeapEnd : LongInt;
   MemTotalKb       : LongInt;
+  MemUseKb         : LongInt;      { memoire geree (MemTotalKb plafonnee a MaxPhysKb) }
   PhysTop          : LongInt;
 
   { Pagination }
@@ -2142,6 +2149,298 @@ Var
   CacheData : Array[0..CacheSlots - 1] Of LongInt;   { 2 Ko chacun }
   CacheNext : LongInt;
 
+{ ==================================================================== }
+{ Pilote AHCI (SATA) : CD-ROM ATAPI et disques ATA                      }
+{ ==================================================================== }
+{ VirtualBox branche souvent le disque et le lecteur de CD-ROM sur un
+  controleur SATA AHCI (classe PCI 01h, sous-classe 06h) et non sur
+  l'IDE. Un peripherique AHCI est designe par Base = AhciTag + port
+  (aucun port IDE ne depasse FFFFh) : HdIOx, AtaReadSector et la table
+  Disks servent ainsi aux deux. Transferts par DMA (une table de
+  commande, une entree PRDT) dans un tampon du noyau (memoire basse,
+  projetee a l'identique), recopie ensuite a l'adresse demandee. }
+
+Const
+  AhciTag    = $10000;
+  AhciMaxP   = 32;
+  AhciBufLen = 65536;                 { 128 secteurs de 512 octets }
+
+Var
+  AhciAbar    : LongInt;              { registres du controleur (0 : absent) }
+  AhciScanned : Boolean;
+  AhciKind    : Array[0..AhciMaxP - 1] Of LongInt;   { 0 rien, 1 disque ATA, 2 ATAPI }
+  AhciMem     : Array[0..AhciMaxP - 1] Of LongInt;   { liste de commandes, FIS recus, table }
+  AhciBuf     : LongInt;              { tampon DMA }
+
+Function PciRead(Bus, Dev, Fn, Reg : LongInt) : LongInt;
+Var A, V : LongInt;
+Begin
+  A := LongInt($80000000) Or (Bus Shl 16) Or (Dev Shl 11) Or (Fn Shl 8) Or (Reg And $FC);
+  asm
+    mov eax,A
+    mov dx,0CF8h
+    out dx,eax
+    mov dx,0CFCh
+    in eax,dx
+    mov V,eax
+  end;
+  PciRead := V;
+End;
+
+Procedure PciWrite(Bus, Dev, Fn, Reg, Val : LongInt);
+Var A : LongInt;
+Begin
+  A := LongInt($80000000) Or (Bus Shl 16) Or (Dev Shl 11) Or (Fn Shl 8) Or (Reg And $FC);
+  asm
+    mov eax,A
+    mov dx,0CF8h
+    out dx,eax
+    mov eax,Val
+    mov dx,0CFCh
+    out dx,eax
+  end;
+End;
+
+Function AhciPort(P : LongInt) : LongInt;
+Begin
+  AhciPort := AhciAbar + $100 + P * $80;
+End;
+
+{ Arreter le moteur de commandes du port (ST puis FRE) }
+Procedure AhciStop(P : LongInt);
+Var R, N : LongInt;
+Begin
+  R := AhciPort(P);
+  MemL[0:R + $18] := MemL[0:R + $18] And Not 1;
+  N := 0;
+  While ((MemL[0:R + $18] And $8000) <> 0) And (N < 1000000) Do Inc(N);
+  MemL[0:R + $18] := MemL[0:R + $18] And Not $10;
+  N := 0;
+  While ((MemL[0:R + $18] And $4000) <> 0) And (N < 1000000) Do Inc(N);
+End;
+
+{ Preparer le port : liste de commandes (1 Ko), FIS recus (256 o),
+  table de commande (128 o d'en-tete + 1 entree PRDT), puis demarrer }
+Function AhciStart(P : LongInt) : Boolean;
+Var R, M, I : LongInt;
+Begin
+  AhciStart := False;
+  R := AhciPort(P);
+  If AhciMem[P] = 0 Then
+  Begin
+    M := KAlloc(4096);
+    If M = 0 Then Exit;
+    M := (M + 1023) And Not 1023;
+    For I := 0 To 2047 Do Mem[0:M + I] := 0;
+    AhciMem[P] := M;
+  End;
+  M := AhciMem[P];
+  AhciStop(P);
+  MemL[0:R] := M; MemL[0:R + 4] := 0;                 { CLB }
+  MemL[0:R + 8] := M + 1024; MemL[0:R + 12] := 0;     { FB }
+  MemL[0:R + $30] := LongInt($FFFFFFFF);              { SERR }
+  MemL[0:R + $10] := LongInt($FFFFFFFF);              { IS }
+  MemL[0:R + $14] := 0;                               { pas d'interruption }
+  MemL[0:R + $18] := MemL[0:R + $18] Or $10;          { FRE }
+  MemL[0:R + $18] := MemL[0:R + $18] Or 1;            { ST }
+  AhciStart := True;
+End;
+
+{ Commande sur le port P, emplacement 0 : FIS H2D (Cmd, Lba, Count,
+  Feat), paquet ATAPI facultatif (Pkt : 12 octets), Len octets en DMA
+  vers ou depuis AhciBuf. Vrai si la commande aboutit sans erreur. }
+Function AhciCmd(P, Cmd, Lba, Count, Feat, Pkt, Len : LongInt; Wr : Boolean) : Boolean;
+Var R, M, T, H, N, I, Fl : LongInt; Ok, Restarted : Boolean;
+Begin
+  AhciCmd := False;
+  If (AhciAbar = 0) Or (AhciMem[P] = 0) Then Exit;
+  R := AhciPort(P);
+  M := AhciMem[P];
+  T := M + 1280;                                      { table de commande (128 o) }
+  { attendre que le peripherique soit libre }
+  N := 0;
+  While ((MemL[0:R + $20] And $88) <> 0) And (N < 2000000) Do Inc(N);
+  If (MemL[0:R + $20] And $88) <> 0 Then Exit;
+  For I := 0 To 255 Do Mem[0:T + I] := 0;
+  { FIS H2D }
+  Mem[0:T] := $27; Mem[0:T + 1] := $80; Mem[0:T + 2] := Cmd; Mem[0:T + 3] := Feat And $FF;
+  Mem[0:T + 4] := Lba And $FF; Mem[0:T + 5] := (Lba Shr 8) And $FF; Mem[0:T + 6] := (Lba Shr 16) And $FF;
+  Mem[0:T + 7] := $40;
+  Mem[0:T + 8] := (Lba Shr 24) And $FF;
+  Mem[0:T + 12] := Count And $FF; Mem[0:T + 13] := (Count Shr 8) And $FF;
+  If Pkt <> 0 Then
+    For I := 0 To 11 Do Mem[0:T + $40 + I] := Mem[0:Pkt + I];
+  { une entree PRDT }
+  If Len > 0 Then
+  Begin
+    MemL[0:T + $80] := AhciBuf; MemL[0:T + $84] := 0;
+    MemL[0:T + $8C] := Len - 1;
+  End;
+  { en-tete de commande 0 : 5 doubles mots de FIS, A (ATAPI), W (ecriture) }
+  Fl := 5;
+  If Pkt <> 0 Then Fl := Fl Or $20;
+  If Wr Then Fl := Fl Or $40;
+  If Len > 0 Then Fl := Fl Or $10000;
+  H := M;
+  MemL[0:H] := Fl; MemL[0:H + 4] := 0; MemL[0:H + 8] := T; MemL[0:H + 12] := 0;
+  MemL[0:R + $10] := LongInt($FFFFFFFF);
+  MemL[0:R + $38] := 1;                               { CI : emplacement 0 }
+  Ok := True;
+  N := 0;
+  While (MemL[0:R + $38] And 1) <> 0 Do
+  Begin
+    If (MemL[0:R + $10] And $40000000) <> 0 Then      { TFES : erreur de fichier de taches }
+    Begin
+      Ok := False;
+      Break;
+    End;
+    Inc(N);
+    If N > 20000000 Then
+    Begin
+      Ok := False;
+      Break;
+    End;
+  End;
+  If (MemL[0:R + $20] And 1) <> 0 Then Ok := False;
+  If Not Ok Then
+  Begin
+    { relancer le port apres une erreur }
+    AhciStop(P);
+    MemL[0:R + $30] := LongInt($FFFFFFFF);
+    Restarted := AhciStart(P);
+  End;
+  AhciCmd := Ok;
+End;
+
+{ Chercher le controleur AHCI et ses peripheriques (une seule fois) }
+Procedure AhciScan;
+Var Bus, Dev, Fn, V, Cls, P, Pi, R, Sig, Nf : LongInt;
+Begin
+  If AhciScanned Then Exit;
+  AhciScanned := True;
+  AhciAbar := 0;
+  For P := 0 To AhciMaxP - 1 Do
+  Begin
+    AhciKind[P] := 0; AhciMem[P] := 0;
+  End;
+  For Bus := 0 To 7 Do
+    For Dev := 0 To 31 Do
+    Begin
+      Nf := 1;
+      V := PciRead(Bus, Dev, 0, 0);
+      If (V And $FFFF) <> $FFFF Then
+      Begin
+        If (PciRead(Bus, Dev, 0, $0C) And $00800000) <> 0 Then Nf := 8;
+        For Fn := 0 To Nf - 1 Do
+          If (AhciAbar = 0) And ((PciRead(Bus, Dev, Fn, 0) And $FFFF) <> $FFFF) Then
+          Begin
+            Cls := (PciRead(Bus, Dev, Fn, 8) Shr 8) And $FFFFFF;
+            If Cls = $010601 Then
+            Begin
+              AhciAbar := PciRead(Bus, Dev, Fn, $24) And Not $F;
+              { memoire et maitre du bus (DMA) }
+              PciWrite(Bus, Dev, Fn, 4, PciRead(Bus, Dev, Fn, 4) Or 6);
+              KLog('Controleur SATA AHCI : PCI ' + IntStr(Bus) + ':' + IntStr(Dev) + '.' + IntStr(Fn) +
+                   ', registres en ' + HexStr(AhciAbar, 8) + 'h.');
+            End;
+          End;
+      End;
+    End;
+  If AhciAbar = 0 Then Exit;
+  AhciBuf := KAlloc(AhciBufLen + 4096);
+  If AhciBuf = 0 Then
+  Begin
+    AhciAbar := 0;
+    Exit;
+  End;
+  AhciBuf := (AhciBuf + 4095) And Not 4095;
+  MemL[0:AhciAbar + 4] := MemL[0:AhciAbar + 4] Or LongInt($80000000);   { GHC.AE }
+  Pi := MemL[0:AhciAbar + $0C];
+  For P := 0 To AhciMaxP - 1 Do
+    If (Pi And (1 Shl P)) <> 0 Then
+    Begin
+      R := AhciPort(P);
+      If (MemL[0:R + $28] And $0F) = 3 Then            { SSTS.DET : peripherique present }
+      Begin
+        Sig := MemL[0:R + $24];
+        If Sig = LongInt($EB140101) Then AhciKind[P] := 2
+        Else If Sig = $00000101 Then AhciKind[P] := 1;
+        If (AhciKind[P] <> 0) And Not AhciStart(P) Then AhciKind[P] := 0;
+      End;
+    End;
+End;
+
+{ Premier lecteur ATAPI du controleur AHCI (-1 : aucun) }
+Function AhciCdPort : LongInt;
+Var P, R : LongInt;
+Begin
+  AhciScan;
+  R := -1;
+  For P := AhciMaxP - 1 DownTo 0 Do
+    If AhciKind[P] = 2 Then R := P;
+  AhciCdPort := R;
+End;
+
+{ Lire un secteur de 2048 octets d'un lecteur ATAPI AHCI }
+Function AhciAtapiRead(P, Lba, Dst : LongInt) : Boolean;
+Var Pk : Array[0..11] Of Byte; Tries : LongInt; Ok : Boolean;
+Begin
+  Ok := False;
+  For Tries := 1 To 3 Do
+    If Not Ok Then
+    Begin
+      Pk[0] := $28; Pk[1] := 0;
+      Pk[2] := (Lba Shr 24) And $FF; Pk[3] := (Lba Shr 16) And $FF;
+      Pk[4] := (Lba Shr 8) And $FF; Pk[5] := Lba And $FF;
+      Pk[6] := 0; Pk[7] := 0; Pk[8] := 1; Pk[9] := 0; Pk[10] := 0; Pk[11] := 0;
+      { PACKET (A0h), DMA (caracteristique 1) ; 2048 octets }
+      Ok := AhciCmd(P, $A0, 2048 Shl 8, 0, 1, LongInt(@Pk), 2048, False);
+    End;
+  If Ok Then MoveMem(AhciBuf, Dst, 2048);
+  AhciAtapiRead := Ok;
+End;
+
+{ IDENTIFY DEVICE d'un disque AHCI : secteurs adressables (LBA 28 bits,
+  ou 48 bits) ; les 512 octets d'IDENTIFY sont recopies en Dst }
+Function AhciIdentify(P, Dst : LongInt; Var Sectors : LongInt) : Boolean;
+Var S48 : LongInt; Ok : Boolean;
+Begin
+  Sectors := 0;
+  Ok := AhciCmd(P, $EC, 0, 0, 0, 0, 512, False);
+  If Ok Then
+  Begin
+    MoveMem(AhciBuf, Dst, 512);
+    Sectors := MemW[0:AhciBuf + 120] Or (MemW[0:AhciBuf + 122] Shl 16);
+    S48 := MemL[0:AhciBuf + 200];
+    If (MemL[0:AhciBuf + 204] = 0) And (S48 > Sectors) Then Sectors := S48;
+    Ok := Sectors > 0;
+  End;
+  AhciIdentify := Ok;
+End;
+
+{ Lire ou ecrire N secteurs (1 a 128) d'un disque AHCI }
+Function AhciIO(P, Lba, N, Addr : LongInt; Wr : Boolean) : Boolean;
+Var Ok : Boolean; Tries : LongInt;
+Begin
+  Ok := False;
+  If (N < 1) Or (N > 128) Then
+  Begin
+    AhciIO := False;
+    Exit;
+  End;
+  If Wr Then MoveMem(Addr, AhciBuf, N * 512);
+  For Tries := 1 To 3 Do
+    If Not Ok Then
+    Begin
+      { READ DMA EXT (25h) ou WRITE DMA EXT (35h) }
+      If Wr Then Ok := AhciCmd(P, $35, Lba, N, 0, 0, N * 512, True)
+      Else Ok := AhciCmd(P, $25, Lba, N, 0, 0, N * 512, False);
+    End;
+  If Ok And Wr Then Ok := AhciCmd(P, $EA, 0, 0, 0, 0, 0, False);   { FLUSH CACHE EXT }
+  If Ok And Not Wr Then MoveMem(AhciBuf, Addr, N * 512);
+  AhciIO := Ok;
+End;
+
 { Attendre que BSY retombe ; rend le registre d'etat ou -1 }
 Function AtaWaitBusy : LongInt;
 Var N, St : LongInt;
@@ -2167,6 +2466,7 @@ End;
 
 Procedure AtaSelect;
 Begin
+  If (AtaBase = 0) Or (AtaBase >= AhciTag) Then Exit;   { lecteur AHCI : rien a selectionner }
   If AtaSlave Then Port[AtaBase + 6] := $B0 Else Port[AtaBase + 6] := $A0;
   AtaDelay;
 End;
@@ -2190,11 +2490,23 @@ Begin
 End;
 
 Procedure AtaInit;
+Var P : LongInt;
 Begin
   AtaFound := AtaProbe($170, $376, False);
   If Not AtaFound Then AtaFound := AtaProbe($170, $376, True);
   If Not AtaFound Then AtaFound := AtaProbe($1F0, $3F6, False);
   If Not AtaFound Then AtaFound := AtaProbe($1F0, $3F6, True);
+  If Not AtaFound Then
+  Begin
+    { lecteur de CD-ROM SATA (controleur AHCI) }
+    P := AhciCdPort;
+    If P >= 0 Then
+    Begin
+      AtaBase := AhciTag + P; AtaCtrl := 0; AtaSlave := False;
+      AtaFound := True;
+      KLog('Lecteur de CD-ROM SATA (AHCI, port ' + IntStr(P) + ').');
+    End;
+  End;
 End;
 
 { Lire un secteur de 2048 octets (commande PACKET, READ(10)) a l'adresse Dst }
@@ -2203,6 +2515,11 @@ Var St, Cnt, Got, Tries, B : LongInt;
 Begin
   AtaReadSector := False;
   If Not AtaFound Then Exit;
+  If AtaBase >= AhciTag Then
+  Begin
+    AtaReadSector := AhciAtapiRead(AtaBase - AhciTag, Lba, Dst);
+    Exit;
+  End;
   For Tries := 1 To 3 Do
   Begin
     AtaSelect;
@@ -2419,6 +2736,11 @@ End;
 Function HdIOx(Base, Ctrl : LongInt; Slave : Boolean; Lba, N, Addr : LongInt; Wr : Boolean) : Boolean;
 Var St, I, X, A, Tries : LongInt; Ok : Boolean;
 Begin
+  If Base >= AhciTag Then
+  Begin
+    HdIOx := AhciIO(Base - AhciTag, Lba, N, Addr, Wr);
+    Exit;
+  End;
   Ok := False;
   Tries := 0;
   While (Not Ok) And (Tries < 3) Do
@@ -2552,8 +2874,14 @@ Begin
   Else
     Dec(NBlk);
   If Found Then
-    KLog('Disque IDE ' + HexStr(Base, 3) + 'h ' + IntStr(Ord(Slave)) + ' : ' +
-         IntStr(Sectors Div 2048) + ' Mo, volume(s) de type 07h.');
+  Begin
+    If Base >= AhciTag Then
+      KLog('Disque SATA (AHCI, port ' + IntStr(Base - AhciTag) + ') : ' +
+           IntStr(Sectors Div 2048) + ' Mo, volume(s) de type 07h.')
+    Else
+      KLog('Disque IDE ' + HexStr(Base, 3) + 'h ' + IntStr(Ord(Slave)) + ' : ' +
+           IntStr(Sectors Div 2048) + ' Mo, volume(s) de type 07h.');
+  End;
 End;
 
 { Chercher les disques durs IDE (sauf le lecteur de CD-ROM) : table des
@@ -2586,6 +2914,20 @@ Begin
         ScanDisk(NDisk - 1);
       End;
   End;
+  { disques SATA (controleur AHCI) }
+  AhciScan;
+  For I := 0 To AhciMaxP - 1 Do
+    If (AhciKind[I] = 1) And (NDisk < 4) Then
+      If AhciIdentify(I, LongInt(@HdBuf), Sectors) Then
+      Begin
+        M := '';
+        For K := 0 To 19 Do M := M + Chr(HdBuf[54 + K * 2 + 1]) + Chr(HdBuf[54 + K * 2]);
+        While (Length(M) > 0) And ((M[Length(M)] = ' ') Or (M[Length(M)] = #0)) Do Delete(M, Length(M), 1);
+        Disks[NDisk].Base := AhciTag + I; Disks[NDisk].Ctrl := 0; Disks[NDisk].Slave := False;
+        Disks[NDisk].Sectors := Sectors; Disks[NDisk].Model := M;
+        Inc(NDisk);
+        ScanDisk(NDisk - 1);
+      End;
   { le lecteur de CD-ROM redevient le peripherique selectionne }
   AtaSelect;
 End;
@@ -7607,8 +7949,8 @@ Var Free : LongInt;
 Begin
   Free := HeapFreeBytes + PhysFree;
   MemL[0:P] := 32;
-  MemL[0:P + 4] := 100 - (Free Div 1024) * 100 Div MemTotalKb;
-  MemL[0:P + 8] := MemTotalKb * 1024;
+  MemL[0:P + 4] := 100 - (Free Div 1024) * 100 Div MemUseKb;
+  MemL[0:P + 8] := MemUseKb * 1024;
   MemL[0:P + 12] := Free;
   MemL[0:P + 16] := 0;
   MemL[0:P + 20] := 0;
@@ -7889,7 +8231,9 @@ Begin
   If Ok Then
   Begin
     IfsVols[D].Mounted := True;
-    If Blks[B].Kind = BlkRam Then S1 := 'disque virtuel' Else S1 := 'disque IDE';
+    If Blks[B].Kind = BlkRam Then S1 := 'disque virtuel'
+    Else If Blks[B].Base >= AhciTag Then S1 := 'disque SATA'
+    Else S1 := 'disque IDE';
     KLog('Unite ' + Chr(65 + D) + ': ' + Ifss[IfsVols[D].Ifs].Name + ' (' + S1 + ', ' +
          IntStr(Blks[B].Count Div 2) + ' Ko) : ' + PStr(V + 24));
   End
@@ -17859,7 +18203,9 @@ BEGIN
   KBase := MemL[0:BootInfo + $1C];
   KSize := MemL[0:BootInfo + $20];
   MemTotalKb := MemL[0:BootInfo + $14] + 1024;
-  PhysTop := MemTotalKb * 1024;
+  MemUseKb := MemTotalKb;
+  If MemUseKb > MaxPhysKb Then MemUseKb := MaxPhysKb;
+  PhysTop := MemUseKb * 1024;
   PCount := 0;
   { tache 0 : le noyau }
   For I := 0 To MaxTasks - 1 Do TkUsed[I] := 0;

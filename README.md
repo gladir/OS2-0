@@ -737,6 +737,19 @@ OS/2-0 reconnaît maintenant le matériel des machines virtuelles de <b>VirtualB
 
 Réglages conseillés de la machine virtuelle : type « OS/2 Warp 3 » (ou « Autre »), contrôleur graphique VBoxVGA ou VMSVGA, carte réseau Intel PRO/1000 MT Desktop ou PCnet-FAST III en NAT, souris PS/2. Les Additions ne demandent aucune installation : VBOXGST.DLL est chargé dès qu'il trouve le VMMDev.
 
+<b>Installation depuis VirtualBox.</b> Selon le type de système choisi à la création de la machine, VirtualBox propose des réglages qu'OS/2-0 ne supportait pas, et le CD-ROM d'installation s'arrêtait dès le démarrage du noyau. Deux causes ont été trouvées et corrigées :
+
+<table>
+	<tr><th>Réglage de VirtualBox</th><th>Problème</th><th>Correction</th></tr>
+	<tr><td>Plus de 2 Go de mémoire (les types Windows proposent 2 à 4 Go)</td><td>Le noyau calcule les adresses en entiers signés de 32 bits : la taille de la mémoire devenait négative, et l'appel au BIOS vidéo qui suit partait dans le vide (écran figé après « Mémoire : … Ko »).</td><td>La mémoire gérée est plafonnée à 1792 Mo (OS/2-0 n'en demande pas plus) ; la vraie taille reste affichée.</td></tr>
+	<tr><td>Disque et CD-ROM sur un contrôleur <b>SATA</b> (AHCI), le choix par défaut de nombreux types, et le seul du chipset ICH9</td><td>Le noyau ne connaissait que l'IDE : « lecteur de CD-ROM ATAPI introuvable », puis aucun disque où installer.</td><td>Nouveau pilote AHCI dans le noyau : contrôleur cherché sur le bus PCI (classe 01h, sous-classe 06h), ports SATA, lecteur ATAPI (PACKET, READ(10)) et disques ATA (IDENTIFY, lecture et écriture DMA 48 bits, vidage du cache). Installation, démarrage du disque dur SATA et fichiers sur C: fonctionnent comme en IDE.</td></tr>
+</table>
+
+Ces deux cas sont reproduits dans la régression avec QEMU (<code>-m 3584</code> ; <code>-M q35</code>, dont le disque et le lecteur de CD-ROM sont en SATA) ; le CD d'installation démarre aussi sous Bochs, dont le BIOS est l'ancêtre de celui de VirtualBox. Il faut enfin laisser <b>EFI désactivé</b> (Système → Carte mère) : le CD-ROM d'OS/2-0 démarre par le BIOS (El Torito), comme celui d'OS/2 Warp 3.
+
+<pre>qemu-system-i386 -m 3584 -cdrom IMAGE/OS2INST.ISO -boot d -drive file=disque.img,format=raw,if=ide
+qemu-system-i386 -M q35 -m 512 -cdrom IMAGE/OS2INST.ISO -boot d -drive file=disque.img,format=raw,if=ide</pre>
+
 <pre>qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d -nic user,model=e1000
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d -nic user,model=pcnet</pre>
 

@@ -768,6 +768,10 @@ un seul pointeur), taille de l'ecran demandee par l'hote (fenetre
 redimensionnee, ajustement automatique) appliquee par PMWIN (verifiee
 toutes les 300 ms). Adaptateur graphique de VirtualBox, QEMU, Bochs :
 interface VBE DISPI (ports 1CEh/1CFh), toute resolution.
+Installation sous VirtualBox : disque et CD-ROM en IDE ou en SATA
+(controleur AHCI, pilote du noyau), toute quantite de memoire (au-dela
+de 1792 Mo, le reste est ignore). Laisser EFI desactive (Systeme ->
+Carte mere) : le CD-ROM demarre par le BIOS (El Torito).
 
 VMware Workstation (VMWTOOLS.DLL)
 ---------------------------------
