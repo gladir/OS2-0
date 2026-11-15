@@ -2631,10 +2631,37 @@ End;
 
 { dessiner un caractere : origine (16.16, peripherique) }
 Procedure DrawGlyph(K, Ch, Ox, Oy, V, Mx : LongInt);
-Var Gx, Gy, Bits, Px, Py, Qx, Qy, I : LongInt; Fast : Boolean;
+Var Gx, Gy, Bits, Px, Py, Qx, Qy, I, X1, X2, Y1, Y2, Xx, Yy : LongInt; Fast, Axis : Boolean;
     Xs, Ys, Ss : Array[0..4] Of LongInt;
 Begin
   Fast := (TBx = 8 * 65536) And (TBy = 0) And (TUx = 0) And (TUy = 16 * 65536);
+  { police agrandie sans rotation : chaque pel de la police devient un
+    rectangle plein (pas de trous entre les lignes) }
+  Axis := (Not Fast) And (TBy = 0) And (TUx = 0) And (TBx > 0) And (TUy > 0) And
+          (TBx <= 64 * 65536) And (TUy <= 128 * 65536);
+  If Axis Then
+  Begin
+    For Gy := 0 To 15 Do
+    Begin
+      Bits := FontBits[Ch * 16 + Gy];
+      If Bits <> 0 Then
+      Begin
+        Y1 := FRound(Oy + MulDiv(TUy, 11 - Gy, 16));
+        Y2 := FRound(Oy + MulDiv(TUy, 12 - Gy, 16));
+        If Y2 <= Y1 Then Y2 := Y1 + 1;
+        For Gx := 0 To 7 Do
+          If ((Bits Shr (7 - Gx)) And 1) <> 0 Then
+          Begin
+            X1 := FRound(Ox + MulDiv(TBx, Gx, 8));
+            X2 := FRound(Ox + MulDiv(TBx, Gx + 1, 8));
+            If X2 <= X1 Then X2 := X1 + 1;
+            For Yy := Y1 To Y2 - 1 Do
+              For Xx := X1 To X2 - 1 Do DPix(Xx, Yy, V, Mx);
+          End;
+      End;
+    End;
+    Exit;
+  End;
   For Gy := 0 To 15 Do
   Begin
     Bits := FontBits[Ch * 16 + Gy];
@@ -5582,6 +5609,23 @@ Begin
 End;
 
 { GpiQueryBitmapParameters(hbm, pbmpData) : BITMAPINFOHEADER (12) }
+{ GPIQUERYBITMAPMEM (ordinal 1003, interne : PMWIN.DLL, icones de
+  WinCreatePointerIndirect) : memoire d'un bitmap -> P[0] pels, P[1] cx,
+  P[2] cy, P[3] bits par pel, P[4] octets par ligne, P[5] table des
+  couleurs (RVB) ; BOOL }
+Function GpiQueryBitmapMem(H, P : LongInt) : LongInt;
+Var B : LongInt;
+Begin
+  B := BmIdx(H);
+  If (B < 0) Or (P = 0) Then GpiQueryBitmapMem := 0
+  Else
+  Begin
+    WrL(P, BmBits[B]); WrL(P + 4, BmCx[B]); WrL(P + 8, BmCy[B]); WrL(P + 12, BmBpp[B]);
+    WrL(P + 16, BmStride[B]); WrL(P + 20, BmPal[B]);
+    GpiQueryBitmapMem := 1;
+  End;
+End;
+
 Function GpiQueryBitmapParameters(H, P : LongInt) : LongInt;
 Var B : LongInt;
 Begin
@@ -10520,7 +10564,8 @@ exports
   DspInitSystemDriverName Index 656 Name 'DspInitSystemDriverName',
   GpiQueryFullFontFileDescs Index 657 Name 'GpiQueryFullFontFileDescs',
   GpiStdStart Index 1001 Name 'GPISTDSTART',
-  GpiStdStop Index 1002 Name 'GPISTDSTOP';
+  GpiStdStop Index 1002 Name 'GPISTDSTOP',
+  GpiQueryBitmapMem Index 1003 Name 'GPIQUERYBITMAPMEM';
 
 Var
   InitI : LongInt;

@@ -10,8 +10,10 @@
 #  3. compile CMD.PAS et les commandes de la racine du depot (OS2PC -COS2) ;
 #     dont les jeux du dossier Jeux du bureau : KLONDIKE.PAS (Solitaire -
 #     Klondike), ECHECS.PAS (Echecs) et MAHJONGG.PAS (Mahjongg Solitaire), et
-#     DIGAUDIO.PAS (Audio numerique, dossier Multimedia) et TASKMGR.PAS
-#     (Gestionnaire des taches, dossier Systeme OS/2) ;
+#     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), TASKMGR.PAS
+#     (Gestionnaire des taches, dossier Systeme OS/2) et BROWSER.PAS
+#     (Navigateur Web : HTML, CSS, JavaScript, codes QR, outils F12 ;
+#     bureau et dossier Systeme OS/2) ;
 #  4. compile les bibliotheques DLL/DOSCALLS.PAS (DOSCALLS.DLL),
 #     DLL/FKA.PAS (FKA.DLL), DLL/HPFS.PAS (HPFS.IFS, systeme de
 #     fichiers installable), DLL/VIOCALLS.PAS (VIOCALLS.DLL, video) et

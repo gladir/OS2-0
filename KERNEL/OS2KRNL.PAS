@@ -336,6 +336,7 @@ Var
   TkProc, TkEsp, TkStack, TkLastErr, TkTid, TkFn, TkArg : Array[0..MaxTasks - 1] Of LongInt;
   CurTask, NTasks, IdleStreak, SliceStart, SwSave, SwNew, TmpIntEbp : LongInt;
   SwPde            : LongInt;       { entree 0 du repertoire de la tache reprise }
+  FpuInit          : Array[0..27] Of LongInt;  { etat x87 initial (FNSAVE, 108 octets) }
   SessNoPde        : Boolean;       { SessSwap sans changer l'entree 0 }
   TkEsp0           : Array[0..MaxTasks - 1] Of LongInt;  { pile de l'anneau 0 (TSS) }
   TkFs             : Array[0..MaxTasks - 1] Of LongInt;  { selecteur FS (TIB des programmes LX) }
@@ -657,7 +658,7 @@ Const
 { Ecran TRAP (a la maniere d'OS/2) puis fin du processus fautif ou arret.
   Frame : valeur de EBP de la procedure Interrupt (PUSHAD en EBP+4). }
 Procedure Trap(Vec : LongInt; HasErr : Boolean);
-Var F, Eip, Err, FaultAdr : LongInt; Nm : String;
+Var F, Eip, Err, FaultAdr, K : LongInt; Nm : String;
 Begin
   asm
     mov eax,[ebp]
@@ -682,6 +683,13 @@ Begin
     affiche "Runtime error N at ..." et termine le processus }
   If (CurProc >= 0) And (Procs[CurProc].Filter <> 0) Then
   Begin
+    { journal (port serie seulement) : le programme n'affichera que
+      "Runtime error N at ..." ; ici le detail, pour le diagnostic }
+    Nm := 'EXCEPTION ' + HexStr(Vec, 2) + ' ' + Procs[CurProc].Name + ' EIP=' + HexStr(Eip, 8) +
+          ' CR2=' + HexStr(FaultAdr, 8) + ' EBP=' + HexStr(MemL[0:F], 8) + ' ESP=' + HexStr(F + 36, 8) +
+          ' EAX=' + HexStr(MemL[0:F + 32], 8) + ' ESI=' + HexStr(MemL[0:F + 8], 8) + #13#10;
+    For K := 1 To Length(Nm) Do SerialPut(Nm[K]);
+    If Vec <= 19 Then Nm := ExcNames[Vec] Else Nm := 'Exception';
     Case Vec Of
       0  : ExcRec[0] := LongInt($C0000094);
       4  : ExcRec[0] := LongInt($C0000095);
@@ -6354,10 +6362,14 @@ End;
   sortie de son propre appel a CtxSwitch. }
 Procedure CtxSwitch;
 Begin
+  { l'etat du coprocesseur (x87) est sauve aussi : chaque tache a ses
+    registres flottants (FNSAVE, 108 octets sous les registres generaux) }
   asm
     pushfd
     cli
     pushad
+    sub esp,108
+    fnsave [esp]
     mov eax,SwSave
     mov [eax],esp
     mov eax,SwNew
@@ -6370,6 +6382,8 @@ Begin
     mov eax,cr3
     mov cr3,eax
   @nopde:
+    frstor [esp]
+    add esp,108
     popad
     popfd
   end;
@@ -6565,6 +6579,9 @@ Begin
   For K := 0 To 8 Do MemL[0:E + K * 4] := 0;
   MemL[0:E + 8] := F;          { EBP repris par POPAD }
   MemL[0:E + 32] := $202;      { EFLAGS : IF }
+  { etat x87 initial, repris par FRSTOR dans CtxSwitch }
+  E := E - 108;
+  For K := 0 To 26 Do MemL[0:E + K * 4] := FpuInit[K];
   TkEsp[T] := E;
   TkProc[T] := Proc; TkStack[T] := StackBlk; TkLastErr[T] := 0; TkTid[T] := Tid;
   TkFn[T] := Fn; TkArg[T] := Arg;
@@ -17848,6 +17865,11 @@ BEGIN
   For I := 0 To MaxTasks - 1 Do TkUsed[I] := 0;
   TkUsed[0] := 1; TkProc[0] := -1; TkTid[0] := 1; TkStack[0] := 0;
   CurTask := 0; NTasks := 1; IdleStreak := 0; SliceStart := 0;
+  asm
+    fninit
+    fnsave FpuInit
+    fninit
+  end;
   HeapInit(KBase + KSize + 65536, ProcWinBase);
   { demarrage d'un disque dur (bloc d'amorcage +34h = 'HD') : partition
     d'amorcage (+38h) et pilote HPFS.IFS charge par OS2LDR (+40h adresse,

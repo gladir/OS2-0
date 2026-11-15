@@ -300,6 +300,7 @@ Var
   { --- accelerateurs, pointeurs, bitmaps, tas --- }
   AcUse, AcData, AcPid : Array[0..MaxAccel - 1] Of LongInt;
   PtUse, PtHotX, PtHotY, PtBmp, PtPid, PtAni : Array[0..MaxPtr - 1] Of LongInt;
+  PtMask, PtColor : Array[0..MaxPtr - 1] Of LongInt;   { icones : bitmaps de PMGPI }
   BmUse, BmCX, BmCY, BmData : Array[0..MaxBmp - 1] Of LongInt;
   HpUse, HpBase, HpSize : Array[0..MaxHeap - 1] Of LongInt;
   { --- parametres de presentation --- }
@@ -4391,6 +4392,7 @@ Begin
   Else
   Begin
     PtUse[F] := 1; PtHotX[F] := HotX; PtHotY[F] := HotY; PtBmp[F] := Bmp; PtPid[F] := MyPid; PtAni[F] := Ani;
+    PtMask[F] := 0; PtColor[F] := 0;
     NewPtr := $50540101 + F;
   End;
 End;
@@ -4538,9 +4540,126 @@ End;
 { WinCreatePointerIndirect(hwndDesktop, pptri) : POINTERINFO (fPointer,
   xHotspot, yHotspot, hbmPointer, hbmColor, hbmMiniPointer, hbmMiniColor) }
 Function WinCreatePointerIndirect(HDesk, P : LongInt) : LongInt;
+Var H, I : LongInt;
 Begin
   If P = 0 Then WinCreatePointerIndirect := 0
-  Else WinCreatePointerIndirect := NewPtr(RdL(P + 4), RdL(P + 8), RdL(P + 12), 0);
+  Else
+  Begin
+    H := NewPtr(RdL(P + 4), RdL(P + 8), 0, 0);
+    I := H - $50540101;
+    If (H <> 0) And (I >= 0) And (I < MaxPtr) Then
+    Begin
+      { icone : masque (hbmPointer, ET en haut, OU exclusif en bas) et
+        couleurs (hbmColor), bitmaps de PMGPI }
+      PtMask[I] := RdL(P + 12); PtColor[I] := RdL(P + 16);
+    End;
+    WinCreatePointerIndirect := H;
+  End;
+End;
+
+{ memoire d'un bitmap de PMGPI (GPIQUERYBITMAPMEM, ordinal 1003) }
+Var GpiBmMem : LongInt;
+
+Function BmpMem(H, P : LongInt) : Boolean;
+Var M, F, R : LongInt;
+Begin
+  BmpMem := False;
+  If H = 0 Then Exit;
+  If GpiBmMem = 0 Then
+  Begin
+    GpiModZ[0] := Ord('P'); GpiModZ[1] := Ord('M'); GpiModZ[2] := Ord('G');
+    GpiModZ[3] := Ord('P'); GpiModZ[4] := Ord('I'); GpiModZ[5] := 0;
+    M := 0;
+    If DcLoadModule(0, 0, LongInt(@GpiModZ), LongInt(@M)) = 0 Then
+      If DcQueryProcAddr(M, 1003, 0, LongInt(@F)) = 0 Then GpiBmMem := F;
+    If GpiBmMem = 0 Then GpiBmMem := -1;
+  End;
+  If GpiBmMem = -1 Then Exit;
+  F := GpiBmMem;
+  R := 0;
+  asm
+    mov eax,P
+    push eax
+    mov eax,H
+    push eax
+    mov eax,F
+    call eax
+    add esp,8
+    mov R,eax
+  end;
+  BmpMem := (R <> 0) And (RdL(P) <> 0) And (RdL(P + 4) > 0) And (RdL(P + 8) > 0);
+End;
+
+{ pel (X, Y) d'un bitmap de PMGPI (Y depuis le bas) : RVB }
+Function BmpPel(P, X, Y : LongInt) : LongInt;
+Var A, Bpp, V : LongInt;
+Begin
+  A := RdL(P) + Y * RdL(P + 16);
+  Bpp := RdL(P + 12);
+  Case Bpp Of
+    1 : V := (RdB(A + X Shr 3) Shr (7 - (X And 7))) And 1;
+    4 : V := (RdB(A + X Shr 1) Shr (4 * (1 - (X And 1)))) And 15;
+    8 : V := RdB(A + X);
+  Else
+    Begin
+      A := A + X * (Bpp Div 8);
+      BmpPel := RdB(A) Or (RdB(A + 1) Shl 8) Or (RdB(A + 2) Shl 16);
+      Exit;
+    End;
+  End;
+  If RdL(P + 20) <> 0 Then BmpPel := RdL(RdL(P + 20) + V * 4) And $FFFFFF Else BmpPel := V;
+End;
+
+{ bit brut (masques monochromes) }
+Function BmpBit(P, X, Y : LongInt) : LongInt;
+Begin
+  BmpBit := (RdB(RdL(P) + Y * RdL(P + 16) + X Shr 3) Shr (7 - (X And 7))) And 1;
+End;
+
+{ dessin d'une icone (ecran graphique) : pels opaques la ou le masque ET
+  vaut 0 ; DP_HALFTONED (1) : une pel sur deux (grise) }
+Procedure GIcon(I, X, Y, Fs : LongInt);
+Var Mk, Co : Array[0..7] Of LongInt; HasM, HasC, Dc : Boolean; Cx, Cy, Yy, Xx, C, Run, RunC : LongInt;
+Begin
+  HasM := BmpMem(PtMask[I], LongInt(@Mk));
+  HasC := BmpMem(PtColor[I], LongInt(@Co));
+  If HasC Then
+  Begin
+    Cx := Co[1]; Cy := Co[2];
+  End
+  Else If HasM Then
+  Begin
+    Cx := Mk[1]; Cy := Mk[2] Div 2;
+  End
+  Else Exit;
+  If HasM And ((Mk[1] < Cx) Or (Mk[2] < 2 * Cy) Or (Mk[3] <> 1)) Then HasM := False;
+  Dc := (GLfb <> 0) And (GBits >= 8);
+  For Yy := 0 To Cy - 1 Do
+  Begin
+    Run := -1; RunC := 0;
+    For Xx := 0 To Cx Do
+    Begin
+      C := -1;
+      If Xx < Cx Then
+        If ((Fs And 1) = 0) Or (((Xx + Yy) And 1) = 0) Then
+          If (Not HasM) Or (BmpBit(LongInt(@Mk), Xx, Yy + Cy) = 0) Then
+          Begin
+            If HasC Then C := BmpPel(LongInt(@Co), Xx, Yy)
+            Else If BmpBit(LongInt(@Mk), Xx, Yy) <> 0 Then C := $FFFFFF
+            Else C := 0;
+            If Dc Then C := C Or $1000000 Else C := GNear(C);
+          End;
+      If (Run >= 0) And (C <> RunC) Then
+      Begin
+        GFill(X + Run, Y + Yy, X + Xx, Y + Yy + 1, RunC);
+        Run := -1;
+      End;
+      If (C >= 0) And (Run < 0) Then
+      Begin
+        Run := Xx; RunC := C;
+      End;
+    End;
+  End;
 End;
 
 Function WinDestroyPointer(H : LongInt) : LongInt;
@@ -4643,7 +4762,13 @@ Begin
   End;
   If GMode <> 0 Then
   Begin
-    If GPsClip(K) Then GPtrImage(X + PsOrgX[K], Y + PsOrgY[K]);
+    A := H - $50540101;
+    If GPsClip(K) Then
+    Begin
+      If (A >= 0) And (A < MaxPtr) And ((PtColor[A] <> 0) Or (PtMask[A] <> 0)) Then
+        GIcon(A, X + PsOrgX[K], Y + PsOrgY[K], Fs)
+      Else GPtrImage(X + PsOrgX[K], Y + PsOrgY[K]);
+    End;
     WinDrawPointer := 1;
     Exit;
   End;
@@ -5774,6 +5899,10 @@ Begin
   If (Sc >= $54) And (Sc <= $5D) Then V := VK_F1 + Sc - $54;
   If (Sc >= $5E) And (Sc <= $67) Then V := VK_F1 + Sc - $5E;
   If (Sc >= $68) And (Sc <= $71) Then V := VK_F1 + Sc - $68;
+  { F11 et F12 (57h, 58h) : la plage des Maj+F1..F10 etendus (54h-5Dh) les
+    prenait pour F4 et F5 }
+  If Sc = $57 Then V := VK_F1 + 10;
+  If Sc = $58 Then V := VK_F1 + 11;
   If (Sc = $87) Or (Sc = $89) Or (Sc = $8B) Then V := VK_F1 + 10;
   If (Sc = $88) Or (Sc = $8A) Or (Sc = $8C) Then V := VK_F1 + 11;
   If (Sc = $73) Then V := VK_LEFT;
@@ -8120,6 +8249,26 @@ Begin
         End;
         S := WTextGet(I);
         EntryProc := 1;
+        { presse-papiers, touches CUA d'OS/2 : Maj+Inser colle, Ctrl+Inser
+          copie, Maj+Suppr coupe ; Ctrl+V, Ctrl+C et Ctrl+X aussi }
+        A := 0;
+        If (Fl And KC_VIRTUALKEY) <> 0 Then
+        Begin
+          If (Vk = VK_INSERT) And ((Fl And KC_SHIFT) <> 0) Then A := EM_PASTE
+          Else If (Vk = VK_INSERT) And ((Fl And KC_CTRL) <> 0) Then A := EM_COPY
+          Else If (Vk = VK_DELETE) And ((Fl And KC_SHIFT) <> 0) Then A := EM_CUT;
+        End;
+        If (A = 0) And ((Fl And KC_CTRL) <> 0) And ((Fl And KC_CHAR) <> 0) Then
+          Case Ch Or $20 Of
+            Ord('v') : A := EM_PASTE;
+            Ord('c') : A := EM_COPY;
+            Ord('x') : A := EM_CUT;
+          End;
+        If A <> 0 Then
+        Begin
+          EntryProc := EntryProc(I, A, 0, 0);
+          Exit;
+        End;
         If ((Fl And KC_VIRTUALKEY) <> 0) And ((Vk <> VK_SPACE) Or ((Fl And KC_CHAR) = 0)) And
            Not (Mle And ((Vk = VK_NEWLINE) Or (Vk = VK_ENTER))) Then
         Begin
@@ -15129,6 +15278,6 @@ BEGIN
   AtbUse[0] := 1;
   MyMod := 0;
   InitDone := 0;
-  GpiQRgb := 0;
+  GpiQRgb := 0; GpiBmMem := 0;
   EnsureInit;
 END.
