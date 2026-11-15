@@ -327,6 +327,34 @@ End;
 { Ligne A20                                                          }
 { ------------------------------------------------------------------ }
 
+{ Vrai si la ligne A20 est active : 0000:0500 et FFFF:0510 designent
+  la meme case quand A20 est coupee (repliement a 1 Mo) }
+Function A20On : Boolean;
+Var Save, Hi : Word; R : Boolean;
+Begin
+  Save := MemW[0:$0500];
+  MemW[0:$0500] := $A20A;
+  Hi := MemW[$FFFF:$0510];
+  MemW[0:$0500] := Not Word($A20A);
+  R := MemW[$FFFF:$0510] = Hi;
+  MemW[0:$0500] := Save;
+  A20On := R;
+End;
+
+{ Controleur du clavier : attendre que le tampon d'entree soit vide }
+Procedure KbcWait;
+Var N : Word;
+Begin
+  N := 0;
+  While ((Port[$64] And 2) <> 0) And (N < 60000) Do Inc(N);
+End;
+
+{ Activer la ligne A20 : BIOS (INT 15h AX=2401h), port 92h, puis
+  controleur du clavier (commande D1h) si elle reste coupee. Le BIOS de
+  VirtualBox la coupe a la sortie de chaque INT 15h AH=87h : elle est
+  donc reactivee apres le chargement du noyau, juste avant le passage
+  en mode protege (sinon, sous Hyper-V, le code du noyau situe entre
+  1 Mo et 1 Mo + 64 Ko s'execute replie sur la memoire basse). }
 Procedure EnableA20;
 Begin
   asm
@@ -337,6 +365,14 @@ Begin
     and al,0FEh
     out 92h,al
   end;
+  If Not A20On Then
+  Begin
+    KbcWait;
+    Port[$64] := $D1;
+    KbcWait;
+    Port[$60] := $DF;
+    KbcWait;
+  End;
 End;
 
 { ------------------------------------------------------------------ }
@@ -575,6 +611,9 @@ BEGIN
   ReadMemoryMap;
   LoadKernel;
   If HdMode Then LoadBootIfs;
+  { A20 : les copies INT 15h/87h ont pu la couper (BIOS de VirtualBox) }
+  EnableA20;
+  If Not A20On Then PutS(' A20 ?');
   BuildGdt;
   PutS(#13#10);
   GetCursor;
