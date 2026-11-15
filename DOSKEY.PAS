@@ -850,7 +850,9 @@ Procedure Shell;
 Const
  ErrMsg:String[27]='A:\COMMAND.COM Introuvable'#10;
 Begin
- SetSpLow;
+ {$IFNDEF OS2PC}
+  SetSpLow;
+ {$ENDIF}
  Exec(GetEnv('COMSPEC'),'');
  If DosError<>0Then Exec('C:\COMMAND.COM','');
  If DosError<>0Then Exec('A:\COMMAND.COM','');

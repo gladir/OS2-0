@@ -2542,6 +2542,12 @@ Begin
     { IFDEF FPC des sources (unites, messages, File of Byte...) sont celles a suivre }
     DefineAdd('FPC');
     { FPC pour Win32 definit aussi WINDOWS et MSWINDOWS (CHKDSK, EQUIP, T-CHAR...) }
+    { Ils restent definis pour les cibles OS/2 : dans les sources, la branche  }
+    { WINDOWS est celle du mode protege 32 bits, sans les interruptions du     }
+    { BIOS et du DOS (Int 13h, 16h, 25h de CHKDSK, DISKCOPY, MODE...). Les     }
+    { appels de l'API Win32 qu'elle contient (SetUseACP, unite Windows) sont   }
+    { donc exclus par IFNDEF OS2PC ; un appel oublie est signale (procedure ou }
+    { fonction non definie ; avec -w, identificateur non declare).             }
     DefineAdd('WINDOWS');
     DefineAdd('MSWINDOWS');
   End;

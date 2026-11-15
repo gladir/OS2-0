@@ -385,7 +385,9 @@ End;
 BEGIN
  {$IFDEF FPC}
   {$IFDEF WINDOWS}
-   SetUseACP(False);
+   {$IFNDEF OS2PC}
+    SetUseACP(False);
+   {$ENDIF}
   {$ENDIF}
  {$ENDIF}
  Language:=_French;
