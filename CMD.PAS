@@ -538,12 +538,43 @@ Begin
  End;
 End;
 
+{ Le chemin designe-t-il un repertoire existant (racine comprise) ? }
+Function IsDirPath(S:String):Boolean;
+Var
+ Info:SearchRec;
+Begin
+ IsDirPath:=False;
+ If S=''Then Exit;
+ If(Pos('*',S)>0)or(Pos('?',S)>0)Then Exit;
+ If(S[Length(S)]='\')or((Length(S)=2)and(S[2]=':'))Then Begin
+  IsDirPath:=True;
+  Exit;
+ End;
+ FindFirst(S,AnyFile,Info);
+ If DosError=0Then IsDirPath:=(Info.Attr and Directory)=Directory;
+End;
+
+{ Repertoire d'un chemin (avec la barre finale) }
+Function DirPart(S:String):String;
+Var
+ I:Integer;
+Begin
+ DirPart:='';
+ For I:=Length(S)downto 1do If(S[I]='\')or(S[I]=':')Then Begin
+  DirPart:=Copy(S,1,I);
+  Exit;
+ End;
+End;
+
 Procedure CopyCommand;
 Var
  P:Byte;
  ShowProgression:Boolean;
  F:File;
- CurrParam,Source,Target:String;
+ CurrParam,Source,Target,T:String;
+ Info:SearchRec;
+ N:Integer;
+ TDir:Boolean;
 Begin
  P:=0;
  ShowProgression:=False;
@@ -597,8 +628,39 @@ Begin
  End
   Else
  Begin
-  If CopyFile(Source,Target,ShowProgression)Then WriteLn('1 fichier copie')
-                                            Else WriteLn('Echec de copie de fichier');
+  { source avec jokers : chaque fichier ; destination repertoire : meme nom }
+  If(Pos('*',Source)>0)or(Pos('?',Source)>0)Then Begin
+   N:=0;
+   { avant la recherche : FindFirst n'a qu'une recherche a la fois }
+   TDir:=IsDirPath(Target);
+   FindFirst(Source,ReadOnly+Archive+Hidden+SysFile,Info);
+   While DosError=0do Begin
+    If(Info.Attr and Directory)=0Then Begin
+     If TDir Then Begin
+      If Target[Length(Target)]='\'Then T:=Target+Info.Name
+                                    Else T:=Target+'\'+Info.Name;
+     End
+      Else
+     T:=Target;
+     WriteLn(DirPart(Source)+Info.Name);
+     If CopyFile(DirPart(Source)+Info.Name,T,ShowProgression)Then Inc(N);
+    End;
+    FindNext(Info);
+   End;
+   WriteLn(N,' fichier(s) copie(s)');
+  End
+   Else
+  Begin
+   If IsDirPath(Target)Then Begin
+    T:=Source;
+    While(Pos('\',T)>0)do T:=Copy(T,Pos('\',T)+1,255);
+    If Pos(':',T)>0Then T:=Copy(T,Pos(':',T)+1,255);
+    If Target[Length(Target)]='\'Then Target:=Target+T
+                                  Else Target:=Target+'\'+T;
+   End;
+   If CopyFile(Source,Target,ShowProgression)Then WriteLn('1 fichier copie')
+                                             Else WriteLn('Echec de copie de fichier');
+  End;
  End;
 End;
 
@@ -739,6 +801,11 @@ Begin
                    Else ShowDir:=CurrParam;
   If P>99Then Break;
  Until CurrParam='';
+ { repertoire sans masque : son contenu }
+ If IsDirPath(ShowDir)Then Begin
+  If ShowDir[Length(ShowDir)]='\'Then ShowDir:=ShowDir+'*.*'
+                                  Else ShowDir:=ShowDir+'\*.*';
+ End;
  CurrDrive:=Path2Drive(ShowDir);
  CurrLabel:=GetDiskLabel(Byte(CurrDrive)-64);
  P:=0;
@@ -1621,6 +1688,19 @@ Begin
  WriteLn;
 End;
 
+{ Fichier de commandes : NOM.CMD (OS/2) ou NOM.BAT, ou le nom donne avec
+  son extension ; '' sinon }
+Function BatchName(S:String):String;
+Var
+ U:String;
+Begin
+ BatchName:='';
+ U:=StrToUpper(S);
+ If((Copy(U,Length(U)-3,4)='.CMD')or(Copy(U,Length(U)-3,4)='.BAT'))and FileExist(S)Then BatchName:=S Else
+ If FileExist(S+'.CMD')Then BatchName:=S+'.CMD' Else
+ If FileExist(S+'.BAT')Then BatchName:=S+'.BAT';
+End;
+
 Procedure RunCommand;
 Label
  Restart;
@@ -1749,14 +1829,14 @@ Restart:
    WriteLn;
   End
    Else
-  If FileExist(CmdStr+'.BAT')Then Begin
+  If BatchName(CmdStr)<>''Then Begin
    Inc(InCmd);
    If InCmd>20Then Begin
     WriteLn('Limite de 20 fichiers de traitements par lots maximum.');
     Exit;
    End;
    LastEcho:=Echo;
-   Assign(FileBat,CmdStr+'.BAT');
+   Assign(FileBat,BatchName(CmdStr));
    {$I-}Reset(FileBat);{$I+}
    If IOResult=0Then Begin
     While Not EOF(FileBat)do Begin

@@ -68,7 +68,8 @@ Program PMSHELL;
   autre que l'invite de commandes, le noyau attend une touche avant de
   fermer la session.
   Fichiers de donnees : visionneuse (texte du fichier dans une liste).
-  STARTUP.CMD (C:\ ou D:\) est execute au demarrage, avant le bureau.
+  STARTUP.CMD (C:\ ou D:\) est execute au demarrage, apres l'ouverture du
+  bureau, dans une session d'arriere-plan.
 
   Demandes des autres programmes (LaunchPad) : le programme ecrit la
   demande dans OS2.INI (PMSHELL, REQn) et envoie WM_USER + 1 (mp1 = n) a
@@ -147,7 +148,7 @@ Const
   OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19; OB_COUNTRY = 23; IC_GLOBE = 20;
   OB_GAMES = 24; OB_GAME = 25; IC_CARDS = 21; IC_CHESS = 22; IC_TILES = 23;
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
-  OB_DOSFS = 28; OB_DOSWIN = 29;
+  OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10;
   { controles du carnet des parametres }
@@ -162,7 +163,7 @@ Const
   { commandes des menus }
   CM_OPEN = 100; CM_REFRESH = 101; CM_ARRANGE = 102; CM_WINLIST = 103; CM_INFO = 104; CM_SHUTDOWN = 105;
   CM_HELP = 106; CM_PROPS = 107; CM_DELETE = 108; CM_CLOSE = 109; CM_PARENT = 110; CM_CMDHERE = 111;
-  CM_SHADOW = 112; CM_CREATE = 113; CM_SETTINGS = 114;
+  CM_SHADOW = 112; CM_CREATE = 113; CM_SETTINGS = 114; CM_TASKMGR = 115;
 
 Type
   { objet d'une vue (icone) }
@@ -491,6 +492,21 @@ Begin
   S := GetEnvS('COMSPEC');
   If (S = '') Or (Pos('PMSHELL', UpStr(S)) > 0) Then S := 'C:\CMD.EXE';
   Comspec := S;
+End;
+
+{ Gestionnaire des taches (TASKMGR.EXE) : racine de C: ou repertoire de
+  l'interpreteur de commandes ; '' s'il est absent }
+Function TaskMgrPath : String;
+Var S : String;
+Begin
+  TaskMgrPath := '';
+  If FileExists('C:\TASKMGR.EXE') Then TaskMgrPath := 'C:\TASKMGR.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'TASKMGR.EXE') Then TaskMgrPath := S + 'TASKMGR.EXE';
+  End;
 End;
 
 Procedure ShowMsg(Text, Cap : String; Style : LongInt);
@@ -1016,6 +1032,8 @@ Begin
         Dummy := NewItem(V, IC_WINLIST, OB_WINLIST, 'Liste des fenetres', '');
         Dummy := NewItem(V, IC_SETUP, OB_SETUP, 'Configuration du systeme', '');
         Dummy := NewItem(V, IC_INFO, OB_INFO, 'Informations systeme', '');
+        If TaskMgrPath <> '' Then
+          Dummy := NewItem(V, IC_TASKMGR, OB_GAME, 'Gestionnaire des taches', TaskMgrPath);
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
@@ -1311,6 +1329,21 @@ Begin
         FBox(Hps, X + 14, Y + 2, X + 28, Y + 19, CLR_YELLOW, CLR_DARKRED);
         GText(Hps, X + 17, Y + 3, 'z', CLR_DARKRED, CLR_YELLOW);
       End;
+    IC_TASKMGR :
+      Begin
+        { moniteur : historique vert sur fond noir }
+        FBox(Hps, X + 3, Y + 8, X + 28, Y + 28, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 6, Y + 11, X + 25, Y + 25, CLR_BLACK, DRO_FILL);
+        GLn(Hps, X + 6, Y + 18, X + 25, Y + 18, CLR_DARKGREEN);
+        GLn(Hps, X + 13, Y + 11, X + 13, Y + 25, CLR_DARKGREEN);
+        GLn(Hps, X + 20, Y + 11, X + 20, Y + 25, CLR_DARKGREEN);
+        GLn(Hps, X + 7, Y + 13, X + 11, Y + 16, CLR_GREEN);
+        GLn(Hps, X + 11, Y + 16, X + 14, Y + 14, CLR_GREEN);
+        GLn(Hps, X + 14, Y + 14, X + 18, Y + 22, CLR_GREEN);
+        GLn(Hps, X + 18, Y + 22, X + 21, Y + 19, CLR_GREEN);
+        GLn(Hps, X + 21, Y + 19, X + 24, Y + 23, CLR_GREEN);
+        FBox(Hps, X + 10, Y + 3, X + 21, Y + 7, CLR_PALEGRAY, CLR_BLACK);
+      End;
     IC_INFO, IC_HELP :
       Begin
         FBox(Hps, X + 4, Y + 4, X + 27, Y + 27, CLR_BLUE, CLR_DARKBLUE);
@@ -1442,6 +1475,7 @@ Begin
     MenuAdd(CM_ARRANGE, '~Reorganiser');
     MenuAdd(0, '');
     MenuAdd(CM_WINLIST, '~Liste des fenetres');
+    If TaskMgrPath <> '' Then MenuAdd(CM_TASKMGR, '~Gestionnaire des taches');
     MenuAdd(CM_INFO, '~Informations systeme');
     MenuAdd(CM_SETTINGS, '~Parametres du systeme...');
     MenuAdd(CM_HELP, 'Ai~de');
@@ -2270,6 +2304,7 @@ Begin
     CM_HELP : Help;
     CM_SETTINGS : OpenNotebook(0);
     CM_SHUTDOWN : Shutdown;
+    CM_TASKMGR : If TaskMgrPath <> '' Then RunPm(TaskMgrPath, '');
     CM_CLOSE : CloseView(V);
     CM_PARENT : ParentFolder(V);
     CM_CMDHERE : RunProgram(Comspec, '', Vw(V)^.Path, False);
@@ -4352,13 +4387,36 @@ Begin
   If ParseRes(S, W, H, B) Then Dummy := WinSetScreenMode(W, H, B);
 End;
 
+{ STARTUP.CMD : comme sous OS/2, apres l'ouverture du bureau, dans une
+  session d'arriere-plan (un programme de PM qu'il lance rejoint le
+  bureau) }
 Procedure StartupCmd;
-Var S : String;
+Var Res : Array[0..1] Of LongInt; S, D, Prm : String; K, Ses, Rc : LongInt;
 Begin
   S := '';
   If FileExists('C:\STARTUP.CMD') Then S := 'C:\STARTUP.CMD'
   Else If FileExists('D:\STARTUP.CMD') Then S := 'D:\STARTUP.CMD';
-  If S <> '' Then RunProgram(Comspec, '/C ' + S, DirOf(S), False);
+  If S = '' Then Exit;
+  D := DirOf(S);
+  If (Length(D) >= 2) And (D[2] = ':') Then Dummy := DosSetDefaultDisk(Ord(UpCase(D[1])) - 64);
+  If (Length(D) > 3) And (D[Length(D)] = '\') Then D := Copy(D, 1, Length(D) - 1);
+  Dummy := DosSetCurrentDir(Z(D));
+  Prm := '/C ' + S;
+  PutZ(LongInt(@ArgBuf), Comspec);
+  K := Length(Comspec) + 1;
+  PutZ(LongInt(@ArgBuf) + K, Prm);
+  WrB(LongInt(@ArgBuf) + K + Length(Prm) + 1, 0);
+  Ses := KSes(4, Z('STARTUP.CMD'), 0);
+  If Ses < 0 Then Exit;
+  Dummy := KSes(12, Ses, 0);
+  PutZ(LongInt(@NameZ2), Comspec);
+  Res[0] := 0; Res[1] := 0;
+  Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
+  If Rc <> 0 Then
+  Begin
+    Dummy := KSes(12, -1, 0);
+    Dummy := KSes(17, Ses, 0);
+  End;
 End;
 
 BEGIN
@@ -4396,7 +4454,6 @@ BEGIN
   Dummy := WinRegisterClass(Hab, Z('WPList'), LongInt(@ListProc), 0, 8);
   Dummy := WinRegisterClass(Hab, Z('WPNotebook'), LongInt(@NotebookProc), 0, 8);
   Dummy := WinRegisterClass(Hab, Z('WPLogo'), LongInt(@LogoProc), 0, 8);
-  StartupCmd;
   { bureau : fenetre de tout l'ecran, sous les autres }
   I := NewView(VK_DESK, '', 'Bureau');
   Creating := I;
@@ -4412,6 +4469,7 @@ BEGIN
   PrfSet('PMSHELL', 'HWND', IStr(Desk));
   ShowLogo;
   StartLaunchPad;
+  StartupCmd;
   { boucle des messages (WM_QUIT est ignore : le bureau ne se termine pas) }
   Repeat
     If WinGetMsg(Hab, LongInt(@Qmsg), 0, 0, 0) <> 0 Then Dummy := WinDispatchMsg(Hab, LongInt(@Qmsg));

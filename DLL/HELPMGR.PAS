@@ -86,8 +86,8 @@ Const
   RT_HELPSUBTABLE = 19;
 
   MaxInst  = 8;               { instances d'aide }
-  MaxTab   = 32;              { entrees de table d'aide par instance }
-  MaxSub   = 256;             { elements de sous-tables par instance }
+  MaxTab   = 128;             { entrees de table d'aide par instance }
+  MaxSub   = 2048;            { elements de sous-tables par instance }
   MaxAssoc = 32;              { fenetres associees }
   HelpBase = $00030000;       { handle : HelpBase + generation * 256 + n }
 
@@ -283,6 +283,11 @@ Begin
     Exit;
   End;
   R := NO_ERROR;
+  { entrees de 6 octets (fenetre, sous-table, panneau) ou, comme dans les
+    ressources compilees par le RC d'OS/2, de 8 octets (sous-table
+    FFFF:id sur 32 bits) }
+  Sz := 6;
+  If RdW(P + 4) = $FFFF Then Sz := 8;
   While (R = NO_ERROR) And (RdW(P) <> 0) Do
   Begin
     If NTabN >= MaxTab Then R := HMERR_NO_MEMORY
@@ -290,18 +295,19 @@ Begin
     Begin
       First := NSubN;
       NApp[NTabN] := RdW(P);
-      NExt[NTabN] := RdW(P + 4);
+      If Sz = 8 Then NExt[NTabN] := RdW(P + 6) Else NExt[NTabN] := RdW(P + 4);
       If RdW(P + 2) <> 0 Then
       Begin
+        { une sous-table absente des ressources est ignoree (comme
+          IPF : la fenetre n'a alors que son panneau etendu) }
         Q := 0;
-        If DcGetResource(Hmod, RT_HELPSUBTABLE, RdW(P + 2), LongInt(@Q)) <> NO_ERROR Then
-          R := HMERR_HELPTABLE_UNDEFINE
-        Else If Not AddSub(Q) Then R := HMERR_HELPTABLE_UNDEFINE;
+        If DcGetResource(Hmod, RT_HELPSUBTABLE, RdW(P + 2), LongInt(@Q)) = NO_ERROR Then
+          If Not AddSub(Q) Then R := HMERR_HELPTABLE_UNDEFINE;
       End;
       NSubFirst[NTabN] := First;
       NSubCnt[NTabN] := NSubN - First;
       Inc(NTabN);
-      P := P + 6;
+      P := P + Sz;
     End;
   End;
   BuildFromRes := R;

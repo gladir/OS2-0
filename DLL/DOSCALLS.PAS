@@ -1244,7 +1244,7 @@ Var Spc, Bps, Free, Total : LongInt;
 Begin
   If Disk = 0 Then Disk := CurDrive;
   If Disk = 3 Then DriveExists := True
-  Else If (Disk = 1) And (CurDrive = 1) Then DriveExists := True
+  Else If (Disk = 1) And ((CurDrive = 1) Or ((KTaskCtl(32, 0, 0, 0) And 1) <> 0)) Then DriveExists := True
   Else If (Disk < 1) Or (Disk = 2) Or (Disk > 26) Then DriveExists := False
   Else DriveExists := KGetDiskFreeSpaceA(Z(DriveRoot(Disk), 0), LongInt(@Spc), LongInt(@Bps),
                                          LongInt(@Free), LongInt(@Total)) <> 0;
@@ -1278,8 +1278,8 @@ Function DosQueryCurrentDisk(PDisk, PLogical : LongInt) : LongInt;
 Var I, M : LongInt;
 Begin
   M := 1 Shl 2;
-  { A: : lecteur de disquettes (unite courante) }
-  If CurDrive = 1 Then M := M Or 1;
+  { A: : lecteur de disquettes (present dans la configuration) }
+  If (CurDrive = 1) Or ((KTaskCtl(32, 0, 0, 0) And 1) <> 0) Then M := M Or 1;
   For I := 4 To 26 Do
     If DriveExists(I) Then M := M Or (1 Shl (I - 1));
   PokeL(PDisk, CurDrive);

@@ -75,6 +75,7 @@ Function ViGetConfig(ConfigId, PInfo, Hvio : LongInt) : LongInt; External 'VIOCA
 Function NlCaseMap(Len, Pcc, PCh : LongInt) : LongInt; External 'NLS' Name 'DosCaseMap';
 Function NlGetDBCSEv(Cb, Pcc, PBuf : LongInt) : LongInt; External 'NLS' Name 'DosGetDBCSEv';
 Function MsPutMessage(H, Cb, PBuf : LongInt) : LongInt; External 'MSG' Name 'Dos16PutMessage';
+Function MsInsertMessage(PTable, CTable, PMsg, CbMsg, PBuf, CbBuf, PcbMsg : LongInt) : LongInt; External 'MSG' Name 'DosInsertMessage';
 Function MsTrueGetMessage(PTable, CTable, PBuf, CbBuf, Num, PFile, PcbMsg, PSeg : LongInt) : LongInt; External 'MSG' Name 'DosTrueGetMessage';
 
 Var
@@ -82,6 +83,7 @@ Var
   Tab : Array[0..15] Of LongInt;
   St  : Array[0..15] Of LongInt;           { FILESTATUS3/4 }
   FBuf : Array[0..2047] Of LongInt;        { 8 Ko : entrees FILEFINDBUF3/4 }
+  MTxt : Array[0..1023] Of Byte;           { message d'un segment MSGBIND }
 
 Function PeekL(A : LongInt) : LongInt;
 Var P : PLong;
@@ -133,6 +135,20 @@ Var I : LongInt;
 Begin
   If (Src = 0) Or (Dst = 0) Then Exit;
   For I := 0 To N - 1 Do PokeB(Dst + I, PeekB(Src + I));
+End;
+
+Function GetZ(A : LongInt) : String;
+Var S : String; N : LongInt;
+Begin
+  S := '';
+  N := 0;
+  If A <> 0 Then
+    While (N < 250) And (PeekB(A + N) <> 0) Do
+    Begin
+      S := S + Chr(PeekB(A + N));
+      Inc(N);
+    End;
+  GetZ := S;
 End;
 
 { argument de 16 bits, de 32 bits, pointeur 16:16 (adresse lineaire) a
@@ -645,11 +661,81 @@ Begin
   F5_1 := MsPutMessage(W(A, 6), W(A, 4), P(A, 0));
 End;
 
+{ Segment de messages d'OS/2 1.x (MSGBIND) : en-tete FFh 'MKMSGSEG',
+  +0Eh table des fichiers (nombre, deplacements des entrees : donnees,
+  nom), donnees : composant (3), nombre, deplacements des messages ;
+  message : numero, longueur, type (E, W, I...), texte. Les deplacements
+  sont relatifs au segment (Base). Rend le nombre d'octets du message
+  prepare dans MTxt, -1 s'il est absent. }
+Function SegMsg(Hdr, Base, Num : LongInt; FName : String) : LongInt;
+Var T, N, I, E, D, Cnt, K, R, Ln, Ty, J, Q : LongInt; Nm, F, C : String;
+Begin
+  SegMsg := -1;
+  If (PeekB(Hdr) <> $FF) Or (PeekB(Hdr + 1) <> Ord('M')) Or (PeekB(Hdr + 3) <> Ord('M')) Or
+     (PeekB(Hdr + 5) <> Ord('G')) Or (PeekB(Hdr + 6) <> Ord('S')) Then Exit;
+  F := FName;
+  For I := Length(F) DownTo 1 Do
+    If (F[I] = '\') Or (F[I] = ':') Then
+    Begin
+      F := Copy(F, I + 1, 255);
+      Break;
+    End;
+  For I := 1 To Length(F) Do F[I] := UpCase(F[I]);
+  T := Base + PeekW(Hdr + $0E);
+  N := PeekW(T);
+  For I := 0 To N - 1 Do
+  Begin
+    E := Base + PeekW(T + 2 + I * 4);
+    Nm := '';
+    J := 0;
+    While (J < 12) And (PeekB(E + J) <> 0) Do
+    Begin
+      Nm := Nm + UpCase(Chr(PeekB(E + J)));
+      Inc(J);
+    End;
+    If Nm = F Then
+    Begin
+      D := Base + PeekW(T + 4 + I * 4);
+      C := Chr(PeekB(D)) + Chr(PeekB(D + 1)) + Chr(PeekB(D + 2));
+      Cnt := PeekW(D + 3);
+      For K := 0 To Cnt - 1 Do
+      Begin
+        R := Base + PeekW(D + 5 + K * 2);
+        If PeekW(R) = Num Then
+        Begin
+          Ln := PeekW(R + 2);
+          Ty := PeekB(R + 4);
+          Q := 0;
+          If (Ty = Ord('E')) Or (Ty = Ord('W')) Then
+          Begin
+            { prefixe SYSnnnn: }
+            Nm := C + Chr(48 + (Num Div 1000) Mod 10) + Chr(48 + (Num Div 100) Mod 10) +
+                  Chr(48 + (Num Div 10) Mod 10) + Chr(48 + Num Mod 10) + ': ';
+            For J := 1 To Length(Nm) Do
+            Begin
+              MTxt[Q] := Ord(Nm[J]);
+              Inc(Q);
+            End;
+          End;
+          For J := 0 To Ln - 2 Do
+            If Q < 1000 Then
+            Begin
+              MTxt[Q] := PeekB(R + 5 + J);
+              Inc(Q);
+            End;
+          SegMsg := Q;
+          Exit;
+        End;
+      End;
+    End;
+  End;
+End;
+
 { 2 DosTrueGetMessage(ppchVTable, usVCount, pchBuf, cbBuf, usMsgNum,
     pszFileName, pcbMsg, pMsgSeg) : DosGetMessage d'OS/2 1.x ; pMsgSeg
     designe le segment de messages lie au programme (MSGBIND) }
 Function F5_2(A : LongInt) : LongInt;
-Var I, N, T, R : LongInt;
+Var I, N, T, R, Ln : LongInt;
 Begin
   N := W(A, 20);
   If N > 9 Then N := 9;
@@ -658,8 +744,17 @@ Begin
     If T <> 0 Then Tab[I] := KTask(30, PeekW(T + I * 4 + 2), PeekW(T + I * 4), 0)
     Else Tab[I] := 0;
   Tmp[0] := 0;
-  R := MsTrueGetMessage(LongInt(@Tab), N, P(A, 16), W(A, 14), W(A, 12), P(A, 8),
-                        LongInt(@Tmp), P(A, 0));
+  R := -1;
+  { messages lies au programme (segment MSGBIND), sinon le fichier }
+  If P(A, 0) <> 0 Then
+  Begin
+    Ln := SegMsg(P(A, 0), KTask(30, PeekW(A + 2), 0, 0), W(A, 12), GetZ(P(A, 8)));
+    If Ln >= 0 Then
+      R := MsInsertMessage(LongInt(@Tab), N, LongInt(@MTxt), Ln, P(A, 16), W(A, 14), LongInt(@Tmp));
+  End;
+  If R < 0 Then
+    R := MsTrueGetMessage(LongInt(@Tab), N, P(A, 16), W(A, 14), W(A, 12), P(A, 8),
+                          LongInt(@Tmp), 0);
   PokeW(P(A, 4), Tmp[0]);
   F5_2 := R;
 End;

@@ -1073,7 +1073,7 @@ Begin
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Then Wanted := OptMM <> 0
   Else If (U = 'TCPIP32.DLL') Or (U = 'E1000.DLL') Or (U = 'PCNET.DLL') Or (U = 'IFCONFIG.EXE') Or (U = 'PING.EXE') Or
           (U = 'HOST.EXE') Or (U = 'WGET.EXE') Then Wanted := OptNet <> 0
-  Else If U = 'DEVMGR.EXE' Then Wanted := True
+  Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Then Wanted := True
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 
@@ -1838,7 +1838,7 @@ Begin
   If H = 0 Then Exit;
   WLine(H, 'REM CONFIG.SYS de OS/2-0 (installe sur le disque dur par INSTALL.EXE)');
   If OptDesk <> 0 Then WLine(H, 'PROTSHELL=C:\PMSHELL.EXE') Else WLine(H, 'PROTSHELL=C:\CMD.EXE');
-  WLine(H, 'LIBPATH=C:\;');
+  WLine(H, 'LIBPATH=.;C:\;');
   S := 'IFS=C:\HPFS.IFS /CACHE:64 /AUTOCHECK:C';
   If OptRam <> 0 Then S := S + ' /RAMDISK:4096';
   WLine(H, S);
