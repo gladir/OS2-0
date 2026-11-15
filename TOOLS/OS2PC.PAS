@@ -1155,6 +1155,14 @@ Var
   UsesCount    : Integer;
 
 { Forward declarations TODO 05 }
+{ TokIsP : le jeton I est la ponctuation P ; un litteral chaine ou
+  caractere de meme texte (par exemple ')' ) n'en est pas une (sans ce
+  test, F(')') perdait son argument et faussait l'analyse de la suite) }
+Function TokIsP(I : LongInt; Const P : TString) : Boolean;
+Begin
+  TokIsP := (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = P);
+End;
+
 Procedure SymRegisterBuiltins; Forward;
 
 { ============================================================ }
@@ -2534,6 +2542,12 @@ Begin
     { IFDEF FPC des sources (unites, messages, File of Byte...) sont celles a suivre }
     DefineAdd('FPC');
     { FPC pour Win32 definit aussi WINDOWS et MSWINDOWS (CHKDSK, EQUIP, T-CHAR...) }
+    { Ils restent definis pour les cibles OS/2 : dans les sources, la branche  }
+    { WINDOWS est celle du mode protege 32 bits, sans les interruptions du     }
+    { BIOS et du DOS (Int 13h, 16h, 25h de CHKDSK, DISKCOPY, MODE...). Les     }
+    { appels de l'API Win32 qu'elle contient (SetUseACP, unite Windows) sont   }
+    { donc exclus par IFNDEF OS2PC ; un appel oublie est signale (procedure ou }
+    { fonction non definie ; avec -w, identificateur non declare).             }
     DefineAdd('WINDOWS');
     DefineAdd('MSWINDOWS');
   End;
@@ -3210,17 +3224,17 @@ Begin
       Begin
         If (TokenPool[J - 1].Kind = TK_IDENT) Or
            ((TokenPool[J - 1].Kind = TK_PUNCT) And
-            ((TokenPool[J - 1].Val = ')') Or (TokenPool[J - 1].Val = ']'))) Or
+            ((TokIsP(J - 1, ')')) Or (TokIsP(J - 1, ']')))) Or
            ((TokenPool[J - 1].Kind = TK_OP) And (TokenPool[J - 1].Val = '^')) Then
           IsDeref := True;
-        If (TokenPool[J - 1].Kind = TK_PUNCT) And (TokenPool[J - 1].Val = ':') Then
+        If (TokenPool[J - 1].Kind = TK_PUNCT) And (TokIsP(J - 1, ':')) Then
           IsType := True;
         { TYPE P = ^T;  ou  Array[..] Of ^T;  : la lettre est suivie de ';' ou ')' }
         If (((TokenPool[J - 1].Kind = TK_OP) And (TokenPool[J - 1].Val = '=')) Or
             ((TokenPool[J - 1].Kind = TK_KEYWORD) And
              (StrUpperCase(TokenPool[J - 1].Val) = 'OF'))) And
            (I + 2 < TokenCount) And (TokenPool[I + 2].Kind = TK_PUNCT) And
-           ((TokenPool[I + 2].Val = ';') Or (TokenPool[I + 2].Val = ')')) Then
+           ((TokIsP(I + 2, ';')) Or (TokIsP(I + 2, ')'))) Then
           IsType := True;
       End;
       If Not IsDeref And Not IsType Then
@@ -3255,9 +3269,9 @@ Begin
   While I < TokenCount Do
   Begin
     If (TokenPool[I].Kind = TK_IDENT) And (I + 2 < TokenCount) And
-       (TokenPool[I + 1].Kind = TK_PUNCT) And (TokenPool[I + 1].Val = '.') And
+       (TokenPool[I + 1].Kind = TK_PUNCT) And (TokIsP(I + 1, '.')) And
        ((TokenPool[I + 2].Kind = TK_IDENT) Or (TokenPool[I + 2].Kind = TK_KEYWORD)) And
-       Not ((J > 0) And (TokenPool[J - 1].Kind = TK_PUNCT) And (TokenPool[J - 1].Val = '.')) Then
+       Not ((J > 0) And (TokenPool[J - 1].Kind = TK_PUNCT) And (TokIsP(J - 1, '.'))) Then
     Begin
       Up := StrUpperCase(TokenPool[I].Val);
       If (Up = 'SYSTEM') Or (Up = 'DOS') Or (Up = 'CRT') Or (Up = 'STRINGS') Or
@@ -3462,6 +3476,20 @@ Begin
       SymAdd := Dup;
       Exit;
     End
+    { Variable du RTL (TextAttr, FileMode...) redeclaree par le programme : }
+    { la declaration du programme la remplace (stockage propre)           }
+    Else If (SymTab[Dup].UnitName = 'RTLVAR') And (SymTab[Dup].Kind = SK_VAR) Then
+    Begin
+      SymTab[Dup].MangledName := SymMangle(Up, Kind);
+      SymTab[Dup].Kind        := Kind;
+      SymTab[Dup].TypeIdx     := TIdx;
+      SymTab[Dup].Offset      := 0;
+      SymTab[Dup].IsGlobal    := (CurScopeLevel = 0);
+      SymTab[Dup].UnitName    := '';
+      SymTab[Dup].ImmVal      := 0;
+      SymAdd := Dup;
+      Exit;
+    End
     { Permettre qu un proc/func masque un type pre-declare }
     Else If (SymTab[Dup].Kind = SK_TYPE) And
             (Kind In [SK_PROC, SK_FUNC, SK_VAR]) Then
@@ -3575,6 +3603,19 @@ Var
     Begin
       SymTab[R].IsGlobal  := True;
       SymTab[R].IsExternal := True;
+    End;
+  End;
+
+  { Registrer une variable du RTL sur une donnee du runtime (Label) }
+  Procedure RegRtlVar(Const Name, Lbl : TString; TIdx : Integer);
+  Var R : Integer;
+  Begin
+    R := SymAdd(Name, SK_VAR, TIdx);
+    If R >= 0 Then
+    Begin
+      SymTab[R].MangledName := Lbl;
+      SymTab[R].IsGlobal    := True;
+      SymTab[R].UnitName    := 'RTLVAR';
     End;
   End;
 
@@ -3830,6 +3871,22 @@ Begin
     SymTab[DosSymIdx].MangledName := 'DOSERROR';
     SymTab[DosSymIdx].IsGlobal    := True;
   End;
+
+  { Variables des unites System et Crt, sur les donnees du runtime :  }
+  { WindMax et TextAttr sont tenues a jour par Window, TextColor...  }
+  { (sinon : variables implicites a 0, Hi(WindMax) = 0 pour MORE).    }
+  { Un programme qui declare une variable du meme nom la remplace     }
+  { (le noyau a son propre TextAttr) : voir SymAdd, marque RTLVAR.    }
+  RegRtlVar('TEXTATTR', 'TEXTATTR', TY_IDX_BYTE);
+  RegRtlVar('WINDMIN', 'WINDMIN', TY_IDX_WORD);
+  RegRtlVar('WINDMAX', 'WINDMAX', TY_IDX_WORD);
+  RegRtlVar('LASTMODE', 'LASTMODE', TY_IDX_WORD);
+  RegRtlVar('DIRECTVIDEO', 'DIRECTVIDEO', TY_IDX_BOOLEAN);
+  RegRtlVar('CHECKBREAK', 'CHECKBREAK', TY_IDX_BOOLEAN);
+  RegRtlVar('CHECKEOF', 'CHECKEOF', TY_IDX_BOOLEAN);
+  RegRtlVar('CHECKSNOW', 'CHECKSNOW', TY_IDX_BOOLEAN);
+  RegRtlVar('FILEMODE', 'FILEMODE', TY_IDX_BYTE);
+  RegRtlVar('INOUTRES', 'FILE_IOERR', TY_IDX_INTEGER);
 
   { ---------------------------------------------------------- }
   { Procedures et fonctions de l unite Graph (TODO 20)         }
@@ -5928,7 +5985,7 @@ Procedure SkipToMatchingEnd(Var I : Integer); Forward;
 Function TokIsProcType(I : Integer) : Boolean;
 Begin
   TokIsProcType := (I > 0) And (I < TokenCount) And
-    ((TokenPool[I - 1].Val = '=') Or (TokenPool[I - 1].Val = ':'));
+    ((TokenPool[I - 1].Val = '=') Or (TokIsP(I - 1, ':')));
 End;
 
 { ============================================================ }
@@ -5975,11 +6032,49 @@ Function ParseTypeExprAt(Var I : Integer) : Integer; Forward;
 {     + - * DIV MOD SHL SHR AND OR XOR, parentheses, Ord Chr SizeOf Pred Succ Abs    }
 Function ConstTokExprAt(Var I : Integer) : LongInt; Forward;
 
+{ Constante pas encore declaree dans la table des symboles : les
+  sections TYPE sont analysees avant les sections CONST, si bien qu'un
+  "Array[0..MAXN] Of T" d'une section TYPE voyait MAXN = 0 (taille du
+  type et des variables fausses). On cherche "NOM = expression" dans une
+  section CONST du source (constante non typee) et on l'evalue. }
+Var ConstSrcDepth : Integer;
+
+Function ConstFromSource(Const Up : TString; Var Found : Boolean) : LongInt;
+Var K, J, Lvl : Integer; InConst : Boolean;
+Begin
+  ConstFromSource := 0; Found := False;
+  If ConstSrcDepth > 8 Then Exit;
+  InConst := False; Lvl := 0;
+  For K := 0 To TokenCount - 3 Do
+  Begin
+    If TokenPool[K].Kind = TK_KEYWORD Then
+    Begin
+      If StrUpperCase(TokenPool[K].Val) = 'CONST' Then InConst := True
+      Else If (StrUpperCase(TokenPool[K].Val) = 'TYPE') Or (StrUpperCase(TokenPool[K].Val) = 'VAR') Or
+              (StrUpperCase(TokenPool[K].Val) = 'PROCEDURE') Or (StrUpperCase(TokenPool[K].Val) = 'FUNCTION') Or
+              (StrUpperCase(TokenPool[K].Val) = 'BEGIN') Then InConst := False;
+    End;
+    If InConst And ((TokenPool[K].Kind = TK_IDENT) Or (TokenPool[K].Kind = TK_KEYWORD)) And
+       (StrUpperCase(TokenPool[K].Val) = Up) And ((TokenPool[K + 1].Kind = TK_OP) Or
+       (TokenPool[K + 1].Kind = TK_PUNCT)) And (TokenPool[K + 1].Val = '=') Then
+    Begin
+      J := K + 2;
+      Inc(ConstSrcDepth);
+      ConstFromSource := ConstTokExprAt(J);
+      Dec(ConstSrcDepth);
+      Found := True;
+      Exit;
+    End;
+  End;
+  If Lvl = 0 Then;
+End;
+
 Function ConstTokAtomAt(Var I : Integer) : LongInt;
 Var
   V : LongInt;
   Up : TString;
   SI, TI : Integer;
+  Found : Boolean;
 Begin
   V := 0;
   If I >= TokenCount Then Begin ConstTokAtomAt := 0; Exit; End;
@@ -6062,7 +6157,8 @@ Begin
         Else
         Begin
           SI := SymFind(Up);
-          If (SI >= 0) And (SymTab[SI].Kind = SK_CONST) Then V := SymTab[SI].ImmVal;
+          If (SI >= 0) And (SymTab[SI].Kind = SK_CONST) Then V := SymTab[SI].ImmVal
+          Else If SI < 0 Then V := ConstFromSource(Up, Found);
         End;
       End;
   Else
@@ -7033,7 +7129,7 @@ Begin
             Inc(I);
             { Si virgule, continuer a collecter }
             If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = ',') Then
+               (TokIsP(I, ',')) Then
               Inc(I)  { sauter la virgule }
             Else
               Break;
@@ -7048,14 +7144,14 @@ Begin
 
           { Attendre ':' }
           If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-             (TokenPool[I].Val = ':') Then
+             (TokIsP(I, ':')) Then
             Inc(I) { sauter ':' }
           Else
           Begin
             { Pas de ':' -> erreur de syntaxe, avancer au ';' }
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -7094,7 +7190,7 @@ Begin
                 End;
               End;
               While (I < TokenCount) And
-                    Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do
+                    Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do
                 Inc(I);
               If I < TokenCount Then Inc(I);
               Continue;
@@ -7114,7 +7210,7 @@ Begin
             { Avancer au ';' }
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -7148,7 +7244,7 @@ Begin
                 End;
               End;
               While (I < TokenCount) And
-                    Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do
+                    Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do
                 Inc(I);
               If I < TokenCount Then Inc(I);
               Continue;
@@ -7166,7 +7262,7 @@ Begin
 
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -7181,14 +7277,19 @@ Begin
                (StrUpperCase(TokenPool[I].Val) = 'OF') Then
               Inc(I);
             BaseTN := 'BYTE';
-            If (I < TokenCount) And
+            BTIdx := -1;
+            If TokIsPunct(I, '(') Then
+              { SET OF (a, b, c) : les valeurs de l'enumeration sont des }
+              { constantes (0, 1, 2...), comme pour TYPE T = (a, b, c)   }
+              BTIdx := ParseTypeExprAt(I)
+            Else If (I < TokenCount) And
                ((TokenPool[I].Kind = TK_IDENT) Or
                 (TokenPool[I].Kind = TK_KEYWORD)) Then
             Begin
               BaseTN := StrUpperCase(TokenPool[I].Val);
               Inc(I);
             End;
-            BTIdx := TypeFindByName(BaseTN);
+            If BTIdx < 0 Then BTIdx := TypeFindByName(BaseTN);
             If BTIdx < 0 Then BTIdx := TY_IDX_BYTE;
             TIdx := TypeAdd(TYK_SET, '', 32, 4, False, BTIdx);
 
@@ -7205,7 +7306,7 @@ Begin
 
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -7213,14 +7314,14 @@ Begin
 
           { Type enumere inline : (val1, val2, ...) }
           If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-             (TokenPool[I].Val = '(') Then
+             (TokIsP(I, '(')) Then
           Begin
             Inc(I); { sauter '(' }
             TIdx := TypeAdd(TYK_ENUM, '', 4, 4, False, -1);
             FC := 0;
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ')')) Do
+                       (TokIsP(I, ')'))) Do
             Begin
               If (TokenPool[I].Kind = TK_IDENT) Then
               Begin
@@ -7248,7 +7349,7 @@ Begin
 
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -7283,7 +7384,7 @@ Begin
               End;
             End;
             While (I < TokenCount) And
-                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do
+                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -7321,17 +7422,17 @@ Begin
           If (TIdx < 0) And ((TName = 'PROCEDURE') Or (TName = 'FUNCTION')) Then
           Begin
             TIdx := TypeAdd(TYK_PROCVAR, '', 4, 4, False, -1);
-            If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = '(') Then
+            If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, '(')) Then
             Begin
               J := 0;
               Repeat
-                If (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = '(') Then Inc(J)
-                Else If (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ')') Then Dec(J);
+                If (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, '(')) Then Inc(J)
+                Else If (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ')')) Then Dec(J);
                 Inc(I);
               Until (J = 0) Or (I >= TokenCount);
             End;
             If (TName = 'FUNCTION') And (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = ':') Then Begin Inc(I); If I < TokenCount Then Inc(I) End;
+               (TokIsP(I, ':')) Then Begin Inc(I); If I < TokenCount Then Inc(I) End;
             TName := 'POINTER';
           End;
 
@@ -7355,7 +7456,7 @@ Begin
               Inc(I);
               { Attendre ':' }
               If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                 (TokenPool[I].Val = ':') Then
+                 (TokIsP(I, ':')) Then
               Begin
                 Inc(I);
                 { Lire l'offset }
@@ -7429,7 +7530,7 @@ Begin
             { Avancer au ';' }
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -7459,7 +7560,7 @@ Begin
               End;
             End;
             While (I < TokenCount) And
-                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do
+                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -7493,7 +7594,7 @@ Begin
           { Avancer au ';' }
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
-                     (TokenPool[I].Val = ';')) Do
+                     (TokIsP(I, ';'))) Do
             Inc(I);
           If I < TokenCount Then Inc(I);
         End; { while parsing VAR block }
@@ -7539,7 +7640,7 @@ Begin
           RealK := 10;
 
           If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-             (TokenPool[I].Val = ':') Then
+             (TokIsP(I, ':')) Then
           Begin
             { Constante typee : nom : Type = valeur (scalaire, chaine, tableau, record, ensemble) }
             Inc(I); { sauter ':' }
@@ -7582,7 +7683,7 @@ Begin
             { Expression constante generale (Byte(' '), Ord('A'), Chr(65), N*2+1) : plus d un }
             { jeton avant le ';' sans litteral chaine ni reel -> evaluateur d expressions.       }
             J := I; ArrElem := 0; CxGen := False;
-            While (J < TokenCount) And Not ((TokenPool[J].Kind = TK_PUNCT) And (TokenPool[J].Val = ';')) Do
+            While (J < TokenCount) And Not ((TokenPool[J].Kind = TK_PUNCT) And (TokIsP(J, ';'))) Do
             Begin
               If (TokenPool[J].Kind = TK_REAL) Or
                  ((TokenPool[J].Kind = TK_STRING) And (Length(TokenPool[J].Val) <> 1)) Then CxGen := True;
@@ -7707,7 +7808,7 @@ Begin
           { Avancer au ';' }
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
-                     (TokenPool[I].Val = ';')) Do
+                     (TokIsP(I, ';'))) Do
             Inc(I);
           If I < TokenCount Then Inc(I);
         End; { while parsing CONST block }
@@ -7738,7 +7839,7 @@ Begin
             Inc(I);
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Break;
@@ -7751,7 +7852,7 @@ Begin
             SkipToMatchingEnd(I);
             { Sauter le ';' apres END }
             If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = ';') Then
+               (TokIsP(I, ';')) Then
               Inc(I);
             Break;
           End;
@@ -8271,12 +8372,12 @@ Var
         NPC := 0;
         NVM := 0;
         If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-           (TokenPool[I].Val = '(') Then
+           (TokIsP(I, '(')) Then
         Begin
           Inc(I);
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
-                     (TokenPool[I].Val = ')')) Do
+                     (TokIsP(I, ')'))) Do
           Begin
             NIsVarP := False;
             NIsConstP := False;
@@ -8305,10 +8406,10 @@ Var
               End;
               Inc(I);
               If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                 (TokenPool[I].Val = ',') Then Inc(I) Else Break;
+                 (TokIsP(I, ',')) Then Inc(I) Else Break;
             End;
             If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = ':') Then
+               (TokIsP(I, ':')) Then
             Begin
               Inc(I);
               If (I < TokenCount) And
@@ -8317,17 +8418,21 @@ Var
               Begin
                 NTName := StrUpperCase(TokenPool[I].Val);
                 NTIdx := TypeFindByName(NTName);
-                If NTIdx < 0 Then NTIdx := TY_IDX_INTEGER;
+                If NTIdx < 0 Then
+                Begin
+                  WarnMsg('ligne ' + IntToStr_(TokenPool[I].Line) + ' : type inconnu ' + NTName + ' (Integer suppose)');
+                  NTIdx := TY_IDX_INTEGER;
+                End;
                 For NK := NGrpSt To NPC - 1 Do
                   ProcTab[NI].Params[NK].TypeIdx := NTIdx;
                 Inc(I);
               End;
             End;
             If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = ';') Then Inc(I);
+               (TokIsP(I, ';')) Then Inc(I);
           End;
           If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-             (TokenPool[I].Val = ')') Then Inc(I);
+             (TokIsP(I, ')')) Then Inc(I);
         End;
         ProcTab[NI].ParamCount := NPC;
         ProcTab[NI].VarMask    := NVM;
@@ -8344,7 +8449,7 @@ Var
         If NIsFunc Then
         Begin
           If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-             (TokenPool[I].Val = ':') Then
+             (TokIsP(I, ':')) Then
           Begin
             Inc(I);
             If (I < TokenCount) And
@@ -8363,7 +8468,7 @@ Var
         { Attendre ';' apres la signature }
         While (I < TokenCount) And
               Not ((TokenPool[I].Kind = TK_PUNCT) And
-                   (TokenPool[I].Val = ';')) Do
+                   (TokIsP(I, ';'))) Do
           Inc(I);
         If I < TokenCount Then Inc(I);
 
@@ -8376,7 +8481,7 @@ Var
           ProcTab[NI].IsForward := True;
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
-                     (TokenPool[I].Val = ';')) Do
+                     (TokIsP(I, ';'))) Do
             Inc(I);
           If I < TokenCount Then Inc(I);
         End
@@ -8443,10 +8548,10 @@ Var
                   End;
                   Inc(I);
                   If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT)
-                     And (TokenPool[I].Val = ',') Then Inc(I) Else Break;
+                     And (TokIsP(I, ',')) Then Inc(I) Else Break;
                 End;
                 If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                   (TokenPool[I].Val = ':') Then
+                   (TokIsP(I, ':')) Then
                 Begin
                   Inc(I);
                   NLTIdx := ParseTypeExprAt(I);
@@ -8483,7 +8588,7 @@ Var
                 End;
                 While (I < TokenCount) And
                       Not ((TokenPool[I].Kind = TK_PUNCT) And
-                           (TokenPool[I].Val = ';')) Do
+                           (TokIsP(I, ';'))) Do
                   Inc(I);
                 If I < TokenCount Then Inc(I);
               End;
@@ -8527,7 +8632,7 @@ Var
           End;
           { Sauter le ';' apres END }
           If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-             (TokenPool[I].Val = ';') Then
+             (TokIsP(I, ';')) Then
             Inc(I);
         End;
 
@@ -8560,7 +8665,7 @@ Var
         Inc(I);
       End;
       If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-         (TokenPool[I].Val = ';') Then
+         (TokIsP(I, ';')) Then
         Inc(I);
     End;
   End;
@@ -8664,12 +8769,12 @@ Begin
         PC := 0;
         VM := 0;
         If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-           (TokenPool[I].Val = '(') Then
+           (TokIsP(I, '(')) Then
         Begin
           Inc(I); { sauter '(' }
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
-                     (TokenPool[I].Val = ')')) Do
+                     (TokIsP(I, ')'))) Do
           Begin
             { Detecter VAR ou CONST }
             IsVarP := False;
@@ -8708,7 +8813,7 @@ Begin
               End;
               Inc(I);
               If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                 (TokenPool[I].Val = ',') Then
+                 (TokIsP(I, ',')) Then
                 Inc(I)
               Else
                 Break;
@@ -8716,7 +8821,7 @@ Begin
 
             { Lire le type ':' TypeName }
             If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = ':') Then
+               (TokIsP(I, ':')) Then
             Begin
               Inc(I);
               If (I < TokenCount) And
@@ -8725,7 +8830,11 @@ Begin
               Begin
                 TName := StrUpperCase(TokenPool[I].Val);
                 TIdx := TypeFindByName(TName);
-                If TIdx < 0 Then TIdx := TY_IDX_INTEGER;
+                If TIdx < 0 Then
+                Begin
+                  WarnMsg('ligne ' + IntToStr_(TokenPool[I].Line) + ' : type inconnu ' + TName + ' (Integer suppose)');
+                  TIdx := TY_IDX_INTEGER;
+                End;
                 For J := GrpStart To PC - 1 Do
                   ProcTab[PI].Params[J].TypeIdx := TIdx;
                 Inc(I);
@@ -8734,12 +8843,12 @@ Begin
 
             { Sauter ';' entre groupes }
             If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = ';') Then
+               (TokIsP(I, ';')) Then
               Inc(I);
           End;
           { Sauter ')' }
           If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-             (TokenPool[I].Val = ')') Then
+             (TokIsP(I, ')')) Then
             Inc(I);
         End;
 
@@ -8762,7 +8871,7 @@ Begin
         If IsFunc Then
         Begin
           If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-             (TokenPool[I].Val = ':') Then
+             (TokIsP(I, ':')) Then
           Begin
             Inc(I);
             If (I < TokenCount) And
@@ -8782,7 +8891,7 @@ Begin
         { Attendre ';' apres la signature }
         While (I < TokenCount) And
               Not ((TokenPool[I].Kind = TK_PUNCT) And
-                   (TokenPool[I].Val = ';')) Do
+                   (TokIsP(I, ';'))) Do
           Inc(I);
         If I < TokenCount Then Inc(I);
 
@@ -8793,7 +8902,7 @@ Begin
                (StrUpperCase(TokenPool[I].Val) = 'NEAR') Or
                (StrUpperCase(TokenPool[I].Val) = 'FAR') Or
                (StrUpperCase(TokenPool[I].Val) = 'INTERRUPT')) And
-              (TokenPool[I + 1].Kind = TK_PUNCT) And (TokenPool[I + 1].Val = ';') Do
+              (TokenPool[I + 1].Kind = TK_PUNCT) And (TokIsP(I + 1, ';')) Do
         Begin
           If StrUpperCase(TokenPool[I].Val) = 'INTERRUPT' Then ProcIntr[PI] := True;
           Inc(I, 2);
@@ -8809,7 +8918,7 @@ Begin
           Inc(I);
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
-                     (TokenPool[I].Val = ';')) Do
+                     (TokIsP(I, ';'))) Do
             Inc(I);
           If I < TokenCount Then Inc(I);
           { Enregistrer le symbole dans SymTab }
@@ -8867,7 +8976,7 @@ Begin
           End;
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
-                     (TokenPool[I].Val = ';')) Do
+                     (TokIsP(I, ';'))) Do
             Inc(I);
           If I < TokenCount Then Inc(I);
           If IsFunc Then
@@ -9022,7 +9131,7 @@ Begin
                 End;
                 Inc(I);
                 If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT)
-                   And (TokenPool[I].Val = ',') Then
+                   And (TokIsP(I, ',')) Then
                   Inc(I)
                 Else
                   Break;
@@ -9030,7 +9139,7 @@ Begin
 
               { Lire ':' TypeName }
               If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                 (TokenPool[I].Val = ':') Then
+                 (TokIsP(I, ':')) Then
               Begin
                 Inc(I);
                 LTName := '';
@@ -9095,7 +9204,7 @@ Begin
               { Avancer au ';' }
               While (I < TokenCount) And
                     Not ((TokenPool[I].Kind = TK_PUNCT) And
-                         (TokenPool[I].Val = ';')) Do
+                         (TokIsP(I, ';'))) Do
                 Inc(I);
               If I < TokenCount Then Inc(I);
             End;
@@ -9147,7 +9256,7 @@ Begin
 
         { Sauter le ';' apres END }
         If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-           (TokenPool[I].Val = ';') Then
+           (TokIsP(I, ';')) Then
           Inc(I);
 
         { Enregistrer le symbole dans SymTab (si pas deja fait via FORWARD) }
@@ -9305,7 +9414,7 @@ Begin
           Begin
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -9329,7 +9438,7 @@ Begin
 
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -9355,14 +9464,18 @@ Begin
               Inc(I);
 
             BaseTN := 'BYTE';
-            If (I < TokenCount) And
+            BTIdx := -1;
+            If TokIsPunct(I, '(') Then
+              { SET OF (a, b, c) : valeurs de l'enumeration declarees }
+              BTIdx := ParseTypeExprAt(I)
+            Else If (I < TokenCount) And
                ((TokenPool[I].Kind = TK_IDENT) Or
                 (TokenPool[I].Kind = TK_KEYWORD)) Then
             Begin
               BaseTN := StrUpperCase(TokenPool[I].Val);
               Inc(I);
             End;
-            BTIdx := TypeFindByName(BaseTN);
+            If BTIdx < 0 Then BTIdx := TypeFindByName(BaseTN);
             If BTIdx < 0 Then BTIdx := TY_IDX_BYTE;
 
             TIdx := TypeAdd(TYK_SET, TName, 32, 4, False, BTIdx);
@@ -9370,7 +9483,7 @@ Begin
 
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -9386,7 +9499,7 @@ Begin
 
             { Heritage : OBJECT(Parent) }
             If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = '(') Then
+               (TokIsP(I, '(')) Then
             Begin
               Inc(I);
               If (I < TokenCount) And
@@ -9397,7 +9510,7 @@ Begin
                 Inc(I);
               End;
               If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                 (TokenPool[I].Val = ')') Then
+                 (TokIsP(I, ')')) Then
                 Inc(I);
 
               { Copier les champs du parent }
@@ -9450,12 +9563,12 @@ Begin
               Begin
                 While (I < TokenCount) And
                       Not ((TokenPool[I].Kind = TK_PUNCT) And
-                           (TokenPool[I].Val = ';')) And
+                           (TokIsP(I, ';'))) And
                       Not ((TokenPool[I].Kind = TK_KEYWORD) And
                            (StrUpperCase(TokenPool[I].Val) = 'END')) Do
                   Inc(I);
                 If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                   (TokenPool[I].Val = ';') Then
+                   (TokIsP(I, ';')) Then
                   Inc(I);
                 Continue;
               End;
@@ -9470,18 +9583,18 @@ Begin
               Inc(I);
 
               If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                 (TokenPool[I].Val = ':') Then
+                 (TokIsP(I, ':')) Then
                 Inc(I)
               Else
               Begin
                 While (I < TokenCount) And
                       Not ((TokenPool[I].Kind = TK_PUNCT) And
-                           (TokenPool[I].Val = ';')) And
+                           (TokIsP(I, ';'))) And
                       Not ((TokenPool[I].Kind = TK_KEYWORD) And
                            (StrUpperCase(TokenPool[I].Val) = 'END')) Do
                   Inc(I);
                 If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                   (TokenPool[I].Val = ';') Then Inc(I);
+                   (TokIsP(I, ';')) Then Inc(I);
                 Continue;
               End;
 
@@ -9504,7 +9617,11 @@ Begin
                   FSz := 4;
               End;
               FTIdx := TypeFindByName(FTName);
-              If FTIdx < 0 Then FTIdx := TY_IDX_INTEGER;
+              If FTIdx < 0 Then
+              Begin
+                WarnMsg('type de champ inconnu ' + FTName + ' (Integer suppose)');
+                FTIdx := TY_IDX_INTEGER;
+              End;
 
               If (TIdx >= 0) And (FC < MAX_FIELDS) Then
               Begin
@@ -9518,27 +9635,27 @@ Begin
               End;
 
               If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-                 (TokenPool[I].Val = ';') Then
+                 (TokIsP(I, ';')) Then
                 Inc(I);
             End;
 
             SIdx := SymAdd(TName, SK_TYPE, TIdx);
 
             If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And
-               (TokenPool[I].Val = ';') Then
+               (TokIsP(I, ';')) Then
               Inc(I);
             Continue;
           End;
 
           { --- Enumeration : (val1, val2, ...) --- }
-          If (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = '(') Then
+          If (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, '(')) Then
           Begin
             Inc(I);
             TIdx := TypeAdd(TYK_ENUM, TName, 4, 4, False, -1);
             FC := 0;
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ')')) Do
+                       (TokIsP(I, ')'))) Do
             Begin
               If (TokenPool[I].Kind = TK_IDENT) Then
               Begin
@@ -9557,7 +9674,7 @@ Begin
 
             While (I < TokenCount) And
                   Not ((TokenPool[I].Kind = TK_PUNCT) And
-                       (TokenPool[I].Val = ';')) Do
+                       (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -9578,7 +9695,7 @@ Begin
             End;
             SIdx := SymAdd(TName, SK_TYPE, TIdx);
             While (I < TokenCount) And
-                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do
+                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -9590,17 +9707,17 @@ Begin
             Inc(I);
             TIdx := TypeAdd(TYK_PROCVAR, TName, 4, 4, False, -1);
             SIdx := SymAdd(TName, SK_TYPE, TIdx);
-            If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = '(') Then
+            If (I < TokenCount) And (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, '(')) Then
             Begin
               FC := 0;
               Repeat
-                If (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = '(') Then Inc(FC)
-                Else If (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ')') Then Dec(FC);
+                If (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, '(')) Then Inc(FC)
+                Else If (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ')')) Then Dec(FC);
                 Inc(I);
               Until (FC = 0) Or (I >= TokenCount);
             End;
             While (I < TokenCount) And
-                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do
+                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -9621,7 +9738,7 @@ Begin
             TIdx := TypeAdd(TYK_FILE, TName, TFR_SIZE, 4, False, BTIdx);
             SIdx := SymAdd(TName, SK_TYPE, TIdx);
             While (I < TokenCount) And
-                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do
+                  Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do
               Inc(I);
             If I < TokenCount Then Inc(I);
             Continue;
@@ -9679,7 +9796,7 @@ Begin
           { Avancer au ';' }
           While (I < TokenCount) And
                 Not ((TokenPool[I].Kind = TK_PUNCT) And
-                     (TokenPool[I].Val = ';')) Do
+                     (TokIsP(I, ';'))) Do
             Inc(I);
           If I < TokenCount Then Inc(I);
         End;
@@ -9924,7 +10041,10 @@ End;
 Function EPMatch(Const S : TString) : Boolean;
 Begin
   EPMatch := False;
-  If (EP < EPEnd) And (StrUpperCase(TokenPool[EP].Val) = S) Then
+  { un litteral (chaine ou caractere) n'est jamais une ponctuation ni un
+    mot-cle : sans ce test, F(')') perdait son argument }
+  If (EP < EPEnd) And (TokenPool[EP].Kind <> TK_STRING) And (TokenPool[EP].Kind <> TK_CHAR) And
+     (StrUpperCase(TokenPool[EP].Val) = S) Then
   Begin
     Inc(EP);
     EPMatch := True;
@@ -10053,6 +10173,7 @@ Begin
   For K := 0 To DataCount - 1 Do
     If DataTab[K].LblName = TP_VAR_PFX + Up Then Exit;
   If Opts.DebugMode Then WriteLn('  [var] ', Up, ' : non declaree, emplacement implicite');
+  WarnMsg('identificateur non declare (variable implicite) : ' + Up);
   DataAdd(TP_VAR_PFX + Up, DK_DWORD, 0, '', 0, 0);
   SI := SymAdd(Up, SK_VAR, TY_IDX_LONGINT);
   If SI >= 0 Then
@@ -11047,7 +11168,7 @@ Function CharLitArgFollows : Boolean;
 Begin
   CharLitArgFollows := (Not EPAtEnd) And (TokenPool[EP].Kind = TK_STRING) And
     (Length(TokenPool[EP].Val) = 1) And (EP + 1 < EPEnd) And
-    (TokenPool[EP + 1].Kind = TK_PUNCT) And (TokenPool[EP + 1].Val = ')');
+    (TokenPool[EP + 1].Kind = TK_PUNCT) And (TokIsP(EP + 1, ')'));
 End;
 
 { TypeBoundValue : Low/High d un type (tableau : bornes d index ; chaine : 0..255 ;
@@ -11185,7 +11306,7 @@ Begin
       If Not ((LastVarTypeIdx >= 0) And (LastVarTypeIdx < TypeCount) And
               (TypeTab[LastVarTypeIdx].Kind = TYK_PROCVAR) And
               (EP + 1 < EPEnd) And (TokenPool[EP + 1].Kind = TK_PUNCT) And
-              (TokenPool[EP + 1].Val = '(')) Then
+              (TokIsP(EP + 1, '('))) Then
       Begin
         GenLoadVar(PI, Up);
         Inc(EP);
@@ -11234,7 +11355,7 @@ Begin
         (Up = 'LONGWORD') Or (Up = 'COMP')) And
        (EP + 1 < EPEnd) And
        (TokenPool[EP + 1].Kind = TK_PUNCT) And
-       (TokenPool[EP + 1].Val = '(') Then
+       (TokIsP(EP + 1, '(')) Then
     Begin
       Inc(EP);  { sauter le nom de type }
       Inc(EP);  { sauter '(' }
@@ -11277,7 +11398,7 @@ Begin
             Inc(EP);
             While (Not EPAtEnd) And (SI >= 0) And (SI < TypeCount) And
                   (((TokenPool[EP].Kind = TK_PUNCT) And
-                    ((TokenPool[EP].Val = '.') Or (TokenPool[EP].Val = '['))) Or
+                    ((TokIsP(EP, '.')) Or (TokIsP(EP, '[')))) Or
                    ((TokenPool[EP].Kind = TK_OP) And (TokenPool[EP].Val = '^'))) Do
             Begin
               If TokenPool[EP].Val = '^' Then
@@ -11285,13 +11406,13 @@ Begin
                 Inc(EP);
                 If TypeTab[SI].Kind = TYK_POINTER Then SI := TypeTab[SI].BaseTypeIdx Else SI := -1;
               End
-              Else If TokenPool[EP].Val = '[' Then
+              Else If TokIsP(EP, '[') Then
               Begin
                 LI := 0;
                 While Not EPAtEnd Do
                 Begin
-                  If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '[') Then Inc(LI)
-                  Else If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ']') Then Dec(LI);
+                  If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '[')) Then Inc(LI)
+                  Else If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ']')) Then Dec(LI);
                   Inc(EP);
                   If LI = 0 Then Break;
                 End;
@@ -11659,7 +11780,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '(') Then
+         (TokIsP(EP, '(')) Then
       Begin
         Inc(EP);  { ( }
         ParseExpr(PI);  { max dans EAX }
@@ -12051,7 +12172,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '(') Then
+         (TokIsP(EP, '(')) Then
       Begin
         Inc(EP);  { consommer ( }
         If Not EPAtEnd Then
@@ -12089,7 +12210,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '(') Then
+         (TokIsP(EP, '(')) Then
       Begin
         Inc(EP);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_IDENT) Then
@@ -12121,7 +12242,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '(') Then
+         (TokIsP(EP, '(')) Then
       Begin
         Inc(EP);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_IDENT) Then
@@ -12151,7 +12272,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '(') Then
+         (TokIsP(EP, '(')) Then
       Begin
         Inc(EP);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_IDENT) Then
@@ -12243,7 +12364,7 @@ Begin
           { suffixes ^ et .champ : suivre le type }
           While (Not EPAtEnd) And (SI >= 0) And (SI < TypeCount) And
                 (((TokenPool[EP].Kind = TK_OP) And (TokenPool[EP].Val = '^')) Or
-                 ((TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '.'))) Do
+                 ((TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '.')))) Do
           Begin
             If TokenPool[EP].Val = '^' Then
             Begin
@@ -12394,7 +12515,7 @@ Begin
         GmCast := (Not EPAtEnd) And (TokenPool[EP].Kind = TK_IDENT) And
                   (StrUpperCase(TokenPool[EP].Val) = 'POINTER') And
                   (EP + 1 < EPEnd) And (TokenPool[EP + 1].Kind = TK_PUNCT) And
-                  (TokenPool[EP + 1].Val = '(');
+                  (TokIsP(EP + 1, '('));
         If GmCast Then Inc(EP, 2);
         If ParseLValueAddrW32(PI, LI) Then
         Begin
@@ -12424,7 +12545,7 @@ Begin
         Begin
           ParseExpr(PI);                  { valeur du pointeur }
           If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-             (TokenPool[EP].Val = ',') Then
+             (TokIsP(EP, ',')) Then
           Begin
             Inc(EP);
             EmitInstr('PUSH EAX');
@@ -12829,8 +12950,8 @@ Begin
         WI := 0;
         While Not EPAtEnd Do
         Begin
-          If (TokenPool[EP].Kind = TK_PUNCT) And ((TokenPool[EP].Val = '(') Or (TokenPool[EP].Val = '[')) Then Inc(WI)
-          Else If (TokenPool[EP].Kind = TK_PUNCT) And ((TokenPool[EP].Val = ')') Or (TokenPool[EP].Val = ']')) Then
+          If (TokenPool[EP].Kind = TK_PUNCT) And ((TokIsP(EP, '(')) Or (TokIsP(EP, '['))) Then Inc(WI)
+          Else If (TokenPool[EP].Kind = TK_PUNCT) And ((TokIsP(EP, ')')) Or (TokIsP(EP, ']'))) Then
           Begin
             If WI = 0 Then Break;
             Dec(WI);
@@ -13007,7 +13128,7 @@ Begin
             EPMatch(',');
             If Not EPAtEnd Then Inc(EP);  { buf }
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then
+               (TokIsP(EP, ',')) Then
             Begin
               Inc(EP);
               ParseExpr(PI);  { size }
@@ -13019,7 +13140,7 @@ Begin
             EPMatch(',');
             If Not EPAtEnd Then Inc(EP);  { buf }
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then
+               (TokIsP(EP, ',')) Then
             Begin
               Inc(EP);
               ParseExpr(PI);  { size }
@@ -13031,7 +13152,7 @@ Begin
             EPMatch(',');
             If Not EPAtEnd Then Inc(EP);  { buf }
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then
+               (TokIsP(EP, ',')) Then
             Begin
               Inc(EP);
               ParseExpr(PI);  { size }
@@ -13043,7 +13164,7 @@ Begin
             EPMatch(',');
             If Not EPAtEnd Then Inc(EP);  { buf }
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then
+               (TokIsP(EP, ',')) Then
             Begin
               Inc(EP);
               ParseExpr(PI);  { size }
@@ -13055,7 +13176,7 @@ Begin
             EPMatch(',');
             If Not EPAtEnd Then Inc(EP);  { buf }
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then
+               (TokIsP(EP, ',')) Then
             Begin
               Inc(EP);
               ParseExpr(PI);  { size }
@@ -13067,7 +13188,7 @@ Begin
             EPMatch(',');
             If Not EPAtEnd Then Inc(EP);  { buf }
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then
+               (TokIsP(EP, ',')) Then
             Begin
               Inc(EP);
               ParseExpr(PI);  { size }
@@ -13457,6 +13578,11 @@ Begin
             EmitInstr('JMP ' + LblLoop);
             EmitLabel(LblDone);
             EmitInstr('POP EDI');
+            LblLoop := LabelGen;
+            EmitInstr('CMP ECX,254');      { chemin long : 254 + NUL dans la String }
+            EmitInstr('JBE ' + LblLoop);
+            EmitInstr('MOV ECX,254');
+            EmitLabel(LblLoop);
             EmitInstr('MOV [EDI],CL');     { S[0] = longueur }
             EmitInstr('INC EDI');
             EmitInstr('MOV ESI,EDX');      { source = debut DIR_NAMEBUF }
@@ -14219,7 +14345,7 @@ Begin
             { Arguments suivants }
             While Not EPAtEnd Do
             Begin
-              If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+              If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
               Begin
                 Inc(EP);
                 ParseExpr(PI);
@@ -14247,7 +14373,7 @@ Begin
             { Arguments suivants }
             While Not EPAtEnd Do
             Begin
-              If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+              If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
               Begin
                 Inc(EP);
                 ParseExpr(PI);
@@ -14270,7 +14396,7 @@ Begin
             EmitInstr('CALL ' + TP_RT_PFX + 'STRASSIGN_PCHAR');
             While Not EPAtEnd Do
             Begin
-              If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+              If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
               Begin
                 Inc(EP);
                 ParseExpr(PI);
@@ -14294,7 +14420,7 @@ Begin
             EmitInstr('JSR ' + TP_RT_PFX + 'STRASSIGN_PCHAR');
             While Not EPAtEnd Do
             Begin
-              If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+              If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
               Begin
                 Inc(EP);
                 ParseExpr(PI);
@@ -14319,7 +14445,7 @@ Begin
             EmitInstr('JSR ' + TP_RT_PFX + 'STRASSIGN_PCHAR');
             While Not EPAtEnd Do
             Begin
-              If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+              If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
               Begin
                 Inc(EP);
                 ParseExpr(PI);
@@ -14343,7 +14469,7 @@ Begin
             EmitInstr('CALL ' + TP_RT_PFX + 'STRASSIGN_PCHAR');
             While Not EPAtEnd Do
             Begin
-              If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+              If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
               Begin
                 Inc(EP);
                 ParseExpr(PI);
@@ -18501,7 +18627,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('MOVE.L D0,-(SP)');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then Inc(EP);
+               (TokIsP(EP, ',')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('MOVE.L D0,-(SP)');
             EmitInstr('BSR ' + TP_RT_PFX + 'STREAM_READ');
@@ -18512,7 +18638,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH AX');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then Inc(EP);
+               (TokIsP(EP, ',')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PUSH AX');
             EmitInstr('CALL ' + TP_RT_PFX + 'STREAM_READ');
@@ -18523,7 +18649,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH HL');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then Inc(EP);
+               (TokIsP(EP, ',')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PUSH HL');
             EmitInstr('CALL ' + TP_RT_PFX + 'STREAM_READ');
@@ -18535,7 +18661,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PHA');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then Inc(EP);
+               (TokIsP(EP, ',')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PHA');
             EmitInstr('JSR ' + TP_RT_PFX + 'STREAM_READ');
@@ -18547,7 +18673,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PSHS D');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then Inc(EP);
+               (TokIsP(EP, ',')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PSHS D');
             EmitInstr('JSR ' + TP_RT_PFX + 'STREAM_READ');
@@ -18558,7 +18684,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH EAX');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ',') Then Inc(EP);
+               (TokIsP(EP, ',')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PUSH EAX');
             EmitInstr('CALL ' + TP_RT_PFX + 'STREAM_READ');
@@ -18575,7 +18701,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '[') Then
+         (TokIsP(EP, '[')) Then
       Begin
         Inc(EP);
         Case Opts.DestTarget Of
@@ -18584,7 +18710,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('MOVE.L D0,-(SP)');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('MOVE.L D0,D1');
             EmitInstr('MOVE.L (SP)+,D0');
@@ -18599,7 +18725,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH AX');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('MOV DX,AX');
             EmitInstr('POP AX');
@@ -18614,7 +18740,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH HL');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('POP DE');
             EmitInstr('CALL ' + TP_RT_PFX + 'READMEM');
@@ -18626,7 +18752,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PHA');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('TAX');
             EmitInstr('PLA');
@@ -18637,7 +18763,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PSHS D');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('TFR D,X');
             EmitInstr('PULS D');
@@ -18648,7 +18774,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH EAX');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('MOV EDX,EAX');
             EmitInstr('POP EAX');
@@ -18681,7 +18807,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '[') Then
+         (TokIsP(EP, '[')) Then
       Begin
         Inc(EP);
         Case Opts.DestTarget Of
@@ -18756,7 +18882,7 @@ Begin
     SI := SymFind(Up);
     If (SI >= 0) And (SymTab[SI].Kind = SK_PROC) And (Not SymTab[SI].IsExternal) And
        Not ((EP + 1 < EPEnd) And (TokenPool[EP + 1].Kind = TK_PUNCT) And
-            (TokenPool[EP + 1].Val = '(')) Then
+            (TokIsP(EP + 1, '('))) Then
     Begin
       { nom de procedure dans une expression : son adresse (affectation a une variable procedure) }
       EmitInstr('LEA EAX,[' + SymTab[SI].MangledName + ']');
@@ -18775,7 +18901,7 @@ Begin
     LI := GetVarTypeIdx(PI, Up);
     If (LI >= 0) And (LI < TypeCount) And (TypeTab[LI].Kind = TYK_PROCVAR) And
        (EP + 1 < EPEnd) And (TokenPool[EP + 1].Kind = TK_PUNCT) And
-       (TokenPool[EP + 1].Val = '(') Then
+       (TokIsP(EP + 1, '(')) Then
     Begin
       Inc(EP);
       ParseFuncCall(PI, Up);
@@ -18793,7 +18919,7 @@ Begin
           Inc(EP);
           If (Not ProcTab[LI].IsFunction) And
              Not ((Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-                  (TokenPool[EP].Val = '(')) Then
+                  (TokIsP(EP, '('))) Then
           Begin
             EmitInstr('LEA EAX,[' + TP_FUNC_PFX + Up + ']');
             LastVarTypeIdx := -1;
@@ -18839,7 +18965,7 @@ Begin
   End;
 
   { Constructeur d ensemble : [elem1, elem2, lo..hi, ...] -> tampon de 32 octets (256 bits) }
-  If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '[') Then
+  If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '[')) Then
   Begin
     Inc(EP); { sauter '[' }
     Lbl := 'SETBUF+' + IntToStr_((SetBufSeq Mod 8) * 32);
@@ -18851,7 +18977,7 @@ Begin
     WantCharLit := True;
     While (Not EPAtEnd) And
           Not ((TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ']')) Do
+               (TokIsP(EP, ']'))) Do
     Begin
       ParseExpr(PI);                  { EAX = valeur element (ou borne basse) }
       If (Not EPAtEnd) And (((TokenPool[EP].Kind = TK_PUNCT) Or (TokenPool[EP].Kind = TK_OP)) And
@@ -18872,7 +18998,7 @@ Begin
         EmitInstr('CALL ' + TP_RT_PFX + 'SETINCL');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ',') Then
+         (TokIsP(EP, ',')) Then
         Inc(EP);
     End;
     WantCharLit := False;
@@ -18884,7 +19010,7 @@ Begin
   End;
 
   { Expression entre parentheses }
-  If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '(') Then
+  If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '(')) Then
   Begin
     Inc(EP);
     ParseExpr(PI);
@@ -18974,7 +19100,7 @@ Begin
   Repeat
     EmitInstr('PUSH EAX');
     IsZero := (Not EPAtEnd) And (TokenPool[EP].Kind = TK_INTEGER) And (TokenPool[EP].IntVal = 0) And
-              (EP + 1 < EPEnd) And (TokenPool[EP + 1].Kind = TK_PUNCT) And (TokenPool[EP + 1].Val = ']');
+              (EP + 1 < EPEnd) And (TokenPool[EP + 1].Kind = TK_PUNCT) And (TokIsP(EP + 1, ']'));
     ParseExpr(PI);
     If (T >= 0) And (T < TypeCount) And (TypeTab[T].Kind = TYK_ARRAY) Then
     Begin
@@ -19008,7 +19134,7 @@ Begin
     EmitInstr('POP EBX');
     EmitInstr('ADD EAX,EBX');
     If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-       (TokenPool[EP].Val = ',') Then
+       (TokIsP(EP, ',')) Then
       Inc(EP)
     Else
       Break;
@@ -19044,7 +19170,7 @@ Begin
       Continue;
     End;
     { [index] }
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '[') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '[')) Then
     Begin
       Inc(EP);
       If (T >= 0) And (T < TypeCount) And (TypeTab[T].Kind = TYK_PCHAR) Then
@@ -19053,7 +19179,7 @@ Begin
       Continue;
     End;
     { .champ }
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '.') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '.')) Then
     Begin
       Inc(EP);
       If EPAtEnd Then Break;
@@ -19194,7 +19320,7 @@ Begin
     End;
 
     { Acces tableau / chaine : [index] ou [i,j] multi-dimensionnel }
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '[') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '[')) Then
     Begin
       Inc(EP);
       SavedTypeIdx := LastVarTypeIdx;
@@ -19204,7 +19330,7 @@ Begin
     End;
 
     { Acces champ : .field (record/objet) }
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '.') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '.')) Then
     Begin
       Inc(EP);
       If Not EPAtEnd Then
@@ -19883,7 +20009,7 @@ Var
         Else Break;
         Inc(P);
       End
-      Else If (TokenPool[P].Kind = TK_PUNCT) And (TokenPool[P].Val = '[') Then
+      Else If (TokenPool[P].Kind = TK_PUNCT) And (TokIsP(P, '[')) Then
       Begin
         If TypeTab[TI].Kind = TYK_ARRAY Then TI := TypeTab[TI].BaseTypeIdx
         Else If (TypeTab[TI].Kind = TYK_STRING) Or (TypeTab[TI].Kind = TYK_PCHAR) Then TI := TY_IDX_CHAR
@@ -19893,16 +20019,16 @@ Var
         Begin
           If TokenPool[P].Kind = TK_PUNCT Then
           Begin
-            If (TokenPool[P].Val = '[') Or (TokenPool[P].Val = '(') Then Inc(Depth)
-            Else If (TokenPool[P].Val = ']') Or (TokenPool[P].Val = ')') Then Dec(Depth)
-            Else If (TokenPool[P].Val = ',') And (Depth = 1) And (TI >= 0) And
+            If (TokIsP(P, '[')) Or (TokIsP(P, '(')) Then Inc(Depth)
+            Else If (TokIsP(P, ']')) Or (TokIsP(P, ')')) Then Dec(Depth)
+            Else If (TokIsP(P, ',')) And (Depth = 1) And (TI >= 0) And
                     (TI < TypeCount) And (TypeTab[TI].Kind = TYK_ARRAY) Then
               TI := TypeTab[TI].BaseTypeIdx;
           End;
           Inc(P);
         End;
       End
-      Else If (TokenPool[P].Kind = TK_PUNCT) And (TokenPool[P].Val = '.') And (P + 1 < EPEnd) Then
+      Else If (TokenPool[P].Kind = TK_PUNCT) And (TokIsP(P, '.')) And (P + 1 < EPEnd) Then
       Begin
         If (TypeTab[TI].Kind <> TYK_RECORD) And (TypeTab[TI].Kind <> TYK_OBJECT) Then Break;
         FUp := StrUpperCase(TokenPool[P + 1].Val);
@@ -19927,14 +20053,14 @@ Begin
   Begin
     If TokenPool[SP].Kind = TK_PUNCT Then
     Begin
-      If (TokenPool[SP].Val = '(') Or (TokenPool[SP].Val = '[') Then Inc(SDepth)
-      Else If (TokenPool[SP].Val = ')') Or (TokenPool[SP].Val = ']') Then
+      If (TokIsP(SP, '(')) Or (TokIsP(SP, '[')) Then Inc(SDepth)
+      Else If (TokIsP(SP, ')')) Or (TokIsP(SP, ']')) Then
       Begin
         If SDepth = 0 Then Break;
         Dec(SDepth);
       End
-      Else If (SDepth = 0) And ((TokenPool[SP].Val = ',') Or (TokenPool[SP].Val = ':') Or
-                                (TokenPool[SP].Val = ';')) Then Break;
+      Else If (SDepth = 0) And ((TokIsP(SP, ',')) Or (TokIsP(SP, ':')) Or
+                                (TokIsP(SP, ';'))) Then Break;
     End
     Else If SDepth = 0 Then
     Begin
@@ -20385,12 +20511,12 @@ Begin
   End;
 
   { Parens }
-  If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '(') Then
+  If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '(')) Then
   Begin
     Inc(EP);
     If Not AIICTEvalExpr(V, IsCh) Then Exit;
     If EPAtEnd Or (TokenPool[EP].Kind <> TK_PUNCT) Or
-       (TokenPool[EP].Val <> ')') Then Exit;
+       ((Not TokIsP(EP, ')'))) Then Exit;
     Inc(EP);
     AIICTEvalPrimary := True;
     Exit;
@@ -20428,12 +20554,12 @@ Begin
       Begin
         Inc(EP);
         If EPAtEnd Or (TokenPool[EP].Kind <> TK_PUNCT) Or
-           (TokenPool[EP].Val <> '(') Then Exit;
+           ((Not TokIsP(EP, '('))) Then Exit;
         Inc(EP);
         If Not AIICTEvalExpr(V, IsCh) Then Exit;
         IsCh := True;
         If EPAtEnd Or (TokenPool[EP].Kind <> TK_PUNCT) Or
-           (TokenPool[EP].Val <> ')') Then Exit;
+           ((Not TokIsP(EP, ')'))) Then Exit;
         Inc(EP);
         AIICTEvalPrimary := True;
         Exit;
@@ -20442,12 +20568,12 @@ Begin
       Begin
         Inc(EP);
         If EPAtEnd Or (TokenPool[EP].Kind <> TK_PUNCT) Or
-           (TokenPool[EP].Val <> '(') Then Exit;
+           ((Not TokIsP(EP, '('))) Then Exit;
         Inc(EP);
         If Not AIICTEvalExpr(V, IsCh) Then Exit;
         IsCh := False;
         If EPAtEnd Or (TokenPool[EP].Kind <> TK_PUNCT) Or
-           (TokenPool[EP].Val <> ')') Then Exit;
+           ((Not TokIsP(EP, ')'))) Then Exit;
         Inc(EP);
         AIICTEvalPrimary := True;
         Exit;
@@ -20456,12 +20582,12 @@ Begin
       { Identifiant : variable CT ou tableau CT indexe }
       Inc(EP); { consommer ident }
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '[') Then
+         (TokIsP(EP, '[')) Then
       Begin
         Inc(EP);
         If Not AIICTEvalExpr(IdxV, IdxCh) Then Exit;
         If EPAtEnd Or (TokenPool[EP].Kind <> TK_PUNCT) Or
-           (TokenPool[EP].Val <> ']') Then Exit;
+           ((Not TokIsP(EP, ']'))) Then Exit;
         Inc(EP);
         ArrI := AIICTFindArr(Up);
         If ArrI < 0 Then
@@ -20636,9 +20762,9 @@ Begin
     Begin
       If TokenPool[EP].Kind = TK_PUNCT Then
       Begin
-        If (TokenPool[EP].Val = '(') Or (TokenPool[EP].Val = '[') Then Inc(D)
-        Else If (TokenPool[EP].Val = ')') Or (TokenPool[EP].Val = ']') Then Dec(D)
-        Else If (D = 0) And (TokenPool[EP].Val = ';') Then Break;
+        If (TokIsP(EP, '(')) Or (TokIsP(EP, '[')) Then Inc(D)
+        Else If (TokIsP(EP, ')')) Or (TokIsP(EP, ']')) Then Dec(D)
+        Else If (D = 0) And (TokIsP(EP, ';')) Then Break;
       End
       Else If (D = 0) And (TokenPool[EP].Kind = TK_KEYWORD) Then
       Begin
@@ -20784,7 +20910,7 @@ Begin
     EmitComment('writeln (Apple II)');
   { WriteLn sans arguments ou Write sans parenthese : juste CR LF si LN }
   If EPAtEnd Or
-     Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '(')) Then
+     Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '('))) Then
   Begin
     If IsWriteLn Then
     Begin
@@ -20848,7 +20974,7 @@ Begin
   { Boucler sur les arguments }
   While Not EPAtEnd Do
   Begin
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then Break;
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Break;
 
     { Argument litteral chaine ? }
     If TokenPool[EP].Kind = TK_STRING Then
@@ -20905,13 +21031,13 @@ Begin
         Begin
           If TokenPool[EP].Kind = TK_PUNCT Then
           Begin
-            If TokenPool[EP].Val = '(' Then Inc(Depth)
-            Else If TokenPool[EP].Val = ')' Then
+            If TokIsP(EP, '(') Then Inc(Depth)
+            Else If TokIsP(EP, ')') Then
             Begin
               If Depth = 0 Then Begin Done := True; Continue; End;
               Dec(Depth);
             End
-            Else If (Depth = 0) And (TokenPool[EP].Val = ',') Then
+            Else If (Depth = 0) And (TokIsP(EP, ',')) Then
             Begin Done := True; Continue; End;
           End;
           Inc(EP);
@@ -20921,7 +21047,7 @@ Begin
 
     { Sauter format :width / :width:dec eventuel }
     If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-       (TokenPool[EP].Val = ':') Then
+       (TokIsP(EP, ':')) Then
     Begin
       Inc(EP);
       For I := 1 To 2 Do
@@ -20929,21 +21055,21 @@ Begin
         If EPAtEnd Then Break;
         If TokenPool[EP].Kind = TK_INTEGER Then Inc(EP);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ':') Then Inc(EP)
+           (TokIsP(EP, ':')) Then Inc(EP)
         Else Break;
       End;
     End;
 
     { Virgule entre arguments }
     If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-       (TokenPool[EP].Val = ',') Then
+       (TokIsP(EP, ',')) Then
       Inc(EP)
     Else Break;
   End;
 
   { Consommer ) }
   If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-     (TokenPool[EP].Val = ')') Then
+     (TokIsP(EP, ')')) Then
     Inc(EP);
 
   { WriteLn : ajouter CR }
@@ -21034,7 +21160,7 @@ Begin
 
   { Sauter ; en tete }
   While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-        (TokenPool[EP].Val = ';') Do Inc(EP);
+        (TokIsP(EP, ';')) Do Inc(EP);
   If EPAtEnd Then Exit;
 
   { Mots-cles }
@@ -21058,7 +21184,7 @@ Begin
         ParseStmtAppleII;
         If EP = StartEP Then Inc(EP); { securite anti-boucle }
         While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-              (TokenPool[EP].Val = ';') Do Inc(EP);
+              (TokIsP(EP, ';')) Do Inc(EP);
       End;
       Exit;
     End;
@@ -21146,7 +21272,7 @@ Begin
           ParseStmtAppleII;
           If EP = StartEP Then Inc(EP);
           While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-                (TokenPool[EP].Val = ';') Do Inc(EP);
+                (TokIsP(EP, ';')) Do Inc(EP);
         End;
         If EPAtEnd Then Exit;
         Inc(EP); { consommer UNTIL }
@@ -21235,11 +21361,11 @@ Begin
         Begin
           If TokenPool[EP].Kind = TK_PUNCT Then
           Begin
-            If (TokenPool[EP].Val = '(') Or (TokenPool[EP].Val = '[') Then
+            If (TokIsP(EP, '(')) Or (TokIsP(EP, '[')) Then
               Inc(AIIDepth)
-            Else If (TokenPool[EP].Val = ')') Or (TokenPool[EP].Val = ']') Then
+            Else If (TokIsP(EP, ')')) Or (TokIsP(EP, ']')) Then
               Dec(AIIDepth)
-            Else If (AIIDepth = 0) And (TokenPool[EP].Val = ';') Then Break;
+            Else If (AIIDepth = 0) And (TokIsP(EP, ';')) Then Break;
           End
           Else If (AIIDepth = 0) And (TokenPool[EP].Kind = TK_KEYWORD) Then
           Begin
@@ -21261,7 +21387,7 @@ Begin
 
     { Mot-cle non reconnu : sauter jusqu au ; }
     While (Not EPAtEnd) And
-          Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ';')) Do
+          Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ';'))) Do
       Inc(EP);
     Exit;
   End;
@@ -21277,7 +21403,7 @@ Begin
       Inc(EP);
       ParseWriteStmtAppleII(IdName = 'WRITELN');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -21285,12 +21411,12 @@ Begin
 
     { Indexation [expr] ? }
     If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-       (TokenPool[EP].Val = '[') Then
+       (TokIsP(EP, '[')) Then
     Begin
       Inc(EP);
       If Not AIICTEvalExpr(IdxV, IdxCh) Then Exit;
       If EPAtEnd Or (TokenPool[EP].Kind <> TK_PUNCT) Or
-         (TokenPool[EP].Val <> ']') Then Exit;
+         ((Not TokIsP(EP, ']'))) Then Exit;
       Inc(EP);
       If EPAtEnd Or (TokenPool[EP].Kind <> TK_OP) Or
          (TokenPool[EP].Val <> ':=') Then Exit;
@@ -21306,7 +21432,7 @@ Begin
         AIICTArrVal[ArrI, IdxV] := RhsV;
       { Sauter ; }
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -21318,13 +21444,13 @@ Begin
       If Not AIICTEvalExpr(RhsV, RhsCh) Then Exit;
       AIICTSetVar(IdName, RhsV);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
     { Identifiant non reconnu : sauter jusqu au ; }
     While (Not EPAtEnd) And
-          Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ';')) Do
+          Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ';'))) Do
       Inc(EP);
     Exit;
   End;
@@ -21381,7 +21507,7 @@ Begin
   End;
 
   { Si pas de parenthese, WriteLn sans args }
-  If Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '(')) Then
+  If Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '('))) Then
   Begin
     If IsWriteLn Then
     Begin
@@ -21428,7 +21554,7 @@ Begin
       { Write(Output, ...) : sortie standard }
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ',') Then
+         (TokIsP(EP, ',')) Then
         Inc(EP);
     End
     Else If IsFileVarType(FVarTIdx) Then
@@ -21446,7 +21572,7 @@ Begin
       EmitInstr('MOV DWORD PTR [FILE_WRHND],EAX');
       { Sauter la virgule si presente }
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ',') Then
+         (TokIsP(EP, ',')) Then
         Inc(EP);
     End;
   End;
@@ -21456,7 +21582,7 @@ Begin
     { Write(F, V1, V2...) sur File Of T : BlockWrite d un enregistrement par variable }
     While Not EPAtEnd Do
     Begin
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then Break;
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Break;
       If TokenPool[EP].Kind = TK_IDENT Then
       Begin
         GenLoadAddr(PI, FileArgName);
@@ -21469,17 +21595,17 @@ Begin
         EmitInstr('ADD ESP,12');
       End
       Else Inc(EP);
-      If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then Inc(EP)
+      If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then Inc(EP)
       Else Break;
     End;
-    If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then Inc(EP);
+    If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Inc(EP);
     Exit;
   End;
   { Boucle sur les arguments }
   While Not EPAtEnd Do
   Begin
     { Fin des arguments ? }
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then
       Break;
 
     { Determiner le type de l argument }
@@ -21507,15 +21633,15 @@ Begin
     FmtDec := -1;
     If Not EPAtEnd Then
     Begin
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ':') Then
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ':')) Then
       Begin
         Inc(EP); { consommer : }
         If Not EPAtEnd Then
         Begin
           If (TokenPool[EP].Kind = TK_INTEGER) And (EP + 1 < EPEnd) And
              (TokenPool[EP + 1].Kind = TK_PUNCT) And
-             ((TokenPool[EP + 1].Val = ',') Or (TokenPool[EP + 1].Val = ')') Or
-              (TokenPool[EP + 1].Val = ':')) Then
+             ((TokIsP(EP + 1, ',')) Or (TokIsP(EP + 1, ')')) Or
+              (TokIsP(EP + 1, ':'))) Then
           Begin
             FmtWidth := TokenPool[EP].IntVal;
             Inc(EP);
@@ -21535,14 +21661,14 @@ Begin
         { :w:d (formatage des reels) : decimales constantes ou dynamiques (EDX) }
         If Not EPAtEnd Then
         Begin
-          If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ':') Then
+          If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ':')) Then
           Begin
             Inc(EP);
             If Not EPAtEnd Then
             Begin
               If (TokenPool[EP].Kind = TK_INTEGER) And (EP + 1 < EPEnd) And
                  (TokenPool[EP + 1].Kind = TK_PUNCT) And
-                 ((TokenPool[EP + 1].Val = ',') Or (TokenPool[EP + 1].Val = ')')) Then
+                 ((TokIsP(EP + 1, ',')) Or (TokIsP(EP + 1, ')'))) Then
               Begin
                 FmtDec := TokenPool[EP].IntVal;
                 Inc(EP);
@@ -21573,7 +21699,7 @@ Begin
     { Virgule entre arguments }
     If Not EPAtEnd Then
     Begin
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
         Inc(EP)
       Else
         Break;
@@ -21582,7 +21708,7 @@ Begin
 
   { Consommer ) }
   If Not EPAtEnd Then
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then
       Inc(EP);
 
   { WriteLn : ajouter CR+LF }
@@ -21630,7 +21756,7 @@ Begin
 
   { ReadLn sans arguments : lire et jeter une ligne }
   If EPAtEnd Or
-     Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '(')) Then
+     Not ((TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '('))) Then
   Begin
     If IsReadLn Then
       EmitInstr('CALL ' + TP_RT_PFX + 'READLN');
@@ -21667,7 +21793,7 @@ Begin
       { Read(Input, ...) : entree standard }
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ',') Then
+         (TokIsP(EP, ',')) Then
         Inc(EP);
     End
     Else If IsFileVarType(FVarTIdx) Then
@@ -21679,7 +21805,7 @@ Begin
       Inc(EP);
       { Sauter la virgule si presente }
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ',') Then
+         (TokIsP(EP, ',')) Then
         Inc(EP);
       { Read(F, C) sur un Text : caractere par caractere ; File Of T : un enregistrement
         par variable ; sinon lecture d une ligne dans INBUF }
@@ -21703,7 +21829,7 @@ Begin
     { Read(F, V1, V2...) sur File Of T : BlockRead d un enregistrement par variable }
     While Not EPAtEnd Do
     Begin
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then Break;
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Break;
       If TokenPool[EP].Kind = TK_IDENT Then
       Begin
         VName := TokenPool[EP].Val;
@@ -21718,10 +21844,10 @@ Begin
         EmitIoCheck;
       End
       Else Inc(EP);
-      If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then Inc(EP)
+      If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then Inc(EP)
       Else Break;
     End;
-    If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then Inc(EP);
+    If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Inc(EP);
     Exit;
   End;
   If FileByChar Then
@@ -21729,7 +21855,7 @@ Begin
     { Read(F, C1, C2...) : un caractere par variable, sans consommer la fin de ligne }
     While Not EPAtEnd Do
     Begin
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then Break;
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Break;
       If TokenPool[EP].Kind = TK_IDENT Then
       Begin
         VName := TokenPool[EP].Val;
@@ -21742,10 +21868,10 @@ Begin
         GenStoreVar(PI, VName);
       End
       Else Inc(EP);
-      If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then Inc(EP)
+      If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then Inc(EP)
       Else Break;
     End;
-    If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then Inc(EP);
+    If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Inc(EP);
     Exit;
   End;
 
@@ -21758,7 +21884,7 @@ Begin
   { Boucle sur les variables }
   While Not EPAtEnd Do
   Begin
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then
       Break;
 
     If TokenPool[EP].Kind = TK_IDENT Then
@@ -21835,7 +21961,7 @@ Begin
     { Virgule entre variables }
     If Not EPAtEnd Then
     Begin
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
         Inc(EP)
       Else
         Break;
@@ -21844,7 +21970,7 @@ Begin
 
   { Consommer ) }
   If Not EPAtEnd Then
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ')') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then
       Inc(EP);
 End;
 
@@ -21867,12 +21993,12 @@ Begin
   T := LastVarTypeIdx;
   Dec := -1;
   Width := 0;
-  If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ':') Then
+  If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ':')) Then
   Begin
     Inc(EP);
     If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_INTEGER) And (EP + 1 < EPEnd) And
        (TokenPool[EP + 1].Kind = TK_PUNCT) And
-       ((TokenPool[EP + 1].Val = ',') Or (TokenPool[EP + 1].Val = ':')) Then
+       ((TokIsP(EP + 1, ',')) Or (TokIsP(EP + 1, ':'))) Then
     Begin
       Width := TokenPool[EP].IntVal;
       Inc(EP);
@@ -21886,11 +22012,11 @@ Begin
       Width := -1;
     End;
     { :w:d (reels) : decimales }
-    If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ':') Then
+    If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ':')) Then
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_INTEGER) And (EP + 1 < EPEnd) And
-         (TokenPool[EP + 1].Kind = TK_PUNCT) And (TokenPool[EP + 1].Val = ',') Then
+         (TokenPool[EP + 1].Kind = TK_PUNCT) And (TokIsP(EP + 1, ',')) Then
       Begin
         Dec := TokenPool[EP].IntVal;
         Inc(EP);
@@ -21996,7 +22122,7 @@ Begin
   End;
 
   { variable code }
-  If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Then
+  If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then
   Begin
     Inc(EP);
     If ParseLValueAddrW32(PI, T) Then
@@ -22078,7 +22204,7 @@ Begin
     If (TokenPool[EP].Kind = TK_KEYWORD) And
        (StrUpperCase(TokenPool[EP].Val) = 'ELSE') And
        Not ((EP > 0) And (TokenPool[EP - 1].Kind = TK_PUNCT) And
-            (TokenPool[EP - 1].Val = ';')) Then
+            (TokIsP(EP - 1, ';'))) Then
       HasElse := True;
 
   If HasElse Then
@@ -22136,7 +22262,7 @@ Begin
       Break;
 
     { Semicolons isoles : sauter }
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ';') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ';')) Then
     Begin
       Inc(EP);
       Continue;
@@ -22149,7 +22275,7 @@ Begin
     While Not EPAtEnd Do
     Begin
       { Detecter ':' (fin des valeurs pour cette branche) }
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ':') Then
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ':')) Then
         Break;
 
       { Lire la valeur : constante (entier, caractere, constante nommee, expression constante) }
@@ -22172,7 +22298,7 @@ Begin
         EmitInstr('JE ' + LblHit);
 
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then
+           (TokIsP(EP, ',')) Then
         Begin
           Inc(EP);
           Continue;
@@ -22206,7 +22332,7 @@ Begin
 
       { Virgule : valeurs multiples }
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ',') Then
+         (TokIsP(EP, ',')) Then
         Inc(EP)
       Else
         Break;
@@ -22218,7 +22344,7 @@ Begin
 
     { Consommer ':' }
     If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-       (TokenPool[EP].Val = ':') Then
+       (TokIsP(EP, ':')) Then
       Inc(EP);
 
     { Parser l instruction de cette branche }
@@ -22226,7 +22352,7 @@ Begin
 
     { Consommer le ; optionnel }
     If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-       (TokenPool[EP].Val = ';') Then
+       (TokIsP(EP, ';')) Then
       Inc(EP);
 
     { Sauter a la fin du CASE }
@@ -22244,7 +22370,7 @@ Begin
       Inc(EP);
       { Consommer ':' optionnel apres ELSE }
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ':') Then
+         (TokIsP(EP, ':')) Then
         Inc(EP);
       EmitComment('case default');
       { Parser les instructions de la clause par defaut jusqu a END }
@@ -22256,7 +22382,7 @@ Begin
         SI := EP;
         ParseStmt(PI);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ';') Then
+           (TokIsP(EP, ';')) Then
           Inc(EP);
         If EP = SI Then SkipStuckToken;
       End;
@@ -22274,7 +22400,7 @@ Begin
 
   { Consommer ; optionnel apres END }
   If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-     (TokenPool[EP].Val = ';') Then
+     (TokIsP(EP, ';')) Then
     Inc(EP);
 End;
 
@@ -22327,7 +22453,7 @@ Begin
 
   { Consommer ; optionnel apres le corps }
   If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-     (TokenPool[EP].Val = ';') Then
+     (TokIsP(EP, ';')) Then
     Inc(EP);
 
   { Retour au test }
@@ -22383,7 +22509,7 @@ Begin
     SI := EP;
     ParseStmt(PI);
     If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-       (TokenPool[EP].Val = ';') Then
+       (TokIsP(EP, ';')) Then
       Inc(EP);
     If EP = SI Then SkipStuckToken;
   End;
@@ -22530,7 +22656,7 @@ Begin
 
   { Consommer ; optionnel apres le corps }
   If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-     (TokenPool[EP].Val = ';') Then
+     (TokIsP(EP, ';')) Then
     Inc(EP);
 
   { Label continue (increment) }
@@ -22579,7 +22705,7 @@ Begin
 
   { Consommer ; optionnel }
   If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-     (TokenPool[EP].Val = ';') Then
+     (TokIsP(EP, ';')) Then
     Inc(EP);
 End;
 
@@ -22669,14 +22795,14 @@ Begin
   End;
 
   { Point-virgule seul : instruction vide }
-  If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ';') Then
+  If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ';')) Then
   Begin
     Inc(EP);
     Exit;
   End;
 
   { Point final : fin du programme }
-  If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '.') Then
+  If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '.')) Then
   Begin
     Inc(EP);
     Exit;
@@ -22695,7 +22821,7 @@ Begin
       Else
         EmitInstr('JMP ' + LoopContLbl[LoopTop]);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -22727,7 +22853,7 @@ Begin
           Inc(EP);  { consommer END }
           { Consommer ; ou . optionnel apres END }
           If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-             ((TokenPool[EP].Val = ';') Or (TokenPool[EP].Val = '.')) Then
+             ((TokIsP(EP, ';')) Or (TokIsP(EP, '.'))) Then
             Inc(EP);
           Break;
         End;
@@ -22735,7 +22861,7 @@ Begin
         ParseStmt(PI);
         { Consommer ; optionnel entre instructions }
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ';') Then
+           (TokIsP(EP, ';')) Then
           Inc(EP);
         { Securite : si EP n a pas avance, forcer l avancement }
         If EP = SI Then SkipStuckToken;
@@ -22826,7 +22952,7 @@ Begin
       Inc(EP);
       EmitInstr('JMP ' + RetLbl);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -22846,7 +22972,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'OFLUSH');
       EmitInstr('CALL ExitProcess');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -22864,7 +22990,7 @@ Begin
         EmitInstr('MOV EAX,0');
       EmitInstr('CALL ' + TP_RT_PFX + 'RTERROR');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -22878,7 +23004,7 @@ Begin
       Else
         WarnMsg('break en dehors d une boucle');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -22892,7 +23018,7 @@ Begin
       Else
         WarnMsg('continue en dehors d une boucle');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -22910,7 +23036,7 @@ Begin
       Inc(EP);
       While Not EPAtEnd Do
       Begin
-        If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ';') Then
+        If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ';')) Then
         Begin
           Inc(EP);
           Break;
@@ -22937,7 +23063,7 @@ Begin
     Begin
       ParseExpr(PI);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -22952,7 +23078,7 @@ Begin
   Begin
     If (EP + 1 < EPEnd) And
        (TokenPool[EP + 1].Kind = TK_PUNCT) And
-       (TokenPool[EP + 1].Val = ':') Then
+       (TokIsP(EP + 1, ':')) Then
     Begin
       EmitLabel(TP_LBL_PFX + TokenPool[EP].Val);
       Inc(EP, 2);  { consommer nombre et ':' }
@@ -22969,7 +23095,7 @@ Begin
     { Label identificateur : ident suivi de ':' (pas ':=') }
     If (EP + 1 < EPEnd) And
        (TokenPool[EP + 1].Kind = TK_PUNCT) And
-       (TokenPool[EP + 1].Val = ':') And
+       (TokIsP(EP + 1, ':')) And
        Not ((EP + 2 < EPEnd) And (TokenPool[EP + 2].Val = '=')) Then
     Begin
       EmitLabel(TP_LBL_PFX + Up);
@@ -22985,7 +23111,7 @@ Begin
        (((TokenPool[EP + 1].Kind = TK_OP) And
          ((TokenPool[EP + 1].Val = ':=') Or (TokenPool[EP + 1].Val = '^'))) Or
         ((TokenPool[EP + 1].Kind = TK_PUNCT) And
-         ((TokenPool[EP + 1].Val = '[') Or (TokenPool[EP + 1].Val = '.')))) And
+         ((TokIsP(EP + 1, '[')) Or (TokIsP(EP + 1, '.'))))) And
        (Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) Then
     Begin
       ParseLValueAddrW32(PI, TIdx);   { EAX = adresse de la destination (et suffixes) }
@@ -23008,7 +23134,7 @@ Begin
         End;
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23023,7 +23149,7 @@ Begin
     Begin
       ParseExpr(PI);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23043,7 +23169,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'OFLUSH');
       EmitInstr('CALL ExitProcess');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23061,7 +23187,7 @@ Begin
         EmitInstr('MOV EAX,0');
       EmitInstr('CALL ' + TP_RT_PFX + 'RTERROR');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23072,7 +23198,7 @@ Begin
       Inc(EP);
       EmitInstr('JMP ' + RetLbl);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23083,7 +23209,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'RANDOMIZE');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23102,7 +23228,7 @@ Begin
       End;
       EmitComment('SANE ' + Up + ' stub : no-op');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23121,7 +23247,7 @@ Begin
       End;
       EmitComment('SANE ' + Up + ' stub : no-op');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23143,7 +23269,7 @@ Begin
       End;
       EmitComment('SANE ' + Up + ' stub : store 0');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23172,7 +23298,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'SANE_NUM2STR');
       EmitInstr('ADD ESP,12');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23195,7 +23321,7 @@ Begin
       End;
       EmitComment('SANE ' + Up + ' stub : no-op');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23216,7 +23342,7 @@ Begin
       End;
       EmitComment('SANE ' + Up + ' stub : no-op');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23227,7 +23353,7 @@ Begin
       Inc(EP);
       ParseWriteStmt(PI, Up = 'WRITELN');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23238,7 +23364,7 @@ Begin
       Inc(EP);
       ParseReadStmt(PI, Up = 'READLN');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23249,7 +23375,7 @@ Begin
       Inc(EP);
       ParseStrStmt(PI);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23260,7 +23386,7 @@ Begin
       Inc(EP);
       ParseValStmt(PI);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23295,7 +23421,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23331,7 +23457,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23344,7 +23470,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'CLRSCR');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23355,7 +23481,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'CLREOL');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23376,7 +23502,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'GOTOXY');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23394,7 +23520,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'TEXTCOLOR');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23412,7 +23538,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'TEXTBG');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23423,7 +23549,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'HIGHVIDEO');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23434,7 +23560,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'LOWVIDEO');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23445,7 +23571,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'NORMVIDEO');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23472,7 +23598,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'WINDOW');
       EmitInstr('ADD ESP,16');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23489,7 +23615,7 @@ Begin
       EmitInstr('PUSH EAX');
       EmitInstr('CALL Sleep');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23507,7 +23633,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'SOUND');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23518,7 +23644,7 @@ Begin
       Inc(EP);
       EmitComment('NoSound (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23534,7 +23660,7 @@ Begin
       End;
       EmitComment('AssignCrt (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23545,7 +23671,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'INSLINE');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23556,7 +23682,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'DELLINE');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23574,7 +23700,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'TEXTMODE');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23598,7 +23724,7 @@ Begin
           EmitInstr('CALL ' + TP_RT_PFX + 'READKEY');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23622,7 +23748,7 @@ Begin
           EmitInstr('CALL ' + TP_RT_PFX + 'KEYPRESSED');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23668,7 +23794,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23714,7 +23840,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23738,7 +23864,7 @@ Begin
       EmitInstr('PUSH OFFSET DOS_SYSTIME');
       EmitInstr('CALL SetLocalTime');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23766,7 +23892,7 @@ Begin
       EmitInstr('PUSH OFFSET DOS_SYSTIME');
       EmitInstr('CALL SetLocalTime');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23801,7 +23927,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23828,7 +23954,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23856,7 +23982,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'ASSIGN');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23877,7 +24003,7 @@ Begin
         EmitInstr('PUSH EAX');
         { taille d enregistrement : parametre optionnel, sinon celle du type }
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then
+           (TokIsP(EP, ',')) Then
         Begin
           Inc(EP);
           ParseExpr(PI);
@@ -23891,7 +24017,7 @@ Begin
       EmitInstr('ADD ESP,8');
       EmitIoCheck;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23911,7 +24037,7 @@ Begin
         End;
         EmitInstr('PUSH EAX');
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then
+           (TokIsP(EP, ',')) Then
         Begin
           Inc(EP);
           ParseExpr(PI);
@@ -23925,7 +24051,7 @@ Begin
       EmitInstr('ADD ESP,8');
       EmitIoCheck;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23948,7 +24074,7 @@ Begin
       EmitInstr('ADD ESP,4');
       EmitIoCheck;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -23971,7 +24097,7 @@ Begin
       EmitInstr('ADD ESP,4');
       EmitIoCheck;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24000,7 +24126,7 @@ Begin
       EmitLabel(Lbl);
       EmitIoCheck;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24032,7 +24158,7 @@ Begin
       EmitInstr('ADD ESP,8');
       EmitIoCheck;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24060,7 +24186,7 @@ Begin
       EmitInstr('ADD ESP,8');
       EmitIoCheck;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24083,7 +24209,7 @@ Begin
       EmitInstr('PUSH EAX');          { hFile }
       EmitInstr('CALL SetEndOfFile');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24106,7 +24232,7 @@ Begin
       End;
       EmitInstr('CALL FlushFileBuffers');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24133,7 +24259,7 @@ Begin
         ParseExpr(PI);                { nombre d enregistrements }
         EmitInstr('PUSH EAX');
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then
+           (TokIsP(EP, ',')) Then
         Begin
           Inc(EP);
           If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_IDENT) Then
@@ -24172,7 +24298,7 @@ Begin
         GenStoreToAddr(GetVarTypeIdx(PI, ArgName));
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24196,7 +24322,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'FINDFIRST');
       EmitInstr('ADD ESP,12');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24214,7 +24340,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'FINDNEXT');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24230,7 +24356,7 @@ Begin
       End;
       EmitComment('FindClose (stub - Win32 handles auto)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24263,7 +24389,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'FSPLIT');
       EmitInstr('ADD ESP,16');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24286,7 +24412,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'EXEC');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24297,7 +24423,7 @@ Begin
       Inc(EP);
       EmitComment('SwapVectors (stub - non applicable Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24315,7 +24441,7 @@ Begin
       End;
       EmitComment('GetIntVec (stub - non applicable Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24333,7 +24459,7 @@ Begin
       End;
       EmitComment('SetIntVec (stub - non applicable Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24352,7 +24478,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'MSDOS');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24374,7 +24500,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'INTR');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -24391,7 +24517,7 @@ Begin
       { Toujours retourner False (Win32 n a pas de Ctrl-Break DOS) }
       EmitInstr('MOV DWORD PTR [EAX],0');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -24407,7 +24533,7 @@ Begin
       { Stub sous Win32 }
       EmitComment('SetCBreak - stub Win32');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -24426,7 +24552,7 @@ Begin
       EmitInstr('XOR EAX,EAX');
       GenStoreToAddr(TIdx);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -24442,7 +24568,7 @@ Begin
       { Stub sous Win32 }
       EmitComment('SetVerify - stub Win32');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -24462,7 +24588,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'GETFTIME');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -24482,7 +24608,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'SETFTIME');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -24728,7 +24854,7 @@ Begin
         End;
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -24932,7 +25058,7 @@ Begin
         End;
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -24970,7 +25096,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25042,7 +25168,7 @@ Begin
         End; { Case }
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25052,7 +25178,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'CLOSEGRAPH');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25092,7 +25218,7 @@ Begin
         End; { Case }
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25128,7 +25254,7 @@ Begin
         Else                  EmitInstr('ADD ESP,12');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25168,7 +25294,7 @@ Begin
         Else                  EmitInstr('ADD ESP,16');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25200,7 +25326,7 @@ Begin
         Else                  EmitInstr('ADD ESP,8');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25232,7 +25358,7 @@ Begin
         Else                  EmitInstr('ADD ESP,8');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25252,7 +25378,7 @@ Begin
       EmitInstr('POP ECX');  { X }
       EmitInstr('MOV DWORD PTR [GR_CPX],ECX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25276,7 +25402,7 @@ Begin
       EmitInstr('ADD EAX,ECX');
       EmitInstr('MOV DWORD PTR [GR_CPX],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25298,7 +25424,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'RECTANGLE');
       EmitInstr('ADD ESP,16');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25320,7 +25446,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'BAR');
       EmitInstr('ADD ESP,16');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25346,7 +25472,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'BAR3D');
       EmitInstr('ADD ESP,24');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25366,7 +25492,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'CIRCLE');
       EmitInstr('ADD ESP,12');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25390,7 +25516,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'ARC');
       EmitInstr('ADD ESP,20');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25416,7 +25542,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'ELLIPSE');
       EmitInstr('ADD ESP,24');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25438,7 +25564,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'FILLELLIPSE');
       EmitInstr('ADD ESP,16');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25462,7 +25588,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'PIESLICE');
       EmitInstr('ADD ESP,20');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25488,7 +25614,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'SECTOR');
       EmitInstr('ADD ESP,24');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25508,7 +25634,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'FLOODFILL');
       EmitInstr('ADD ESP,12');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25531,7 +25657,7 @@ Begin
         Else                  EmitInstr('ADD ESP,4');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25546,7 +25672,7 @@ Begin
       End;
       EmitInstr('MOV DWORD PTR [GR_BKCOLOR],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25566,7 +25692,7 @@ Begin
       EmitInstr('POP EAX');  { Pattern }
       EmitInstr('MOV DWORD PTR [GR_FILLSTYLE],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25589,7 +25715,7 @@ Begin
       EmitInstr('MOV DWORD PTR [GR_LINESTYLE],EAX');
       EmitInstr('CALL ' + TP_RT_PFX + 'UPDATEPEN');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25609,7 +25735,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'OUTTEXTXY');
       EmitInstr('ADD ESP,12');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25631,7 +25757,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'OUTTEXTXY');
       EmitInstr('ADD ESP,12');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25656,7 +25782,7 @@ Begin
       EmitInstr('MOV DWORD PTR [GR_TXFONT],EAX');
       EmitInstr('CALL ' + TP_RT_PFX + 'UPDATEFONT');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25678,7 +25804,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25688,7 +25814,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'CLEARDEVICE');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25703,7 +25829,7 @@ Begin
       End;
       EmitComment(Up + ' (stub - page unique en Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25724,7 +25850,7 @@ Begin
       EmitInstr('AND EAX,0Fh');
       EmitInstr('MOV DWORD PTR [GR_PALETTE+EAX*4],ECX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25755,7 +25881,7 @@ Begin
       EmitInstr('AND EAX,0Fh');
       EmitInstr('MOV DWORD PTR [GR_PALETTE+EAX*4],ECX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25772,7 +25898,7 @@ Begin
       End;
       EmitComment('SetAspectRatio (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25787,7 +25913,7 @@ Begin
       End;
       EmitInstr('MOV DWORD PTR [GR_WRITEMODE],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25811,7 +25937,7 @@ Begin
       EmitComment('GetImage (stub - bitmap non implemente)');
       EmitInstr('ADD ESP,20');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25833,7 +25959,7 @@ Begin
       EmitComment('PutImage (stub - bitmap non implemente)');
       EmitInstr('ADD ESP,16');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25843,7 +25969,7 @@ Begin
       Inc(EP);
       EmitComment('RestoreCrtMode (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25858,7 +25984,7 @@ Begin
       End;
       EmitInstr('MOV DWORD PTR [GR_MODE],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25888,7 +26014,7 @@ Begin
       EmitInstr('MOV DWORD PTR [GR_TXJUST_H],0');
       EmitInstr('MOV DWORD PTR [GR_TXJUST_V],2');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25899,7 +26025,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('SetGraphBufSize (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25919,7 +26045,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25939,7 +26065,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'DRAWPOLY');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25957,7 +26083,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'FILLPOLY');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25974,7 +26100,7 @@ Begin
       End;
       EmitInstr('MOV DWORD PTR [GR_FILLCOLOR],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25985,7 +26111,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('SetAllPalette (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -25996,7 +26122,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('GetPalette (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26007,7 +26133,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('GetDefaultPalette (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26025,7 +26151,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26043,7 +26169,7 @@ Begin
       End;
       EmitComment('SetUserCharSize (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26054,7 +26180,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('GetTextSettings (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26065,7 +26191,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('GetLineSettings (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26076,7 +26202,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('GetFillSettings (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26087,7 +26213,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('GetFillPattern (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26098,7 +26224,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('GetViewSettings (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26109,7 +26235,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('GetArcCoords (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26127,7 +26253,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26137,7 +26263,7 @@ Begin
       Inc(EP);
       EmitComment('ClearViewPort (stub - same as ClearDevice for now)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26216,7 +26342,7 @@ Begin
         End;
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26330,7 +26456,7 @@ Begin
         End;
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26341,7 +26467,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetActivePage (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26352,7 +26478,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetVisualPage (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26366,7 +26492,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'GETVIDEOCONFIG');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26378,7 +26504,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetViewOrg (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26394,7 +26520,7 @@ Begin
       End;
       EmitComment('_SetViewport (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26410,7 +26536,7 @@ Begin
       End;
       EmitComment('_SetClipRgn (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26427,7 +26553,7 @@ Begin
       End;
       EmitComment('_SetWindow (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26438,13 +26564,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment(Up + ' (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26459,7 +26585,7 @@ Begin
       End;
       EmitComment(Up + ' (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26470,7 +26596,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment(Up + ' (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26496,7 +26622,7 @@ Begin
       EmitInstr('CALL PatBlt');
       EmitLabel(Lbl);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26514,7 +26640,7 @@ Begin
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26526,7 +26652,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_MoveTo_w (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26544,7 +26670,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'LINETO');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26556,7 +26682,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_LineTo_w (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26580,7 +26706,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'MSGR_RECT');
       EmitInstr('ADD ESP,20');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26591,13 +26717,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment(Up + ' (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26621,7 +26747,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'MSGR_ELLPS');
       EmitInstr('ADD ESP,20');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26632,13 +26758,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment(Up + ' (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26668,7 +26794,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'ARC');
       EmitInstr('ADD ESP,32');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26679,13 +26805,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment('_ARC_WXY (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26696,13 +26822,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment(Up + ' (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26722,7 +26848,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'MSGR_FLOOD');
       EmitInstr('ADD ESP,12');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26737,7 +26863,7 @@ Begin
       End;
       EmitComment('_FloodFill_w (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26755,7 +26881,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'MSGR_SETPXL');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26767,7 +26893,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetPixel_w (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26785,7 +26911,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'UPDATEPEN');
       EmitLabel(Lbl);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26796,7 +26922,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitInstr('MOV DWORD PTR [GR_BKCOLOR],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26807,7 +26933,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitInstr('MOV DWORD PTR [GR_LINESTYLE],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26818,7 +26944,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitInstr('MOV DWORD PTR [GR_WRITEMODE],EAX');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26829,7 +26955,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetFillMask (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26840,7 +26966,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_RemapAllPalette (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26856,7 +26982,7 @@ Begin
       End;
       EmitComment('_SetTextWindow (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26872,7 +26998,7 @@ Begin
       End;
       EmitComment('_GetTextWindow (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26883,7 +27009,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_ScrollTextWindow (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26895,7 +27021,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_OutMem (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26906,7 +27032,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_OutText (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26917,7 +27043,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetTextCursor (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26929,7 +27055,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetTextPosition (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26941,7 +27067,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_GetTextPosition (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26952,7 +27078,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetTextColor (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26963,13 +27089,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment('_GetImage (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26980,13 +27106,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment(Up + ' (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -26997,13 +27123,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment('_PutImage (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27014,13 +27140,13 @@ Begin
       If EPMatch('(') Then
       Begin
         ParseExpr(PI);
-        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ',') Do
+        While (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ',')) Do
         Begin EPMatch(','); ParseExpr(PI); End;
         EPMatch(')');
       End;
       EmitComment('_PutImage_w (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27030,7 +27156,7 @@ Begin
       Inc(EP);
       EmitComment('_UnRegisterFonts (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27041,7 +27167,7 @@ Begin
       If EPMatch('(') Then Begin ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_OutGText (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27053,7 +27179,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_SetGTextVector (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27065,7 +27191,7 @@ Begin
       Begin ParseExpr(PI); EPMatch(','); ParseExpr(PI); EPMatch(')'); End;
       EmitComment('_GetGTextVector (stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27077,7 +27203,7 @@ Begin
       Inc(EP);
       EmitComment('GraphColorMode (Graph3 compat - stub InitGraph)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27087,7 +27213,7 @@ Begin
       Inc(EP);
       EmitComment('GraphMode (Graph3 compat - stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27097,7 +27223,7 @@ Begin
       Inc(EP);
       EmitComment('HiRes (Graph3 compat - stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27107,7 +27233,7 @@ Begin
       Inc(EP);
       EmitComment('HiResColor (Graph3 compat - stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27122,7 +27248,7 @@ Begin
       End;
       EmitComment('Palette (Graph3 compat - stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27138,7 +27264,7 @@ Begin
       EmitInstr('MOV DWORD PTR [GR_BKCOLOR],EAX');
       EmitComment('GraphBackground (Graph3 compat)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27159,7 +27285,7 @@ Begin
       End;
       EmitComment('GraphWindow (Graph3 compat)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27180,7 +27306,7 @@ Begin
       EmitInstr('ADD ESP,12');
       EmitComment('Plot (Graph3 compat -> PutPixel)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27208,7 +27334,7 @@ Begin
       EmitInstr('ADD ESP,16');
       EmitComment('Draw (Graph3 compat -> SetColor+Line)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27229,7 +27355,7 @@ Begin
       End;
       EmitComment('ColorTable (Graph3 compat - stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27248,7 +27374,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'STRDISPOSE');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27260,7 +27386,7 @@ Begin
       Inc(EP);
       EmitComment('AssignLst (Printer unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27277,7 +27403,7 @@ Begin
       End;
       EmitComment('OvrInit (stub - not needed in Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27287,7 +27413,7 @@ Begin
       Inc(EP);
       EmitComment('OvrInitEMS (stub - not needed in Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27303,7 +27429,7 @@ Begin
       EmitInstr('MOV DWORD PTR [OVR_BUFSIZE],EAX');
       EmitComment('OvrSetBuf (stub - not needed in Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27313,7 +27439,7 @@ Begin
       Inc(EP);
       EmitComment('OvrClearBuf (stub - not needed in Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27328,7 +27454,7 @@ Begin
       End;
       EmitComment('OvrSetRetry (stub - not needed in Win32)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27344,7 +27470,7 @@ Begin
       Inc(EP);
       EmitComment('GraphColorMode (Turbo3 compat -> stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27353,7 +27479,7 @@ Begin
       Inc(EP);
       EmitComment('GraphMode (Turbo3 compat -> stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27370,7 +27496,7 @@ Begin
       End;
       EmitComment('RegisterType (Objects unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27387,7 +27513,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'DISPOSESTR');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27399,7 +27525,7 @@ Begin
       Inc(EP);
       EmitComment('TObject.Init (Objects unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27409,7 +27535,7 @@ Begin
       Inc(EP);
       EmitComment('TObject.Done (Objects unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27419,7 +27545,7 @@ Begin
       Inc(EP);
       EmitComment('TObject.Free (Objects unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27432,7 +27558,7 @@ Begin
         ParseExpr(PI);
         EmitInstr('PUSH EAX'); { FileName }
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then Inc(EP);
+           (TokIsP(EP, ',')) Then Inc(EP);
         ParseExpr(PI);
         EmitInstr('PUSH EAX'); { Mode }
         EPMatch(')');
@@ -27440,7 +27566,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'DOSSTREAM_INIT');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27450,7 +27576,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'DOSSTREAM_DONE');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27463,11 +27589,11 @@ Begin
         ParseExpr(PI);
         EmitInstr('PUSH EAX'); { FileName }
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then Inc(EP);
+           (TokIsP(EP, ',')) Then Inc(EP);
         ParseExpr(PI);
         EmitInstr('PUSH EAX'); { Mode }
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then Inc(EP);
+           (TokIsP(EP, ',')) Then Inc(EP);
         ParseExpr(PI);
         EmitComment('BufSize ignored - using default');
         EPMatch(')');
@@ -27475,7 +27601,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'DOSSTREAM_INIT');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27485,7 +27611,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'DOSSTREAM_DONE');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27495,7 +27621,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'STREAM_FLUSH');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27507,13 +27633,13 @@ Begin
       Begin
         ParseExpr(PI);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then Inc(EP);
+           (TokIsP(EP, ',')) Then Inc(EP);
         ParseExpr(PI);
         EPMatch(')');
       End;
       EmitComment('TCollection.Init (Objects unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27523,7 +27649,7 @@ Begin
       Inc(EP);
       EmitComment('TCollection.Done (Objects unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27538,7 +27664,7 @@ Begin
       End;
       EmitComment('TCollection.Insert (Objects unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27553,7 +27679,7 @@ Begin
       End;
       EmitComment('TCollection.Delete (Objects unit stub)');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27566,7 +27692,7 @@ Begin
         ParseExpr(PI);
         EmitInstr('PUSH EAX'); { Buf }
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ',') Then Inc(EP);
+           (TokIsP(EP, ',')) Then Inc(EP);
         ParseExpr(PI);
         EmitInstr('PUSH EAX'); { Count }
         EPMatch(')');
@@ -27574,7 +27700,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'STREAM_WRITE');
       EmitInstr('ADD ESP,8');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27591,7 +27717,7 @@ Begin
       EmitInstr('CALL ' + TP_RT_PFX + 'STREAM_SEEK');
       EmitInstr('ADD ESP,4');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27602,7 +27728,7 @@ Begin
       EmitInstr('MOV DWORD PTR [OBJ_STATUS],0');
       EmitComment('TStream.Reset -> stOk');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27612,7 +27738,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'STREAM_FLUSH');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27622,7 +27748,7 @@ Begin
       Inc(EP);
       EmitInstr('CALL ' + TP_RT_PFX + 'STREAM_TRUNCATE');
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then Inc(EP);
+         (TokIsP(EP, ';')) Then Inc(EP);
       Exit;
     End;
 
@@ -27631,7 +27757,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '[') Then
+         (TokIsP(EP, '[')) Then
       Begin
         Inc(EP);
         Case Opts.DestTarget Of
@@ -27640,7 +27766,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('MOVE.L D0,-(SP)');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('MOVE.L D0,-(SP)');
             EPMatch(']');
@@ -27660,7 +27786,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH AX');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PUSH AX');
             EPMatch(']');
@@ -27680,7 +27806,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH HL');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PUSH HL');
             EPMatch(']');
@@ -27700,7 +27826,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PHA');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PHA');
             EPMatch(']');
@@ -27721,7 +27847,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PSHS D');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PSHS D');
             EPMatch(']');
@@ -27742,7 +27868,7 @@ Begin
             ParseExpr(PI);
             EmitInstr('PUSH EAX');
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ':') Then Inc(EP);
+               (TokIsP(EP, ':')) Then Inc(EP);
             ParseExpr(PI);
             EmitInstr('PUSH EAX');
             EPMatch(']');
@@ -27770,7 +27896,7 @@ Begin
         End; { Case }
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -27780,7 +27906,7 @@ Begin
     Begin
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = '[') Then
+         (TokIsP(EP, '[')) Then
       Begin
         Inc(EP);
         Case Opts.DestTarget Of
@@ -27890,7 +28016,7 @@ Begin
         End; { Case }
       End;
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -27902,7 +28028,7 @@ Begin
       Inc(EP);
       ParseFuncCall(PI, Up);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -27919,7 +28045,7 @@ Begin
       Inc(EP);
       ParseFuncCall(PI, Up);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ';') Then
+         (TokIsP(EP, ';')) Then
         Inc(EP);
       Exit;
     End;
@@ -27944,7 +28070,7 @@ Begin
           GenStoreToAddr(TIdx);
         End;
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ';') Then
+           (TokIsP(EP, ';')) Then
           Inc(EP);
         Exit;
       End;
@@ -27956,7 +28082,7 @@ Begin
     Begin
       { Affectation indirecte : ident[index] / ident.champ / ident^ ... := expr }
       If ((TokenPool[EP].Kind = TK_PUNCT) And
-          ((TokenPool[EP].Val = '[') Or (TokenPool[EP].Val = '.'))) Or
+          ((TokIsP(EP, '[')) Or (TokIsP(EP, '.')))) Or
          ((TokenPool[EP].Kind = TK_OP) And (TokenPool[EP].Val = '^')) Then
       Begin
         ParseLValueW32(PI, VName, TIdx);   { EAX = adresse destination }
@@ -27980,7 +28106,7 @@ Begin
           End;
         End;
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ';') Then
+           (TokIsP(EP, ';')) Then
           Inc(EP);
         Exit;
       End;
@@ -27992,7 +28118,7 @@ Begin
       Begin
         ParseFuncCall(PI, Up);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ';') Then
+           (TokIsP(EP, ';')) Then
           Inc(EP);
         Exit;
       End;
@@ -28013,7 +28139,7 @@ Begin
             Inc(EP);
             GenStoreVar(PI, VName);
             If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-               (TokenPool[EP].Val = ';') Then
+               (TokIsP(EP, ';')) Then
               Inc(EP);
             Exit;
           End;
@@ -28027,7 +28153,7 @@ Begin
           GenRangeCheckAssign(TIdx);
         GenStoreVar(PI, VName);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ';') Then
+           (TokIsP(EP, ';')) Then
           Inc(EP);
         Exit;
       End;
@@ -28048,18 +28174,18 @@ Begin
           FDeref := FuncDerefAssignW32(PI, Up);
         End;
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ';') Then
+           (TokIsP(EP, ';')) Then
           Inc(EP);
         Exit;
       End;
 
       { Appel avec parentheses }
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '(') Then
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '(')) Then
       Begin
         ParseFuncCall(PI, Up);
         FDeref := FuncDerefAssignW32(PI, Up);
         If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-           (TokenPool[EP].Val = ';') Then
+           (TokIsP(EP, ';')) Then
           Inc(EP);
         Exit;
       End;
@@ -28115,14 +28241,14 @@ Begin
       If Not EPAtEnd Then
       Begin
         If (TokenPool[EP].Kind = TK_PUNCT) And
-           ((TokenPool[EP].Val = '.') Or (TokenPool[EP].Val = ';')) Then
+           ((TokIsP(EP, '.')) Or (TokIsP(EP, ';'))) Then
           Inc(EP);
       End;
       Break;
     End;
 
     { Point final : fin du programme }
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = '.') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, '.')) Then
     Begin
       Inc(EP);
       Break;
@@ -28866,7 +28992,7 @@ Begin
       FlushLine;
       Inc(EP);
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         ((TokenPool[EP].Val = ';') Or (TokenPool[EP].Val = '.')) Then
+         ((TokIsP(EP, ';')) Or (TokIsP(EP, '.'))) Then
         Inc(EP);
       Break;
     End;
@@ -28876,7 +29002,7 @@ Begin
       CurLine := TokenPool[EP].Line;
       LastEnd := 0;
     End;
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ';') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ';')) Then
     Begin
       FlushLine; Inc(EP); LastEnd := 0; Continue;
     End;
@@ -28890,7 +29016,7 @@ Begin
       Else Lbl := LocalLabel(TokenPool[EP].Val);
       LastEnd := TokenPool[EP].Col + Length(TokenPool[EP].Val);
       Inc(EP);
-      If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ':') And
+      If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ':')) And
          (TokenPool[EP].Line = CurLine) Then
       Begin
         FlushLine;
@@ -28909,7 +29035,7 @@ Begin
     End;
     { label nom: en debut de ligne }
     If (AsmLine = '') And (TokenPool[EP].Kind = TK_IDENT) And (EP + 1 < EPEnd) And
-       (TokenPool[EP + 1].Kind = TK_PUNCT) And (TokenPool[EP + 1].Val = ':') And
+       (TokenPool[EP + 1].Kind = TK_PUNCT) And (TokIsP(EP + 1, ':')) And
        (TokenPool[EP + 1].Line = CurLine) And Not IsAsmReg(TokenPool[EP].Val) Then
     Begin
       EmitLabel(TokenPool[EP].Val);
@@ -28962,13 +29088,13 @@ Begin
       Inc(EP);
       { Consommer ; ou . optionnel apres END }
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         ((TokenPool[EP].Val = ';') Or (TokenPool[EP].Val = '.')) Then
+         ((TokIsP(EP, ';')) Or (TokIsP(EP, '.'))) Then
         Inc(EP);
       Break;
     End;
 
     { Point-virgule seul : separateur d instructions, ignorer }
-    If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ';') Then
+    If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ';')) Then
     Begin
       Inc(EP);
       Continue;
@@ -28980,7 +29106,7 @@ Begin
     While Not EPAtEnd Do
     Begin
       { Arreter au ; ou END }
-      If (TokenPool[EP].Kind = TK_PUNCT) And (TokenPool[EP].Val = ';') Then
+      If (TokenPool[EP].Kind = TK_PUNCT) And (TokIsP(EP, ';')) Then
         Break;
       If (TokenPool[EP].Kind = TK_KEYWORD) And
          (StrUpperCase(TokenPool[EP].Val) = 'END') Then
@@ -28992,7 +29118,7 @@ Begin
 
       { Si le prochain token est ':', c est un label }
       If (Not EPAtEnd) And (TokenPool[EP].Kind = TK_PUNCT) And
-         (TokenPool[EP].Val = ':') Then
+         (TokIsP(EP, ':')) Then
       Begin
         { Emettre le label }
         EmitLabel(T);
@@ -30205,7 +30331,15 @@ Begin
   EmitInstr('JNE ' + TP_RT_PFX + 'TF_FO_NR');
   EmitInstr('CMP DWORD PTR [EBX+' + IntToStr_(TFR_RECSIZE) + '],0');
   EmitInstr('JE ' + TP_RT_PFX + 'TF_FO_GO');
+  EmitComment('fichier type ou non type : acces selon FileMode (0 lecture, 1 ecriture, 2 les deux)');
   EmitInstr('MOV ESI,0C0000000h');
+  EmitInstr('CMP BYTE PTR [FILEMODE],0');
+  EmitInstr('JNE ' + TP_RT_PFX + 'TF_FO_FM1');
+  EmitInstr('MOV ESI,80000000h');
+  EmitLabel(TP_RT_PFX + 'TF_FO_FM1');
+  EmitInstr('CMP BYTE PTR [FILEMODE],1');
+  EmitInstr('JNE ' + TP_RT_PFX + 'TF_FO_GO');
+  EmitInstr('MOV ESI,40000000h');
   EmitInstr('JMP ' + TP_RT_PFX + 'TF_FO_GO');
   EmitLabel(TP_RT_PFX + 'TF_FO_NR');
   EmitInstr('MOV ESI,40000000h');
@@ -31109,9 +31243,9 @@ Begin
   EmitInstr('CMP BYTE PTR [EDX+ECX],0');
   EmitInstr('JE ' + TP_RT_PFX + 'FXL_D');
   EmitInstr('INC ECX');
-  EmitInstr('CMP ECX,255');
+  EmitInstr('CMP ECX,254');
   EmitInstr('JB ' + TP_RT_PFX + 'FXL_L');
-  EmitInstr('MOV BYTE PTR [EDI+256],0');
+  EmitInstr('MOV BYTE PTR [EDI+255],0');     { NUL dans les 256 octets }
   EmitLabel(TP_RT_PFX + 'FXL_D');
   EmitInstr('MOV BYTE PTR [EDI],CL');
   EmitInstr('POPAD');
@@ -31424,10 +31558,12 @@ Begin
   EmitInstr('INC ESI');
   EmitInstr('JMP ' + TP_RT_PFX + 'SASG_C');
   EmitLabel(TP_RT_PFX + 'SASG_D');
-  { ECX = longueur, tronquer a 255 max }
-  EmitInstr('CMP ECX,255');
+  { ECX = longueur, tronquee a 254 : octet de longueur + 254 caracteres + NUL
+    final tiennent dans les 256 octets d une String (avec 255, le NUL debordait
+    sur la variable suivante, par exemple l EBP sauvegarde d une procedure) }
+  EmitInstr('CMP ECX,254');
   EmitInstr('JLE ' + TP_RT_PFX + 'SASG_OK');
-  EmitInstr('MOV ECX,255');
+  EmitInstr('MOV ECX,254');
   EmitLabel(TP_RT_PFX + 'SASG_OK');
   { Stocker longueur dans EDI[0] }
   EmitInstr('MOV BYTE PTR [EDI],CL');
@@ -31455,7 +31591,7 @@ Begin
   EmitInstr('MOVZX ECX,BYTE PTR [ESI]');
   EmitInstr('INC ESI');
   EmitInstr('MOV EBX,ESI');
-  EmitInstr('JMP ' + TP_RT_PFX + 'SASG_OK');
+  EmitInstr('JMP ' + TP_RT_PFX + 'SASG_D');      { borne a 254 (voir STRASSIGN) }
 
   { ------ _TPRT_STRASSIGN_PCHAR : copier ASCIIZ brut -------- }
   { Entree : ESI = source ASCIIZ, EDI = destination ASCIIZ     }
@@ -31579,9 +31715,9 @@ Begin
   EmitInstr('SHL EAX,8');
   EmitInstr('MOV EDI,OFFSET STRRING');
   EmitInstr('ADD EDI,EAX');
-  EmitInstr('CMP ECX,255');
+  EmitInstr('CMP ECX,254');                  { + NUL : 256 octets au plus }
   EmitInstr('JBE ' + TP_RT_PFX + 'CA2S_OK');
-  EmitInstr('MOV ECX,255');
+  EmitInstr('MOV ECX,254');
   EmitLabel(TP_RT_PFX + 'CA2S_OK');
   EmitInstr('MOV EAX,EDI');
   EmitInstr('MOV BYTE PTR [EDI],CL');
@@ -33006,7 +33142,7 @@ Begin
   EmitInstr('JZ ' + TP_RT_PFX + 'FF_CE');
   EmitInstr('STOSB');
   EmitInstr('INC ECX');
-  EmitInstr('CMP ECX,255');
+  EmitInstr('CMP ECX,254');
   EmitInstr('JB ' + TP_RT_PFX + 'FF_CP');
   EmitLabel(TP_RT_PFX + 'FF_CE');
   EmitInstr('MOV BYTE PTR [EDI],0');        { terminateur NUL }
@@ -33093,7 +33229,7 @@ Begin
   EmitInstr('JZ ' + TP_RT_PFX + 'FN_CE');
   EmitInstr('STOSB');
   EmitInstr('INC ECX');
-  EmitInstr('CMP ECX,255');
+  EmitInstr('CMP ECX,254');
   EmitInstr('JB ' + TP_RT_PFX + 'FN_CP');
   EmitLabel(TP_RT_PFX + 'FN_CE');
   EmitInstr('MOV BYTE PTR [EDI],0');        { terminateur NUL }
@@ -35792,9 +35928,9 @@ Begin
   { Longueur }
   EmitInstr('PUSH ESI');
   EmitInstr('CALL lstrlenA');
-  EmitInstr('CMP EAX,255');
+  EmitInstr('CMP EAX,254');
   EmitInstr('JBE ' + TP_RT_PFX + 'PA_OK');
-  EmitInstr('MOV EAX,255');                  { tronquer a 255 }
+  EmitInstr('MOV EAX,254');                  { tronquer a 254 (+ NUL : 256 octets) }
   EmitLabel(TP_RT_PFX + 'PA_OK');
   EmitInstr('LEA EDI,[STR_PASBUF]');
   EmitInstr('MOV BYTE PTR [EDI],AL');        { octet de longueur }
@@ -38397,6 +38533,9 @@ Var
     End;
     If Mnem = 'FLDCW' Then Begin EmitMem($D9, 5); Exit; End;
     If Mnem = 'FNSTCW' Then Begin EmitMem($D9, 7); Exit; End;
+    { etat complet du coprocesseur (108 octets) : commutation de taches du noyau }
+    If Mnem = 'FNSAVE' Then Begin EmitMem($DD, 6); Exit; End;
+    If Mnem = 'FRSTOR' Then Begin EmitMem($DD, 4); Exit; End;
     If Mnem = 'FSTCW' Then Begin BcEmitB($9B); EmitMem($D9, 7); Exit; End;
     AssembleX87 := False;
   End;
@@ -41989,6 +42128,7 @@ Begin
   BcDefineDataLabel('FILE_WRHND');  BcDataD(0);
   BcDefineDataLabel('FILE_WRFLG');  BcDataD(0);
   BcDefineDataLabel('FILE_IOERR');  BcDataD(0);
+  BcDefineDataLabel('FILEMODE');    BcDataD(2);   { FileMode : 0 lecture, 1 ecriture, 2 les deux }
   BcDefineDataLabel('STDIN_EOF');    BcDataD(0);
   BcDefineDataLabel('DIR_NAMEBUF');   For I := 1 To 260 Do BcDataB(0);
   BcDefineDataLabel('DIR_DRVBUF');    BcDataD(0);
@@ -42131,6 +42271,8 @@ Begin
 End;
 
 { --- Resolution des fixups (code relatif + donnees absolues) --- }
+Var BcUndefSeen : TString;
+
 Procedure BcResolveFixups(DataVA: LongInt);
 Var
   I: LongInt;
@@ -42138,6 +42280,7 @@ Var
   Val: LongInt;
   Nm: TString;
 Begin
+  BcUndefSeen := '';
   { Adresses dans la section .data (constantes typees : PChar, @variable, @procedure) }
   For I := 0 To BcDFixCnt - 1 Do
   Begin
@@ -42185,6 +42328,15 @@ Begin
           BcCode[FixOfs + 1] := Byte(Val Shr 8);
           BcCode[FixOfs + 2] := Byte(Val Shr 16);
           BcCode[FixOfs + 3] := Byte(Val Shr 24);
+        End
+        Else If (Copy(BcFixups[I].LblName, 1, Length(TP_FUNC_PFX)) = TP_FUNC_PFX) And
+                (Pos(#1 + BcFixups[I].LblName + #1, BcUndefSeen) = 0) Then
+        Begin
+          { appel d'une procedure jamais definie (identificateur inconnu ou
+            fonction externe non declaree) : l'appel partirait n'importe ou }
+          WriteLn('OS2PC: avertissement : procedure ou fonction non definie : ',
+                  Copy(BcFixups[I].LblName, Length(TP_FUNC_PFX) + 1, 200));
+          If Length(BcUndefSeen) < 200 Then BcUndefSeen := BcUndefSeen + #1 + BcFixups[I].LblName + #1;
         End;
       End;
       BC_FIX_ABS32_DATA:
@@ -45984,7 +46136,7 @@ Begin
         UnitSourceName := StrUpperCase(TokenPool[I].Val);
         Inc(I);
       End;
-      While (I < TokenCount) And Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do Inc(I);
+      While (I < TokenCount) And Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do Inc(I);
       If I < TokenCount Then Inc(I);
       If Opts.Verbose Then
         WriteLn('  Source unite : ', UnitSourceName);
@@ -45994,7 +46146,7 @@ Begin
        (StrUpperCase(TokenPool[I].Val) = 'PROGRAM') Then
     Begin
       Inc(I);
-      While (I < TokenCount) And Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do Inc(I);
+      While (I < TokenCount) And Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do Inc(I);
       If I < TokenCount Then Inc(I);
       Continue;
     End;
@@ -46007,7 +46159,7 @@ Begin
         WarnMsg('la clause Uses n''est pas disponible avant Turbo Pascal 4.0 (version courante: ' + TPVersionStr(Opts.TPVersion) + ')');
         { Sauter la clause Uses sans la traiter }
         Inc(I);
-        While (I < TokenCount) And Not ((TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';')) Do Inc(I);
+        While (I < TokenCount) And Not ((TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';'))) Do Inc(I);
         If I < TokenCount Then Inc(I);
         Continue;
       End;
@@ -46062,8 +46214,8 @@ Begin
           Inc(UsesCount); Inc(I);
           If I < TokenCount Then
           Begin
-            If (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ',') Then Inc(I)
-            Else If (TokenPool[I].Kind = TK_PUNCT) And (TokenPool[I].Val = ';') Then Begin Inc(I); InUses := False End
+            If (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ',')) Then Inc(I)
+            Else If (TokenPool[I].Kind = TK_PUNCT) And (TokIsP(I, ';')) Then Begin Inc(I); InUses := False End
             Else InUses := False;
           End;
         End
@@ -50601,8 +50753,8 @@ Begin
            (TokenPool[P].Val = 'xor') Then Inc(Ops)
         Else Ok := False;
       TK_PUNCT :
-        If TokenPool[P].Val = '(' Then Inc(Depth)
-        Else If TokenPool[P].Val = ')' Then
+        If TokIsP(P, '(') Then Inc(Depth)
+        Else If TokIsP(P, ')') Then
         Begin
           If Depth = 0 Then Ok := False Else Dec(Depth);
         End
@@ -50615,7 +50767,7 @@ Begin
   If (Ops = 0) Or (Operands < 2) Then Exit;
   { le dernier token de la suite doit etre un operande ou ")" }
   If (TokenPool[P - 1].Kind = TK_OP) Or (TokenPool[P - 1].Kind = TK_KEYWORD) Or
-     ((TokenPool[P - 1].Kind = TK_PUNCT) And (TokenPool[P - 1].Val = '(')) Then Exit;
+     ((TokenPool[P - 1].Kind = TK_PUNCT) And (TokIsP(P - 1, '('))) Then Exit;
   D16ConstAhead := True;
 End;
 
@@ -51707,8 +51859,8 @@ Begin
     If Ok Then Inc(P);
   End;
   If N = 0 Then Exit;
-  If Not ((TokenPool[P].Kind = TK_PUNCT) And ((TokenPool[P].Val = ',') Or (TokenPool[P].Val = ')') Or
-          (TokenPool[P].Val = ';') Or (TokenPool[P].Val = ']'))) Then Exit;
+  If Not ((TokenPool[P].Kind = TK_PUNCT) And ((TokIsP(P, ',')) Or (TokIsP(P, ')')) Or
+          (TokIsP(P, ';')) Or (TokIsP(P, ']')))) Then Exit;
   D16StrConstAhead := True;
 End;
 
@@ -58438,7 +58590,7 @@ Begin
     Begin
       Start := I;
       J := I + 1;
-      While (J < TokenCount) And Not ((TokenPool[J].Kind = TK_PUNCT) And (TokenPool[J].Val = ';')) Do
+      While (J < TokenCount) And Not ((TokenPool[J].Kind = TK_PUNCT) And (TokIsP(J, ';'))) Do
       Begin
         If (TokenPool[J].Kind = TK_IDENT) Or (TokenPool[J].Kind = TK_KEYWORD) Then
         Begin
@@ -58489,7 +58641,7 @@ Begin
       If ((TokenPool[I].Kind = TK_IDENT) Or (TokenPool[I].Kind = TK_KEYWORD)) And
          (StrUpperCase(TokenPool[I].Val) = ExpProcNm[J]) And
          (TokenPool[I + 1].Kind In [TK_OP, TK_PUNCT]) And (TokenPool[I + 1].Val = '=') And
-         (TokenPool[I + 3].Kind = TK_PUNCT) And (TokenPool[I + 3].Val = ';') Then
+         (TokenPool[I + 3].Kind = TK_PUNCT) And (TokIsP(I + 3, ';')) Then
       Begin
         If TokenPool[I + 2].Kind = TK_INTEGER Then
         Begin

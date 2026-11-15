@@ -25,6 +25,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Cette commande permet de demander ou de changer les attributs d'un fichier.</td>
 		</tr>
 		<tr>
+			<td><b>BROWSER.PAS</b></td>
+			<td>Navigateur Web de Presentation Manager avec l'apparence d'OS/2 Warp 3 (adapté du BROWSER.PAS de DEV-COOLS) : HTML, CSS, JavaScript, images GIF, PNG, JPEG et BMP, code source, codes QR, menu contextuel et outils de développement F12 (Inspecteur, Débogueur, Éditeur de style, Console, Réseau).</td>
+		</tr>
+		<tr>
 			<td><b>CHKDSK.PAS</b></td>
 			<td>Cette commande permet de vérifier le disque. Cette commande est inspiré du DOS.</td>
 		</tr>		
@@ -845,6 +849,91 @@ L'OS/2 d'origine n'avait <b>pas de gestionnaire des tâches</b> : la Liste des f
 
 Le multitâche du noyau existait (tâches, ordonnanceur préemptif, sessions) ; pour le Gestionnaire des tâches, le noyau compte maintenant le temps du processeur à chaque interruption de la minuterie (100 Hz) : temps <b>inactif</b> (processeur arrêté par hlt dans la boucle d'attente), temps de chaque <b>processus</b>, temps du <b>noyau</b> (code interrompu hors du programme : noyau et DLL du système). Deux nouvelles fonctions le donnent aux programmes : <b>KrnTaskCtl 34</b> (état du système : tops, temps inactif et du noyau, mémoire physique et disponible, tas du noyau, fils, processus, handles, disque virtuel) et <b>KrnTaskCtl 35</b> (un processus : PID, parent, fils, temps du processeur, mémoire, session, type, nom et chemin). PMWIN détruit maintenant les fenêtres d'un processus terminé de force (au plus une fois par seconde, pendant l'attente des messages) et efface le curseur d'une fenêtre détruite. Les graphiques utilisent des couleurs RGB (GpiCreateLogColorTable, LCOLF_RGB) quand l'écran a plus de 16 couleurs.
 
+<h3>Navigateur Web (BROWSER.PAS)</h3>
+
+On a beaucoup reproché à OS/2 Warp 3 sa faiblesse sur le <b>Web</b> : à l'heure où Internet arrivait chez tout le monde, il n'offrait qu'un navigateur à part, le WebExplorer de l'Internet Access Kit, vite dépassé (ni JavaScript, ni outils pour les développeurs) et mal intégré au reste du système. OS/2-0 en a un, intégré au bureau : <b>BROWSER.PAS</b> (BROWSER.EXE). On l'ouvre par le menu contextuel du bureau (<b>Navigateur Web</b>), par son icône du bureau (un globe devant une page) ou par son objet du dossier <b>Système OS/2</b> ; depuis CMD, <code>BROWSER adresse</code> l'ouvre sur une page.
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/WEB_BUREAU.png" width="400" alt="Bureau : icône et menu contextuel du Navigateur Web"><br><i>Le Navigateur Web sur le bureau et dans son menu contextuel</i></td>
+		<td align="center"><img src="IMAGE/WEB_GLADIR.png" width="400" alt="Navigateur Web : page de type Gladir.com"><br><i>Page reproduisant la structure de www.gladir.com : bandeau, colonne de rubriques, tableaux imbriqués, images</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/WEB_GOOGLE.png" width="400" alt="Navigateur Web : page de type Google"><br><i>Page reproduisant celle de www.google.ca : logo PNG, formulaire de recherche, scripts</i></td>
+		<td align="center"><img src="IMAGE/WEB_JS.png" width="400" alt="Navigateur Web : démonstration JavaScript"><br><i>JavaScript : document.write, DOM modifié par un clic, horloge (setInterval), feuille CSS externe</i></td>
+	</tr>
+</table>
+
+<h4>Le concept : le navigateur de DEV-COOLS, refait pour Presentation Manager</h4>
+
+Le point de départ est le navigateur graphique <b>BROWSER.PAS</b> du dépôt <b>DEV-COOLS</b> (Turbo Pascal / Free Pascal, unité Graph, WinInet). Son architecture est gardée : lecture de la source HTML, analyseur qui construit un arbre de nœuds, moteur de rendu par balises, décodeurs d'images GIF, PNG, JPEG et BMP, historique, favoris, barre d'adresse et boutons Précédent / Suivant / Actualiser. Tout le reste est refait pour qu'il soit un vrai programme d'OS/2, qui ne pourrait pas tourner ailleurs :
+
+<table>
+	<tr><th>Élément</th><th>Avec l'apparence d'OS/2 Warp 3</th></tr>
+	<tr><td>Fenêtre</td><td>Cadre de PM redimensionnable (titre, menu système, bordure), vrai menu de PM (Fichier, Affichage, Aller, Signets, Options, Aide), raccourcis (Alt+Gauche, F5, Ctrl+U, F12...), barre d'état gravée, boîtes de message et dialogues de PM.</td></tr>
+	<tr><td>Barre d'outils</td><td>Boutons en relief portant des <b>icônes d'OS/2</b> créées par l'API des pointeurs et icônes (WinCreatePointerIndirect, WinDrawPointer) : Précédent, Suivant, Arrêter, Actualiser, Accueil, Signets, Code source ; grisées (DP_HALFTONED) quand l'action est impossible ; globe d'OS/2 allumé pendant le chargement, grisé ensuite.</td></tr>
+	<tr><td>Contrôles</td><td>Champ d'adresse WC_ENTRYFIELD (tout sélectionné à l'activation : la frappe remplace l'adresse), barre de défilement WC_SCROLLBAR, menu contextuel par WinCreateMenu et WinPopupMenu, presse-papiers de PM.</td></tr>
+	<tr><td>Dessin</td><td>GPI : couleurs RGB, polices mises à l'échelle (GpiSetCharBox), images par GpiDrawBits, à partir d'une liste d'affichage ; le défilement et les scripts ne redessinent que ce qui change. En 16 couleurs, les couleurs des pages sont ramenées à celles de la palette.</td></tr>
+	<tr><td>Réseau</td><td>TCPIP32.DLL d'OS/2-0 (HTTP/1.1 : redirections, transfert « chunked », proxy HTTP), dans un fil d'exécution à part : la fenêtre reste vivante pendant le chargement (bouton Arrêter).</td></tr>
+	<tr><td>Réglages</td><td>Signets, page d'accueil, proxy et options dans <b>OS2.INI</b> (application BROWSER).</td></tr>
+</table>
+
+<h4>Les problèmes corrigés</h4>
+
+Le navigateur d'origine plantait sur <b>www.google.ca</b> et sur <b>www.gladir.com</b>. Les causes, et celles trouvées en chemin dans OS/2-0 lui-même, sont corrigées :
+
+<table>
+	<tr><th>Problème</th><th>Correction</th></tr>
+	<tr><td>Le contenu des &lt;script&gt; et &lt;style&gt; était analysé comme du HTML (un <code>a&lt;b</code> d'un script ouvrait des balises sans fin)</td><td>Contenu de &lt;script&gt;, &lt;style&gt; et &lt;textarea&gt; lu comme texte brut, jusqu'à sa balise de fin.</td></tr>
+	<tr><td>Pages très imbriquées (tableaux dans des tableaux), pages énormes</td><td>Profondeur de l'arbre et de la récursion bornées, tableaux aux colonnes et lignes bornées (au-delà de 12 niveaux, cellules mesurées simplement), corps des réponses et images de taille bornée, mémoire épuisée gérée (page tronquée au lieu d'un plantage).</td></tr>
+	<tr><td>Accents illisibles</td><td>UTF-8 reconnu par validation des séquences complètes, converti en page de codes 850 ; entités inconnues gardées telles quelles.</td></tr>
+	<tr><td>Attributs sans valeur ou mal fermés, images tronquées ou corrompues</td><td>Analyseur tolérant ; décodeurs d'images vérifiés à chaque lecture (image ignorée au lieu d'un plantage).</td></tr>
+	<tr><td>Boucle sans fin dans un script</td><td>Budget d'instructions et mémoire bornée pour le JavaScript : le script est arrêté, avec un message dans la Console.</td></tr>
+	<tr><td>Débordement de pile (« runtime error 216 ») sur certaines pages</td><td>Défaut du compilateur <b>OS2PC</b> : ses routines de chaînes écrivaient un octet nul <i>après</i> le 255<sup>e</sup> caractère, une case trop loin. Elles sont maintenant limitées à 254 caractères.</td></tr>
+	<tr><td><code>Break</code> compilé comme un appel de procédure, appels à des procédures inexistantes acceptés sans rien dire</td><td>OS2PC : un littéral d'un caractère comme <code>')'</code> était confondu avec la ponctuation, ce qui faussait la suite de l'instruction. Il avertit aussi maintenant des procédures et fonctions non définies (et, avec -w, des variables implicites).</td></tr>
+	<tr><td>Fonction qui s'appelait elle-même sans fin (plantage TRAP 6)</td><td>OS2PC compile le nom d'une fonction lu dans son propre corps comme un appel récursif : le navigateur utilise une variable locale pour le résultat.</td></tr>
+	<tr><td>Calculs en virgule flottante faux quand plusieurs programmes tournent</td><td>Noyau : l'état du coprocesseur x87 est sauvé et rendu à chaque changement de tâche (FNSAVE, FRSTOR).</td></tr>
+	<tr><td>F12 agissait comme F5</td><td>PMWIN : codes de balayage de F11 et F12 (0x57 et 0x58) traduits en VK_F11 et VK_F12.</td></tr>
+	<tr><td>Page qui clignotait chaque seconde avec une horloge en JavaScript</td><td>Redessin partiel : après chaque mise en page, seules les opérations de dessin qui ont changé sont invalidées.</td></tr>
+</table>
+
+Pour s'en assurer, le moteur (analyseur, CSS, mise en page, JavaScript) est aussi compilé par Free Pascal sur l'hôte, avec vérification des bornes, et passé au <b>test aléatoire</b> : 400 pages HTML et 600 scripts déformés au hasard, sans aucun plantage ; puis 40 pages dans OS/2-0 sous QEMU. Remarque : l'environnement des essais n'avait pas accès aux vrais sites ; www.google.ca et www.gladir.com ont donc été <b>reproduits</b> sur un petit serveur HTTP local (même structure, mêmes pièges : scripts, tableaux imbriqués, UTF-8, images), que QEMU voit à l'adresse 10.0.2.2.
+
+<h4>Les possibilités</h4>
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/WEB_MENU.png" width="400" alt="Navigateur Web : menu contextuel d'un lien"><br><i>Bouton 2 sur un lien : menu contextuel de PM</i></td>
+		<td align="center"><img src="IMAGE/WEB_QR.png" width="400" alt="Navigateur Web : code QR de la page"><br><i>Créer un code QR pour cette page : à lire avec un téléphone</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/WEB_SOURCE.png" width="400" alt="Navigateur Web : code source"><br><i>Code source (view-source:, Ctrl+U) numéroté et coloré</i></td>
+		<td align="center"><img src="IMAGE/WEB_INSPECTEUR.png" width="400" alt="Outils de développement : Inspecteur"><br><i>F12, Inspecteur : élément choisi à la souris, encadré en orange dans la page</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/WEB_CONSOLE.png" width="400" alt="Outils de développement : Console"><br><i>Console : expressions évaluées, erreurs, DOM modifié en direct</i></td>
+		<td align="center"><img src="IMAGE/WEB_RESEAU.png" width="400" alt="Outils de développement : Réseau"><br><i>Réseau : chaque requête de la page (état, type, taille, durée)</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/WEB_STYLE.png" width="400" alt="Outils de développement : Éditeur de style"><br><i>Éditeur de style : la couleur du titre changée en direct dans demo.css</i></td>
+		<td align="center"><img src="IMAGE/WEB_DEBOGUEUR.png" width="400" alt="Outils de développement : Débogueur"><br><i>Débogueur : scripts de la page, internes et externes</i></td>
+	</tr>
+</table>
+
+<table>
+	<tr><th>Fonction</th><th>Détails</th></tr>
+	<tr><td><b>Pages</b></td><td>HTML (titres, paragraphes, listes, tableaux, formulaires, liens, ancres, &lt;meta refresh&gt;), CSS (feuilles &lt;link&gt; et &lt;style&gt;, attribut style ; couleurs, fonds, polices, alignement, marges et espacements), images GIF, PNG, JPEG et BMP, pages text/plain, adresses http://, file:///C:/... et about:home. Enregistrer sous : les octets reçus tels quels, avec confirmation avant de remplacer un fichier.</td></tr>
+	<tr><td><b>JavaScript</b></td><td>Sous-ensemble d'ECMAScript 5 et 6 : var, let, const, fonctions et fonctions fléchées, objets, tableaux (map, filter, reduce, forEach...), chaînes, décomposition (...), switch, try/catch, for-in/for-of, Math, Date, JSON ; document.write, DOM (getElementById, querySelector, innerHTML, textContent, style, classList, createElement, appendChild...), événements (onclick, addEventListener, onload, DOMContentLoaded, onsubmit, onchange, survol), setTimeout et setInterval, location, history, alert.</td></tr>
+	<tr><td><b>Code source</b></td><td>view-source:adresse, Ctrl+U ou menu Affichage : lignes numérotées ; balises, attributs, valeurs, commentaires, scripts et styles en couleurs.</td></tr>
+	<tr><td><b>Menu contextuel</b></td><td>Bouton 2 dans la page : Ouvrir le lien, Code QR du lien, Copier l'adresse du lien (presse-papiers de PM), Précédent, Suivant, Actualiser, Voir le code source, Enregistrer sous..., Créer un code QR pour cette page, Inspecter (F12). Les actions impossibles sont grisées.</td></tr>
+	<tr><td><b>Code QR</b></td><td>Générateur écrit pour OS/2-0 : versions 1 à 10 (jusqu'à 271 octets), niveau de correction L, blocs Reed-Solomon entrelacés, choix du meilleur des 8 masques. Vérifié par un vérificateur indépendant (format BCH, syndromes Reed-Solomon) et, module par module, sur la capture d'écran.</td></tr>
+	<tr><td><b>Outils de développement (F12)</b></td><td>Panneau ancré sous la page, à la manière de <b>Firebug</b> : <b>Inspecteur</b> (arbre du DOM repliable, attributs, style calculé ; bouton de sélection puis clic dans la page, ou Inspecter du menu contextuel), <b>Débogueur</b> (scripts internes et externes), <b>Éditeur de style</b> (double clic sur une ligne d'une feuille : la page est restylée aussitôt), <b>Console</b> (messages de console.log, warn et error, erreurs des scripts ; Entrée évalue une expression dans la page, flèches haut et bas pour l'historique), <b>Réseau</b> (état, méthode, domaine, fichier, type, taille et durée de chaque requête ; clic : détails dans la barre d'état).</td></tr>
+	<tr><td><b>Presse-papiers</b></td><td>Ajouté pour l'occasion aux champs de saisie de PMWIN, avec les touches CUA d'OS/2 : Maj+Inser (coller), Ctrl+Inser (copier), Maj+Suppr (couper), et aussi Ctrl+V, Ctrl+C et Ctrl+X.</td></tr>
+	<tr><td><b>Diagnostic</b></td><td><code>SET BROWSER_TRACE=1</code> dans CONFIG.SYS recopie la console et les étapes du chargement sur la sortie standard (le port série sous QEMU).</td></tr>
+</table>
+
+Pour l'essayer sous QEMU, il faut une carte réseau : <code>qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d -nic user,model=e1000</code>. Les sites en <b>https://</b> demandent un proxy HTTP (menu Options - Proxy, ou <code>SET HTTP_PROXY=hôte:port</code>) : il n'y a pas de TLS dans OS/2-0. Du navigateur d'origine, ne sont pas encore repris : les flux RSS/Atom, les cadres &lt;iframe&gt; affichés dans la page (ils sont remplacés par un lien), la liste des répertoires ftp://, le texte des PDF et les images SVG.
+
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 
 Le fichier <b>LAUNCHPAD.PAS</b> est le <b>LaunchPad</b> d'OS/2 Warp 3 (<b>LAUNCHPD.EXE</b> sur le CD-ROM, nom 8.3 de l'ISO 9660) : PMSHELL le lance au démarrage du bureau (sauf si OS2.INI contient PMSHELL, LAUNCHPAD = 0), dans la session de Presentation Manager, et les deux programmes s'exécutent en même temps. C'est une petite barre toujours visible, en bas au centre de l'écran (déplaçable en glissant son fond ; position gardée dans OS2.INI).
@@ -895,7 +984,7 @@ Langue : la variable <code>LANGUAGE</code> de CONFIG.SYS (convention commune ave
 
 <img width="640" height="480" alt="OS/2-0 : onglet Langue du carnet Système - Paramètres" src="IMAGE/LANGUE.png" />
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL, PMCTLS.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, IFCONFIG.EXE, PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE, TESTVDM.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL, PMCTLS.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, IFCONFIG.EXE, PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE, TESTVDM.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>

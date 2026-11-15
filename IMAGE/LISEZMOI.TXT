@@ -13,8 +13,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
-              DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, IFCONFIG.EXE, PING.EXE,
-              HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
+              DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, IFCONFIG.EXE,
+              PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
@@ -864,6 +864,48 @@ Affichage : Actualiser (F5), frequence haute, normale, basse ou
 suspendue. Le noyau compte le temps du processeur (inactif, par
 processus, noyau) a chaque top de la minuterie : KrnTaskCtl 34 (etat
 du systeme) et 35 (processus).
+
+Navigateur Web (BROWSER.EXE)
+----------------------------
+OS/2 Warp 3 n'offrait qu'un navigateur a part (WebExplorer, de
+l'Internet Access Kit), vite depasse. BROWSER.PAS est le navigateur BROWSER.PAS du
+depot DEV-COOLS, refait pour Presentation Manager avec l'apparence
+d'OS/2 : cadre, menus, barre d'outils aux icones d'OS/2, champ d'adresse,
+barre d'etat, boites de message et dialogues de PM. Il s'ouvre par le
+menu contextuel du bureau (Navigateur Web), son icone du bureau (globe)
+ou son objet du dossier Systeme OS/2 ; BROWSER adresse le lance aussi
+depuis CMD. Il faut le reseau (TCPIP32.DLL, carte E1000 ou PCNET ; avec
+QEMU : -nic user,model=e1000) ; about:home est la page d'accueil.
+  Pages          HTML, CSS (feuilles <link> et <style>, marges, couleurs,
+                 polices), tableaux, listes, formulaires, images GIF,
+                 PNG, JPEG et BMP, UTF-8 converti en page 850, signets
+                 (OS2.INI), historique, Enregistrer sous (octets recus,
+                 confirmation avant de remplacer un fichier).
+  JavaScript     sous-ensemble d'ECMAScript 5/6 : document.write, DOM
+                 (getElementById, querySelector, innerHTML, style...),
+                 evenements (onclick, addEventListener, onload...),
+                 setTimeout/setInterval, JSON, Math, Date, console ; une
+                 boucle sans fin est arretee (budget d'instructions).
+  Code source    view-source:adresse ou Ctrl+U : lignes numerotees,
+                 balises, attributs, chaines, commentaires en couleurs.
+  Bouton 2       menu contextuel : Ouvrir le lien, Code QR du lien,
+                 Copier l'adresse du lien, Precedent, Suivant,
+                 Actualiser, Voir le code source, Enregistrer sous,
+                 Creer un code QR pour cette page, Inspecter.
+  Code QR        versions 1 a 10 (271 octets au plus), correction L ;
+                 a lire avec l'appareil photo d'un telephone.
+  F12            outils de developpement (comme Firebug) : Inspecteur
+                 (arbre du DOM, attributs, style calcule ; bouton de
+                 selection puis clic dans la page), Debogueur (scripts),
+                 Editeur de style (double clic sur une ligne : la page
+                 est restylee aussitot), Console (journal ; Entree evalue
+                 une expression, fleches haut et bas : historique),
+                 Reseau (etat, methode, domaine, fichier, type, taille,
+                 duree de chaque requete).
+Presse-papiers des champs de saisie de PM : Maj+Inser, Ctrl+Inser,
+Maj+Suppr (et Ctrl+V, Ctrl+C, Ctrl+X). HTTPS demande un proxy HTTP
+(Options - Proxy, ou SET HTTP_PROXY=hote:port). SET BROWSER_TRACE=1
+copie la console et les etapes du chargement sur la sortie standard.
 
 LaunchPad (LAUNCHPD.EXE)
 ------------------------

@@ -6,7 +6,14 @@
 
 Program Mode;
 
-Uses DOS{$IFDEF Windows},Windows{$ENDIF};
+Uses DOS{$IFDEF Windows}{$IFNDEF OS2PC},Windows{$ENDIF}{$ENDIF};
+
+{$IFDEF OS2PC}
+ { OS/2 : vitesse de repetition du clavier par DosDevIOCtl, categorie 4
+   (clavier), fonction 54h (KBD_SETTYPAMATICRATE) : delai en ms et
+   frequence en caracteres par seconde }
+ Function DosDevIOCtl(H,Category,Func,PParm,CbParmMax,PcbParm,PData,CbDataMax,PcbData:LongInt):LongInt;External 'DOSCALLS';
+{$ENDIF}
 
 Const
   { Registre par defaut pour les modes d'affichages texte de la Graphics Solution }
@@ -19,6 +26,10 @@ Var
  _Rate,_Delay,I:Integer;      { Compteur de boucle }
  {$IFDEF Windows}
   SmallRate,SmallDelay:SmallInt;
+ {$ENDIF}
+ {$IFDEF OS2PC}
+  RateDelay:Array[0..1]of Word;
+  CbParm:LongInt;
  {$ENDIF}
  SetRate,SetDelay:Boolean;
  Err:Word;
@@ -238,6 +249,14 @@ BEGIN
     WriteLn('Taux invalide (1 a 32)');
     Halt;
    End;
+   {$IFDEF OS2PC}
+    RateDelay[0]:=_Delay*250;
+    RateDelay[1]:=2+((_Rate-1)*28)Div 31;
+    CbParm:=4;
+    If DosDevIOCtl(0,4,$54,LongInt(@RateDelay),4,LongInt(@CbParm),0,0,0)<>0Then Begin
+     WriteLn('Erreur pendant la fixation du taux de repetition');
+    End;
+   {$ELSE}
    {$IFDEF Windows}
     SmallRate:=_Rate;
     If Not SystemParametersInfo(SPI_GETKEYBOARDSPEED,0,@SmallRate,SPIF_SENDCHANGE)Then Begin
@@ -252,6 +271,7 @@ BEGIN
     Regs.BL:=32-_Rate;
     Regs.BH:=_Delay-1;
     Intr($16,Regs);
+   {$ENDIF}
    {$ENDIF}
   End;
  End

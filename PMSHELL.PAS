@@ -104,7 +104,7 @@ Program PMSHELL;
 Const
   { messages }
   WM_CREATE = $0001; WM_DESTROY = $0002; WM_SIZE = $0007; WM_ACTIVATE = $000D;
-  WM_SETFOCUS = $000F; WM_COMMAND = $0020; WM_SYSCOMMAND = $0021; WM_PAINT = $0023; WM_CLOSE = $0029; WM_CONTROL = $0030;
+  WM_SETFOCUS = $000F; WM_COMMAND = $0020; WM_SYSCOMMAND = $0021; WM_PAINT = $0023; WM_TIMER = $0024; WM_CLOSE = $0029; WM_CONTROL = $0030;
   WM_VSCROLL = $0031; WM_MOUSEMOVE = $0070; WM_BUTTON1DOWN = $0071; WM_BUTTON1UP = $0072;
   WM_BUTTON1DBLCLK = $0073; WM_BUTTON2DOWN = $0074; WM_BUTTON2UP = $0075; WM_BUTTON2CLICK = $0416;
   WM_CHAR = $007A; WM_REQUEST = $1001;
@@ -148,7 +148,7 @@ Const
   OB_CMDWIN = 21; OB_LANG = 22; IC_LANG = 19; OB_COUNTRY = 23; IC_GLOBE = 20;
   OB_GAMES = 24; OB_GAME = 25; IC_CARDS = 21; IC_CHESS = 22; IC_TILES = 23;
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
-  OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27;
+  OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10;
   { controles du carnet des parametres }
@@ -163,7 +163,7 @@ Const
   { commandes des menus }
   CM_OPEN = 100; CM_REFRESH = 101; CM_ARRANGE = 102; CM_WINLIST = 103; CM_INFO = 104; CM_SHUTDOWN = 105;
   CM_HELP = 106; CM_PROPS = 107; CM_DELETE = 108; CM_CLOSE = 109; CM_PARENT = 110; CM_CMDHERE = 111;
-  CM_SHADOW = 112; CM_CREATE = 113; CM_SETTINGS = 114; CM_TASKMGR = 115;
+  CM_SHADOW = 112; CM_CREATE = 113; CM_SETTINGS = 114; CM_TASKMGR = 115; CM_BROWSER = 116;
 
 Type
   { objet d'une vue (icone) }
@@ -506,6 +506,20 @@ Begin
     S := Comspec;
     While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
     If (S <> '') And FileExists(S + 'TASKMGR.EXE') Then TaskMgrPath := S + 'TASKMGR.EXE';
+  End;
+End;
+
+{ Navigateur Web (BROWSER.EXE) : memes emplacements que TASKMGR.EXE }
+Function BrowserPath : String;
+Var S : String;
+Begin
+  BrowserPath := '';
+  If FileExists('C:\BROWSER.EXE') Then BrowserPath := 'C:\BROWSER.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'BROWSER.EXE') Then BrowserPath := S + 'BROWSER.EXE';
   End;
 End;
 
@@ -1015,6 +1029,8 @@ Begin
         Dummy := NewItem(V, IC_SHRED, OB_SHRED, 'Broyeur', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
+        If BrowserPath <> '' Then
+          Dummy := NewItem(V, IC_WEB, OB_GAME, 'Navigateur Web', BrowserPath);
         { fichiers et dossiers du repertoire du bureau, puis raccourcis }
         AddSorted(V, DeskDir);
         AddShadows(V, 'BUREAU');
@@ -1034,6 +1050,8 @@ Begin
         Dummy := NewItem(V, IC_INFO, OB_INFO, 'Informations systeme', '');
         If TaskMgrPath <> '' Then
           Dummy := NewItem(V, IC_TASKMGR, OB_GAME, 'Gestionnaire des taches', TaskMgrPath);
+        If BrowserPath <> '' Then
+          Dummy := NewItem(V, IC_WEB, OB_GAME, 'Navigateur Web', BrowserPath);
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
@@ -1159,6 +1177,7 @@ Begin
 End;
 
 Procedure DrawIcon(Hps, Icon, X, Y : LongInt);
+Var K, R : LongInt;
 Begin
   Case Icon Of
     IC_FOLDER : IconFolder(Hps, X, Y, CLR_YELLOW);
@@ -1329,6 +1348,31 @@ Begin
         FBox(Hps, X + 14, Y + 2, X + 28, Y + 19, CLR_YELLOW, CLR_DARKRED);
         GText(Hps, X + 17, Y + 3, 'z', CLR_DARKRED, CLR_YELLOW);
       End;
+    IC_WEB :
+      Begin
+        { globe terrestre (meridiens et parallele) et sa page Web }
+        For K := -12 To 12 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 150 Do Inc(R);
+          GLn(Hps, X + 16 - R, Y + 17 + K, X + 16 + R, Y + 17 + K, CLR_BLUE);
+          If R > 0 Then
+          Begin
+            GLn(Hps, X + 16 - R, Y + 17 + K, X + 16 - R, Y + 17 + K, CLR_DARKBLUE);
+            GLn(Hps, X + 16 + R, Y + 17 + K, X + 16 + R, Y + 17 + K, CLR_DARKBLUE);
+            GLn(Hps, X + 16 - R Div 2, Y + 17 + K, X + 16 - R Div 2, Y + 17 + K, CLR_CYAN);
+            GLn(Hps, X + 16 + R Div 2, Y + 17 + K, X + 16 + R Div 2, Y + 17 + K, CLR_CYAN);
+          End;
+        End;
+        GLn(Hps, X + 16, Y + 5, X + 16, Y + 29, CLR_CYAN);
+        GLn(Hps, X + 4, Y + 17, X + 28, Y + 17, CLR_CYAN);
+        FBox(Hps, X + 8, Y + 19, X + 13, Y + 25, CLR_GREEN, CLR_DARKGREEN);
+        FBox(Hps, X + 18, Y + 9, X + 23, Y + 15, CLR_GREEN, CLR_DARKGREEN);
+        { feuille "www" en bas a droite }
+        FBox(Hps, X + 17, Y + 1, X + 30, Y + 9, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 19, Y + 6, X + 28, Y + 6, CLR_DARKBLUE);
+        GLn(Hps, X + 19, Y + 4, X + 26, Y + 4, CLR_DARKBLUE);
+      End;
     IC_TASKMGR :
       Begin
         { moniteur : historique vert sur fond noir }
@@ -1476,6 +1520,7 @@ Begin
     MenuAdd(0, '');
     MenuAdd(CM_WINLIST, '~Liste des fenetres');
     If TaskMgrPath <> '' Then MenuAdd(CM_TASKMGR, '~Gestionnaire des taches');
+    If BrowserPath <> '' Then MenuAdd(CM_BROWSER, '~Navigateur Web');
     MenuAdd(CM_INFO, '~Informations systeme');
     MenuAdd(CM_SETTINGS, '~Parametres du systeme...');
     MenuAdd(CM_HELP, 'Ai~de');
@@ -2305,6 +2350,7 @@ Begin
     CM_SETTINGS : OpenNotebook(0);
     CM_SHUTDOWN : Shutdown;
     CM_TASKMGR : If TaskMgrPath <> '' Then RunPm(TaskMgrPath, '');
+    CM_BROWSER : If BrowserPath <> '' Then RunPm(BrowserPath, '');
     CM_CLOSE : CloseView(V);
     CM_PARENT : ParentFolder(V);
     CM_CMDHERE : RunProgram(Comspec, '', Vw(V)^.Path, False);
