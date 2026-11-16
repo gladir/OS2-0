@@ -149,8 +149,9 @@ Const
   OB_GAMES = 24; OB_GAME = 25; IC_CARDS = 21; IC_CHESS = 22; IC_TILES = 23;
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
   OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
+  OB_DEVKIT = 30; IC_PASDEV = 29;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
-  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10;
+  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
   BS_PUSHBUTTON = 0; BS_AUTOCHECKBOX = 2; BS_AUTORADIOBUTTON = 4; SS_TEXT = 1; SS_GROUPBOX = 2;
@@ -523,6 +524,20 @@ Begin
   End;
 End;
 
+{ Pascal Developer (PASDEV.EXE, dossier Developer Kit) : memes emplacements }
+Function PasDevPath : String;
+Var S : String;
+Begin
+  PasDevPath := '';
+  If FileExists('C:\PASDEV.EXE') Then PasDevPath := 'C:\PASDEV.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'PASDEV.EXE') Then PasDevPath := S + 'PASDEV.EXE';
+  End;
+End;
+
 Procedure ShowMsg(Text, Cap : String; Style : LongInt);
 Begin
   Dummy := WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z(Text), Z2(Cap), 0, Style Or MB_MOVEABLE);
@@ -873,7 +888,7 @@ Begin
     OB_COUNTRY : Icon := IC_GLOBE;
     OB_COLORS : Icon := IC_PALETTE;
     OB_LANG : Icon := IC_LANG;
-    OB_GAMES, OB_MMFOLDER : Icon := IC_FOLDER;
+    OB_GAMES, OB_MMFOLDER, OB_DEVKIT : Icon := IC_FOLDER;
   Else
     Icon := IC_FILE;
   End;
@@ -1031,6 +1046,8 @@ Begin
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
         If BrowserPath <> '' Then
           Dummy := NewItem(V, IC_WEB, OB_GAME, 'Navigateur Web', BrowserPath);
+        If PasDevPath <> '' Then
+          Dummy := NewItem(V, IC_FOLDER, OB_DEVKIT, 'Developer Kit', '');
         { fichiers et dossiers du repertoire du bureau, puis raccourcis }
         AddSorted(V, DeskDir);
         AddShadows(V, 'BUREAU');
@@ -1077,6 +1094,12 @@ Begin
         If FileExists('C:\ECHECS.EXE') Then Dummy := NewItem(V, IC_CHESS, OB_GAME, 'Echecs', 'C:\ECHECS.EXE');
         If FileExists('C:\KLONDIKE.EXE') Then
           Dummy := NewItem(V, IC_CARDS, OB_GAME, 'Solitaire - Klondike', 'C:\KLONDIKE.EXE');
+      End;
+    VK_DEVKIT :
+      Begin
+        { Developer Kit : l'EDI Pascal Developer (compilateur OS2PC.EXE) }
+        If PasDevPath <> '' Then
+          Dummy := NewItem(V, IC_PASDEV, OB_GAME, 'Pascal Developer', PasDevPath);
       End;
     VK_SETUP :
       Begin
@@ -1388,6 +1411,20 @@ Begin
         GLn(Hps, X + 21, Y + 19, X + 24, Y + 23, CLR_GREEN);
         FBox(Hps, X + 10, Y + 3, X + 21, Y + 7, CLR_PALEGRAY, CLR_BLACK);
       End;
+    IC_PASDEV :
+      Begin
+        { feuille de source Pascal (lignes colorees) et plume }
+        FBox(Hps, X + 4, Y + 2, X + 24, Y + 28, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 7, Y + 24, X + 16, Y + 24, CLR_DARKBLUE);
+        GLn(Hps, X + 9, Y + 21, X + 20, Y + 21, CLR_BLACK);
+        GLn(Hps, X + 9, Y + 18, X + 18, Y + 18, CLR_DARKRED);
+        GLn(Hps, X + 9, Y + 15, X + 21, Y + 15, CLR_BLACK);
+        GLn(Hps, X + 7, Y + 12, X + 13, Y + 12, CLR_DARKBLUE);
+        GText(Hps, X + 6, Y + 3, 'P', CLR_DARKBLUE, CLR_WHITE);
+        GLn(Hps, X + 16, Y + 4, X + 29, Y + 20, CLR_BROWN);
+        GLn(Hps, X + 17, Y + 4, X + 30, Y + 20, CLR_YELLOW);
+        GLn(Hps, X + 15, Y + 3, X + 16, Y + 4, CLR_BLACK);
+      End;
     IC_INFO, IC_HELP :
       Begin
         FBox(Hps, X + 4, Y + 4, X + 27, Y + 27, CLR_BLUE, CLR_DARKBLUE);
@@ -1397,21 +1434,23 @@ Begin
   End;
 End;
 
-{ etiquette : deux lignes de 14 caracteres au plus }
+{ etiquette : premiere ligne de 13 caracteres au plus (la cellule en
+  contient 14 : un espace reste entre deux etiquettes voisines, sinon
+  "Navigateur Web" et "Aide du bureau" se touchent), seconde de 14 }
 Procedure SplitLabel(S : String; Var L1, L2 : String);
 Var K : LongInt;
 Begin
   L2 := '';
-  If Length(S) <= 14 Then
+  If Length(S) <= 13 Then
   Begin
     L1 := S;
     Exit;
   End;
-  K := 15;
+  K := 14;
   While (K > 1) And (S[K] <> ' ') Do Dec(K);
   If K <= 1 Then
   Begin
-    L1 := Copy(S, 1, 14); L2 := Copy(S, 15, 255);
+    L1 := Copy(S, 1, 13); L2 := Copy(S, 14, 255);
   End
   Else
   Begin
@@ -2216,6 +2255,7 @@ Begin
     OB_LANG : OpenNotebook(7);
     OB_COUNTRY : OpenNb(2, 0);
     OB_GAMES : OpenFolder(VK_GAMES, '', 'Jeux');
+    OB_DEVKIT : OpenFolder(VK_DEVKIT, '', 'Developer Kit');
     OB_GAME : RunPm(It(K)^.Path, '');
     OB_MMFOLDER : OpenFolder(VK_MM, '', 'Multimedia');
     OB_SOUND :

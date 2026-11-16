@@ -101,6 +101,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Cette commande permet de déplacer un fichier.</td>
 		</tr>
 		<tr>
+			<td><b>PASDEV.PAS</b></td>
+			<td>Pascal Developer : environnement de développement intégré Pascal de Presentation Manager (dossier Developer Kit du bureau), dans l'esprit de Borland Pascal mais avec l'apparence d'OS/2 : fenêtres d'édition MDI à coloration syntaxique, compilation par OS2PC.EXE, exécution, boîte Information.</td>
+		</tr>
+		<tr>
 			<td><b>REPLACE.PAS</b></td>
 			<td>Cette commande permet de remplacer un fichier. Cette commande est un équivalent du DOS.</td>
 		</tr>
@@ -737,6 +741,10 @@ OS/2-0 reconnaît maintenant le matériel des machines virtuelles de <b>VirtualB
 
 Réglages conseillés de la machine virtuelle : type « OS/2 Warp 3 » (ou « Autre »), contrôleur graphique VBoxVGA ou VMSVGA, carte réseau Intel PRO/1000 MT Desktop ou PCnet-FAST III en NAT, souris PS/2. Les Additions ne demandent aucune installation : VBOXGST.DLL est chargé dès qu'il trouve le VMMDev.
 
+<img width="804" height="671" alt="OS/2-0 dans VirtualBox 7 sous Windows : le bureau et le dossier Système OS/2" src="IMAGE/VIRTUALBOX.png" />
+
+<i>OS/2-0 dans <b>VirtualBox 7.0</b> sous Windows (VirtualBox au-dessus de Hyper-V) : le bureau, le dossier Système OS/2 et le LaunchPad.</i>
+
 <b>Installation depuis VirtualBox.</b> Le CD-ROM d'installation s'arrêtait dès le démarrage du noyau : « OS/2-0 OS2LDR...... » restait affiché et plus rien ne se passait. Trois causes ont été trouvées et corrigées :
 
 <table>
@@ -947,6 +955,36 @@ Pour s'en assurer, le moteur (analyseur, CSS, mise en page, JavaScript) est auss
 </table>
 
 Pour l'essayer sous QEMU, il faut une carte réseau : <code>qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d -nic user,model=e1000</code>. Les sites en <b>https://</b> demandent un proxy HTTP (menu Options - Proxy, ou <code>SET HTTP_PROXY=hôte:port</code>) : il n'y a pas de TLS dans OS/2-0. Du navigateur d'origine, ne sont pas encore repris : les flux RSS/Atom, les cadres &lt;iframe&gt; affichés dans la page (ils sont remplacés par un lien), la liste des répertoires ftp://, le texte des PDF et les images SVG.
+
+<h3>Pascal Developer (PASDEV.PAS) et dossier Developer Kit</h3>
+
+Le bureau a maintenant un dossier <b>Developer Kit</b> qui contient <b>Pascal Developer</b> (PASDEV.EXE), un environnement de développement intégré Pascal dans l'esprit de Borland Pascal, mais avec l'apparence d'OS/2 :
+
+<img width="800" height="600" alt="OS/2-0 : le dossier Developer Kit du bureau et l'objet Pascal Developer" src="IMAGE/DEVKIT.png" />
+
+<img width="800" height="600" alt="OS/2-0 : Pascal Developer, source coloré et fenêtre Messages après la compilation" src="IMAGE/PASDEV.png" />
+
+<table>
+	<tr><th>Fonction</th><th>Description</th></tr>
+	<tr><td>Fenêtres MDI</td><td>Les sources s'ouvrent dans des fenêtres d'édition dessinées dans la zone de travail : barre de titre aux couleurs du système (glisser pour déplacer, double clic ou case de droite pour agrandir, case de gauche pour fermer), barres de défilement, coin de redimensionnement ; menu Fenêtre : Mosaïque, Cascade, Suivante (F6), Messages, Liste (Alt+0), Fermer tout.</td></tr>
+	<tr><td>Coloration syntaxique</td><td>Mots réservés, directives <code>{$...}</code>, commentaires <code>{ }</code>, <code>(* *)</code> et <code>//</code> (même sur plusieurs lignes), chaînes et caractères <code>#nn</code>, nombres décimaux et hexadécimaux.</td></tr>
+	<tr><td>Fichier, Édition, Recherche</td><td>Nouveau (Ctrl+N), Ouvrir (F3 : liste des répertoires et des sources), Enregistrer (F2), Enregistrer sous, Enregistrer tout, Fermer (Alt+F3), Quitter (Alt+X) ; Couper, Copier, Coller (presse-papiers de PM, touches CUA et Borland), Effacer, Tout sélectionner ; Rechercher (Ctrl+F), Occurrence suivante (Ctrl+L), Aller à la ligne (Ctrl+G), Ouvrir le fichier au curseur (Ctrl+Entrée, pour un <code>Uses</code> ou un <code>{$I}</code>).</td></tr>
+	<tr><td>Compiler (F9)</td><td>Le source est enregistré puis compilé par <b>OS2PC.EXE</b>, le compilateur OS2PC compilé par lui-même pour OS/2-0 ; sa sortie standard est redirigée vers un fichier et ses messages (erreurs, avertissements avec leur numéro de ligne) vont dans la fenêtre <b>Messages</b> : un double clic va à la ligne en cause.</td></tr>
+	<tr><td>Destination</td><td>Menu Compiler : <b>OS/2 Presentation Manager</b> (par défaut, symbole <code>OS2PM</code>) ou <b>OS/2 Console</b> (symbole <code>OS2CONSOLE</code>).</td></tr>
+	<tr><td>Exécuter (Ctrl+F9)</td><td>Compile si le source a changé, puis lance le programme : directement pour PM, dans une fenêtre OS/2 (pause à la fin) pour une console ; Paramètres : arguments du programme.</td></tr>
+	<tr><td>Information</td><td>Taille du code, des données, de la pile et du fichier .EXE, importations, lignes compilées, durée, avertissements et erreurs de la dernière compilation.</td></tr>
+	<tr><td>Barre d'état et menu contextuel</td><td>Ligne et colonne du curseur, Insertion ou Refrappe (touche Ins), fichier modifié, destination ; bouton 2 de la souris (ou Maj+F10) : Couper, Copier, Coller, Effacer, Tout sélectionner, Ouvrir le fichier au curseur, Aller à la ligne, Compiler, Exécuter, Information.</td></tr>
+</table>
+
+Alt+F9 (réduire) et F10 (menu) sont des touches du système d'OS/2 : la compilation est sur F9 (le « Make » de Borland). Deux exemples sont copiés sur le CD-ROM : <b>BONJOUR.PAS</b> (fenêtre de PM) et <b>HELLO.PAS</b> (console).
+
+<img width="800" height="600" alt="OS/2-0 : Pascal Developer, boîte Information (taille du code et des données du programme compilé)" src="IMAGE/PASDEV_INFO.png" />
+
+La boîte <b>À propos</b> montre Blaise Pascal écrivant OS/2 à la plume (image de 144 x 176 pels en 16 couleurs, tramée, rangée par rangée dans le source) :
+
+<img width="800" height="600" alt="OS/2-0 : Pascal Developer, boîte À propos (Blaise Pascal écrivant OS/2)" src="IMAGE/PASDEV_APROPOS.png" />
+
+Pour que OS2PC se compile lui-même et produise un OS2PC.EXE qui fonctionne sous OS/2-0, le compilateur a été corrigé : grandes tables allouées au démarrage (DosAllocMem), variables globales d'un type alias de <code>String</code>, <code>Pos</code> sur des chaînes Pascal (<code>Pos(#0, S)</code>), procédures imbriquées appelées par une procédure sœur (lien statique), variables portant le nom d'une fonction prédéfinie (<code>Mem</code>), <code>Move</code> avec recouvrement, procédure du programme prioritaire sur une prédéfinie du même nom (<code>InsLine</code> de Crt), caractère <code>#0</code> conservé par le lexeur. OS2PC.EXE produit les mêmes fichiers, octet pour octet, que le compilateur construit par Free Pascal (HELLO, TREE, KLONDIKE, BONJOUR, et PASDEV lui-même). Ses tables occupent environ 40 Mo et le tableau des jetons grandit avec le source : 64 Mo de mémoire suffisent pour un source d'environ 3 000 lignes ; PASDEV.PAS (4 000 lignes, 31 000 jetons) demande 128 Mo.
 
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 
