@@ -2255,6 +2255,11 @@ Begin
     LastImports := NumAfter(S, 'imports=');
   End
   Else If Pos('Lignes analysees', S) > 0 Then LastLines := NumAfter(S, ':')
+  Else If (Pos('OS2PC', S) = 1) And (Pos('OS2PC v', S) <> 1) Then
+  Begin
+    Inc(LastErrs);
+    MsgAdd(Trim(S), -2);
+  End
   Else If Pos('Runtime error', S) > 0 Then
   Begin
     Inc(LastErrs);

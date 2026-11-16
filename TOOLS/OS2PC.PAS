@@ -59488,7 +59488,8 @@ Begin
 {$ENDIF}
   If P = Nil Then
   Begin
-    WriteLn('OS2PC : memoire insuffisante pour les tables du compilateur (', Size, ' octets).');
+    WriteLn('OS2PC: FATAL: memoire insuffisante pour les tables du compilateur (', Size,
+            ' octets) : source trop grand pour la memoire de la machine.');
     Halt(8);
   End;
   FillChar(P^, Size, 0);

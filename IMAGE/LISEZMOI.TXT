@@ -951,6 +951,9 @@ du bureau, objet Pascal Developer (PASDEV fichier.pas le lance aussi).
 Alt+F9 (reduire) et F10 (menu) sont des touches du systeme : la
 compilation est sur F9. Exemples : BONJOUR.PAS (PM), HELLO.PAS (console).
 Sur le CD-ROM, les nouveaux fichiers et les .EXE vont sur D:.
+OS2PC.EXE (compilateur natif) occupe environ 40 Mo de tables ; avec 64 Mo
+de memoire, il compile un source d'environ 3 000 lignes ; au-dela (par
+exemple PASDEV.PAS lui-meme, 4 000 lignes), donner 128 Mo a la machine.
 
 LaunchPad (LAUNCHPD.EXE)
 ------------------------
