@@ -290,6 +290,7 @@ Function WinQueryActiveWindow(HDesk : LongInt) : LongInt; External 'PMWIN';
 Function WinSetCapture(HDesk, H : LongInt) : LongInt; External 'PMWIN';
 Function WinSetWindowText(H, P : LongInt) : LongInt; External 'PMWIN';
 Function WinMessageBox(HPar, HOwn, PText, PCap, Id, Fl : LongInt) : LongInt; External 'PMWIN';
+Function KTrapCtl(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
 Function WinCreateMenu(HPar, P : LongInt) : LongInt; External 'PMWIN';
 Function WinPopupMenu(HPar, HOwn, HMenu, X, Y, Id, Fs : LongInt) : LongInt; External 'PMWIN';
 Function WinSendMsg(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMWIN';
@@ -4161,10 +4162,31 @@ Begin
   If LogoH <> 0 Then Dummy := WinSetFocus(HWND_DESKTOP, LogoH);
 End;
 
+{ un programme s'est arrete sur une exception (KrnTaskCtl 21) : boite
+  SYS3175, comme OS/2 (sans elle, un programme de PM disparaissait sans
+  message : l'ecran du noyau est cache par PM) }
+Var TrapSeen : LongInt;
+    TrapTxt : Array[0..299] Of Byte;
+
+Procedure CheckTrap;
+Var N : LongInt;
+Begin
+  N := KTrapCtl(21, LongInt(@TrapTxt), 300, 0);
+  If N = TrapSeen Then Exit;
+  TrapSeen := N;
+  Dummy := WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, LongInt(@TrapTxt), Z2('SYS3175'), 0,
+                         MB_OK Or MB_ERROR Or MB_MOVEABLE);
+End;
+
 Function ViewProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
 Var V, K, X, Y, Dx, Dy, Sc, Hw : LongInt; Pt : Array[0..1] Of LongInt;
 Begin
   ViewProc := 0;
+  If (Msg = WM_TIMER) And ((Mp1 And $FFFF) = 11) Then
+  Begin
+    CheckTrap;
+    Exit;
+  End;
   V := ViewOf(H);
   If (V < 0) And (Msg = WM_CREATE) And (Creating >= 0) Then
   Begin
@@ -4560,6 +4582,9 @@ BEGIN
   Dummy := WinSetFocus(HWND_DESKTOP, Desk);
   Dummy := WinInvalidateRect(HWND_DESKTOP, 0, 1);
   PrfSet('PMSHELL', 'HWND', IStr(Desk));
+  { exceptions des programmes : verifiees chaque seconde }
+  TrapSeen := KTrapCtl(21, 0, 0, 0);
+  Dummy := WinStartTimer(Hab, Desk, 11, 1000);
   ShowLogo;
   StartLaunchPad;
   StartupCmd;

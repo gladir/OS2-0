@@ -105,11 +105,12 @@ Const
   ProcWinBase   = $00400000;
   ProcWinSize   = $00400000;
   ProcStackSize = $00040000;   { 256 Ko de pile par processus }
-  PhysProcBase  = $01800000;   { memoire physique des processus (>= 24 Mo) }
-  { region des DLL (8 Mo - 24 Mo), partagee : 8 Mo ne suffisaient plus
-    (bureau, NTFS.IFS, TLS32.DLL, session DOS dans une fenetre...) }
+  PhysProcBase  = $01000000;   { memoire physique des processus (>= 16 Mo) }
+  { region des DLL (8 Mo - 16 Mo), partagee ; quand elle est pleine, une
+    DLL va dans un bloc de memoire physique pris a la demande (PAlloc) :
+    la memoire des processus n'est reduite que si c'est necessaire }
   DllBase       = $00800000;
-  DllTop        = $01800000;
+  DllTop        = $01000000;
   ModFirstCap   = 16;          { table des modules : 16 entrees, doublee au besoin }
   DllAlign      = $00010000;   { placement des DLL relogees : 64 Ko }
 
@@ -653,6 +654,11 @@ Var
   ExcPtrs   : Array[0..1] Of LongInt;    { EXCEPTION_POINTERS }
   FilterAdr : LongInt;
   FilterArg : LongInt;
+  { derniere exception d'un processus (KrnTaskCtl 21 : le bureau l'affiche
+    dans une boite SYS3175, l'ecran texte du noyau etant cache par PM) }
+  TrapSeq   : LongInt;
+  TrapMsg   : String;
+  TrapProc  : LongInt;    { processus de la derniere exception }
 
 Const
   ExcNames : Array[0..19] Of String[40] = (
@@ -688,6 +694,14 @@ Begin
     Eip := MemL[0:F + 36];
   End;
   If Vec <= 19 Then Nm := ExcNames[Vec] Else Nm := 'Exception';
+  If CurProc >= 0 Then
+  Begin
+    Inc(TrapSeq);
+    TrapProc := CurProc;
+    TrapMsg := 'SYS3175 : ' + Procs[CurProc].Name + ' a provoque une exception et a ete arrete. TRAP ' +
+               HexStr(Vec, 4) + ' (' + Nm + ')  EIP=' + HexStr(Eip, 8) + '  CR2=' + HexStr(FaultAdr, 8) +
+               '  EBP=' + HexStr(MemL[0:F], 8);
+  End;
   { un programme OS2PC installe un filtre (SetUnhandledExceptionFilter) qui
     affiche "Runtime error N at ..." et termine le processus }
   If (CurProc >= 0) And (Procs[CurProc].Filter <> 0) Then
@@ -5893,7 +5907,7 @@ End;
 
 { --- Modules de liens dynamiques (DLL) ---
   Une DLL OS/2-0 (OS2PC, Library) est une image PE chargee (une seule
-  fois) dans la region 00800000h-017FFFFFh, projetee a l'identique et
+  fois) dans la region 00800000h-00FFFFFFh, projetee a l'identique et
   partagee par tous les processus. Elle est placee a sa base preferee
   (directive $IMAGEBASE d'OS2PC) si cette place est libre, sinon a la
   premiere place libre de la region : ses adresses absolues sont alors
@@ -6182,11 +6196,19 @@ Begin
     If (RelRva = 0) Or (RelSize = 0) Then
     Begin
       ConPutLn('SYS0191: ' + Path + ' n''est pas relocalisable et sa place (' + HexStr(Pref, 8) +
-               'h) est prise ou hors de la region des DLL (00800000h-017FFFFFh).');
+               'h) est prise ou hors de la region des DLL (00800000h-00FFFFFFh).');
       KFree(Buf);
       Exit;
     End;
     Base := DllFindSpace(ImgSize);
+    If Base = 0 Then
+    Begin
+      { region pleine : bloc de memoire physique (au-dela de 16 Mo, vu a la
+        meme adresse par tous les processus), garde tant que la DLL l'est }
+      Base := PAlloc((ImgSize + 4095) And Not 4095);
+      If Base <> 0 Then
+        KLog(UpStr(BaseName(Path)) + ' : region des DLL pleine, chargee en ' + HexStr(Base, 8) + 'h.');
+    End;
     If Base = 0 Then
     Begin
       ConPutLn('SYS0191: plus de place dans la region des DLL pour ' + Path + '.');
@@ -7036,7 +7058,31 @@ Begin
 End;
 
 Procedure ExitProcess(Code : LongInt);
+Var Nm : String;
 Begin
+  { programme de la session de PM arrete sur une erreur d'execution
+    Pascal (Runtime error 200 a 217, ecrite sur une sortie que personne
+    ne voit) : le bureau l'affiche (KrnTaskCtl 21) }
+  If (CurProc >= 0) And (Code >= 200) And (Code <= 217) And (Procs[CurProc].Sess = PmSess) And
+     (TrapProc <> CurProc) Then
+  Begin
+    Case Code Of
+      200 : Nm := 'division par zero';
+      201 : Nm := 'hors limites';
+      202 : Nm := 'debordement de pile';
+      203 : Nm := 'memoire insuffisante (tas)';
+      204 : Nm := 'pointeur non valable';
+      205 : Nm := 'debordement flottant';
+      207 : Nm := 'operation flottante non valable';
+      215 : Nm := 'debordement entier';
+      216 : Nm := 'acces memoire non valable';
+    Else
+      Nm := 'erreur d''execution';
+    End;
+    Inc(TrapSeq);
+    TrapMsg := 'SYS3175 : ' + Procs[CurProc].Name + ' s''est arrete : Runtime error ' + IntStr(Code) + ' (' + Nm + ').';
+  End;
+  If (CurProc >= 0) And (TrapProc = CurProc) Then TrapProc := -1;
   If CurProc >= 0 Then KillCurrentProcess(Code);
   ConPutLn('OS2KRNL: fin du noyau.');
   asm
@@ -7327,6 +7373,12 @@ Begin
               KrnTaskCtl := S;
             End;
           End;
+        End;
+   { 21 : derniere exception d'un processus : rend son numero (0 : aucune) ;
+     P1 : texte ASCIIZ (P2 octets au plus) }
+   21 : Begin
+          KrnTaskCtl := TrapSeq;
+          If (P1 <> 0) And (P2 > 0) Then PutPStr(P1, TrapMsg, P2);
         End;
    { 19 : bloc permanent de P1 octets (sans proprietaire : jamais libere ;
      ecran fantome du VGA de PMWIN, vu par tous les processus) }
@@ -18264,6 +18316,7 @@ BEGIN
   NDisk := 0;
   HdBoot := MemW[0:BootInfo + $34] = $4448;
   BootPartLba := 0; BootIfsBuf := 0; BootIfsSize := 0; FmtIfs := -1;
+  TrapSeq := 0; TrapMsg := ''; TrapProc := -1;
   BootIfsName := 'HPFS.IFS';
   If HdBoot Then
   Begin
@@ -18294,7 +18347,7 @@ BEGIN
   End;
   Banner;
   If PhysTop < PhysProcBase + $00400000 Then
-    KLog('OS2KRNL: au moins 28 Mo de memoire sont necessaires.');
+    KLog('OS2KRNL: au moins 20 Mo de memoire sont necessaires.');
   AtaInit;
   If (Not AtaFound) And (Not HdBoot) Then
   Begin

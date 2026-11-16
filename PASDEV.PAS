@@ -181,6 +181,7 @@ Var
   DlgPrompt, DlgDir : String;
   { boites Information et A propos }
   InfoFr, AboutFr : LongInt;
+  CompFr, CompCl, PrgMem, CompLastLine, CompLastPh : LongInt;   { boite de compilation, progression d'OS2PC }
   NameZ, NameZ2, TxtBuf, ArgBuf, FailBuf : Array[0..1023] Of Byte;
   MenuT : Array[0..4095] Of Byte;
   MenuLen : LongInt;
@@ -244,6 +245,8 @@ Function SetStdHandle(N, H : LongInt) : LongInt; External 'DOSCALLS';
 Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
 Function KTicks : LongInt; External 'DOSCALLS' Name 'GetTickCount';
 Function DosWaitChild(Action, Option, PRes, PPid, Pid : LongInt) : LongInt; External 'DOSCALLS';
+Function DosAllocSharedMem(PPb, PName, Cb, Flag : LongInt) : LongInt; External 'DOSCALLS';
+Function DosGetNamedSharedMem(PPb, PName, Flag : LongInt) : LongInt; External 'DOSCALLS';
 Function WinStartTimer(Hab, H, Id, Dt : LongInt) : LongInt; External 'PMWIN';
 Function WinStopTimer(Hab, H, Id : LongInt) : LongInt; External 'PMWIN';
 
@@ -2297,6 +2300,8 @@ Var
   CompErrN : String;
 
 Procedure CompileDone(R, Code : LongInt); Forward;
+Procedure CompBoxOpen; Forward;
+Procedure CompBoxClose; Forward;
 
 Function Compile : Boolean;
 Var W, R, K, T0 : LongInt; Src, Exe, ErrN, Args, S : String; Res : Array[0..1] Of LongInt;
@@ -2365,6 +2370,16 @@ Begin
   Res[0] := 0; Res[1] := 0;
   CompT0 := KTicks;
   CompErrN := ErrN;
+  { progression : OS2PC -PRG ecrit l'etape et la ligne dans la memoire
+    partagee \SHAREMEM\OS2PC.PRG ; boite de compilation }
+  If PrgMem <> 0 Then
+  Begin
+    For K := 0 To 15 Do WrL(PrgMem + K * 4, 0);
+    WrL(PrgMem, $31475250);
+    SetArgs(CompilerPath, '-PRG ' + Args);
+  End;
+  CompLastLine := -1; CompLastPh := -1;
+  CompBoxOpen;
   { EXEC_ASYNCRESULT : le resultat est lu par DosWaitChild (minuteur) }
   R := DosExecPgm(LongInt(@FailBuf), 64, 2, LongInt(@ArgBuf), 0, LongInt(@Res), Z(CompilerPath));
   Dummy := SetStdHandle(-11, 0);
@@ -2387,7 +2402,17 @@ Begin
   Res[0] := 0; Res[1] := 0; Pid := 0;
   { DCWA_PROCESS, DCWW_NOWAIT }
   R := DosWaitChild(0, 1, LongInt(@Res), LongInt(@Pid), CompPid);
-  If R = 129 Then Exit;                  { ERROR_CHILD_NOT_COMPLETE }
+  If R = 129 Then
+  Begin
+    { ERROR_CHILD_NOT_COMPLETE : boite de compilation mise a jour }
+    If (PrgMem <> 0) And (CompCl <> 0) Then
+      If (RdL(PrgMem + 8) <> CompLastLine) Or (RdL(PrgMem + 4) <> CompLastPh) Then
+      Begin
+        CompLastLine := RdL(PrgMem + 8); CompLastPh := RdL(PrgMem + 4);
+        Dummy := WinInvalidateRect(CompCl, 0, 0);
+      End;
+    Exit;
+  End;
   CompBusy := False;
   Dummy := WinStopTimer(Hab, Client, 7);
   If R <> 0 Then Res[1] := 0;
@@ -2399,6 +2424,7 @@ Procedure CompileDone(R, Code : LongInt);
 Var K : LongInt; S, ErrN, Exe, Src : String; EF : Text;
 Begin
   LastTime := KTicks - CompT0;
+  CompBoxClose;
   Close(CompEF);
   SetWait(False);
   ErrN := CompErrN; Exe := LastExe; Src := LastSrc;
@@ -2936,6 +2962,94 @@ Begin
     Dummy := WinSetActiveWindow(HWND_DESKTOP, Fr);
   End;
   OpenBox := Fr;
+End;
+
+{ boite de compilation (comme celle de Borland Pascal) : fichier,
+  destination, etape, ligne, erreurs ; fermee a la fin de la compilation }
+Function PhaseName(Ph : LongInt) : String;
+Begin
+  Case Ph Of
+    1 : PhaseName := 'Lecture du source';
+    2 : PhaseName := Acc('D^eclarations');
+    3 : PhaseName := Acc('Proc^edures et instructions');
+    4 : PhaseName := Acc('G^en^eration du code');
+    5 : PhaseName := Acc('^Ecriture de ') + NameOf(LastExe);
+    9 : PhaseName := Acc('Termin^ee');
+  Else
+    PhaseName := 'Chargement du compilateur';
+  End;
+End;
+
+Function CompProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Hps, Hh, Y, Ph, Ln, Tot, Pc, T, Bw : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  CompProc := 0;
+  Case Msg Of
+    WM_PAINT :
+      Begin
+        Hps := WinBeginPaint(H, 0, 0);
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        Dummy := WinFillRect(Hps, LongInt(@Rc), CLR_PALEGRAY);
+        Hh := Rc[3]; Bw := Rc[2];
+        Ph := 0; Ln := 0; Tot := 0;
+        If PrgMem <> 0 Then
+        Begin
+          Ph := RdL(PrgMem + 4); Ln := RdL(PrgMem + 8); Tot := RdL(PrgMem + 12);
+        End;
+        If (SrcWin >= 0) And (Wins[SrcWin].NLines > Tot) Then Tot := Wins[SrcWin].NLines;
+        If Ln > Tot Then Tot := Ln;
+        Y := 12;
+        InfoLine(Hps, Hh, Y, 'Fichier principal :', NameOf(LastSrc)); Y := Y + 20;
+        InfoLine(Hps, Hh, Y, 'Destination :', TargetName(LastTarget)); Y := Y + 20;
+        InfoLine(Hps, Hh, Y, Acc('^Etape :'), PhaseName(Ph)); Y := Y + 20;
+        InfoLine(Hps, Hh, Y, 'Ligne :', NStr(Ln) + ' / ' + NStr(Tot)); Y := Y + 20;
+        If PrgMem <> 0 Then
+        Begin
+          InfoLine(Hps, Hh, Y, 'Erreurs :', IStr(RdL(PrgMem + 16)) + '   Avertissements : ' + IStr(RdL(PrgMem + 20)));
+          Y := Y + 20;
+        End;
+        T := KTicks - CompT0;
+        InfoLine(Hps, Hh, Y, Acc('Dur^ee :'), IStr(T Div 1000) + ',' + IStr((T Mod 1000) Div 100) + ' s');
+        Y := Y + 28;
+        { barre de progression : lecture 0-20 %, declarations 20-30 %,
+          procedures 30-70 % (selon la ligne), code 70-90 %, ecriture 90 % }
+        If Tot <= 0 Then Tot := 1;
+        Case Ph Of
+          1 : Pc := (Ln * 20) Div Tot;
+          2 : Pc := 25;
+          3 : Pc := 30 + (Ln * 40) Div Tot;
+          4 : Pc := 80;
+          5 : Pc := 95;
+          9 : Pc := 100;
+        Else
+          Pc := 0;
+        End;
+        If Pc > 100 Then Pc := 100;
+        Rc[0] := 16; Rc[2] := Bw - 16; Rc[3] := Hh - Y; Rc[1] := Rc[3] - 18;
+        Dummy := WinFillRect(Hps, LongInt(@Rc), CLR_DARKGRAY);
+        Rc[0] := 17; Rc[1] := Rc[1] + 1; Rc[3] := Rc[3] - 1; Rc[2] := Bw - 17;
+        Dummy := WinFillRect(Hps, LongInt(@Rc), CLR_WHITE);
+        Rc[2] := 17 + ((Bw - 34) * Pc) Div 100;
+        If Rc[2] > Rc[0] Then Dummy := WinFillRect(Hps, LongInt(@Rc), CLR_DARKBLUE);
+        Dummy := WinEndPaint(Hps);
+      End;
+    WM_CLOSE : ;                         { la boite se ferme a la fin de la compilation }
+  Else
+    CompProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+Procedure CompBoxOpen;
+Begin
+  If CompFr <> 0 Then Dummy := WinDestroyWindow(CompFr);
+  CompFr := OpenBox('PDCOMP', 'Compilation', 440, 210, CompCl);
+End;
+
+Procedure CompBoxClose;
+Begin
+  If CompFr <> 0 Then Dummy := WinDestroyWindow(CompFr);
+  CompFr := 0; CompCl := 0;
+  Dummy := WinSetFocus(HWND_DESKTOP, Client);
 End;
 
 Procedure ShowInfo;
@@ -4078,6 +4192,9 @@ Begin
       Else MainProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
     WM_BUTTON1DOWN :
       Begin
+        { clic dans l'EDI : le clavier lui revient (apres la fenetre d'un
+          programme lance, la boite de compilation...) }
+        Dummy := WinSetFocus(HWND_DESKTOP, H);
         ButtonDown(S16(Mp1), CH - 1 - S16(Mp1 Shr 16), Hi16(Mp2), False);
         MainProc := 1;
       End;
@@ -4191,6 +4308,12 @@ BEGIN
   Dummy := WinRegisterClass(Hab, Z('PDOPEN'), LongInt(@OpenProc), 0, 0);
   Dummy := WinRegisterClass(Hab, Z('PDWINLIST'), LongInt(@WinListProc), 0, 0);
   Dummy := WinRegisterClass(Hab, Z('PDINFO'), LongInt(@InfoProc), 0, 0);
+  Dummy := WinRegisterClass(Hab, Z('PDCOMP'), LongInt(@CompProc), 0, 0);
+  { memoire partagee de la progression d'OS2PC (-PRG) }
+  PrgMem := 0;
+  If DosAllocSharedMem(LongInt(@PrgMem), Z('\SHAREMEM\OS2PC.PRG'), 4096, $13) <> 0 Then
+    If DosGetNamedSharedMem(LongInt(@PrgMem), Z('\SHAREMEM\OS2PC.PRG'), 3) <> 0 Then PrgMem := 0;
+  CompFr := 0; CompCl := 0;
   Dummy := WinRegisterClass(Hab, Z('PDABOUT'), LongInt(@AboutProc), 0, 0);
   Fl := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_SIZEBORDER Or FCF_MINBUTTON Or FCF_MAXBUTTON Or FCF_TASKLIST;
   Client := 0;

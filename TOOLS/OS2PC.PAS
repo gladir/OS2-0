@@ -205,6 +205,14 @@ Type
     Os2Flat     : LongInt;   { OS2F_BOOT / OS2F_LDR : image brute 16 bits (D16) }
   End;
 
+Type
+  { progression (-PRG) : memoire partagee \SHAREMEM\OS2PC.PRG creee par
+    Pascal Developer : [0] 'PRG1', [1] etape (1 lecture, 2 declarations,
+    3 procedures, 4 code, 5 ecriture, 9 fin), [2] ligne en cours, [3]
+    lignes lues, [4] erreurs, [5] avertissements }
+  TPrgArr = Array[0..15] Of LongInt;
+  PPrgArr = ^TPrgArr;
+
 Var
   { Options }
   Opts : TOptions;
@@ -213,6 +221,9 @@ Var
   ErrorCount : LongInt;
   WarnCount  : LongInt;
   TotalLines : LongInt;
+  PrgP       : PPrgArr;
+  PrgWanted  : Boolean;
+
 
   { Fichier de sortie interne (pour future emission) }
   OutF       : Text;
@@ -380,11 +391,17 @@ Begin
   Halt(EXIT_ERROR);
 End;
 
+Procedure PrgStep(Ph : LongInt);
+Begin
+  If PrgP <> Nil Then PrgP^[1] := Ph;
+End;
+
 Procedure WarnMsg(Const Msg : TString);
 Begin
   If Not Opts.Warnings Then Exit;
   WriteLn('OS2PC: warning: ', MsgLinePfx(Msg), Msg);
   Inc(WarnCount);
+  If PrgP <> Nil Then PrgP^[5] := WarnCount;
 End;
 
 { ------------------------------------------------------------ }
@@ -569,6 +586,8 @@ Begin
       ShowHelp
     Else If Arg = '-v' Then
       Opts.Verbose := True
+    Else If Arg = '-PRG' Then
+      PrgWanted := True
     Else If Arg = '-d' Then
       Opts.DebugMode := True
     Else If Arg = '-w' Then
@@ -1441,6 +1460,10 @@ Begin
     ReadLn(LexSrcF, LexLine);
     Inc(LexLineNo);
     Inc(TotalLines);
+    If PrgP <> Nil Then
+    Begin
+      PrgP^[2] := TotalLines; PrgP^[3] := TotalLines;
+    End;
     LexColNo := 1;
   End;
 End;
@@ -22910,6 +22933,8 @@ Var
   WI      : LongInt;
   FDeref  : Boolean;     { F(args)^... := expr }
 Begin
+  If PrgP <> Nil Then
+    If (EP >= 0) And (EP < TokenCount) Then PrgP^[2] := TokenPool^[EP].Line;
   If EPAtEnd Then Exit;
   If Opts.DebugMode And Opts.Verbose Then
     WriteLn('  [stmt] ligne ', TokenPool^[EP].Line, ' : ', TokenPool^[EP].Val,
@@ -37738,21 +37763,49 @@ Var
   BcImports  : Array[0..BC_MAX_IMP-1] of TBcImport;
   BcImportCnt: LongInt;
 
-{ --- Helpers ecriture binaire --- }
+{ --- Helpers ecriture binaire ---
+  Tampon de 64 Ko devant PEBinF : sous OS/2-0, chaque BlockWrite de 1 a 4
+  octets devenait un DosWrite, puis une ecriture de secteur du disque
+  (HPFS.IFS) ; la compilation d'un petit programme faisait des millions
+  d'acces au disque. }
+
+Var
+  PEOut : Array[0..65535] Of Byte;
+  PEOutN, PEOutDone : LongInt;
+
+Procedure PEOutReset;
+Begin
+  PEOutN := 0; PEOutDone := 0;
+End;
+
+Procedure PEFlush;
+Begin
+  If PEOutN > 0 Then BlockWrite(PEBinF, PEOut, PEOutN);
+  PEOutDone := PEOutDone + PEOutN;
+  PEOutN := 0;
+End;
+
+{ position dans le fichier (octets ecrits et en attente) }
+Function PEPos : LongInt;
+Begin
+  PEPos := PEOutDone + PEOutN;
+End;
 
 Procedure PEWrB(B: Byte);
 Begin
-  BlockWrite(PEBinF, B, 1);
+  If PEOutN >= 65536 Then PEFlush;
+  PEOut[PEOutN] := B;
+  Inc(PEOutN);
 End;
 
 Procedure PEWrW(W: Word);
 Begin
-  BlockWrite(PEBinF, W, 2);
+  PEWrB(W And $FF); PEWrB((W Shr 8) And $FF);
 End;
 
 Procedure PEWrD(D: LongInt);
 Begin
-  BlockWrite(PEBinF, D, 4);
+  PEWrB(D And $FF); PEWrB((D Shr 8) And $FF); PEWrB((D Shr 16) And $FF); PEWrB((D Shr 24) And $FF);
 End;
 
 Procedure PEWrZeros(N: LongInt);
@@ -37784,7 +37837,7 @@ End;
 
 Procedure PEPadTo(Pos: LongInt);
 Begin
-  While FilePos(PEBinF) < Pos Do PEWrB(0);
+  While PEPos < Pos Do PEWrB(0);
 End;
 
 { ============================================================ }
@@ -45294,8 +45347,10 @@ Begin
   End;
 
   { ========== Ecrire le fichier PE ========== }
+  PrgStep(5);
   Assign(PEBinF, FileName);
   Rewrite(PEBinF, 1);
+  PEOutReset;
 
   { ===== DOS MZ Header (64 octets) ===== }
   PEWrW($5A4D);         { e_magic = 'MZ' }
@@ -45537,7 +45592,7 @@ Begin
       PEPadTo(IdataFileBase + HntPerImp[ImpIdx]);
       PEWrW(0);                              { Hint = 0 }
       PEWrStr(BcImports[ImpIdx].ApiName);    { Nom ASCIIZ }
-      If Odd(FilePos(PEBinF)) Then PEWrB(0); { Aligner sur 2 }
+      If Odd(PEPos) Then PEWrB(0); { Aligner sur 2 }
     End;
 
   { --- DLL Name strings --- }
@@ -45545,7 +45600,7 @@ Begin
   Begin
     PEPadTo(IdataFileBase + DnmPerDll[DI]);
     PEWrStr(DllGroups[DI].DllName);
-    If Odd(FilePos(PEBinF)) Then PEWrB(0);
+    If Odd(PEPos) Then PEWrB(0);
   End;
 
   { Remplir le reste de la section }
@@ -45615,9 +45670,10 @@ Begin
 
   If Opts.Verbose Then
     WriteLn('  PE genere : ', FileName, ' (',
-            FilePos(PEBinF), ' octets, code=', BcCodeLen,
+            PEPos, ' octets, code=', BcCodeLen,
             ' data=', BcDataLen, ' imports=', BcImportCnt, ')');
 
+  PEFlush;
   Close(PEBinF);
 
   { -GD / -GP : carte des procedures (adresses virtuelles) }
@@ -45625,6 +45681,7 @@ Begin
   Begin
     Assign(PEBinF, ReplaceExt(FileName, '.map'));
     Rewrite(PEBinF, 1);
+    PEOutReset;
     For I := 0 To BcLabelCnt - 1 Do
       If (Copy(BcLabels^[I].Name, 1, 5) = '_TPF_') Or (Copy(BcLabels^[I].Name, 1, 5) = '_TPX_') Or
          (Copy(BcLabels^[I].Name, 1, 5) = '_TPE_') Or
@@ -45633,6 +45690,7 @@ Begin
         PEWrStrNoZ(HexMap(PEImgBase + PE_TEXT_RVA + BcLabels^[I].Offset) + ' ' +
                    BcLabels^[I].Name + #13#10);
       End;
+    PEFlush;
     Close(PEBinF);
   End;
 End;
@@ -45670,6 +45728,7 @@ Begin
 
   Assign(PEBinF, FileName);
   Rewrite(PEBinF, 1);
+  PEOutReset;
 
   { ===== COFF File Header (20 octets) ===== }
   PEWrW($014C);           { Machine = i386 }
@@ -45778,6 +45837,7 @@ Begin
   { ===== String Table ===== }
   PEWrD(4);               { Taille de la string table (min = 4) }
 
+  PEFlush;
   Close(PEBinF);
 
   If Opts.Verbose Then
@@ -48341,6 +48401,7 @@ Begin
   Else
     WriteLn('OS2PC: ', Opts.SrcFile, '(', L, ',', C, ') Erreur: ', Msg);
   Inc(ErrorCount);
+  If PrgP <> Nil Then PrgP^[4] := ErrorCount;
   If OutFOpen Then Begin Close(OutF); OutFOpen := False End;
   Halt(EXIT_ERROR);
 End;
@@ -59092,6 +59153,7 @@ Var
   I : LongInt;
 Begin
   ShowBanner;
+  PrgStep(1);
 
   { Ouvrir le fichier source }
   Assign(LexSrcF, Opts.SrcFile);
@@ -59163,6 +59225,7 @@ Begin
   { Enregistrer toutes les chaines dans le pool de donnees }
   TokenPoolRegisterStrings;
 
+  PrgStep(2);
   If Opts.Verbose Then
     WriteLn('  Tokens: ', TokenCount, '  Donnees: ', DataCount,
             '  Symboles: ', SymCount, '  Types: ', TypeCount);
@@ -59215,6 +59278,7 @@ Begin
             '  Symboles=', SymCount);
 
   { Analyser les declarations PROCEDURE et FUNCTION (TODO 09) }
+  PrgStep(3);
   ParseProcDecls;
   If IsLibrary Then Os2ResolveExports;
 
@@ -59242,6 +59306,7 @@ Begin
     If Opts.AsmOutput Then
       EmitOpen(ReplaceExt(Opts.OutFile, '.asm'));
 
+    PrgStep(4);
     EmitHeader;
     EmitDataSeg;
     EmitCodeSeg;
@@ -59540,6 +59605,28 @@ Begin
   PERelRva := BigAlloc(SizeOf(TArr_PERelRva));
 End;
 
+{ -PRG : memoire de progression de Pascal Developer (OS2PC natif) }
+{$IFDEF OS2PC}
+Function DosGetNamedSharedMem(PPb, PName, Flag : LongInt) : LongInt; External 'DOSCALLS';
+{$ENDIF}
+Procedure PrgAttach;
+{$IFDEF OS2PC}
+Var Nm : Array[0..31] Of Byte; S : TString; K : LongInt; P : PPrgArr;
+{$ENDIF}
+Begin
+  PrgP := Nil;
+  If Not PrgWanted Then Exit;
+{$IFDEF OS2PC}
+  S := '\SHAREMEM\OS2PC.PRG';
+  For K := 1 To Length(S) Do Nm[K - 1] := Ord(S[K]);
+  Nm[Length(S)] := 0;
+  P := Nil;
+  If DosGetNamedSharedMem(LongInt(@P), LongInt(@Nm), 3) = 0 Then
+    If P <> Nil Then
+      If P^[0] = $31475250 Then PrgP := P;
+{$ENDIF}
+End;
+
 BEGIN
   AllocTables;
   ErrorCount := 0;
@@ -59547,8 +59634,11 @@ BEGIN
   TotalLines := 0;
   OutFOpen   := False;
 
+  PrgP := Nil; PrgWanted := False;
   ParseArgs;
+  PrgAttach;
   Run;
   Cleanup;
+  PrgStep(9);
   Halt(EXIT_OK);
 END.
