@@ -13,7 +13,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
-              DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, IFCONFIG.EXE,
+              DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
+              OS2PC.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -913,6 +914,43 @@ Presse-papiers des champs de saisie de PM : Maj+Inser, Ctrl+Inser,
 Maj+Suppr (et Ctrl+V, Ctrl+C, Ctrl+X). HTTPS demande un proxy HTTP
 (Options - Proxy, ou SET HTTP_PROXY=hote:port). SET BROWSER_TRACE=1
 copie la console et les etapes du chargement sur la sortie standard.
+
+Pascal Developer (PASDEV.EXE, dossier Developer Kit)
+---------------------------------------------------
+Environnement de developpement Pascal (source PASDEV.PAS), dans l'esprit
+de Borland Pascal mais avec l'apparence d'OS/2 : dossier Developer Kit
+du bureau, objet Pascal Developer (PASDEV fichier.pas le lance aussi).
+  - fenetres d'edition multiples (MDI) dans la zone de travail : barre
+    de titre (glisser : deplacer ; double clic ou case de droite :
+    agrandir ; case de gauche : fermer), barres de defilement, coin de
+    redimensionnement ; Fenetre : Mosaique, Cascade, Suivante (F6),
+    Messages, Liste (Alt+0), Fermer tout ;
+  - coloration syntaxique : mots reserves, directives {$...},
+    commentaires { } (* *) //, chaines et caracteres #nn, nombres ;
+  - Fichier : Nouveau (Ctrl+N), Ouvrir (F3, liste des repertoires et
+    des sources), Enregistrer (F2), Enregistrer sous, Enregistrer tout,
+    Fermer (Alt+F3), Quitter (Alt+X) ; Edition : Couper, Copier, Coller
+    (presse-papiers de PM), Effacer, Tout selectionner ; Recherche :
+    Rechercher (Ctrl+F), Occurrence suivante (Ctrl+L), Aller a la ligne
+    (Ctrl+G), Ouvrir le fichier au curseur (Ctrl+Entree : Uses, $I) ;
+  - Compiler (F9) : le source est enregistre puis compile par OS2PC.EXE
+    (OS/2 Pascal Compiler, OS2PC.PAS compile par lui-meme) avec -v -w ;
+    sa sortie standard est redirigee vers un fichier et ses messages
+    vont dans la fenetre Messages (double clic ou Entree : la ligne en
+    cause). Destination (menu Compiler) : OS/2 Presentation Manager par
+    defaut (symbole OS2PM), ou OS/2 Console (symbole OS2CONSOLE) ;
+  - Executer (Ctrl+F9) : compile si besoin, puis lance le programme (PM :
+    directement ; Console : dans une fenetre OS/2, pause a la fin) ;
+    Parametres : arguments du programme ;
+  - Information : taille du code, des donnees, de la pile et du .EXE,
+    importations, lignes compilees, duree, avertissements et erreurs ;
+  - barre d'etat : ligne et colonne, Insertion ou Refrappe (Ins),
+    Modifie, destination ; menu contextuel (bouton 2 ou Maj+F10) ;
+  - A propos : Blaise Pascal ecrivant OS/2, Sylvain Maltais, 2026,
+    licence MIT.
+Alt+F9 (reduire) et F10 (menu) sont des touches du systeme : la
+compilation est sur F9. Exemples : BONJOUR.PAS (PM), HELLO.PAS (console).
+Sur le CD-ROM, les nouveaux fichiers et les .EXE vont sur D:.
 
 LaunchPad (LAUNCHPD.EXE)
 ------------------------

@@ -968,6 +968,7 @@ Var
   LexMemIdx      : LongInt;
   LexMemCount    : LongInt;
   TokenPoolLimit : LongInt;      { capacite utilisee du pool de tokens          }
+  TokCap         : LongInt;      { jetons alloues dans TokenPool                }
 
 { Forward declarations TODO 03 }
 Procedure LexHandleDollarDirective; Forward;
@@ -983,7 +984,9 @@ Function  D16Selected : Boolean; Forward;
 
 Const
   MAX_DATA   = {$IFDEF OS2PC}2048{$ELSE}{$IFDEF FPC}65536{$ELSE}128{$ENDIF}{$ENDIF};
-  MAX_TOKENS = {$IFDEF OS2PC}24576{$ELSE}{$IFDEF FPC}524288{$ELSE}4096{$ENDIF}{$ENDIF};
+  { OS2PC natif : le pool grandit a la demande (TokenGrow), au plus MAX_TOKENS }
+  MAX_TOKENS = {$IFDEF FPC}524288{$ELSE}4096{$ENDIF};
+  TOK_INIT = 8192;
   TOKENS_W32 = {$IFDEF FPC}16384{$ELSE}4096{$ENDIF};  { limite des autres cibles }
 
   { Prefixes de mangling pour les labels generes }
@@ -3233,13 +3236,13 @@ Begin
 End;
 
 { ---- TokenPoolAdd : ajouter un token dans le pool ---- }
+Procedure TokenGrow; Forward;
+
 Procedure TokenPoolAdd(Const T : TToken);
 Begin
   If TokenCount >= TokenPoolLimit Then
-  Begin
-    WarnMsg('pool de tokens plein');
-    Exit;
-  End;
+    FatalError('source trop grand : plus de ' + IntToStr_(TokenPoolLimit) + ' jetons');
+  If TokenCount >= TokCap Then TokenGrow;
   TokenPool^[TokenCount] := T;
   Inc(TokenCount);
 End;
@@ -59471,6 +59474,7 @@ End;
 { ------------------------------------------------------------ }
 {$IFDEF OS2PC}
 Function DosAllocMem(PPb, Cb, Flag : LongInt) : LongInt; External 'DOSCALLS';
+Function DosFreeMem(P : LongInt) : LongInt; External 'DOSCALLS';
 {$ENDIF}
 
 Function BigAlloc(Size : LongInt) : Pointer;
@@ -59491,9 +59495,34 @@ Begin
   BigAlloc := P;
 End;
 
+{ TokenGrow : doubler le pool de jetons (OS2PC natif : la memoire d'OS/2-0
+  ne permet pas d'allouer d'emblee MAX_TOKENS jetons de 284 octets) }
+Procedure TokenGrow;
+Var P : ^TArr_TokenPool; N : LongInt;
+Begin
+  N := TokCap * 2;
+  If N > MAX_TOKENS Then N := MAX_TOKENS;
+  If N <= TokCap Then FatalError('source trop grand : plus de ' + IntToStr_(TokCap) + ' jetons');
+  P := BigAlloc(N * SizeOf(TToken));
+  Move(TokenPool^, P^, TokCap * SizeOf(TToken));
+{$IFDEF OS2PC}
+  If DosFreeMem(LongInt(TokenPool)) <> 0 Then ;
+{$ELSE}
+  FreeMem(TokenPool, TokCap * SizeOf(TToken));
+{$ENDIF}
+  TokenPool := Pointer(P);
+  TokCap := N;
+End;
+
 Procedure AllocTables;
 Begin
+{$IFDEF OS2PC}
+  TokCap := TOK_INIT;
+  TokenPool := BigAlloc(TOK_INIT * SizeOf(TToken));
+{$ELSE}
+  TokCap := MAX_TOKENS;
   TokenPool := BigAlloc(SizeOf(TArr_TokenPool));
+{$ENDIF}
   TokVariantCase := BigAlloc(SizeOf(TArr_TokVariantCase));
   SymTab := BigAlloc(SizeOf(TArr_SymTab));
   TypeTab := BigAlloc(SizeOf(TArr_TypeTab));

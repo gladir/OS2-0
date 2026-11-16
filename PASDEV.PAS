@@ -222,6 +222,7 @@ Function WinSetWindowText(H, P : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryWindowText(H, Cch, P : LongInt) : LongInt; External 'PMWIN';
 Function WinSetFocus(HD, H : LongInt) : LongInt; External 'PMWIN';
 Function WinSetActiveWindow(HD, H : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryActiveWindow(HD : LongInt) : LongInt; External 'PMWIN';
 Function WinSetPointer(HD, H : LongInt) : LongInt; External 'PMWIN';
 Function WinQuerySysPointer(HD, Id, Ld : LongInt) : LongInt; External 'PMWIN';
 Function WinSetCapture(HD, H : LongInt) : LongInt; External 'PMWIN';
@@ -1357,7 +1358,7 @@ Begin
   TextAt(Hps, X + 4, Y + 4, R, S, CLR_BLACK, CLR_PALEGRAY);
   { message ou rappel des touches }
   If StatusMsg <> '' Then S := StatusMsg
-  Else S := Acc('F2 Enregistrer  F3 Ouvrir  F9 Compiler  Ctrl+F9 Ex^ecuter');
+  Else S := Acc('F2 Enreg.  F3 Ouvrir  F9 Compiler  Ctrl+F9 Ex^ecuter');
   Bevel(Hps, 4, Y + 3, X - 4, CH - 2, False);
   TextAt(Hps, 8, Y + 4, X - 6, S, CLR_BLACK, CLR_PALEGRAY);
 End;
@@ -1611,22 +1612,48 @@ Begin
 End;
 
 Procedure Tile;
-Var K, N, C, R, I, Wd, Ht, W : LongInt;
+Var K, N, C, R, I, Wd, Ht, W, AreaH : LongInt;
 Begin
-  N := NZ;
-  If N = 0 Then Exit;
+  If NZ = 0 Then Exit;
+  { Messages en bas sur toute la largeur, les sources en grille au-dessus }
+  AreaH := WorkH;
+  If (MsgWin >= 0) And Wins[MsgWin].Used Then
+  Begin
+    Wins[MsgWin].Max := False;
+    Wins[MsgWin].H := MaxI(80, WorkH Div 3);
+    Wins[MsgWin].X := 0; Wins[MsgWin].W := CW;
+    Wins[MsgWin].Y := WorkH - Wins[MsgWin].H;
+    AreaH := Wins[MsgWin].Y;
+  End;
+  N := 0;
+  For K := 0 To NZ - 1 Do
+    If Wins[ZOrd[K]].Kind = WK_EDIT Then Inc(N);
+  If N = 0 Then
+  Begin
+    Redraw;
+    Exit;
+  End;
   C := 1;
   While C * C < N Do Inc(C);
   R := (N + C - 1) Div C;
-  If (C - 1) * R >= N Then Dec(C);
-  Wd := CW Div C; Ht := WorkH Div R;
-  For K := 0 To N - 1 Do
+  Wd := CW Div C; Ht := AreaH Div R;
+  I := 0;
+  For K := 0 To NZ - 1 Do
   Begin
     W := ZOrd[K];
-    I := K;
-    Wins[W].Max := False;
-    Wins[W].X := (I Mod C) * Wd; Wins[W].Y := (I Div C) * Ht;
-    Wins[W].W := Wd; Wins[W].H := Ht;
+    If Wins[W].Kind = WK_EDIT Then
+    Begin
+      Wins[W].Max := False;
+      Wins[W].X := (I Mod C) * Wd; Wins[W].Y := (I Div C) * Ht;
+      Wins[W].W := Wd; Wins[W].H := Ht;
+      { derniere rangee incomplete : les fenetres s'elargissent }
+      If (I Div C = R - 1) And (N Mod C <> 0) Then
+      Begin
+        Wins[W].W := CW Div (N Mod C);
+        Wins[W].X := (I Mod C) * Wins[W].W;
+      End;
+      Inc(I);
+    End;
   End;
   Redraw;
 End;
@@ -2380,7 +2407,7 @@ End;
 Var ShieldOk : Boolean;
 
 Procedure RunProgram;
-Var W, Rc, S, Hc : LongInt; Res : Array[0..1] Of LongInt; Exe : String;
+Var W, Rc, S, Hc : LongInt; Res : Array[0..1] Of LongInt; Exe, Cmd : String;
 Begin
   W := SrcWin;
   If W < 0 Then Exit;
@@ -2389,6 +2416,9 @@ Begin
      Not FileExists(LastExe) Then
     If Not Compile Then Exit;
   Exe := LastExe;
+  { repeindre l'EDI maintenant : sinon le dessin en attente (compilation)
+    passerait par-dessus la fenetre du programme }
+  Dummy := WinUpdateWindow(Client);
   SetArgs(Exe, RunParams);
   Res[0] := 0; Res[1] := 0;
   If Target = 0 Then
@@ -2400,16 +2430,21 @@ Begin
   End
   Else
   Begin
-    { console : nouvelle session dans une fenetre OS/2, pause a la fin }
+    { console : nouvelle session dans une fenetre OS/2 ; l'interpreteur de
+      commandes lance le programme puis PAUSE (la fenetre reste ouverte) }
+    Cmd := GetEnv('COMSPEC');
+    If (Cmd = '') Or Not FileExists(Cmd) Then Cmd := ExeDir + 'CMD.EXE';
+    If Not FileExists(Cmd) Then Cmd := 'C:\CMD.EXE';
+    If RunParams = '' Then SetArgs(Cmd, '/C ' + Exe + ' /C PAUSE')
+    Else SetArgs(Cmd, '/C "' + Exe + ' ' + RunParams + '" /C PAUSE');
     S := KSes(4, Z(NameOf(Exe)), 0);
     If S < 0 Then
     Begin
       ShowMsg('Trop de sessions : fermez un programme.', Acc('Ex^ecuter'), MB_OK Or MB_WARNING);
       Exit;
     End;
-    Dummy := KSes(16, S, 1);
     Dummy := KSes(12, S, 0);
-    Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), Z(Exe));
+    Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), Z(Cmd));
     If Rc <> 0 Then
     Begin
       Dummy := KSes(12, -1, 0);
@@ -2427,7 +2462,8 @@ Begin
       Dummy := KSes(3, S, 0);
     StatusMsg := Acc('Ex^ecution de ') + NameOf(Exe) + ' (OS/2 Console)';
   End;
-  Redraw;
+  { la barre d'etat seulement : la fenetre du programme est devant l'EDI }
+  InvRect(0, WorkH, CW, CH);
 End;
 
 { ==================================================================== }
@@ -3276,7 +3312,7 @@ Begin
   MItem(MIS_TEXT, 0, CM_TILE, Acc('~Mosa^ique'));
   MItem(MIS_TEXT, 0, CM_CASCADE, '~Cascade');
   MItem(MIS_TEXT, 0, CM_NEXT, '~Suivante' + Chr(9) + 'F6');
-  MItem(MIS_TEXT, 0, CM_MESSAGES, '~Messages');
+  MItem(MIS_TEXT, 0, CM_MESSAGES, 'M~essages');
   MItem(MIS_TEXT, 0, CM_WIN0, '~Liste...' + Chr(9) + 'Alt+0');
   MSep;
   MItem(MIS_TEXT, 0, CM_CLOSEALL, '~Fermer tout');
@@ -3437,6 +3473,9 @@ Begin
     CM_KEYS : ShowKeys;
     CM_ABOUT : ShowAbout;
   End;
+  { apres un menu, le clavier revient a l'editeur (sauf dialogue ouvert) }
+  If (DlgFr = 0) And (InfoFr = 0) And (AboutFr = 0) And (WinQueryActiveWindow(HWND_DESKTOP) = Frame) Then
+    Dummy := WinSetFocus(HWND_DESKTOP, Client);
 End;
 
 { ==================================================================== }
@@ -3704,7 +3743,7 @@ End;
 { Clavier                                                               }
 { ==================================================================== }
 
-Function KeyEdit(W, Fl, Vk, Ch : LongInt) : Boolean;
+Function KeyEdit(W, Fl, Vk, KCh : LongInt) : Boolean;
 Var Sh, Ct : Boolean; L : LongInt; S : String;
 Begin
   KeyEdit := True;
@@ -3833,9 +3872,9 @@ Begin
         End;
     End;
   { caracteres }
-  If ((Fl And KC_CHAR) <> 0) And (Ch >= 32) And (Ch < 256) And ((Fl And (KC_CTRL Or KC_ALT)) = 0) Then
+  If ((Fl And KC_CHAR) <> 0) And (KCh >= 32) And (KCh < 256) And ((Fl And (KC_CTRL Or KC_ALT)) = 0) Then
   Begin
-    TypeChar(W, Chr(Ch));
+    TypeChar(W, Chr(KCh));
     RedrawText(W);
     Exit;
   End;
@@ -3870,7 +3909,7 @@ Begin
 End;
 
 { touches de l'EDI ; Faux : a traiter par l'editeur ou PM }
-Function KeyGlobal(Fl, Vk, Ch : LongInt) : Boolean;
+Function KeyGlobal(Fl, Vk, KCh : LongInt) : Boolean;
 Var C : LongInt; Ct, Al, Sh : Boolean;
 Begin
   KeyGlobal := True;
@@ -3890,13 +3929,13 @@ Begin
   End;
   If ((Fl And KC_CHAR) <> 0) Or ((Fl And KC_VIRTUALKEY) = 0) Then
   Begin
-    C := Ch;
+    C := KCh;
     If (C >= 1) And (C <= 26) Then C := C + 64;
     C := C And $DF;
     If Al And Not Ct Then
     Begin
       If C = Ord('X') Then Begin Command(CM_EXIT); Exit; End;
-      If Ch = Ord('0') Then Begin Command(CM_WIN0); Exit; End;
+      If KCh = Ord('0') Then Begin Command(CM_WIN0); Exit; End;
     End;
     If Ct And Not Al Then
     Begin
@@ -3929,7 +3968,7 @@ End;
 { ==================================================================== }
 
 Function MainProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
-Var Rc : Array[0..3] Of LongInt; Fl, Vk, Ch, W, X, Y : LongInt;
+Var Rc : Array[0..3] Of LongInt; Fl, Vk, KCh, W, X, Y : LongInt;
 Begin
   MainProc := 0;
   Case Msg Of
@@ -3967,13 +4006,13 @@ Begin
     WM_COMMAND : Command(Lo16(Mp1));
     WM_CHAR :
       Begin
-        Fl := Lo16(Mp1); Vk := Hi16(Mp2); Ch := Lo16(Mp2);
+        Fl := Lo16(Mp1); Vk := Hi16(Mp2); KCh := Lo16(Mp2);
         If (Fl And KC_KEYUP) <> 0 Then
         Begin
           MainProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
           Exit;
         End;
-        If KeyGlobal(Fl, Vk, Ch) Then
+        If KeyGlobal(Fl, Vk, KCh) Then
         Begin
           MainProc := 1;
           Exit;
@@ -3988,7 +4027,7 @@ Begin
           End;
         End
         Else If W >= 0 Then
-          If KeyEdit(W, Fl, Vk, Ch) Then
+          If KeyEdit(W, Fl, Vk, KCh) Then
           Begin
             If StatusMsg <> '' Then
             Begin
