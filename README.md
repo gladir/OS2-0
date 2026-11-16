@@ -73,6 +73,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Cette commande permet de convertir un fichier EXE en binaire (COM).</td>
 		</tr>
 		<tr>
+			<td><b>EXPLORER.PAS</b></td>
+			<td>Explorateur OS2-0 : explorateur de fichiers à deux volets dans le style de Windows 95 (arbre des dossiers, Grandes icônes ou Détails, barre d'état), porté de l'Explorateur Pasdows ; application de Presentation Manager indépendante (Système OS/2 → Productivité, menu contextuel du bureau).</td>
+		</tr>
+		<tr>
 			<td><b>FIND.PAS</b></td>
 			<td>Cette commande permet de rechercher une chaine de caractères dans des fichiers. Cette commande est un équivalent du DOS.</td>
 		</tr>
@@ -738,6 +742,25 @@ OS/2 Warp 3 n'avait pas de calculatrice. OS/2-0 en a une : celle de Pasdows 95 (
 </table>
 
 Le calcul est celui de Pasdows 95, en double précision : chiffres, virgule, +/-, quatre opérations, racine carrée (<code>sqrt</code>), pourcentage, inverse (<code>1/x</code>), égal qui répète la dernière opération, mémoire (MC, MR, MS, M+, indicateur <b>M</b>), Retour arrière, CE et C ; affichage sur 15 chiffres significatifs, notation scientifique au-delà (<code>1,5e+020</code>). Clavier : chiffres, <code>.</code> ou <code>,</code>, <code>+ - * /</code>, Entrée ou <code>=</code>, <code>@</code> (racine), <code>%</code>, <code>R</code> (1/x), F9 (+/-), Retour arrière, Suppr (CE), Échap (C), Ctrl+L, R, M, P (mémoire), Ctrl+C et Ctrl+V (le texte collé est tapé touche par touche). Les exceptions du coprocesseur sont masquées et chaque résultat est vérifié : une division par zéro ou un dépassement affiche un message (« Impossible de diviser par zéro. », « Dépassement de capacité. ») au lieu d'une TRAP 0010 sous VirtualBox.
+
+<h3>Explorateur OS2-0 (EXPLORER.PAS)</h3>
+
+Le Workplace Shell d'OS/2 montre les fichiers dans des dossiers d'objets, une fenêtre par dossier. Ce modèle convient à beaucoup de travaux, mais pas à tous : certains utilisateurs veulent parfois un explorateur à deux volets, l'arbre des dossiers d'un côté et le contenu de l'autre. <b>Explorateur OS2-0</b> répond à ce besoin sans toucher au bureau : c'est une application de Presentation Manager indépendante (comme un traitement de texte ou la Calculatrice), portée de l'Explorateur Pasdows de Pasdows 95, qui faisait partie du noyau <code>VMM32</code> et devient ici un programme qui utilise l'API d'OS/2. On l'ouvre de deux façons : l'objet <b>Explorateur OS2-0</b> du dossier <b>Productivité</b> (Système OS/2), ou le menu contextuel du bureau (bouton 2), entre <i>Gestionnaire des tâches</i> et <i>Navigateur Web</i>. <code>EXPLORER [dossier]</code> à l'invite l'ouvre aussi.
+
+<img width="640" height="480" alt="OS/2-0 : l'Explorateur OS2-0 (arbre des dossiers et contenu de C:, Grandes icônes)" src="IMAGE/EXPLORATEUR.png" />
+<img width="640" height="480" alt="OS/2-0 : l'Explorateur OS2-0 en mode Détails" src="IMAGE/EXPLORATEUR_DETAILS.png" />
+
+<table>
+	<tr><th>Partie</th><th>Description</th></tr>
+	<tr><td>Arbre « Tous les dossiers »</td><td>Bureau, Poste de travail, lecteurs (disque, CD-ROM, disquette), dossiers ; cases + et −, traits pointillés, branches dépliées à la demande ; l'arbre suit le dossier affiché. Clavier : flèches haut et bas (le contenu suit), gauche (replier ou remonter), droite (déplier).</td></tr>
+	<tr><td>« Contenu de »</td><td><b>Grandes icônes</b> (cellules de 100 × 70 comme Pasdows 95, étiquettes sur deux lignes) ou <b>Détails</b> (nom, taille en Ko, type, date de modification). Dossiers d'abord, puis fichiers, par ordre alphabétique. Barres de défilement, flèches, Début, Fin, Pg.préc., Pg.suiv., une lettre : objet suivant qui commence par elle.</td></tr>
+	<tr><td>Barre d'état</td><td>Nombre d'objets ou objet choisi (taille en octets ; espace libre et capacité d'un lecteur), espace disque libre du lecteur.</td></tr>
+	<tr><td>Ouvrir (double clic, Entrée)</td><td>Dossier ou lecteur : l'affiche. <code>.EXE</code>, <code>.COM</code> : lance le programme (nouvelle session, comme les objets programme du bureau) ; <code>.CMD</code>, <code>.BAT</code> : par CMD.EXE ; textes et sources (<code>.TXT</code>, <code>.PAS</code>, <code>.INI</code>…) : Pascal Developer ; <code>.WAV</code> : Audio numérique ; <code>.HTM</code> : Navigateur Web.</td></tr>
+	<tr><td>Menus</td><td>Fichier (Ouvrir, Propriétés, Fermer), Affichage (Grandes icônes, Détails, Actualiser F5), Aller à (Dossier parent : Retour arrière, Poste de travail), ? (À propos). Bouton 2 : menu contextuel Ouvrir et Propriétés. Tab passe de l'arbre au contenu.</td></tr>
+	<tr><td>Propriétés (Alt+Entrée)</td><td>Fichier : type, emplacement, taille, date, attributs. Lecteur : système de fichiers (HPFS, NTFS, FAT, CDFS), espace utilisé, libre, capacité.</td></tr>
+</table>
+
+Le portage remplace les services du noyau de Pasdows par l'API d'OS/2 : <code>DosFindFirst</code>/<code>DosFindNext</code> (FILEFINDBUF3 : nom, taille, attributs, date) au lieu du parcours direct des répertoires FAT et ISO 9660 ; <code>DosQueryCurrentDisk</code> pour les lecteurs, <code>DosQueryFSInfo</code> (étiquette de volume, espace libre) et <code>DosQueryFSAttach</code> (nom du système de fichiers) ; <code>DosExecPgm</code> pour ouvrir ; fenêtre standard, gabarit de menu, <code>WinPopupMenu</code> et <code>WinMessageBox</code> de PM. Les icônes de Pasdows 95 (grille de 32 × 32 mise à l'échelle : 32 points dans le contenu, 16 dans l'arbre et les Détails) sont redessinées par <code>WinFillRect</code> et <code>GpiLine</code> ; les reliefs, les en-têtes et la barre d'état gardent l'apparence de Windows 95. Langue : variable <code>LANGUAGE</code> (français, anglais, allemand, italien, espagnol).
 
 <h3>Multimédia : Audio numérique (DIGAUDIO.PAS), MDM.DLL et pilotes des cartes son</h3>
 

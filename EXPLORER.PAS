@@ -1,0 +1,2120 @@
+{ EXPLORER.PAS - Explorateur OS2-0 (Presentation Manager).
+
+  Compilation : OS2PC EXPLORER.PAS EXPLORER.EXE
+
+  Explorateur de fichiers dans le style de Windows 95, porte de
+  l'Explorateur Pasdows (KERNEL/VMM32.PAS de Pasdows 95, ou il faisait
+  partie du noyau) vers l'API d'OS/2 : c'est une application de
+  Presentation Manager independante, qui ne change rien au Workplace Shell.
+  Elle complete les dossiers d'objets du bureau pour ceux qui preferent un
+  explorateur a deux volets :
+    - a gauche, l'arbre "Tous les dossiers" : Bureau, Poste de travail,
+      lecteurs, dossiers (cases + et -, traits pointilles, deplie a la
+      demande) ;
+    - a droite, le "Contenu de" du dossier choisi : Grandes icones (comme
+      Pasdows 95) ou Details (nom, taille, type, date de modification) ;
+    - en bas, la barre d'etat en deux parties (objets ou objet choisi,
+      espace disque libre).
+  Double clic ou Entree : ouvre un dossier ou un lecteur, lance un
+  programme (.EXE, .COM ; .CMD et .BAT par CMD.EXE), ouvre un document
+  avec son application (texte et sources : Pascal Developer ; .WAV : Audio
+  numerique ; .HTM : Navigateur Web). Retour arriere : dossier parent ; F5 :
+  actualiser ; Tab : passe de l'arbre au contenu ; fleches, Debut, Fin,
+  Pg.prec., Pg.suiv. ; bouton 2 : menu contextuel (Ouvrir, Proprietes).
+
+  API d'OS/2 : DosFindFirst/DosFindNext (FILEFINDBUF3), DosQueryCurrentDisk,
+  DosQueryFSInfo (etiquette, espace libre), DosQueryFSAttach (CDFS, HPFS,
+  NTFS...), DosExecPgm, WinCreateStdWindow, gabarit de menu et
+  WinPopupMenu, WinFillRect, GpiLine, WinDrawText, WinMessageBox.
+  Langue : variable LANGUAGE (FR, EN, GR, IT, SP). }
+
+Program Explorer;
+
+Const
+  WM_SIZE = $0007; WM_COMMAND = $0020; WM_PAINT = $0023; WM_CLOSE = $0029; WM_QUIT = $002A;
+  WM_BUTTON1DOWN = $0071; WM_BUTTON1DBLCLK = $0073; WM_BUTTON2DOWN = $0074;
+  WM_CHAR = $007A;
+  FCF_TITLEBAR = 1; FCF_SYSMENU = 2; FCF_SIZEBORDER = 8; FCF_MINBUTTON = $10; FCF_MAXBUTTON = $20;
+  FCF_TASKLIST = $800;
+  HWND_DESKTOP = 1; HWND_TOP = 3;
+  SWP_SIZE = 1; SWP_MOVE = 2; SWP_ZORDER = 4; SWP_SHOW = 8; SWP_ACTIVATE = $80;
+  MIS_TEXT = 1; MIS_SEPARATOR = 4; MIS_SUBMENU = $10;
+  MIA_CHECKED = $2000; MIA_DISABLED = $4000; MM_SETITEMATTR = $0192;
+  MB_OK = 0; MB_INFORMATION = $30; MB_WARNING = $20; MB_ERROR = $40; MB_MOVEABLE = $4000;
+  KC_CHAR = 1; KC_VIRTUALKEY = 2; KC_SHIFT = 8; KC_CTRL = $10; KC_ALT = $20; KC_KEYUP = $40;
+  VK_BACKSPACE = $05; VK_TAB = $06; VK_BACKTAB = $07; VK_NEWLINE = $08; VK_ESC = $0F;
+  VK_PAGEUP = $11; VK_PAGEDOWN = $12; VK_END = $13; VK_HOME = $14; VK_LEFT = $15; VK_UP = $16;
+  VK_RIGHT = $17; VK_DOWN = $18; VK_ENTER = $1E; VK_F5 = $24;
+  { couleurs (palette de PM ; equivalents de Windows 95) }
+  cBlue = 1; cRed = 2; cLime = 4; cAqua = 5; cYellow = 6; cGray = 8; cNavy = 9;
+  cMaroon = 10; cGreen = 12; cTeal = 13; cOlive = 14; cSilver = 15;
+  cWhite = -2; cBlack = -1;
+  DT_RIGHT = $200;
+  { icones (numeros de Pasdows 95) }
+  icComputer = 1; icText = 6; icFolder = 7; icCdrom = 8; icFloppy = 9; icDisplay = 11;
+  icDocs = 23; icApp = 25; icHardDisk = 26; icExplorer = 28; icWeb = 39; icSound = 32;
+  { types d'entrees }
+  ekFile = 0; ekDir = 1; ekHdd = 2; ekCd = 3; ekFloppy = 4;
+  { commandes }
+  cmOpen = 101; cmProps = 102; cmClose = 103;
+  cmIcons = 111; cmDetails = 112; cmRefresh = 113;
+  cmUp = 121; cmComputer = 122;
+  cmAbout = 131;
+  { dimensions }
+  MaxE = 1500;
+  TreeMax = 256;
+  TreeRow = 18;
+  CellW = 100; CellH = 70;
+  RowH = 18;
+  SbW = 17;
+
+Type
+  PByte = ^Byte;
+  PLong = ^LongInt;
+  TEnt = Record
+    Nm : String;
+    Size, Kind, FDate, FTime, Attr : LongInt;
+  End;
+  PEnt = ^TEnt;
+
+Function WinInitialize(Fl : LongInt) : LongInt; External 'PMWIN';
+Function WinCreateMsgQueue(Hab, N : LongInt) : LongInt; External 'PMWIN';
+Function WinGetMsg(Hab, P, HF, First, Last : LongInt) : LongInt; External 'PMWIN';
+Function WinDispatchMsg(Hab, P : LongInt) : LongInt; External 'PMWIN';
+Function WinRegisterClass(Hab, PName, Proc, Style, Cb : LongInt) : LongInt; External 'PMWIN';
+Function WinCreateStdWindow(HPar, Style, PFl, PCls, PTitle, CStyle, Hmod, Id, PClient : LongInt) : LongInt; External 'PMWIN';
+Function WinDestroyWindow(H : LongInt) : LongInt; External 'PMWIN';
+Function WinDefWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMWIN';
+Function WinBeginPaint(H, Hps, P : LongInt) : LongInt; External 'PMWIN';
+Function WinEndPaint(Hps : LongInt) : LongInt; External 'PMWIN';
+Function WinFillRect(Hps, P, C : LongInt) : LongInt; External 'PMWIN';
+Function WinDrawText(Hps, Cch, P, PR, Fg, Bg, Fl : LongInt) : LongInt; External 'PMWIN';
+Function WinInvalidateRect(H, P, Inc : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryWindowRect(H, P : LongInt) : LongInt; External 'PMWIN';
+Function WinSetWindowPos(H, HB, X, Y, Cx, Cy, Fl : LongInt) : LongInt; External 'PMWIN';
+Function WinSetWindowText(H, P : LongInt) : LongInt; External 'PMWIN';
+Function WinMessageBox(HPar, HOwn, PText, PCap, Id, Fl : LongInt) : LongInt; External 'PMWIN';
+Function WinPopupMenu(HPar, HOwn, HMenu, X, Y, Id, Fs : LongInt) : LongInt; External 'PMWIN';
+Function WinPostMsg(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMWIN';
+Function WinSendMsg(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMWIN';
+Function WinCreateMenu(HPar, P : LongInt) : LongInt; External 'PMWIN';
+Function WinQuerySysValue(HD, Ix : LongInt) : LongInt; External 'PMWIN';
+Function WinSetFocus(HD, H : LongInt) : LongInt; External 'PMWIN';
+Function WinSetActiveWindow(HD, H : LongInt) : LongInt; External 'PMWIN';
+Function WinWindowFromID(H, Id : LongInt) : LongInt; External 'PMWIN';
+Function WinAlarm(HD, Typ : LongInt) : LongInt; External 'PMWIN';
+Function GpiSetColor(Hps, C : LongInt) : LongInt; External 'PMGPI';
+Function GpiMove(Hps, P : LongInt) : LongInt; External 'PMGPI';
+Function GpiLine(Hps, P : LongInt) : LongInt; External 'PMGPI';
+Function DosAllocMem(PPb, Cb, Flag : LongInt) : LongInt; External 'DOSCALLS';
+Function DosScanEnv(PName, PPValue : LongInt) : LongInt; External 'DOSCALLS';
+Function DosFindFirst(PSpec, PHDir, Attr, PBuf, CbBuf, PCount, Level : LongInt) : LongInt; External 'DOSCALLS';
+Function DosFindNext(HDir, PBuf, CbBuf, PCount : LongInt) : LongInt; External 'DOSCALLS';
+Function DosFindClose(HDir : LongInt) : LongInt; External 'DOSCALLS';
+Function DosQueryCurrentDisk(PDisk, PLogical : LongInt) : LongInt; External 'DOSCALLS';
+Function DosQueryFSInfo(Disk, Level, PBuf, Cb : LongInt) : LongInt; External 'DOSCALLS';
+Function DosQueryFSAttach(PDev, Ordinal, Level, PBuf, PCb : LongInt) : LongInt; External 'DOSCALLS';
+Function DosExecPgm(PObj, CbObj, Flags, PArg, PEnv, PRes, PName : LongInt) : LongInt; External 'DOSCALLS';
+Function DosSetDefaultDisk(Disk : LongInt) : LongInt; External 'DOSCALLS';
+Function DosSetCurrentDir(PName : LongInt) : LongInt; External 'DOSCALLS';
+Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
+
+Var
+  Hab, Hmq, Frame, Client, MenuHw, Lang, Dummy : LongInt;
+  NameZ, NameZ2, TxtBuf, ArgBuf, FailBuf : Array[0..1023] Of Byte;
+  FindBuf : Array[0..4095] Of Byte;
+  MenuT : Array[0..2047] Of Byte;
+  MenuLen : LongInt;
+  CW, CH, Hps : LongInt;
+  { contenu du dossier affiche }
+  CurPath : String;            { '' : Poste de travail ; 'C:' ; 'C:\DIR' }
+  EntBase, NEnt, Sel, Top, View : LongInt;
+  Idx : Array[0..MaxE - 1] Of LongInt;
+  Truncated : Boolean;
+  { arbre : '*' Bureau, '' Poste de travail, 'C:', 'C:\DIR' ; F : 1
+    deplie, 2 sans sous-dossier }
+  NdP : Array[0..TreeMax - 1] Of String[79];
+  NdD, NdF : Array[0..TreeMax - 1] Of LongInt;
+  TN, TTop, TSel, TVis : LongInt;
+  Focus : LongInt;             { 0 contenu, 1 arbre }
+  { lecteurs }
+  DrvLbl : Array[0..25] Of String[15];
+  DrvFs : Array[0..25] Of String[15];
+  DrvKind : Array[0..25] Of LongInt;
+  DrvMap : LongInt;
+  { icones }
+  IcX, IcY, IcS : LongInt;
+  { menu contextuel }
+  CtxMenu : LongInt;
+  FpuCw : Word;
+  DirNames : Array[0..127] Of String[40];
+
+{ ==================================================================== }
+{ Utilitaires                                                           }
+{ ==================================================================== }
+
+Procedure WrB(A, V : LongInt);
+Var Q : PByte;
+Begin
+  Q := Pointer(A);
+  Q^ := V;
+End;
+
+Function RdB(A : LongInt) : LongInt;
+Var Q : PByte;
+Begin
+  Q := Pointer(A);
+  RdB := Q^;
+End;
+
+Function RdL(A : LongInt) : LongInt;
+Var Q : PLong;
+Begin
+  Q := Pointer(A);
+  RdL := Q^;
+End;
+
+Function RdW(A : LongInt) : LongInt;
+Begin
+  RdW := RdB(A) Or (RdB(A + 1) Shl 8);
+End;
+
+Procedure WrW(A, V : LongInt);
+Begin
+  WrB(A, V And 255);
+  WrB(A + 1, (V Shr 8) And 255);
+End;
+
+Procedure PutZ(A : LongInt; S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do WrB(A + K - 1, Ord(S[K]));
+  WrB(A + Length(S), 0);
+End;
+
+Function GetZ(A : LongInt) : String;
+Var S : String; C : LongInt;
+Begin
+  S := '';
+  If A <> 0 Then
+  Begin
+    C := RdB(A);
+    While (C <> 0) And (Length(S) < 250) Do
+    Begin
+      S := S + Chr(C);
+      Inc(A);
+      C := RdB(A);
+    End;
+  End;
+  GetZ := S;
+End;
+
+Function Z(S : String) : LongInt;
+Begin
+  PutZ(LongInt(@NameZ), S);
+  Z := LongInt(@NameZ);
+End;
+
+Function Z2(S : String) : LongInt;
+Begin
+  PutZ(LongInt(@NameZ2), S);
+  Z2 := LongInt(@NameZ2);
+End;
+
+Function Lo16(V : LongInt) : LongInt;
+Begin
+  Lo16 := V And $FFFF;
+End;
+
+Function Hi16(V : LongInt) : LongInt;
+Begin
+  Hi16 := (V Shr 16) And $FFFF;
+End;
+
+Function S16(V : LongInt) : LongInt;
+Begin
+  V := V And $FFFF;
+  If V >= $8000 Then V := V - $10000;
+  S16 := V;
+End;
+
+Function MaxI(A, B : LongInt) : LongInt;
+Begin
+  If A > B Then MaxI := A Else MaxI := B;
+End;
+
+Function MinI(A, B : LongInt) : LongInt;
+Begin
+  If A < B Then MinI := A Else MinI := B;
+End;
+
+Function IStr(V : LongInt) : String;
+Var S : String;
+Begin
+  Str(V, S);
+  IStr := S;
+End;
+
+Function UpStr(S : String) : String;
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If (S[K] >= 'a') And (S[K] <= 'z') Then S[K] := Chr(Ord(S[K]) - 32);
+  UpStr := S;
+End;
+
+Function GetEnvS(N : String) : String;
+Var P : LongInt;
+Begin
+  P := 0;
+  If DosScanEnv(Z(N), LongInt(@P)) = 0 Then GetEnvS := GetZ(P) Else GetEnvS := '';
+End;
+
+Function FileExists(N : String) : Boolean;
+Var H, C, Rc : LongInt;
+Begin
+  H := -1; C := 1;
+  Rc := DosFindFirst(Z(N), LongInt(@H), $07, LongInt(@FindBuf), 4096, LongInt(@C), 1);
+  If H <> -1 Then Dummy := DosFindClose(H);
+  FileExists := (Rc = 0) And (C > 0);
+End;
+
+{ Texte dans la langue courante (page de codes 850) }
+Function L(Fr, En, De, It, Es : String) : String;
+Begin
+  Case Lang Of
+    1 : L := En;
+    2 : L := De;
+    3 : L := It;
+    4 : L := Es;
+  Else
+    L := Fr;
+  End;
+End;
+
+Procedure LangInit;
+Var S : String;
+Begin
+  S := UpStr(GetEnvS('LANGUAGE'));
+  If (S <> '') And (S[1] = '"') Then Delete(S, 1, 1);
+  S := Copy(S, 1, 2);
+  If (S = '') Or (S = 'FR') Then Lang := 0
+  Else If (S = 'GR') Or (S = 'DE') Then Lang := 2
+  Else If S = 'IT' Then Lang := 3
+  Else If (S = 'SP') Or (S = 'ES') Then Lang := 4
+  Else Lang := 1;
+End;
+
+Function AppName : String;
+Begin
+  AppName := L('Explorateur OS2-0', 'OS2-0 Explorer', 'OS2-0-Explorer', 'Esplora risorse OS2-0',
+               'Explorador de OS2-0');
+End;
+
+Procedure Msg(S : String; Fl : LongInt);
+Begin
+  Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(S), Z2(AppName), 0, Fl Or MB_MOVEABLE);
+End;
+
+Function BaseName(P : String) : String;
+Var K : LongInt;
+Begin
+  K := Length(P);
+  While (K > 0) And (P[K] <> '\') Do Dec(K);
+  BaseName := Copy(P, K + 1, 255);
+End;
+
+Function ExtOf(Nm : String) : String;
+Var K : LongInt;
+Begin
+  K := Length(Nm);
+  While (K > 0) And (Nm[K] <> '.') Do Dec(K);
+  If K = 0 Then ExtOf := '' Else ExtOf := UpStr(Copy(Nm, K + 1, 255));
+End;
+
+{ Taille courte : Ko, Mo ou Go (comme Pasdows 95) }
+Function SizeKb(Kb : Double) : String;
+Var G : LongInt; S : String;
+Begin
+  If Kb < 1024 Then S := IStr(Trunc(Kb)) + L(' Ko', ' KB', ' KB', ' KB', ' KB')
+  Else If Kb < 1048576 Then S := IStr(Trunc(Kb / 1024)) + L(' Mo', ' MB', ' MB', ' MB', ' MB')
+  Else
+  Begin
+    G := Round(Kb / 10485.76);
+    S := IStr(G Mod 100);
+    If Length(S) < 2 Then S := '0' + S;
+    S := IStr(G Div 100) + L(',', '.', ',', ',', ',') + S + L(' Go', ' GB', ' GB', ' GB', ' GB');
+  End;
+  SizeKb := S;
+End;
+
+{ nombre avec separateur des milliers }
+Function Thousands(V : LongInt) : String;
+Var R, T, Sep : String; I : LongInt;
+Begin
+  R := IStr(V);
+  Sep := L(' ', ',', '.', '.', '.');
+  T := '';
+  For I := 1 To Length(R) Do
+  Begin
+    T := T + R[I];
+    If ((Length(R) - I) Mod 3 = 0) And (I < Length(R)) Then T := T + Sep;
+  End;
+  Thousands := T;
+End;
+
+Function Two(V : LongInt) : String;
+Begin
+  If V < 10 Then Two := '0' + IStr(V) Else Two := IStr(V);
+End;
+
+{ date et heure de FILEFINDBUF3 (fdateLastWrite, ftimeLastWrite) }
+Function DateStr(D, T : LongInt) : String;
+Var S : String;
+Begin
+  If D = 0 Then
+  Begin
+    DateStr := '';
+    Exit;
+  End;
+  If Lang = 1 Then
+    S := Two((D Shr 5) And 15) + '/' + Two(D And 31) + '/' + IStr(1980 + ((D Shr 9) And 127))
+  Else S := Two(D And 31) + '/' + Two((D Shr 5) And 15) + '/' + IStr(1980 + ((D Shr 9) And 127));
+  DateStr := S + ' ' + Two((T Shr 11) And 31) + ':' + Two((T Shr 5) And 63);
+End;
+
+{ ==================================================================== }
+{ Lecteurs                                                              }
+{ ==================================================================== }
+
+Function FsOf(D : LongInt) : String;
+Var Cb : LongInt; B : Array[0..63] Of Byte;
+Begin
+  Cb := 64;
+  FsOf := '';
+  If DosQueryFSAttach(Z(Chr(64 + D) + ':'), 0, 1, LongInt(@B), LongInt(@Cb)) = 0 Then
+    FsOf := UpStr(GetZ(LongInt(@B) + 11));
+End;
+
+Procedure ScanDrives;
+Var D, Cur, K : LongInt; B : Array[0..63] Of Byte; S : String;
+Begin
+  Cur := 0; DrvMap := 0;
+  Dummy := DosQueryCurrentDisk(LongInt(@Cur), LongInt(@DrvMap));
+  For K := 0 To 25 Do
+  Begin
+    DrvLbl[K] := ''; DrvFs[K] := ''; DrvKind[K] := ekHdd;
+    If (DrvMap And (1 Shl K)) <> 0 Then
+    Begin
+      D := K + 1;
+      If K < 2 Then DrvKind[K] := ekFloppy
+      Else
+      Begin
+        S := FsOf(D);
+        DrvFs[K] := Copy(S, 1, 15);
+        If (S = 'CDFS') Or (S = 'ISO9660') Or (S = 'UDF') Then DrvKind[K] := ekCd;
+        FillChar(B, SizeOf(B), 0);
+        If DosQueryFSInfo(D, 2, LongInt(@B), 64) = 0 Then
+          If (B[4] > 0) And (B[4] < 13) Then
+          Begin
+            S := '';
+            For D := 1 To B[4] Do S := S + Chr(B[4 + D]);
+            While (S <> '') And (S[Length(S)] = ' ') Do Delete(S, Length(S), 1);
+            DrvLbl[K] := S;
+          End;
+      End;
+    End;
+  End;
+End;
+
+Function DriveName(C : Char) : String;
+Var K : LongInt; S : String;
+Begin
+  K := Ord(UpCase(C)) - 65;
+  If (K < 0) Or (K > 25) Then
+  Begin
+    DriveName := C + ':';
+    Exit;
+  End;
+  If DrvKind[K] = ekFloppy Then
+    S := L('Disquette', 'Floppy', 'Diskette', 'Floppy', 'Disquete')
+  Else S := DrvLbl[K];
+  If S = '' Then
+  Begin
+    If DrvKind[K] = ekCd Then S := 'CD-ROM'
+    Else S := L('Disque local', 'Local Disk', 'Lokaler Datentr'#132'ger', 'Disco locale', 'Disco local');
+  End;
+  DriveName := S + ' (' + UpCase(C) + ':)';
+End;
+
+{ espace libre et capacite en Ko ; faux si le lecteur ne repond pas }
+Function DriveSpace(C : Char; Var FreeKb, TotKb : Double) : Boolean;
+Var B : Array[0..31] Of Byte; K, Spc, Tot, Fr, Bps : LongInt;
+Begin
+  DriveSpace := False;
+  FreeKb := 0; TotKb := 0;
+  K := Ord(UpCase(C)) - 64;
+  If (K < 1) Or (K > 26) Then Exit;
+  If DrvKind[K - 1] = ekFloppy Then Exit;
+  If DosQueryFSInfo(K, 1, LongInt(@B), 18) <> 0 Then Exit;
+  Spc := RdL(LongInt(@B) + 4); Tot := RdL(LongInt(@B) + 8); Fr := RdL(LongInt(@B) + 12);
+  Bps := RdW(LongInt(@B) + 16);
+  FreeKb := Fr * 1.0 * Spc * Bps / 1024;
+  TotKb := Tot * 1.0 * Spc * Bps / 1024;
+  DriveSpace := TotKb > 0;
+End;
+
+{ ==================================================================== }
+{ Contenu d'un dossier                                                  }
+{ ==================================================================== }
+
+Function E(I : LongInt) : PEnt;
+Begin
+  E := Pointer(EntBase + Idx[I] * SizeOf(TEnt));
+End;
+
+Function Slot(N : LongInt) : PEnt;
+Begin
+  Slot := Pointer(EntBase + N * SizeOf(TEnt));
+End;
+
+{ comparaison sans distinction des majuscules : dossiers d'abord }
+Function Before(A, B : LongInt) : Boolean;
+Var Pa, Pb : PEnt; K, N, Ca, Cb : LongInt;
+Begin
+  Pa := Slot(A); Pb := Slot(B);
+  If (Pa^.Kind = ekDir) <> (Pb^.Kind = ekDir) Then
+  Begin
+    Before := Pa^.Kind = ekDir;
+    Exit;
+  End;
+  N := MinI(Length(Pa^.Nm), Length(Pb^.Nm));
+  For K := 1 To N Do
+  Begin
+    Ca := Ord(UpCase(Pa^.Nm[K])); Cb := Ord(UpCase(Pb^.Nm[K]));
+    If Ca <> Cb Then
+    Begin
+      Before := Ca < Cb;
+      Exit;
+    End;
+  End;
+  Before := Length(Pa^.Nm) < Length(Pb^.Nm);
+End;
+
+Procedure SortEntries;
+Var Gap, I, J, T : LongInt;
+Begin
+  Gap := NEnt Div 2;
+  While Gap > 0 Do
+  Begin
+    For I := Gap To NEnt - 1 Do
+    Begin
+      T := Idx[I]; J := I;
+      While (J >= Gap) And Before(T, Idx[J - Gap]) Do
+      Begin
+        Idx[J] := Idx[J - Gap];
+        J := J - Gap;
+      End;
+      Idx[J] := T;
+    End;
+    Gap := Gap Div 2;
+  End;
+End;
+
+Procedure AddEnt(Nm : String; Kind, Size, D, T, A : LongInt);
+Var P : PEnt;
+Begin
+  If NEnt >= MaxE Then
+  Begin
+    Truncated := True;
+    Exit;
+  End;
+  P := Slot(NEnt);
+  P^.Nm := Nm; P^.Kind := Kind; P^.Size := Size; P^.FDate := D; P^.FTime := T; P^.Attr := A;
+  Idx[NEnt] := NEnt;
+  Inc(NEnt);
+End;
+
+{ dossier P : '' lecteurs, sinon fichiers et sous-dossiers ; Dirs : les
+  sous-dossiers seulement (arbre) }
+Procedure ListDir(P : String; Dirs : Boolean);
+Var H, N, Off, A, K, Rc : LongInt; S : String;
+Begin
+  NEnt := 0; Truncated := False;
+  If P = '' Then
+  Begin
+    For K := 0 To 25 Do
+      If (DrvMap And (1 Shl K)) <> 0 Then AddEnt(Chr(65 + K) + ':', DrvKind[K], 0, 0, 0, 0);
+    Exit;
+  End;
+  H := -1; N := 1;
+  Rc := DosFindFirst(Z(P + '\*.*'), LongInt(@H), $37, LongInt(@FindBuf), 4096, LongInt(@N), 1);
+  While (Rc = 0) And (N > 0) Do
+  Begin
+    Off := 0;
+    While N > 0 Do
+    Begin
+      A := RdL(LongInt(@FindBuf) + Off + 24);
+      S := '';
+      For K := 0 To RdB(LongInt(@FindBuf) + Off + 28) - 1 Do S := S + Chr(RdB(LongInt(@FindBuf) + Off + 29 + K));
+      If (S <> '.') And (S <> '..') And (S <> '') Then
+        If (A And $10) <> 0 Then
+          AddEnt(S, ekDir, 0, RdW(LongInt(@FindBuf) + Off + 12), RdW(LongInt(@FindBuf) + Off + 14), A)
+        Else If Not Dirs Then
+          AddEnt(S, ekFile, RdL(LongInt(@FindBuf) + Off + 16), RdW(LongInt(@FindBuf) + Off + 12),
+                 RdW(LongInt(@FindBuf) + Off + 14), A);
+      Dec(N);
+      If RdL(LongInt(@FindBuf) + Off) = 0 Then N := 0
+      Else Off := Off + RdL(LongInt(@FindBuf) + Off);
+    End;
+    N := 1;
+    Rc := DosFindNext(H, LongInt(@FindBuf), 4096, LongInt(@N));
+  End;
+  If H <> -1 Then Dummy := DosFindClose(H);
+  SortEntries;
+End;
+
+{ nom affiche d'une entree }
+Function EntName(I : LongInt) : String;
+Begin
+  If CurPath = '' Then EntName := DriveName(E(I)^.Nm[1]) Else EntName := E(I)^.Nm;
+End;
+
+Function EntPath(I : LongInt) : String;
+Begin
+  If CurPath = '' Then EntPath := E(I)^.Nm Else EntPath := CurPath + '\' + E(I)^.Nm;
+End;
+
+Function FileIcon(Nm : String; Kind : LongInt) : LongInt;
+Var X : String;
+Begin
+  X := ExtOf(Nm);
+  Case Kind Of
+    ekDir : FileIcon := icFolder;
+    ekHdd : FileIcon := icHardDisk;
+    ekCd : FileIcon := icCdrom;
+    ekFloppy : FileIcon := icFloppy;
+  Else
+    If (X = 'EXE') Or (X = 'COM') Or (X = 'CMD') Or (X = 'BAT') Then FileIcon := icApp
+    Else If (X = 'TXT') Or (X = 'INI') Or (X = 'SYS') Or (X = 'PAS') Or (X = 'LOG') Or (X = 'CFG') Or
+            (X = 'ME') Or (X = 'DOC') Or (X = 'INC') Or (X = 'ASM') Then FileIcon := icText
+    Else If (X = 'HTM') Or (X = 'HTML') Then FileIcon := icWeb
+    Else If X = 'WAV' Then FileIcon := icSound
+    Else FileIcon := icDocs;
+  End;
+End;
+
+Function TypeName(Nm : String; Kind : LongInt) : String;
+Var X : String;
+Begin
+  X := ExtOf(Nm);
+  Case Kind Of
+    ekDir : TypeName := L('Dossier de fichiers', 'File Folder', 'Dateiordner', 'Cartella di file',
+                          'Carpeta de archivos');
+    ekHdd : TypeName := L('Disque local', 'Local Disk', 'Lokaler Datentr'#132'ger', 'Disco locale', 'Disco local');
+    ekCd : TypeName := L('Disque compact', 'CD-ROM Disc', 'CD-ROM', 'CD-ROM', 'CD-ROM');
+    ekFloppy : TypeName := L('Disquette', 'Floppy Disk', 'Diskette', 'Floppy', 'Disquete');
+  Else
+    If (X = 'EXE') Or (X = 'COM') Then TypeName := L('Application', 'Application', 'Anwendung', 'Applicazione',
+                                                   'Aplicaci'#162'n')
+    Else If (X = 'CMD') Or (X = 'BAT') Then TypeName := L('Fichier de commandes', 'Batch File', 'Stapelverarbeitung',
+                                                          'File batch', 'Archivo por lotes')
+    Else If X = 'DLL' Then TypeName := L('Biblioth'#138'que (DLL)', 'Dynamic Link Library', 'Programmbibliothek',
+                                         'Libreria (DLL)', 'Biblioteca (DLL)')
+    Else If X = 'TXT' Then TypeName := L('Document texte', 'Text Document', 'Textdokument', 'Documento di testo',
+                                         'Documento de texto')
+    Else If X = 'PAS' Then TypeName := L('Source Pascal', 'Pascal Source', 'Pascal-Quelltext', 'Sorgente Pascal',
+                                         'Fuente Pascal')
+    Else If (X = 'HTM') Or (X = 'HTML') Then TypeName := L('Document HTML', 'HTML Document', 'HTML-Dokument',
+                                                          'Documento HTML', 'Documento HTML')
+    Else If X = 'WAV' Then TypeName := L('Son Wave', 'Wave Sound', 'Wave-Klang', 'Suono Wave', 'Sonido Wave')
+    Else If X = '' Then TypeName := L('Fichier', 'File', 'Datei', 'File', 'Archivo')
+    Else TypeName := L('Fichier ', '', '', 'File ', 'Archivo ') + X + L('', ' File', '-Datei', '', '');
+  End;
+End;
+
+{ ==================================================================== }
+{ Dessin (coordonnees de la zone client, Y vers le bas)                 }
+{ ==================================================================== }
+
+{ rectangle plein, bornes incluses }
+Procedure FBar(X1, Y1, X2, Y2, C : LongInt);
+Var Rc : Array[0..3] Of LongInt;
+Begin
+  If (X2 < X1) Or (Y2 < Y1) Then Exit;
+  Rc[0] := X1; Rc[1] := CH - 1 - Y2; Rc[2] := X2 + 1; Rc[3] := CH - Y1;
+  Dummy := WinFillRect(Hps, LongInt(@Rc), C);
+End;
+
+Procedure HLine(X1, X2, Y, C : LongInt);
+Begin
+  FBar(X1, Y, X2, Y, C);
+End;
+
+Procedure VLine(X, Y1, Y2, C : LongInt);
+Begin
+  FBar(X, Y1, X, Y2, C);
+End;
+
+Procedure Pix(X, Y, C : LongInt);
+Begin
+  FBar(X, Y, X, Y, C);
+End;
+
+Procedure DLine(X1, Y1, X2, Y2, C : LongInt);
+Var P : Array[0..1] Of LongInt;
+Begin
+  Dummy := GpiSetColor(Hps, C);
+  P[0] := X1; P[1] := CH - 1 - Y1;
+  Dummy := GpiMove(Hps, LongInt(@P));
+  P[0] := X2; P[1] := CH - 1 - Y2;
+  Dummy := GpiLine(Hps, LongInt(@P));
+End;
+
+Procedure Box(X1, Y1, X2, Y2, C : LongInt);
+Begin
+  HLine(X1, X2, Y1, C); HLine(X1, X2, Y2, C);
+  VLine(X1, Y1, Y2, C); VLine(X2, Y1, Y2, C);
+End;
+
+{ cadre d'un pixel : haut et gauche Lt, bas et droite Dk }
+Procedure Edge(X1, Y1, X2, Y2, Lt, Dk : LongInt);
+Begin
+  HLine(X1, X2, Y1, Lt); VLine(X1, Y1, Y2, Lt);
+  HLine(X1, X2, Y2, Dk); VLine(X2, Y1, Y2, Dk);
+End;
+
+{ relief de Windows 95 (bouton : contour noir) }
+Procedure Raised(X1, Y1, X2, Y2 : LongInt; Btn : Boolean);
+Begin
+  FBar(X1, Y1, X2, Y2, cSilver);
+  If Btn Then
+  Begin
+    Edge(X1, Y1, X2, Y2, cWhite, cBlack);
+    HLine(X1 + 1, X2 - 1, Y2 - 1, cGray); VLine(X2 - 1, Y1 + 1, Y2 - 1, cGray);
+  End
+  Else Edge(X1, Y1, X2, Y2, cWhite, cGray);
+End;
+
+{ champ en creux (fond F) }
+Procedure Sunken(X1, Y1, X2, Y2, F : LongInt);
+Begin
+  FBar(X1 + 2, Y1 + 2, X2 - 2, Y2 - 2, F);
+  Edge(X1, Y1, X2, Y2, cGray, cWhite);
+  Edge(X1 + 1, Y1 + 1, X2 - 1, Y2 - 1, cBlack, cSilver);
+End;
+
+{ texte : coin haut gauche (police du systeme 8 x 16) }
+Procedure OutTxt(X, Y : LongInt; S : String; Fg, Bg : LongInt);
+Var Rc : Array[0..3] Of LongInt;
+Begin
+  If S = '' Then Exit;
+  PutZ(LongInt(@TxtBuf), S);
+  Rc[0] := X; Rc[1] := CH - Y - 16; Rc[2] := X + Length(S) * 8; Rc[3] := CH - Y;
+  Dummy := WinDrawText(Hps, Length(S), LongInt(@TxtBuf), LongInt(@Rc), Fg, Bg, 0);
+End;
+
+{ texte aligne a droite sur X2 }
+Procedure OutRight(X2, Y : LongInt; S : String; Fg, Bg : LongInt);
+Begin
+  OutTxt(X2 - Length(S) * 8, Y, S, Fg, Bg);
+End;
+
+Function TextW(S : String) : LongInt;
+Begin
+  TextW := Length(S) * 8;
+End;
+
+{ texte tenant dans W points (points de suspension) }
+Function Fit(S : String; W : LongInt) : String;
+Var N : LongInt;
+Begin
+  N := W Div 8;
+  If N < 0 Then N := 0;
+  If Length(S) > N Then
+  Begin
+    If N > 3 Then S := Copy(S, 1, N - 3) + '...' Else S := Copy(S, 1, N);
+  End;
+  Fit := S;
+End;
+
+{ triangle : Dir 1 bas, 2 haut }
+Procedure Arrow(X, Y, Dir, C : LongInt);
+Var I : LongInt;
+Begin
+  For I := 0 To 3 Do
+    If Dir = 1 Then HLine(X + I, X + 6 - I, Y + I, C)
+    Else HLine(X + 3 - I, X + 3 + I, Y + I, C);
+End;
+
+{ --- icones de Pasdows 95 : grille de 32 x 32 mise a l'echelle S --- }
+
+Function IcP(V : LongInt) : LongInt;
+Begin
+  IcP := V * IcS Div 32;
+End;
+
+Procedure QR(X1, Y1, X2, Y2, C : LongInt);
+Begin
+  FBar(IcX + IcP(X1), IcY + IcP(Y1), IcX + IcP(X2 + 1) - 1, IcY + IcP(Y2 + 1) - 1, C);
+End;
+
+Procedure QB(X1, Y1, X2, Y2, C : LongInt);
+Begin
+  Box(IcX + IcP(X1), IcY + IcP(Y1), IcX + IcP(X2 + 1) - 1, IcY + IcP(Y2 + 1) - 1, C);
+End;
+
+Procedure QL(X1, Y1, X2, Y2, C : LongInt);
+Begin
+  DLine(IcX + IcP(X1), IcY + IcP(Y1), IcX + IcP(X2), IcY + IcP(Y2), C);
+End;
+
+Function ISqrt(V : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := 0;
+  While (R + 1) * (R + 1) <= V Do Inc(R);
+  ISqrt := R;
+End;
+
+Procedure QD(CX, CY, R, C : LongInt);
+Var X, Y, Rr, Dy, W : LongInt;
+Begin
+  X := IcX + IcP(CX); Y := IcY + IcP(CY); Rr := IcP(R);
+  For Dy := -Rr To Rr Do
+  Begin
+    W := ISqrt(Rr * Rr - Dy * Dy);
+    HLine(X - W, X + W, Y + Dy, C);
+  End;
+End;
+
+Procedure QC(CX, CY, R, C : LongInt);
+Var X, Y, Rr, Dy, W, Pw : LongInt;
+Begin
+  X := IcX + IcP(CX); Y := IcY + IcP(CY); Rr := IcP(R);
+  Pw := 0;
+  For Dy := 0 To Rr Do
+  Begin
+    W := ISqrt(Rr * Rr - Dy * Dy);
+    If Dy = 0 Then Pw := W;
+    HLine(X + W, X + MaxI(W, Pw - 1), Y + Dy, C); HLine(X - MaxI(W, Pw - 1), X - W, Y + Dy, C);
+    HLine(X + W, X + MaxI(W, Pw - 1), Y - Dy, C); HLine(X - MaxI(W, Pw - 1), X - W, Y - Dy, C);
+    Pw := W;
+  End;
+End;
+
+Procedure IFrame(X1, Y1, X2, Y2, F : LongInt);
+Begin
+  QR(X1, Y1, X2, Y2, F);
+  QB(X1, Y1, X2, Y2, cBlack);
+End;
+
+Procedure IconMonitor(Screen : LongInt);
+Begin
+  IFrame(4, 2, 27, 21, cSilver);
+  QR(5, 3, 26, 3, cWhite);
+  IFrame(7, 5, 24, 17, Screen);
+  IFrame(11, 22, 20, 24, cSilver);
+End;
+
+Procedure IconFolder(C : LongInt);
+Begin
+  IFrame(3, 6, 13, 10, C);
+  IFrame(3, 9, 28, 27, C);
+  QR(4, 10, 27, 10, cWhite);
+End;
+
+Procedure IconPage;
+Begin
+  IFrame(6, 2, 25, 29, cWhite);
+  QR(20, 2, 25, 7, cSilver);
+  QL(20, 2, 25, 7, cBlack);
+End;
+
+Procedure PaintIcon(Id, X, Y, S : LongInt);
+Var I : LongInt;
+Begin
+  IcX := X; IcY := Y; IcS := S;
+  Case Id Of
+    icComputer :
+    Begin
+      IconMonitor(cTeal);
+      IFrame(2, 25, 29, 29, cSilver);
+      QR(5, 27, 26, 27, cGray);
+    End;
+    icDisplay :
+    Begin
+      IconMonitor(cBlue);
+      QR(8, 12, 23, 16, cGreen);
+      QD(19, 9, 3, cYellow);
+    End;
+    icText :
+    Begin
+      IconPage;
+      For I := 0 To 4 Do QR(9, 10 + I * 4, 22, 10 + I * 4, cGray);
+    End;
+    icFolder : IconFolder(cYellow);
+    icDocs :
+    Begin
+      IconPage;
+      QR(9, 10, 22, 13, cNavy);
+      For I := 0 To 2 Do QR(9, 17 + I * 4, 22, 17 + I * 4, cGray);
+    End;
+    icCdrom :
+    Begin
+      IFrame(3, 14, 28, 25, cSilver);
+      QR(6, 20, 25, 21, cBlack);
+      QR(22, 16, 25, 17, cLime);
+      QD(16, 8, 7, cSilver);
+      QC(16, 8, 7, cGray);
+      QD(16, 8, 2, cWhite);
+      QL(12, 4, 15, 7, cAqua);
+    End;
+    icFloppy, icHardDisk :
+    Begin
+      IFrame(3, 12, 28, 23, cSilver);
+      QR(4, 13, 27, 13, cWhite);
+      If Id = icFloppy Then QR(8, 17, 23, 18, cBlack)
+      Else QR(6, 19, 12, 20, cGray);
+      QR(23, 20, 25, 21, cLime);
+    End;
+    icWeb :
+    Begin
+      QD(16, 16, 13, cBlue);
+      QR(9, 8, 15, 12, cGreen); QR(8, 12, 13, 15, cGreen);
+      QR(18, 17, 24, 22, cGreen); QR(20, 22, 22, 25, cGreen);
+      QR(5, 18, 8, 20, cGreen); QR(19, 6, 22, 8, cWhite);
+      QC(16, 16, 13, cNavy);
+    End;
+    icSound :
+    Begin
+      IconPage;
+      QR(9, 12, 13, 20, cGray);
+      QL(13, 12, 18, 7, cBlack); QL(13, 20, 18, 25, cBlack); QL(18, 7, 18, 25, cBlack);
+      QR(20, 13, 21, 19, cNavy);
+    End;
+    icApp :
+    Begin
+      IFrame(3, 6, 28, 26, cSilver);
+      QR(4, 7, 27, 10, cNavy);
+      QR(4, 11, 27, 25, cWhite);
+    End;
+    icExplorer :
+    Begin
+      IconFolder(cYellow);
+      QD(19, 18, 6, cAqua);
+      QC(19, 18, 6, cNavy);
+      QL(14, 23, 9, 28, cBlack);
+      QL(15, 23, 10, 28, cBlack);
+    End;
+  End;
+End;
+
+{ ==================================================================== }
+{ Arbre des dossiers                                                    }
+{ ==================================================================== }
+
+{ sous-dossiers de P dans DirNames (ordre alphabetique, 128 au plus) }
+Procedure ListDirNames(P : String; Var N : LongInt);
+Var H, C, Off, A, K, J, Rc : LongInt; S, T : String;
+Begin
+  N := 0;
+  H := -1; C := 1;
+  Rc := DosFindFirst(Z(P + '\*.*'), LongInt(@H), $37, LongInt(@FindBuf), 4096, LongInt(@C), 1);
+  While (Rc = 0) And (C > 0) Do
+  Begin
+    Off := 0;
+    While C > 0 Do
+    Begin
+      A := RdL(LongInt(@FindBuf) + Off + 24);
+      S := '';
+      For K := 0 To RdB(LongInt(@FindBuf) + Off + 28) - 1 Do S := S + Chr(RdB(LongInt(@FindBuf) + Off + 29 + K));
+      If ((A And $10) <> 0) And (S <> '.') And (S <> '..') And (S <> '') And (N < 128) And (Length(S) <= 40) Then
+      Begin
+        DirNames[N] := S;
+        Inc(N);
+      End;
+      Dec(C);
+      If RdL(LongInt(@FindBuf) + Off) = 0 Then C := 0
+      Else Off := Off + RdL(LongInt(@FindBuf) + Off);
+    End;
+    C := 1;
+    Rc := DosFindNext(H, LongInt(@FindBuf), 4096, LongInt(@C));
+  End;
+  If H <> -1 Then Dummy := DosFindClose(H);
+  For J := 1 To N - 1 Do
+  Begin
+    T := DirNames[J]; K := J - 1;
+    While (K >= 0) And (UpStr(DirNames[K]) > UpStr(T)) Do
+    Begin
+      DirNames[K + 1] := DirNames[K];
+      Dec(K);
+    End;
+    DirNames[K + 1] := T;
+  End;
+End;
+
+Function TreeW : LongInt;
+Begin
+  TreeW := MaxI(110, MinI(230, (CW * 2) Div 5));
+End;
+
+Function PathTitle(P : String) : String;
+Begin
+  If P = '' Then PathTitle := L('Poste de travail', 'My Computer', 'Arbeitsplatz', 'Risorse del computer', 'Mi PC')
+  Else If P = '*' Then PathTitle := L('Bureau', 'Desktop', 'Desktop', 'Desktop', 'Escritorio')
+  Else If Length(P) = 2 Then PathTitle := DriveName(P[1])
+  Else PathTitle := BaseName(P);
+End;
+
+Procedure SetTitle;
+Begin
+  Dummy := WinSetWindowText(Frame, Z(AppName + ' - ' + PathTitle(CurPath)));
+End;
+
+Procedure NodeCopy(Dst, Src : LongInt);
+Begin
+  NdP[Dst] := NdP[Src]; NdD[Dst] := NdD[Src]; NdF[Dst] := NdF[Src];
+End;
+
+Procedure TreeIns(At : LongInt; P : String; D : LongInt);
+Var I : LongInt;
+Begin
+  If TN >= TreeMax Then Exit;
+  For I := TN - 1 DownTo At Do NodeCopy(I + 1, I);
+  NdP[At] := P; NdD[At] := D; NdF[At] := 0;
+  Inc(TN);
+  If TSel >= At Then Inc(TSel);
+End;
+
+{ deplier le noeud I : ses sous-dossiers (ordre alphabetique) ou, pour le
+  Poste de travail, les lecteurs }
+Procedure TreeExpand(I : LongInt);
+Var K, N, M, D : LongInt; P : String;
+Begin
+  If (NdF[I] And 3) <> 0 Then Exit;
+  NdF[I] := NdF[I] Or 1;
+  P := NdP[I];
+  If P = '*' Then Exit;
+  D := NdD[I] + 1;
+  M := 0;
+  If P = '' Then
+  Begin
+    For K := 0 To 25 Do
+      If (DrvMap And (1 Shl K)) <> 0 Then
+      Begin
+        TreeIns(I + 1 + M, Chr(65 + K) + ':', D);
+        Inc(M);
+      End;
+  End
+  Else
+  Begin
+    { sous-dossiers (le contenu affiche est garde a part) }
+    ListDirNames(P, N);
+    For K := 0 To N - 1 Do
+      If Length(P) + 1 + Length(DirNames[K]) <= 79 Then
+      Begin
+        TreeIns(I + 1 + M, P + '\' + DirNames[K], D);
+        Inc(M);
+      End;
+  End;
+  If M = 0 Then NdF[I] := 2;
+End;
+
+Procedure TreeCollapse(I : LongInt);
+Var J, K, D : LongInt;
+Begin
+  D := NdD[I];
+  J := I + 1;
+  While (J < TN) And (NdD[J] > D) Do Inc(J);
+  K := J - I - 1;
+  If K > 0 Then
+  Begin
+    If (TSel > I) And (TSel < J) Then TSel := I
+    Else If TSel >= J Then TSel := TSel - K;
+    For J := I + 1 To TN - 1 - K Do NodeCopy(J, J + K);
+    TN := TN - K;
+  End;
+  NdF[I] := NdF[I] And Not 1;
+End;
+
+Function TreeFind(P : String) : LongInt;
+Var I, R : LongInt; U : String;
+Begin
+  R := -1; U := UpStr(P);
+  For I := 0 To TN - 1 Do
+    If (R < 0) And (UpStr(NdP[I]) = U) Then R := I;
+  TreeFind := R;
+End;
+
+{ l'arbre suit le dossier affiche : branches depliees, noeud choisi visible }
+Procedure TreeSync;
+Var P, Cur, Rest, C : String; I, J, K : LongInt;
+Begin
+  P := CurPath;
+  I := TreeFind('');
+  If I < 0 Then Exit;
+  If P <> '' Then
+  Begin
+    TreeExpand(I);
+    Cur := Copy(P, 1, 2);
+    J := TreeFind(Cur);
+    If J >= 0 Then
+    Begin
+      I := J;
+      Rest := Copy(P, 4, 255);
+      While Rest <> '' Do
+      Begin
+        TreeExpand(I);
+        K := Pos('\', Rest);
+        If K = 0 Then K := Length(Rest) + 1;
+        C := Copy(Rest, 1, K - 1);
+        Rest := Copy(Rest, K + 1, 255);
+        Cur := Cur + '\' + C;
+        J := TreeFind(Cur);
+        If J < 0 Then Rest := ''
+        Else I := J;
+      End;
+    End;
+  End;
+  TSel := I;
+  If TVis < 1 Then TVis := 10;
+  If TSel < TTop Then TTop := TSel;
+  If TSel >= TTop + TVis Then TTop := TSel - TVis + 1;
+End;
+
+Procedure TreeInit;
+Begin
+  TN := 0; TTop := 0; TSel := 0; TVis := 10;
+  TreeIns(0, '*', 0);
+  NdF[0] := 1;
+  TreeIns(1, '', 1);
+  TreeExpand(1);
+End;
+
+{ le noeud R a-t-il un frere apres lui au niveau D ? (traits) }
+Function TreeNext(R, D : LongInt) : Boolean;
+Var J : LongInt;
+Begin
+  J := R + 1;
+  While (J < TN) And (NdD[J] > D) Do Inc(J);
+  TreeNext := (J < TN) And (NdD[J] = D);
+End;
+
+Procedure DotV(X, Y1, Y2 : LongInt);
+Var Y : LongInt;
+Begin
+  Y := Y1;
+  While Y <= Y2 Do
+  Begin
+    If ((X + Y) And 1) = 0 Then Pix(X, Y, cGray);
+    Inc(Y);
+  End;
+End;
+
+Procedure DotH(X1, X2, Y : LongInt);
+Var X : LongInt;
+Begin
+  For X := X1 To X2 Do
+    If ((X + Y) And 1) = 0 Then Pix(X, Y, cGray);
+End;
+
+{ barre de defilement verticale de Windows 95 (X : bord gauche) }
+Procedure VScroll(X, Y1, Y2, Pos, Max : LongInt);
+Var TY : LongInt;
+Begin
+  FBar(X, Y1, X + SbW - 2, Y2, cSilver);
+  Raised(X, Y1, X + SbW - 2, Y1 + 15, True);
+  Arrow(X + 4, Y1 + 6, 2, cBlack);
+  Raised(X, Y2 - 15, X + SbW - 2, Y2, True);
+  Arrow(X + 4, Y2 - 9, 1, cBlack);
+  If (Max > 0) And (Y2 - Y1 > 50) Then
+  Begin
+    TY := Y1 + 16 + (Pos * (Y2 - Y1 - 48)) Div Max;
+    Raised(X, TY, X + SbW - 2, TY + 16, True);
+  End;
+End;
+
+{ clic dans une barre : -1 ligne, +1 ligne, -2 page, +2 page }
+Function ScrollHit(Y, Y1, Y2, Pos, Max : LongInt) : LongInt;
+Var TY : LongInt;
+Begin
+  If Y <= Y1 + 15 Then ScrollHit := -1
+  Else If Y >= Y2 - 15 Then ScrollHit := 1
+  Else
+  Begin
+    TY := Y1 + 16;
+    If Max > 0 Then TY := Y1 + 16 + (Pos * (Y2 - Y1 - 48)) Div Max;
+    If Y < TY Then ScrollHit := -2 Else ScrollHit := 2;
+  End;
+End;
+
+Function NodeIcon(P : String) : LongInt;
+Begin
+  If P = '*' Then NodeIcon := icDisplay
+  Else If P = '' Then NodeIcon := icComputer
+  Else If Length(P) = 2 Then
+  Begin
+    Case DrvKind[Ord(UpCase(P[1])) - 65] Of
+      ekCd : NodeIcon := icCdrom;
+      ekFloppy : NodeIcon := icFloppy;
+    Else
+      NodeIcon := icHardDisk;
+    End;
+  End
+  Else NodeIcon := icFolder;
+End;
+
+Procedure PaintTree(X1, Y1, X2, Y2 : LongInt);
+Var R, Y, D, C, K, Fg, Bg, XR : LongInt; Nm : String; Sb : Boolean;
+Begin
+  Sunken(X1, Y1, X2, Y2, cWhite);
+  TVis := MaxI(1, (Y2 - Y1 - 4) Div TreeRow);
+  If TTop > MaxI(0, TN - TVis) Then TTop := MaxI(0, TN - TVis);
+  If TTop < 0 Then TTop := 0;
+  Sb := TN > TVis;
+  XR := X2 - 2;
+  If Sb Then XR := X2 - 2 - SbW;
+  For R := TTop To MinI(TN - 1, TTop + TVis - 1) Do
+  Begin
+    Y := Y1 + 2 + (R - TTop) * TreeRow;
+    D := NdD[R];
+    { traits pointilles des niveaux superieurs, puis vers l'icone }
+    For K := 1 To D - 1 Do
+      If TreeNext(R, K) Then DotV(X1 + 4 + K * 16 - 8, Y, Y + TreeRow - 1);
+    C := X1 + 4 + D * 16 - 8;
+    If D >= 1 Then
+    Begin
+      DotV(C, Y, Y + 8);
+      If TreeNext(R, D) Then DotV(C, Y + 8, Y + TreeRow - 1);
+      DotH(C, C + 7, Y + 8);
+      If (NdF[R] And 2) = 0 Then
+      Begin
+        { case + / - }
+        FBar(C - 4, Y + 4, C + 4, Y + 12, cWhite);
+        Box(C - 4, Y + 4, C + 4, Y + 12, cGray);
+        HLine(C - 2, C + 2, Y + 8, cBlack);
+        If (NdF[R] And 1) = 0 Then VLine(C, Y + 6, Y + 10, cBlack);
+      End;
+    End;
+    If C + 24 < XR Then PaintIcon(NodeIcon(NdP[R]), C + 8, Y + 1, 16);
+    Nm := Fit(PathTitle(NdP[R]), XR - C - 30);
+    Fg := cBlack; Bg := cWhite;
+    If R = TSel Then
+    Begin
+      If Focus = 1 Then Bg := cNavy Else Bg := cGray;
+      Fg := cWhite;
+      If Nm <> '' Then FBar(C + 26, Y, C + 29 + TextW(Nm), Y + 16, Bg);
+    End;
+    OutTxt(C + 28, Y, Nm, Fg, Bg);
+  End;
+  If Sb Then VScroll(X2 - 1 - SbW, Y1 + 2, Y2 - 2, TTop, TN - TVis);
+End;
+
+{ ==================================================================== }
+{ Contenu                                                               }
+{ ==================================================================== }
+
+Var
+  PX1, PY1, PX2, PY2 : LongInt;    { volet du contenu (cadre en creux) }
+  TX1, TY1, TX2, TY2 : LongInt;    { volet de l'arbre }
+
+Procedure Geometry;
+Var Tw : LongInt;
+Begin
+  Tw := TreeW;
+  TX1 := 0; TY1 := 22; TX2 := Tw; TY2 := CH - 23;
+  PX1 := Tw + 3; PY1 := 22; PX2 := CW - 1; PY2 := CH - 23;
+End;
+
+{ colonnes et lignes visibles du contenu }
+Function Cols : LongInt;
+Begin
+  If View = 1 Then Cols := 1
+  Else Cols := MaxI(1, (PX2 - PX1 - 8 - SbW) Div CellW);
+End;
+
+Function VisRows : LongInt;
+Begin
+  If View = 1 Then VisRows := MaxI(1, (PY2 - PY1 - 24) Div RowH)
+  Else VisRows := MaxI(1, (PY2 - PY1 - 8) Div CellH);
+End;
+
+Function TotRows : LongInt;
+Begin
+  TotRows := (NEnt + Cols - 1) Div Cols;
+End;
+
+Procedure ClampTop;
+Begin
+  If Top > TotRows - VisRows Then Top := TotRows - VisRows;
+  If Top < 0 Then Top := 0;
+End;
+
+{ le choix reste visible }
+Procedure ShowSel;
+Var R : LongInt;
+Begin
+  If Sel < 0 Then Exit;
+  R := Sel Div Cols;
+  If R < Top Then Top := R;
+  If R >= Top + VisRows Then Top := R - VisRows + 1;
+  ClampTop;
+End;
+
+{ etiquette d'une icone : deux lignes de 12 caracteres au plus, centrees }
+Procedure DrawLabel(X, Y, W : LongInt; S : String; IsSel : Boolean);
+Var A, B : String; N, K, Fg, Bg : LongInt;
+Begin
+  N := W Div 8;
+  If Length(S) <= N Then
+  Begin
+    A := S; B := '';
+  End
+  Else
+  Begin
+    K := N;
+    While (K > 1) And (S[K] <> ' ') And (S[K] <> '-') And (S[K] <> '.') And (S[K] <> '_') Do Dec(K);
+    If K <= 1 Then K := N;
+    A := Copy(S, 1, K);
+    B := Fit(Copy(S, K + 1, 255), W);
+    While (A <> '') And (A[Length(A)] = ' ') Do Delete(A, Length(A), 1);
+  End;
+  Fg := cBlack; Bg := cWhite;
+  If IsSel Then
+  Begin
+    Fg := cWhite;
+    If Focus = 0 Then Bg := cNavy Else Bg := cGray;
+  End;
+  If IsSel Then FBar(X + (W - TextW(A)) Div 2 - 1, Y, X + (W + TextW(A)) Div 2, Y + 15, Bg);
+  OutTxt(X + (W - TextW(A)) Div 2, Y, A, Fg, Bg);
+  If B <> '' Then
+  Begin
+    If IsSel Then FBar(X + (W - TextW(B)) Div 2 - 1, Y + 16, X + (W + TextW(B)) Div 2, Y + 31, Bg);
+    OutTxt(X + (W - TextW(B)) Div 2, Y + 16, B, Fg, Bg);
+  End;
+End;
+
+Function SizeCol(I : LongInt) : String;
+Begin
+  If E(I)^.Kind <> ekFile Then SizeCol := ''
+  Else SizeCol := Thousands((E(I)^.Size + 1023) Div 1024) + L(' Ko', ' KB', ' KB', ' KB', ' KB');
+End;
+
+Procedure PaintContents;
+Var CX, CY, X, Y, I, R, C, N, NC, VR, W1, W2, W3, XR, Fg, Bg : LongInt; S : String; Sb : Boolean;
+Begin
+  Sunken(PX1, PY1, PX2, PY2, cWhite);
+  CX := PX1; CY := PY1;
+  ClampTop;
+  NC := Cols; VR := VisRows;
+  Sb := TotRows > VR;
+  XR := PX2 - 2;
+  If Sb Then XR := PX2 - 2 - SbW;
+  If View = 1 Then
+  Begin
+    { Details : en-tetes de colonnes, une ligne par objet }
+    W2 := 88; W3 := 150;
+    W1 := MaxI(120, XR - CX - 2 - W2 - W3 - 136);
+    Raised(CX + 2, CY + 2, CX + 2 + W1 - 1, CY + 19, True);
+    OutTxt(CX + 6, CY + 3, Fit(L('Nom', 'Name', 'Name', 'Nome', 'Nombre'), W1 - 8), cBlack, cSilver);
+    If CX + 2 + W1 + W2 <= XR Then
+    Begin
+      Raised(CX + 2 + W1, CY + 2, CX + 1 + W1 + W2, CY + 19, True);
+      OutRight(CX + W1 + W2 - 4, CY + 3, L('Taille', 'Size', 'Gr'#148#225'e', 'Dim.', 'Tama'#164'o'), cBlack, cSilver);
+    End;
+    If CX + 2 + W1 + W2 + W3 <= XR Then
+    Begin
+      Raised(CX + 2 + W1 + W2, CY + 2, CX + 1 + W1 + W2 + W3, CY + 19, True);
+      OutTxt(CX + 6 + W1 + W2, CY + 3, L('Type', 'Type', 'Typ', 'Tipo', 'Tipo'), cBlack, cSilver);
+    End;
+    If CX + 2 + W1 + W2 + W3 + 136 <= XR Then
+    Begin
+      Raised(CX + 2 + W1 + W2 + W3, CY + 2, XR, CY + 19, True);
+      OutTxt(CX + 6 + W1 + W2 + W3, CY + 3, L('Modifi'#130, 'Modified', 'Ge'#132'ndert', 'Modificato', 'Modificado'),
+             cBlack, cSilver);
+    End
+    Else If CX + 2 + W1 + W2 + W3 < XR Then Raised(CX + 2 + W1 + W2 + W3, CY + 2, XR, CY + 19, True);
+    For R := 0 To VR - 1 Do
+    Begin
+      I := Top + R;
+      If I < NEnt Then
+      Begin
+        Y := CY + 21 + R * RowH;
+        PaintIcon(FileIcon(E(I)^.Nm, E(I)^.Kind), CX + 5, Y + 1, 16);
+        S := Fit(EntName(I), W1 - 30);
+        Fg := cBlack; Bg := cWhite;
+        If I = Sel Then
+        Begin
+          Fg := cWhite;
+          If Focus = 0 Then Bg := cNavy Else Bg := cGray;
+          FBar(CX + 24, Y, CX + 27 + TextW(S), Y + 16, Bg);
+        End;
+        OutTxt(CX + 26, Y, S, Fg, Bg);
+        If CX + 2 + W1 + W2 <= XR Then OutRight(CX + W1 + W2 - 4, Y, SizeCol(I), cBlack, cWhite);
+        If CX + 2 + W1 + W2 + W3 <= XR Then
+          OutTxt(CX + 6 + W1 + W2, Y, Fit(TypeName(E(I)^.Nm, E(I)^.Kind), W3 - 8), cBlack, cWhite);
+        If CX + 2 + W1 + W2 + W3 + 136 <= XR Then
+          OutTxt(CX + 6 + W1 + W2 + W3, Y, DateStr(E(I)^.FDate, E(I)^.FTime), cBlack, cWhite);
+      End;
+    End;
+  End
+  Else
+  Begin
+    { Grandes icones (Pasdows 95) : cellules de 100 x 70 }
+    For R := 0 To VR - 1 Do
+      For C := 0 To NC - 1 Do
+      Begin
+        I := (Top + R) * NC + C;
+        If I < NEnt Then
+        Begin
+          X := CX + 6 + C * CellW;
+          Y := CY + 6 + R * CellH;
+          PaintIcon(FileIcon(E(I)^.Nm, E(I)^.Kind), X + 32, Y, 32);
+          DrawLabel(X, Y + 34, CellW - 4, EntName(I), I = Sel);
+        End;
+      End;
+  End;
+  If NEnt = 0 Then
+  Begin
+    If CurPath = '' Then S := ''
+    Else S := L('Ce dossier est vide.', 'This folder is empty.', 'Dieser Ordner ist leer.',
+                'La cartella '#138' vuota.', 'Esta carpeta est'#160' vac'#161'a.');
+    OutTxt(CX + 10, CY + 30, Fit(S, XR - CX - 20), cGray, cWhite);
+  End;
+  If Sb Then VScroll(PX2 - 1 - SbW, PY1 + 2, PY2 - 2, Top, TotRows - VR);
+End;
+
+{ texte de la barre d'etat (partie gauche) }
+Function StatusText : String;
+Var S : String; Fr, Tot : Double;
+Begin
+  If (Sel >= 0) And (Sel < NEnt) Then
+  Begin
+    If CurPath = '' Then
+    Begin
+      If DriveSpace(E(Sel)^.Nm[1], Fr, Tot) Then
+        S := L('Espace libre : ', 'Free Space: ', 'Freier Speicher: ', 'Spazio libero: ', 'Espacio libre: ') +
+             SizeKb(Fr) + L(', capacit'#130' : ', ', Capacity: ', ', Kapazit'#132't: ', ', capacit'#133': ',
+                            ', capacidad: ') + SizeKb(Tot)
+      Else S := EntName(Sel);
+    End
+    Else If E(Sel)^.Kind = ekFile Then
+      S := E(Sel)^.Nm + ' : ' + Thousands(E(Sel)^.Size) + L(' octets', ' bytes', ' Byte', ' byte', ' bytes')
+    Else S := E(Sel)^.Nm;
+  End
+  Else
+  Begin
+    S := IStr(NEnt) + ' ' + L('objet(s)', 'object(s)', 'Objekt(e)', 'oggetti', 'objeto(s)');
+    If Truncated Then S := S + ' (+)';
+  End;
+  StatusText := S;
+End;
+
+Procedure PaintAll(H : LongInt);
+Var Tw : LongInt; S, S2 : String; Fr, Tot : Double;
+Begin
+  Hps := WinBeginPaint(H, 0, 0);
+  Geometry;
+  Tw := TX2;
+  { en-tetes "Tous les dossiers" et "Contenu de" }
+  FBar(0, 0, CW - 1, 21, cSilver);
+  Raised(0, 1, Tw, 20, False);
+  OutTxt(4, 3, Fit(L('Tous les dossiers', 'All Folders', 'Alle Ordner', 'Tutte le cartelle', 'Todas las carpetas'),
+                   Tw - 8), cBlack, cSilver);
+  Raised(Tw + 3, 1, CW - 1, 20, False);
+  OutTxt(Tw + 7, 3, Fit(L('Contenu de ''', 'Contents of ''', 'Inhalt von ''', 'Contenuto di ''', 'Contenido de ''') +
+                        PathTitle(CurPath) + '''', CW - Tw - 14), cBlack, cSilver);
+  FBar(Tw + 1, 22, Tw + 2, CH - 23, cSilver);
+  PaintTree(TX1, TY1, TX2, TY2);
+  PaintContents;
+  { barre d'etat en deux parties : objets, espace libre du lecteur }
+  FBar(0, CH - 22, CW - 1, CH - 1, cSilver);
+  Edge(0, CH - 20, Tw, CH - 1, cGray, cWhite);
+  OutTxt(4, CH - 18, Fit(StatusText, Tw - 8), cBlack, cSilver);
+  Edge(Tw + 3, CH - 20, CW - 1, CH - 1, cGray, cWhite);
+  S2 := '';
+  If (CurPath <> '') And DriveSpace(CurPath[1], Fr, Tot) Then
+    S2 := L('Espace disque libre : ', 'Disk free space: ', 'Freier Speicher: ', 'Spazio libero: ', 'Espacio libre: ') +
+          SizeKb(Fr);
+  OutTxt(Tw + 7, CH - 18, Fit(S2, CW - Tw - 14), cBlack, cSilver);
+  Dummy := WinEndPaint(Hps);
+End;
+
+Procedure Redraw;
+Begin
+  Dummy := WinInvalidateRect(Client, 0, 0);
+End;
+
+{ ==================================================================== }
+{ Navigation et ouverture                                               }
+{ ==================================================================== }
+
+Procedure Navigate(P : String);
+Begin
+  CurPath := P;
+  ListDir(P, False);
+  Sel := -1; Top := 0;
+  TreeSync;
+  SetTitle;
+  Redraw;
+End;
+
+Procedure Refresh;
+Var K, Old : LongInt; Nm : String;
+Begin
+  ScanDrives;
+  Nm := '';
+  If (Sel >= 0) And (Sel < NEnt) Then Nm := E(Sel)^.Nm;
+  Old := Top;
+  ListDir(CurPath, False);
+  Sel := -1;
+  For K := 0 To NEnt - 1 Do
+    If (Nm <> '') And (E(K)^.Nm = Nm) Then Sel := K;
+  Top := Old;
+  { l'arbre est reconstruit (dossiers crees ou supprimes) }
+  TreeInit;
+  TreeSync;
+  Redraw;
+End;
+
+Procedure GoUp;
+Var P : LongInt;
+Begin
+  If CurPath = '' Then Exit;
+  If Length(CurPath) <= 2 Then Navigate('')
+  Else
+  Begin
+    P := Length(CurPath);
+    While (P > 0) And (CurPath[P] <> '\') Do Dec(P);
+    Navigate(Copy(CurPath, 1, P - 1));
+  End;
+End;
+
+Function Comspec : String;
+Var S : String;
+Begin
+  S := GetEnvS('COMSPEC');
+  If (S = '') Or (Pos('PMSHELL', UpStr(S)) > 0) Then S := 'C:\CMD.EXE';
+  Comspec := S;
+End;
+
+{ programme d'OS/2-0 : racine de C: ou repertoire de l'interpreteur }
+Function AppPath(N : String) : String;
+Var S : String;
+Begin
+  AppPath := '';
+  If FileExists('C:\' + N) Then AppPath := 'C:\' + N
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + N) Then AppPath := S + N;
+  End;
+End;
+
+Procedure SetDir(Dir : String);
+Begin
+  If (Length(Dir) >= 2) And (Dir[2] = ':') Then
+  Begin
+    Dummy := DosSetDefaultDisk(Ord(UpCase(Dir[1])) - 64);
+    If Length(Dir) = 2 Then Dir := Dir + '\';
+    Dummy := DosSetCurrentDir(Z(Dir));
+  End;
+End;
+
+{ programme de PM ou de texte : nouvelle session (comme les objets
+  programme du bureau ; un programme de PM revient dans la session de
+  Presentation Manager) }
+Procedure RunProgram(Prog, Params, Dir : String);
+Var Res : Array[0..1] Of LongInt; Rc, K, S : LongInt;
+Begin
+  SetDir(Dir);
+  PutZ(LongInt(@ArgBuf), Prog);
+  K := Length(Prog) + 1;
+  PutZ(LongInt(@ArgBuf) + K, Params);
+  WrB(LongInt(@ArgBuf) + K + Length(Params) + 1, 0);
+  S := KSes(4, Z(UpStr(BaseName(Prog))), 0);
+  If S < 0 Then
+  Begin
+    Msg(L('Trop de sessions : fermez un programme.', 'Too many sessions: close a program.',
+          'Zu viele Sitzungen: Programm schlie'#225'en.', 'Troppe sessioni: chiudere un programma.',
+          'Demasiadas sesiones: cierre un programa.'), MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  Dummy := KSes(16, S, 1);
+  Dummy := KSes(12, S, 0);
+  PutZ(LongInt(@NameZ2), Prog);
+  Res[0] := 0; Res[1] := 0;
+  Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
+  If Rc <> 0 Then
+  Begin
+    Dummy := KSes(12, -1, 0);
+    Dummy := KSes(17, S, 0);
+    Msg('SYS1041: ' + L('Impossible de lancer ', 'Cannot start ', 'Kann nicht starten: ', 'Impossibile avviare ',
+        'No se puede iniciar ') + Prog + ' (' + IStr(Rc) + ').', MB_OK Or MB_ERROR);
+  End
+  Else Dummy := KSes(3, S, 0);
+End;
+
+{ application de PM dans la session de Presentation Manager }
+Procedure RunPm(P, Params : String);
+Var Res : Array[0..1] Of LongInt; Rc : LongInt;
+Begin
+  PutZ(LongInt(@ArgBuf), P);
+  PutZ(LongInt(@ArgBuf) + Length(P) + 1, Params);
+  WrB(LongInt(@ArgBuf) + Length(P) + Length(Params) + 2, 0);
+  PutZ(LongInt(@NameZ2), P);
+  Res[0] := 0; Res[1] := 0;
+  Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), LongInt(@NameZ2));
+  If Rc <> 0 Then
+    Msg('SYS1041: ' + L('Impossible de lancer ', 'Cannot start ', 'Kann nicht starten: ', 'Impossibile avviare ',
+        'No se puede iniciar ') + P + ' (' + IStr(Rc) + ').', MB_OK Or MB_ERROR);
+End;
+
+Procedure OpenFile(P : String);
+Var X, A : String;
+Begin
+  X := ExtOf(P);
+  If (X = 'EXE') Or (X = 'COM') Then RunProgram(P, '', CurPath)
+  Else If (X = 'CMD') Or (X = 'BAT') Then RunProgram(Comspec, '/C ' + P, CurPath)
+  Else
+  Begin
+    A := '';
+    If (X = 'TXT') Or (X = 'PAS') Or (X = 'INI') Or (X = 'SYS') Or (X = 'LOG') Or (X = 'CFG') Or (X = 'ME') Or
+       (X = 'INC') Or (X = 'ASM') Or (X = 'DOC') Or (X = '') Then A := AppPath('PASDEV.EXE')
+    Else If X = 'WAV' Then A := AppPath('DIGAUDIO.EXE')
+    Else If (X = 'HTM') Or (X = 'HTML') Then A := AppPath('BROWSER.EXE');
+    If A <> '' Then RunPm(A, P)
+    Else
+      Msg(L('Aucune application n''est associ'#130'e '#133' ce fichier :', 'No application is associated with ' +
+            'this file:', 'Dieser Datei ist keine Anwendung zugeordnet:', 'Nessuna applicazione associata al ' +
+            'file:', 'Ning'#163'n programa asociado a este archivo:') + Chr(10) + P, MB_OK Or MB_INFORMATION);
+  End;
+End;
+
+Procedure OpenItem(I : LongInt);
+Begin
+  If (I < 0) Or (I >= NEnt) Then Exit;
+  If E(I)^.Kind = ekFile Then OpenFile(EntPath(I))
+  Else Navigate(EntPath(I));
+End;
+
+{ boite Proprietes (objet choisi, sinon le dossier affiche) }
+Procedure Props;
+Var S, P, A : String; Fr, Tot : Double; K, Kd : LongInt;
+Begin
+  S := '';
+  If ((Sel < 0) Or (Sel >= NEnt)) And (Length(CurPath) <> 2) Then
+  Begin
+    If CurPath = '' Then
+      S := PathTitle('') + Chr(10) + IStr(NEnt) + ' ' + L('lecteur(s)', 'drive(s)', 'Laufwerk(e)', 'unit'#133,
+                                                          'unidad(es)')
+    Else
+      S := PathTitle(CurPath) + Chr(10) + TypeName('', ekDir) + Chr(10) + L('Emplacement : ', 'Location: ', 'Ort: ',
+           'Percorso: ', 'Ubicaci'#162'n: ') + CurPath + Chr(10) + IStr(NEnt) + ' ' +
+           L('objet(s)', 'object(s)', 'Objekt(e)', 'oggetti', 'objeto(s)');
+  End
+  Else If (CurPath = '') Or ((Sel < 0) And (Length(CurPath) = 2)) Then
+  Begin
+    If CurPath = '' Then P := E(Sel)^.Nm Else P := CurPath;
+    K := Ord(UpCase(P[1])) - 65;
+    Kd := DrvKind[K];
+    S := DriveName(P[1]) + Chr(10) + TypeName('', Kd);
+    If DrvFs[K] <> '' Then S := S + Chr(10) + L('Syst'#138'me de fichiers : ', 'File system: ', 'Dateisystem: ',
+                                                'File system: ', 'Sistema de archivos: ') + DrvFs[K];
+    If DriveSpace(P[1], Fr, Tot) Then
+      S := S + Chr(10) + L('Espace utilis'#130' : ', 'Used space: ', 'Belegt: ', 'Spazio utilizzato: ',
+                           'Espacio usado: ') + SizeKb(Tot - Fr) + Chr(10) +
+           L('Espace libre : ', 'Free space: ', 'Frei: ', 'Spazio libero: ', 'Espacio libre: ') + SizeKb(Fr) +
+           Chr(10) + L('Capacit'#130' : ', 'Capacity: ', 'Kapazit'#132't: ', 'Capacit'#133': ', 'Capacidad: ') +
+           SizeKb(Tot);
+  End
+  Else
+  Begin
+    S := E(Sel)^.Nm + Chr(10) + TypeName(E(Sel)^.Nm, E(Sel)^.Kind) + Chr(10) +
+         L('Emplacement : ', 'Location: ', 'Ort: ', 'Percorso: ', 'Ubicaci'#162'n: ') + CurPath;
+    If E(Sel)^.Kind = ekFile Then
+      S := S + Chr(10) + L('Taille : ', 'Size: ', 'Gr'#148#225'e: ', 'Dimensione: ', 'Tama'#164'o: ') +
+           SizeKb((E(Sel)^.Size + 1023) Div 1024) + ' (' + Thousands(E(Sel)^.Size) +
+           L(' octets', ' bytes', ' Byte', ' byte', ' bytes') + ')';
+    If E(Sel)^.FDate <> 0 Then
+      S := S + Chr(10) + L('Modifi'#130' : ', 'Modified: ', 'Ge'#132'ndert: ', 'Modificato: ', 'Modificado: ') +
+           DateStr(E(Sel)^.FDate, E(Sel)^.FTime);
+    A := '';
+    If (E(Sel)^.Attr And 1) <> 0 Then A := A + L('Lecture seule ', 'Read-only ', 'Schreibgesch'#129'tzt ',
+                                                 'Sola lettura ', 'S'#162'lo lectura ');
+    If (E(Sel)^.Attr And 2) <> 0 Then A := A + L('Cach'#130' ', 'Hidden ', 'Versteckt ', 'Nascosto ', 'Oculto ');
+    If (E(Sel)^.Attr And 4) <> 0 Then A := A + L('Syst'#138'me ', 'System ', 'System ', 'Sistema ', 'Sistema ');
+    If (E(Sel)^.Attr And $20) <> 0 Then A := A + L('Archive', 'Archive', 'Archiv', 'Archivio', 'Modificado');
+    If A <> '' Then S := S + Chr(10) + L('Attributs : ', 'Attributes: ', 'Attribute: ', 'Attributi: ',
+                                         'Atributos: ') + A;
+  End;
+  Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(S), Z2(L('Propri'#130't'#130's', 'Properties', 'Eigenschaften',
+                         'Propriet'#133, 'Propiedades')), 0, MB_OK Or MB_INFORMATION Or MB_MOVEABLE);
+End;
+
+Procedure About;
+Begin
+  Dummy := WinMessageBox(HWND_DESKTOP, Frame,
+                         Z(AppName + Chr(10) + L('Explorateur de fichiers dans le style de Windows 95',
+                           'Windows 95 style file explorer', 'Datei-Explorer im Stil von Windows 95',
+                           'Esplora file in stile Windows 95', 'Explorador de archivos estilo Windows 95') + Chr(10) +
+                           L('Port'#130' de l''Explorateur Pasdows', 'Ported from the Pasdows Explorer',
+                             'Portiert vom Pasdows-Explorer', 'Portato da Esplora risorse Pasdows',
+                             'Portado del Explorador de Pasdows') + Chr(10) + 'Copyright Gladir.com 2026'),
+                         Z2(L('A propos de l''Explorateur', 'About Explorer', #154'ber Explorer',
+                              'Informazioni su Esplora risorse', 'Acerca del Explorador')),
+                         0, MB_OK Or MB_INFORMATION Or MB_MOVEABLE);
+End;
+
+{ ==================================================================== }
+{ Menus                                                                 }
+{ ==================================================================== }
+
+Procedure MB(V : LongInt);
+Begin
+  MenuT[MenuLen] := V And 255;
+  Inc(MenuLen);
+End;
+
+Procedure MW(V : LongInt);
+Begin
+  MB(V And 255); MB((V Shr 8) And 255);
+End;
+
+Function MenuOpen : LongInt;
+Begin
+  MenuOpen := MenuLen;
+  MW(0); MW(0); MW(0);
+End;
+
+Procedure MenuClose(H, Count : LongInt);
+Begin
+  WrW(LongInt(@MenuT) + H, MenuLen - H);
+  WrW(LongInt(@MenuT) + H + 4, Count);
+End;
+
+Procedure MItem(Style, Attr, Id : LongInt; S : String);
+Var K : LongInt;
+Begin
+  MW(Style); MW(Attr); MW(Id);
+  If (Style And MIS_SEPARATOR) = 0 Then
+  Begin
+    For K := 1 To Length(S) Do MB(Ord(S[K]));
+    MB(0);
+  End;
+End;
+
+Procedure BuildMenu;
+Var H0, H1 : LongInt;
+Begin
+  MenuLen := 0;
+  H0 := MenuOpen;
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 100, L('~Fichier', '~File', '~Datei', '~File', '~Archivo'));
+  H1 := MenuOpen;
+  MItem(MIS_TEXT, 0, cmOpen, L('~Ouvrir', '~Open', #148'~ffnen', '~Apri', '~Abrir') + Chr(9) + L('Entr'#130'e',
+        'Enter', 'Eingabe', 'Invio', 'Entrar'));
+  MItem(MIS_TEXT, 0, cmProps, L('Pr~opri'#130't'#130's', 'P~roperties', '~Eigenschaften', 'P~ropriet'#133,
+        '~Propiedades') + Chr(9) + 'Alt+Entr' + L(#130'e', 'er', 'ag', 'o', 'ar'));
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  MItem(MIS_TEXT, 0, cmClose, L('~Fermer', '~Close', '~Schlie'#225'en', '~Chiudi', '~Cerrar'));
+  MenuClose(H1, 4);
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 110, L('~Affichage', '~View', '~Ansicht', '~Visualizza', '~Ver'));
+  H1 := MenuOpen;
+  MItem(MIS_TEXT, MIA_CHECKED, cmIcons, L('~Grandes ic'#147'nes', 'Lar~ge Icons', '~Gro'#225'e Symbole',
+        'Icone ~grandi', 'Iconos ~grandes'));
+  MItem(MIS_TEXT, 0, cmDetails, L('~D'#130'tails', '~Details', '~Details', '~Dettagli', '~Detalles'));
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  MItem(MIS_TEXT, 0, cmRefresh, L('~Actualiser', '~Refresh', '~Aktualisieren', '~Aggiorna', '~Actualizar') +
+        Chr(9) + 'F5');
+  MenuClose(H1, 4);
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 120, L('A~ller '#133, '~Go', '~Wechseln', '~Vai', '~Ir'));
+  H1 := MenuOpen;
+  MItem(MIS_TEXT, 0, cmUp, L('~Dossier parent', '~Up One Level', '~Eine Ebene h'#148'her', '~Livello superiore',
+        '~Subir un nivel') + Chr(9) + L('Retour', 'Backspace', 'R'#129'cktaste', 'Backspace', 'Retroceso'));
+  MItem(MIS_TEXT, 0, cmComputer, PathTitle(''));
+  MenuClose(H1, 2);
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 130, '~?');
+  H1 := MenuOpen;
+  MItem(MIS_TEXT, 0, cmAbout, L('~A propos de l''Explorateur...', '~About Explorer...', #154'ber ~Explorer...',
+        '~Informazioni su Esplora risorse...', '~Acerca del Explorador...'));
+  MenuClose(H1, 1);
+  MenuClose(H0, 4);
+  MenuHw := WinCreateMenu(Frame, LongInt(@MenuT));
+End;
+
+Procedure SetView(V : LongInt);
+Var M : LongInt;
+Begin
+  If Sel >= 0 Then Top := Sel Div Cols Else Top := 0;
+  View := V;
+  M := WinWindowFromID(Frame, $8005);
+  If V = 0 Then
+  Begin
+    Dummy := WinSendMsg(M, MM_SETITEMATTR, cmIcons Or $10000, MIA_CHECKED Or (MIA_CHECKED Shl 16));
+    Dummy := WinSendMsg(M, MM_SETITEMATTR, cmDetails Or $10000, MIA_CHECKED);
+  End
+  Else
+  Begin
+    Dummy := WinSendMsg(M, MM_SETITEMATTR, cmDetails Or $10000, MIA_CHECKED Or (MIA_CHECKED Shl 16));
+    Dummy := WinSendMsg(M, MM_SETITEMATTR, cmIcons Or $10000, MIA_CHECKED);
+  End;
+  Geometry;
+  If Sel >= 0 Then Top := Sel Div Cols;
+  ShowSel;
+  Redraw;
+End;
+
+{ menu contextuel : Ouvrir, Proprietes (X, Y : coordonnees de PM) }
+Procedure Context(X, Y : LongInt);
+Begin
+  MenuLen := 0;
+  MW(0); MW(0); MW(0);
+  MItem(MIS_TEXT, 0, cmOpen, L('~Ouvrir', '~Open', #148'~ffnen', '~Apri', '~Abrir'));
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  MItem(MIS_TEXT, 0, cmProps, L('Pr~opri'#130't'#130's', 'P~roperties', '~Eigenschaften', 'P~ropriet'#133,
+        '~Propiedades'));
+  MenuClose(0, 3);
+  If CtxMenu <> 0 Then Dummy := WinDestroyWindow(CtxMenu);
+  CtxMenu := WinCreateMenu(HWND_DESKTOP, LongInt(@MenuT));
+  If CtxMenu <> 0 Then Dummy := WinPopupMenu(Client, Client, CtxMenu, X, Y, cmOpen, 0);
+End;
+
+Procedure Command(Id : LongInt);
+Begin
+  Case Id Of
+    cmOpen :
+      If Focus = 1 Then
+      Begin
+        If (TSel >= 0) And (TSel < TN) Then
+          If NdP[TSel] = '*' Then Navigate('') Else Navigate(NdP[TSel]);
+      End
+      Else If Sel >= 0 Then OpenItem(Sel);
+    cmProps : Props;
+    cmClose : Dummy := WinPostMsg(Client, WM_QUIT, 0, 0);
+    cmIcons : SetView(0);
+    cmDetails : SetView(1);
+    cmRefresh : Refresh;
+    cmUp : GoUp;
+    cmComputer : Navigate('');
+    cmAbout : About;
+  End;
+End;
+
+{ ==================================================================== }
+{ Souris et clavier                                                     }
+{ ==================================================================== }
+
+Procedure TreeClick(X, Y : LongInt; Dbl : Boolean);
+Var R, D, C, Hh : LongInt; P : String;
+Begin
+  Focus := 1;
+  If (TN > TVis) And (X >= TX2 - 1 - SbW) Then
+  Begin
+    Hh := ScrollHit(Y, TY1 + 2, TY2 - 2, TTop, TN - TVis);
+    If Abs(Hh) = 1 Then TTop := TTop + Hh Else TTop := TTop + (Hh Div 2) * TVis;
+    If TTop > TN - TVis Then TTop := TN - TVis;
+    If TTop < 0 Then TTop := 0;
+    Redraw;
+    Exit;
+  End;
+  R := TTop + (Y - TY1 - 2) Div TreeRow;
+  If (R < 0) Or (R >= TN) Or (Y < TY1 + 2) Then
+  Begin
+    Redraw;
+    Exit;
+  End;
+  D := NdD[R];
+  C := 4 + D * 16 - 8;
+  If (D >= 1) And (X >= C - 6) And (X <= C + 6) And ((NdF[R] And 2) = 0) Then
+  Begin
+    If (NdF[R] And 1) <> 0 Then TreeCollapse(R) Else TreeExpand(R);
+    Redraw;
+    Exit;
+  End;
+  If Dbl And (D >= 1) Then
+  Begin
+    If (NdF[R] And 1) <> 0 Then TreeCollapse(R) Else TreeExpand(R);
+  End;
+  P := NdP[R];
+  If P = '*' Then P := '';
+  TSel := R;
+  If UpStr(P) <> UpStr(CurPath) Then Navigate(P) Else Redraw;
+End;
+
+Function HitItem(X, Y : LongInt) : LongInt;
+Var I, C : LongInt;
+Begin
+  HitItem := -1;
+  If View = 1 Then
+  Begin
+    If Y < PY1 + 21 Then Exit;
+    I := Top + (Y - PY1 - 21) Div RowH;
+    If (Y - PY1 - 21) Div RowH >= VisRows Then Exit;
+  End
+  Else
+  Begin
+    If (X < PX1 + 6) Or (Y < PY1 + 6) Then Exit;
+    C := (X - PX1 - 6) Div CellW;
+    If C >= Cols Then Exit;
+    If (Y - PY1 - 6) Div CellH >= VisRows Then Exit;
+    I := ((Y - PY1 - 6) Div CellH + Top) * Cols + C;
+  End;
+  If (I >= 0) And (I < NEnt) Then HitItem := I;
+End;
+
+Procedure ContentClick(X, Y : LongInt; Dbl, Btn2 : Boolean);
+Var I, Hh : LongInt;
+Begin
+  Focus := 0;
+  If (TotRows > VisRows) And (X >= PX2 - 1 - SbW) And Not Btn2 Then
+  Begin
+    Hh := ScrollHit(Y, PY1 + 2, PY2 - 2, Top, TotRows - VisRows);
+    If Abs(Hh) = 1 Then Top := Top + Hh Else Top := Top + (Hh Div 2) * VisRows;
+    ClampTop;
+    Redraw;
+    Exit;
+  End;
+  I := HitItem(X, Y);
+  Sel := I;
+  Redraw;
+  If Dbl And (I >= 0) Then OpenItem(I);
+End;
+
+Procedure Mouse(Mp1 : LongInt; Dbl, Btn2 : Boolean);
+Var X, Y : LongInt;
+Begin
+  Geometry;
+  X := S16(Mp1); Y := CH - 1 - S16(Mp1 Shr 16);
+  If (X >= TX1) And (X <= TX2) And (Y >= TY1) And (Y <= TY2) Then
+  Begin
+    If Btn2 Then
+    Begin
+      TreeClick(X, Y, False);
+      Context(S16(Mp1), S16(Mp1 Shr 16));
+    End
+    Else TreeClick(X, Y, Dbl);
+  End
+  Else If (X >= PX1) And (X <= PX2) And (Y >= PY1) And (Y <= PY2) Then
+  Begin
+    ContentClick(X, Y, Dbl, Btn2);
+    If Btn2 Then Context(S16(Mp1), S16(Mp1 Shr 16));
+  End;
+End;
+
+{ arbre au clavier : haut et bas (le dossier suit), gauche replie ou
+  remonte, droite deplie }
+Procedure TreeKey(Vk : LongInt);
+Var J, D : LongInt; P : String;
+Begin
+  Case Vk Of
+    VK_UP : If TSel > 0 Then Dec(TSel);
+    VK_DOWN : If TSel < TN - 1 Then Inc(TSel);
+    VK_HOME : TSel := 0;
+    VK_END : TSel := TN - 1;
+    VK_PAGEUP : TSel := MaxI(0, TSel - TVis);
+    VK_PAGEDOWN : TSel := MinI(TN - 1, TSel + TVis);
+    VK_RIGHT :
+      If (NdF[TSel] And 1) = 0 Then TreeExpand(TSel)
+      Else If (TSel + 1 < TN) And (NdD[TSel + 1] > NdD[TSel]) Then Inc(TSel);
+    VK_LEFT :
+      If (NdF[TSel] And 1) <> 0 Then TreeCollapse(TSel)
+      Else
+      Begin
+        D := NdD[TSel]; J := TSel - 1;
+        While (J >= 0) And (NdD[J] >= D) Do Dec(J);
+        If J >= 0 Then TSel := J;
+      End;
+  Else
+    Exit;
+  End;
+  If TSel < TTop Then TTop := TSel;
+  If TSel >= TTop + TVis Then TTop := TSel - TVis + 1;
+  P := NdP[TSel];
+  If P = '*' Then P := '';
+  J := TSel;
+  If UpStr(P) <> UpStr(CurPath) Then Navigate(P);
+  TSel := J;
+  Redraw;
+End;
+
+Procedure ContentKey(Vk : LongInt);
+Var C, N : LongInt;
+Begin
+  If NEnt = 0 Then Exit;
+  C := Cols; N := Sel;
+  Case Vk Of
+    VK_LEFT : If View = 0 Then N := N - 1;
+    VK_RIGHT : If View = 0 Then N := N + 1;
+    VK_UP : N := N - C;
+    VK_DOWN : If N < 0 Then N := 0 Else N := N + C;
+    VK_HOME : N := 0;
+    VK_END : N := NEnt - 1;
+    VK_PAGEUP : N := N - C * VisRows;
+    VK_PAGEDOWN : N := N + C * VisRows;
+  Else
+    Exit;
+  End;
+  If N < 0 Then N := 0;
+  If N >= NEnt Then N := NEnt - 1;
+  Sel := N;
+  ShowSel;
+  Redraw;
+End;
+
+Function KeyChar(Mp1, Mp2 : LongInt) : Boolean;
+Var Fl, Vk, Ch, K, J : LongInt;
+Begin
+  KeyChar := True;
+  Fl := Lo16(Mp1); Ch := Lo16(Mp2); Vk := Hi16(Mp2);
+  If (Fl And KC_KEYUP) <> 0 Then
+  Begin
+    KeyChar := False;
+    Exit;
+  End;
+  Geometry;
+  If (Fl And KC_VIRTUALKEY) <> 0 Then
+  Begin
+    Case Vk Of
+      VK_ENTER, VK_NEWLINE :
+      Begin
+        If (Fl And KC_ALT) <> 0 Then Props Else Command(cmOpen);
+        Exit;
+      End;
+      VK_BACKSPACE :
+      Begin
+        GoUp;
+        Exit;
+      End;
+      VK_F5 :
+      Begin
+        Refresh;
+        Exit;
+      End;
+      VK_TAB, VK_BACKTAB :
+      Begin
+        Focus := 1 - Focus;
+        If (Focus = 0) And (Sel < 0) And (NEnt > 0) Then Sel := 0;
+        Redraw;
+        Exit;
+      End;
+      VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_HOME, VK_END, VK_PAGEUP, VK_PAGEDOWN :
+      Begin
+        If Focus = 1 Then TreeKey(Vk) Else ContentKey(Vk);
+        Exit;
+      End;
+    End;
+  End;
+  { lettre : objet suivant dont le nom commence par elle }
+  If ((Fl And KC_CHAR) <> 0) And ((Fl And (KC_CTRL Or KC_ALT)) = 0) And (Ch > 32) And (Ch < 256) And (Focus = 0) And
+     (NEnt > 0) Then
+  Begin
+    For K := 1 To NEnt Do
+    Begin
+      J := (MaxI(Sel, -1) + K) Mod NEnt;
+      If UpCase(EntName(J)[1]) = UpCase(Chr(Ch)) Then
+      Begin
+        Sel := J;
+        ShowSel;
+        Redraw;
+        Exit;
+      End;
+    End;
+    Exit;
+  End;
+  KeyChar := False;
+End;
+
+Function ClientProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Rc : Array[0..3] Of LongInt;
+Begin
+  ClientProc := 0;
+  Case Msg Of
+    WM_SIZE :
+    Begin
+      Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+      CW := Rc[2]; CH := Rc[3];
+      Geometry;
+      ShowSel;
+    End;
+    WM_PAINT : PaintAll(H);
+    WM_BUTTON1DOWN :
+    Begin
+      Dummy := WinSetFocus(HWND_DESKTOP, H);
+      Mouse(Mp1, False, False);
+      ClientProc := 1;
+    End;
+    WM_BUTTON1DBLCLK :
+    Begin
+      Mouse(Mp1, True, False);
+      ClientProc := 1;
+    End;
+    WM_BUTTON2DOWN :
+    Begin
+      Dummy := WinSetFocus(HWND_DESKTOP, H);
+      Mouse(Mp1, False, True);
+      ClientProc := 1;
+    End;
+    WM_CHAR :
+      If KeyChar(Mp1, Mp2) Then ClientProc := 1
+      Else ClientProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+    WM_COMMAND : Command(Lo16(Mp1));
+    WM_CLOSE : Dummy := WinPostMsg(H, WM_QUIT, 0, 0);
+  Else
+    ClientProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+Var
+  Fl, Sw, Sh, Fw, Fh, X, Y : LongInt;
+  Qmsg : Array[0..7] Of LongInt;
+  Start : String;
+
+BEGIN
+  FpuCw := $037F;
+  asm
+    fldcw FpuCw
+  end;
+  LangInit;
+  EntBase := 0;
+  If DosAllocMem(LongInt(@EntBase), MaxE * SizeOf(TEnt), $13) <> 0 Then EntBase := 0;
+  If EntBase = 0 Then Halt(8);
+  NEnt := 0; Sel := -1; Top := 0; View := 0; Focus := 1; CtxMenu := 0;
+  CW := 620; CH := 400;
+  ScanDrives;
+  { dossier de depart : parametre, sinon C: }
+  Start := '';
+  If ParamCount > 0 Then Start := UpStr(ParamStr(1));
+  While (Length(Start) > 2) And (Start[Length(Start)] = '\') Do Delete(Start, Length(Start), 1);
+  If Start = '' Then
+  Begin
+    If (DrvMap And 4) <> 0 Then Start := 'C:';
+  End;
+  Hab := WinInitialize(0);
+  Hmq := WinCreateMsgQueue(Hab, 0);
+  Dummy := WinRegisterClass(Hab, Z('OS2EXPLORER'), LongInt(@ClientProc), 0, 0);
+  Fl := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_SIZEBORDER Or FCF_MINBUTTON Or FCF_MAXBUTTON Or FCF_TASKLIST;
+  Client := 0;
+  Frame := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Fl), Z('OS2EXPLORER'), Z2(AppName), 0, 0, 0,
+                              LongInt(@Client));
+  BuildMenu;
+  TreeInit;
+  CurPath := Start;
+  ListDir(CurPath, False);
+  TreeSync;
+  SetTitle;
+  Sw := WinQuerySysValue(HWND_DESKTOP, 20); Sh := WinQuerySysValue(HWND_DESKTOP, 21);
+  Fw := MinI(Sw, 620); Fh := MinI(Sh - 40, 440);
+  If Sw >= 1000 Then
+  Begin
+    Fw := 760; Fh := 540;
+  End;
+  X := MaxI(0, (Sw - Fw) Div 2); Y := MaxI(0, (Sh - Fh) Div 2);
+  Dummy := WinSetWindowPos(Frame, HWND_TOP, X, Y, Fw, Fh, SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW Or
+                           SWP_ACTIVATE);
+  Dummy := WinSetActiveWindow(HWND_DESKTOP, Frame);
+  Dummy := WinSetFocus(HWND_DESKTOP, Client);
+  While WinGetMsg(Hab, LongInt(@Qmsg), 0, 0, 0) <> 0 Do Dummy := WinDispatchMsg(Hab, LongInt(@Qmsg));
+  Dummy := WinDestroyWindow(Frame);
+END.
