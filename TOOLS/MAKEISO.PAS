@@ -30,7 +30,7 @@ Uses Dos;
 
 Const
   SECT       = 2048;
-  MAX_FILES  = 128;
+  MAX_FILES  = 1024;          { 128 jusqu'ici : au-dela, des fichiers etaient perdus en silence }
 
 Type
   TSector = Array[0..SECT-1] Of Byte;
@@ -392,15 +392,25 @@ BEGIN
       While (Length(Dir) > 0) And Not (Dir[Length(Dir)] In ['\', '/', ':']) Do
         Delete(Dir, Length(Dir), 1);
       FindFirst(Arg, ReadOnly Or Archive Or Hidden Or SysFile, SR);
-      While (DosError = 0) And (NFiles < MAX_FILES) Do
+      While DosError = 0 Do
       Begin
+        If NFiles >= MAX_FILES Then
+        Begin
+          WriteLn('MAKEISO: plus de ', MAX_FILES, ' fichiers.');
+          Halt(1);
+        End;
         Inc(NFiles);
         FileNames[NFiles] := Dir + SR.Name;
         FindNext(SR);
       End;
     End
-    Else If NFiles < MAX_FILES Then
+    Else
     Begin
+      If NFiles >= MAX_FILES Then
+      Begin
+        WriteLn('MAKEISO: plus de ', MAX_FILES, ' fichiers.');
+        Halt(1);
+      End;
       Inc(NFiles);
       FileNames[NFiles] := Arg;
     End;

@@ -47,7 +47,7 @@ SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
          (VirtualBox, Bochs ou un vrai PC : graver ou monter l'ISO ;
-         lecteur de CD-ROM IDE/ATAPI, au moins 16 Mo de memoire ;
+         lecteur de CD-ROM IDE/ATAPI, au moins 28 Mo de memoire ;
          32 Mo pour le disque virtuel HPFS)
          Avec un disque dur HPFS (partition de type 07h) :
          qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d -hda disque.img
@@ -178,7 +178,7 @@ Carte memoire
   00100000h          OS2KRNL (image PE)
   fin de l'image..4 Mo tas du noyau
   00400000h-007FFFFFh fenetre du processus courant (pagination)
-  00800000h-00FFFFFFh DLL partagees, a leur base preferee (RMINFO.DLL a
+  00800000h-017FFFFFh DLL partagees, a leur base preferee (RMINFO.DLL a
                      00800000h, OS2SM.DLL a 00850000h, HELPMGR.DLL a
                      00880000h, DOSCALLS.DLL a 00C00000h,
                      KBDCALLS.DLL a 00C80000h, MONCALLS.DLL a
@@ -253,7 +253,9 @@ extension de la MFT, $MFTMirr ; $LogFile vide comme ntfs-3g), formatage
 (FS_FSCTL 8000h, ou KrnDiskCtl 11 avec 'NTFS'), verification (8001h).
 CONFIG.SYS : IFS=C:\NTFS.IFS /CACHE:64. OS/2-0 peut s'installer et
 demarrer sur une partition NTFS : choix NTFS de la page Formatage
-d'INSTALL (HPFS reste le choix par defaut ; SET INSTALL_FS=NTFS dans le
+d'INSTALL (HPFS, le systeme de fichiers d'OS/2, reste le choix par
+defaut ; NTFS facilite le partage des fichiers avec Windows et Linux ;
+SET INSTALL_FS=NTFS dans le
 CONFIG.SYS du CD d'installation le rend initial) ; NTFS.IFS va alors
 dans la zone d'amorcage et OS2LDR le charge. Limites : fichiers
 compresses ou chiffres non lus, attributs etendus d'OS/2 non
@@ -661,10 +663,14 @@ dans ces modes (VioSetMode : 800 x 600, 1024 x 768, 1280 x 1024... en
 et PMGPI y dessinent. Sans autre reglage, le bureau est en 640 x 480
 en memoire lineaire (32, sinon 16 bits par pel, couleurs du VGA) ; le
 mode a plans du VGA (640 x 480 x 16, SET PMRESOLUTION=640x480x4) ne sert
-que sans BIOS VESA : il demande une lecture et une ecriture de la
-fenetre A0000h par octet et des ecritures dans les ports du VGA, tres
-lentes sous VirtualBox au-dessus de Hyper-V (chaque acces est une
-sortie de la machine virtuelle). Resolution du bureau :
+que sans BIOS VESA (ou s'il est demande). PM y dessine dans un ecran
+fantome en memoire (un octet par pel) que PMWIN recopie au VGA quand la
+file de messages est au repos : seuls les groupes de 32 pels changes
+sont ecrits (une ecriture de 32 bits en mode 2 pour un groupe d'une
+couleur, une par plan sinon), sans relire le VGA ; sous VirtualBox
+au-dessus de Hyper-V, ou chaque acces au VGA est une sortie de la
+machine virtuelle, cela en fait environ 30 fois moins. SET PMSHADOW=NON
+revient au dessin direct dans les plans. Resolution du bureau :
   SET PMRESOLUTION=1024x768x32   dans CONFIG.SYS (largeur x hauteur x
                                  bits par pel), ou
   carnet "Systeme - Parametres" (Systeme OS/2, Configuration du
@@ -979,10 +985,13 @@ du bureau, objet Pascal Developer (PASDEV fichier.pas le lance aussi).
     sa sortie standard est redirigee vers un fichier et ses messages
     vont dans la fenetre Messages (double clic ou Entree : la ligne en
     cause). Destination (menu Compiler) : OS/2 Presentation Manager par
-    defaut (symbole OS2PM), ou OS/2 Console (symbole OS2CONSOLE) ;
+    defaut (symbole OS2PM), ou OS/2 Console (symbole OS2CONSOLE). Le
+    compilateur tourne en arriere-plan : l'EDI et le bureau restent
+    utilisables pendant la compilation ;
   - Executer (Ctrl+F9) : compile si besoin, puis lance le programme (PM :
-    directement ; Console : dans une fenetre OS/2, pause a la fin) ;
-    Parametres : arguments du programme ;
+    directement ; Console : dans une fenetre OS/2, pause a la fin ; un
+    programme compile pour PM sans fenetre, un simple WriteLn, est aussi
+    lance dans une fenetre OS/2) ; Parametres : arguments du programme ;
   - Information : taille du code, des donnees, de la pile et du .EXE,
     importations, lignes compilees, duree, avertissements et erreurs ;
   - barre d'etat : ligne et colonne, Insertion ou Refrappe (Ins),

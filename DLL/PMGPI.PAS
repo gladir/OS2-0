@@ -283,7 +283,7 @@ Var
   { divers }
   Arena : Array[0..ArenaSize - 1] Of Byte;
   Recording, Replaying, ReplayDepth, LastErr : LongInt;
-  PmMod, PmErrFn, PmInfoFn, PmFromDc, PmHideFn : LongInt;
+  PmMod, PmErrFn, PmInfoFn, PmFromDc, PmHideFn, PmShadFn : LongInt;
   NameZ : Array[0..259] Of Byte;
   Scratch : Array[0..1023] Of Byte;
   Dummy : LongInt;
@@ -866,6 +866,22 @@ Begin
   NewDc := F;
 End;
 
+{ ecran fantome du VGA 640 x 480 x 16 de PMWIN (WINQUERYSHADOW, ordinal
+  1010) : adresse, ou 0 }
+Function PmShadow : LongInt;
+Begin
+  PmShadow := 0;
+  If PmMod = 0 Then
+  Begin
+    PutZ(LongInt(@NameZ), 'PMWIN');
+    If DcQueryModuleHandle(LongInt(@NameZ), LongInt(@PmMod)) <> 0 Then PmMod := 0;
+  End;
+  If PmMod = 0 Then Exit;
+  If PmShadFn = 0 Then
+    If DcQueryProcAddr(PmMod, 1010, 0, LongInt(@PmShadFn)) <> 0 Then PmShadFn := -1;
+  If PmShadFn > 0 Then PmShadow := CallSys2(PmShadFn, 0, 0);
+End;
+
 { --- ecran : mode du VGA (VIOCALLS) --- }
 Function ScreenMode(Var W, H, Bits : LongInt) : LongInt;
 Var Mi : Array[0..39] Of Byte; K : LongInt;
@@ -883,6 +899,17 @@ Begin
     Begin
       ScrLfb := RdL(LongInt(@Mi) + 14); ScrPitch := RdL(LongInt(@Mi) + 26);
       ScreenMode := TG_LFB;
+    End
+    Else If (Bits = 4) And (W = 640) And (H = 480) Then
+    Begin
+      { VGA 16 couleurs : dessin dans l'ecran fantome de PMWIN (un octet
+        par pel), recopie au VGA par PMWIN }
+      K := PmShadow;
+      If K <> 0 Then
+      Begin
+        ScrLfb := K; ScrPitch := 640;
+        ScreenMode := TG_LFB;
+      End;
     End;
   End
   Else
@@ -1001,7 +1028,7 @@ Begin
         N := 256;
         TgTab := LongInt(@Pal256);
       End
-      Else N := 0;
+      Else If TgBpp > 8 Then N := 0;          { 4 : ecran fantome, 16 couleurs du VGA }
     TG_TEXT : N := 8;
   End;
 End;
@@ -1098,7 +1125,7 @@ Begin
     TG_BMP : If TgBpp >= 24 Then DevMask := $FFFFFF Else DevMask := (1 Shl TgBpp) - 1;
     TG_PLANAR : If TgBpp = 1 Then DevMask := 1 Else DevMask := 15;
     TG_LINEAR : DevMask := 255;
-    TG_LFB : If TgBpp = 8 Then DevMask := 255 Else DevMask := $FFFFFF;
+    TG_LFB : If TgBpp = 8 Then DevMask := 255 Else If TgBpp = 4 Then DevMask := 15 Else DevMask := $FFFFFF;
     TG_TEXT : DevMask := 7;
   Else
     DevMask := 15;
@@ -1170,7 +1197,7 @@ Var A, V : LongInt;
 Begin
   A := TgBase + (TgH - 1 - Y) * TgStride;
   Case TgBpp Of
-    8 : LfbGet := RdB(A + X);
+    4, 8 : LfbGet := RdB(A + X);
     15 : Begin
            V := RdB(A + X * 2) Or (RdB(A + X * 2 + 1) Shl 8);
            LfbGet := (((V Shr 10) And 31) Shl 19) Or (((V Shr 5) And 31) Shl 11) Or ((V And 31) Shl 3);
@@ -1191,7 +1218,7 @@ Begin
   If Not GpiMine Then Exit;
   A := TgBase + (TgH - 1 - Y) * TgStride;
   Case TgBpp Of
-    8 : WrB(A + X, V);
+    4, 8 : WrB(A + X, V);
     15, 16 :
       Begin
         If TgBpp = 15 Then W := (((V Shr 19) And 31) Shl 10) Or (((V Shr 11) And 31) Shl 5) Or ((V Shr 3) And 31)
