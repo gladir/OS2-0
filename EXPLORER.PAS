@@ -118,6 +118,10 @@ Function DosExecPgm(PObj, CbObj, Flags, PArg, PEnv, PRes, PName : LongInt) : Lon
 Function DosSetDefaultDisk(Disk : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetCurrentDir(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
+Function DosOpen(PName, PHf, PAct, Cb, Attr, Fl, Mode, PEa : LongInt) : LongInt; External 'DOSCALLS';
+Function DosRead(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS';
+Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
+Function DosSetFilePtr(H, Ib, Method, PActual : LongInt) : LongInt; External 'DOSCALLS';
 
 Var
   Hab, Hmq, Frame, Client, MenuHw, Lang, Dummy : LongInt;
@@ -1577,11 +1581,110 @@ Begin
         'No se puede iniciar ') + P + ' (' + IStr(Rc) + ').', MB_OK Or MB_ERROR);
 End;
 
+{ programme de Presentation Manager ? En-tete LX/LE (indicateurs du
+  module : 300h, application PM), NE (type d'application 300h) ou PE
+  (table d'importation : PMWIN, PMGPI ou PMMERGE). Un tel programme est
+  lance dans la session de PM, comme les objets du bureau : une nouvelle
+  session plein ecran passerait l'ecran en mode texte puis le rendrait a
+  PM aussitot (affichage perdu en 1024 x 768 x 32 bits). }
+Function PmReadAt(H, Pos, Buf, N : LongInt) : Boolean;
+Var A : LongInt;
+Begin
+  A := 0;
+  PmReadAt := (DosSetFilePtr(H, Pos, 0, LongInt(@A)) = 0) And (DosRead(H, Buf, N, LongInt(@A)) = 0) And (A = N);
+End;
+
+Function IsPmProgram(Path : String) : Boolean;
+Var H, A, Ne, Opt, NSec, OptSz, Imp, Off, K, J, Rva, VA, VS, Raw, NmOff : LongInt; S : String;
+    B : Array[0..255] Of Byte; Sh : Array[0..39] Of Byte;
+
+  Function W(I : LongInt) : LongInt;
+  Begin
+    W := B[I] Or (B[I + 1] Shl 8);
+  End;
+
+  Function D(I : LongInt) : LongInt;
+  Begin
+    D := W(I) Or (W(I + 2) Shl 16);
+  End;
+
+  { deplacement dans le fichier d'une adresse virtuelle relative }
+  Function FileOfs(R : LongInt) : LongInt;
+  Var I : LongInt;
+  Begin
+    FileOfs := -1;
+    For I := 0 To NSec - 1 Do
+      If PmReadAt(H, Opt + OptSz + I * 40, LongInt(@Sh), 40) Then
+      Begin
+        VS := Sh[8] Or (Sh[9] Shl 8) Or (Sh[10] Shl 16) Or (Sh[11] Shl 24);
+        VA := Sh[12] Or (Sh[13] Shl 8) Or (Sh[14] Shl 16) Or (Sh[15] Shl 24);
+        Raw := Sh[20] Or (Sh[21] Shl 8) Or (Sh[22] Shl 16) Or (Sh[23] Shl 24);
+        If VS < Sh[16] Or (Sh[17] Shl 8) Or (Sh[18] Shl 16) Then
+          VS := Sh[16] Or (Sh[17] Shl 8) Or (Sh[18] Shl 16);
+        If (R >= VA) And (R < VA + VS) Then
+        Begin
+          FileOfs := R - VA + Raw;
+          Exit;
+        End;
+      End;
+  End;
+
+Begin
+  IsPmProgram := False;
+  H := 0; A := 0;
+  If DosOpen(Z(Path), LongInt(@H), LongInt(@A), 0, 0, 1, $40, 0) <> 0 Then Exit;
+  If PmReadAt(H, 0, LongInt(@B), 64) And (B[0] = Ord('M')) And (B[1] = Ord('Z')) Then
+  Begin
+    Ne := D($3C);
+    If (Ne > 0) And PmReadAt(H, Ne, LongInt(@B), 128) Then
+    Begin
+      If ((B[0] = Ord('L')) And ((B[1] = Ord('X')) Or (B[1] = Ord('E')))) Then
+        IsPmProgram := (D($10) And $700) = $300
+      Else If (B[0] = Ord('N')) And (B[1] = Ord('E')) Then
+        IsPmProgram := (W($0C) And $300) = $300
+      Else If (B[0] = Ord('P')) And (B[1] = Ord('E')) And (B[2] = 0) And (B[3] = 0) Then
+      Begin
+        NSec := W(6); OptSz := W(20); Opt := Ne + 24;
+        Imp := D(24 + 104);
+        If W(24) = $20B Then Imp := D(24 + 120);
+        Off := -1;
+        If (Imp <> 0) And (NSec > 0) And (NSec < 64) Then Off := FileOfs(Imp);
+        K := 0;
+        While (Off > 0) And (K < 64) And PmReadAt(H, Off + K * 20, LongInt(@B), 20) Do
+        Begin
+          Rva := D(12);
+          If Rva = 0 Then K := 64
+          Else
+          Begin
+            NmOff := FileOfs(Rva);
+            S := '';
+            If (NmOff > 0) And PmReadAt(H, NmOff, LongInt(@Sh), 16) Then
+              For J := 0 To 15 Do
+                If (Sh[J] <> 0) And (Length(S) = J) Then S := S + UpCase(Chr(Sh[J]));
+            If (Copy(S, 1, 5) = 'PMWIN') Or (Copy(S, 1, 5) = 'PMGPI') Or (Copy(S, 1, 7) = 'PMMERGE') Then
+            Begin
+              IsPmProgram := True;
+              K := 64;
+            End;
+            Inc(K);
+          End;
+        End;
+      End;
+    End;
+  End;
+  Dummy := DosClose(H);
+End;
+
 Procedure OpenFile(P : String);
 Var X, A : String;
 Begin
   X := ExtOf(P);
-  If (X = 'EXE') Or (X = 'COM') Then RunProgram(P, '', CurPath)
+  If (X = 'EXE') And IsPmProgram(P) Then
+  Begin
+    SetDir(CurPath);
+    RunPm(P, '');
+  End
+  Else If (X = 'EXE') Or (X = 'COM') Then RunProgram(P, '', CurPath)
   Else If (X = 'CMD') Or (X = 'BAT') Then RunProgram(Comspec, '/C ' + P, CurPath)
   Else
   Begin
