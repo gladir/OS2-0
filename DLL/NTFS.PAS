@@ -61,9 +61,24 @@ Library NTFS;
   le vide (rempli de FFh) avant la premiere modification d'un volume pour
   que Windows ne rejoue pas d'anciennes transactions ; le bit "volume
   modifie" de $Volume est pose pendant les modifications et retire a
-  chaque vidage (FS_FLUSHBUF, FS_COMMIT, fermeture, arret). Les fichiers
-  compresses ou chiffres ne sont pas lus ; les attributs etendus (EA)
-  d'OS/2 ne sont pas enregistres.
+  chaque vidage (FS_FLUSHBUF, FS_COMMIT, fermeture, arret) ; un volume
+  trouve marque au montage est verifie et corrige si sa lettre est citee
+  par /AUTOCHECK. Les noms crees sont dans l'espace "Win32 et DOS" s'ils
+  respectent la forme 8.3 en majuscules, sinon dans l'espace POSIX (comme
+  ntfs-3g) ; les noms DOS (8.3) des fichiers de Windows ne sont pas
+  listes mais permettent de trouver le fichier.
+  Limites : les fichiers compresses ou chiffres ne sont pas lus ; les
+  attributs etendus (EA) d'OS/2 ne sont pas enregistres (une liste non
+  vide est refusee par ERROR_EAS_NOT_SUPPORTED) ; un fichier a liste
+  d'attributs est lu mais ni ecrit ni renomme (un repertoire a liste
+  d'attributs, comme ceux de ntfs-3g dont $INDEX_ROOT est dans une
+  extension, est lu et modifie) ; un fichier ayant un lien physique dans
+  un autre repertoire n'est pas supprime ; les fichiers de 2 Go et plus
+  sont en lecture seule (2 Go - 1 octet lus) ; les dates sont enregistrees
+  telles quelles (heure locale) ; le formatage cree des clusters de
+  4 Ko (volumes de 2 Mo et plus). $Bitmap est garde en memoire s'il fait
+  64 Ko au plus (volumes de 2 Go avec des clusters de 4 Ko), sinon par
+  fenetres de 64 Ko.
 
   Interface (adaptee a OS/2-0 : toutes les valeurs sont de 32 bits, les
   pointeurs sont des adresses lineaires ; convention _System) : la meme
@@ -106,7 +121,8 @@ Library NTFS;
   Le detail des parametres de chacun est donne avec sa fonction
   (partie 13). Fonctions privees de FS_FSCTL : 8000h formater un volume
   (NTFS 3.1), 8001h verifier un volume (comme CHKDSK), 8002h
-  statistiques.
+  statistiques (memes numeros que HPFS.IFS : le noyau les emploie pour
+  formater (MountBlk, KrnDiskCtl 5 et 11) et pour /AUTOCHECK).
 
   Organisation :
     Partie 1  - Constantes, types et variables
@@ -209,6 +225,8 @@ Const
   MaxVol   = 8;
   MaxRuns  = 2048;          { runs par attribut }
   RunBytes = 24576;         { MaxRuns * 12 }
+  BmpWinMax = 65536;        { fenetre de $Bitmap : 512 Ki clusters }
+  ChkMapMax = 262144;       { carte de la verification : 2 Mi clusters par passe }
   CacheMax = 128;           { antememoire : 128 secteurs au plus }
   MaxObj   = 32;            { fichiers ouverts (objets) }
   MaxOpen  = 64;            { ouvertures (SFT) }
@@ -262,7 +280,10 @@ Type
     MftRN    : LongInt;
     MftCap   : LongInt;     { runs que peut recevoir MftRA }
     RecN     : LongInt;     { enregistrements de la MFT }
-    Bmp      : LongInt;     { $Bitmap en memoire (tas) }
+    Bmp      : LongInt;     { fenetre de $Bitmap en memoire (tas) }
+    BmpWin   : LongInt;     { octet de $Bitmap au debut de la fenetre }
+    BmpWinN  : LongInt;     { octets valides de la fenetre (0 : vide) }
+    BmpWinCap : LongInt;    { taille de la fenetre }
     BmpLen   : LongInt;
     BmpRA    : LongInt;
     BmpRN    : LongInt;
@@ -412,6 +433,10 @@ Function KGetCurrentProcessId : LongInt; External 'DOSCALLS' Name 'GetCurrentPro
 { ==================================================================== }
 { Partie 3 - Utilitaires                                               }
 { ==================================================================== }
+{ Le code NTFS de Pasdows accede a la memoire par Mem[0:A], MemW[0:A] et
+  MemL[0:A] : OS2PC ne les traduit en acces directs aux adresses
+  lineaires que dans le noyau ; dans une DLL, ils sont remplaces par
+  RdB/RdW/RdL (lecture) et WrB/WrW/WrL (ecriture). }
 
 Function RdL(A : LongInt) : LongInt;
 Var P : PLong;
@@ -1923,14 +1948,33 @@ Begin
   BitCount := N;
 End;
 
-Function NtBmpGet(V, C : LongInt) : Boolean;
+{ Adresse de l'octet I de $Bitmap : la fenetre (alignee sur sa taille)
+  qui le contient est lue au besoin. Les modifications sont ecrites
+  aussitot (NtBmpSaveSec) : la fenetre n'est jamais a reecrire. }
+Function BmpAddr(V, I : LongInt) : LongInt;
+Var W0, N : LongInt;
 Begin
-  NtBmpGet := (RdB(Vols[V].Bmp + C Shr 3) And (1 Shl (C And 7))) <> 0;
+  If (I < Vols[V].BmpWin) Or (I >= Vols[V].BmpWin + Vols[V].BmpWinN) Then
+  Begin
+    W0 := (I Div Vols[V].BmpWinCap) * Vols[V].BmpWinCap;
+    N := Min(Vols[V].BmpWinCap, Vols[V].BmpLen - W0);
+    Vols[V].BmpWin := W0;
+    Vols[V].BmpWinN := 0;
+    If N > 0 Then
+      If NtStreamIo(V, Vols[V].BmpRA, Vols[V].BmpRN, W0, N, Vols[V].Bmp, False) Then Vols[V].BmpWinN := N
+      Else FillMem(Vols[V].Bmp, N, $FF);           { illisible : tout occupe }
+  End;
+  BmpAddr := Vols[V].Bmp + I - Vols[V].BmpWin;
 End;
 
-{ Clusters libres d'apres le bitmap en memoire }
+Function NtBmpGet(V, C : LongInt) : Boolean;
+Begin
+  NtBmpGet := (RdB(BmpAddr(V, C Shr 3)) And (1 Shl (C And 7))) <> 0;
+End;
+
+{ Clusters libres d'apres $Bitmap (lu fenetre par fenetre) }
 Function CountFree(V : LongInt) : LongInt;
-Var I, N, Used, NB : LongInt; Cnt : Array[0..255] Of Byte;
+Var I, N, Used, NB, A : LongInt; Cnt : Array[0..255] Of Byte;
 Begin
   N := 0;
   If Vols[V].Bmp <> 0 Then
@@ -1939,7 +1983,13 @@ Begin
     NB := Vols[V].NClus Shr 3;
     If NB > Vols[V].BmpLen Then NB := Vols[V].BmpLen;
     Used := 0;
-    For I := 0 To NB - 1 Do Used := Used + Cnt[RdB(Vols[V].Bmp + I)];
+    I := 0;
+    While I < NB Do
+    Begin
+      A := BmpAddr(V, I);
+      Used := Used + Cnt[RdB(A)];
+      Inc(I);
+    End;
     For I := NB * 8 To Vols[V].NClus - 1 Do
       If (I Shr 3) < Vols[V].BmpLen Then
         If NtBmpGet(V, I) Then Inc(Used);
@@ -2112,13 +2162,19 @@ Begin
           HFree(Vols[V].BmpRA);
           Vols[V].BmpRA := A;
         End;
-        Vols[V].Bmp := HAlloc(Sz + 16);
+        { tout le bitmap s'il est petit, sinon une fenetre de 64 Ko }
+        Vols[V].BmpWinCap := Min((Sz + 511) And Not 511, BmpWinMax);
+        Vols[V].BmpWin := 0; Vols[V].BmpWinN := 0;
+        Vols[V].Bmp := HAlloc(Vols[V].BmpWinCap + 16);
         If Vols[V].Bmp <> 0 Then
-          If Not NtStreamIo(V, Vols[V].BmpRA, RN, 0, Sz, Vols[V].Bmp, False) Then
+        Begin
+          BmpAddr(V, 0);
+          If Vols[V].BmpWinN = 0 Then
           Begin
             HFree(Vols[V].Bmp);
             Vols[V].Bmp := 0;
           End;
+        End;
       End;
     End;
     Vols[V].FreeClus := CountFree(V);
@@ -2173,24 +2229,29 @@ End;
 { Partie 7 - NTFS : bitmaps, attributs en ecriture, MFT                }
 { ==================================================================== }
 
-{ Ecrire les octets B0..B1 du bitmap en memoire (secteurs entiers) }
-Procedure NtBmpSave(V, B0, B1 : LongInt);
-Var S0, S1 : LongInt;
+{ Ecrire le secteur S de $Bitmap (depuis la fenetre) }
+Procedure NtBmpSaveSec(V, S : LongInt);
+Var B0, L : LongInt;
 Begin
-  S0 := (B0 Div 512) * 512;
-  S1 := (B1 Div 512 + 1) * 512;
-  If S1 > Vols[V].BmpLen Then S1 := Vols[V].BmpLen;
-  If S1 > S0 Then
-    NtStreamIo(V, Vols[V].BmpRA, Vols[V].BmpRN, S0, S1 - S0, Vols[V].Bmp + S0, True);
+  B0 := S * 512;
+  L := Min(512, Vols[V].BmpLen - B0);
+  If L > 0 Then NtStreamIo(V, Vols[V].BmpRA, Vols[V].BmpRN, B0, L, BmpAddr(V, B0), True);
 End;
 
 Procedure NtBmpMark(V, C, N : LongInt; On : Boolean);
-Var I, A, M : LongInt;
+Var I, A, M, S, Cur : LongInt;
 Begin
   If N <= 0 Then Exit;
+  Cur := -1;
   For I := C To C + N - 1 Do
   Begin
-    A := Vols[V].Bmp + I Shr 3; M := 1 Shl (I And 7);
+    S := (I Shr 3) Div 512;
+    If S <> Cur Then
+    Begin
+      If Cur >= 0 Then NtBmpSaveSec(V, Cur);
+      Cur := S;
+    End;
+    A := BmpAddr(V, I Shr 3); M := 1 Shl (I And 7);
     If On Then
     Begin
       If (RdB(A) And M) = 0 Then Dec(Vols[V].FreeClus);
@@ -2202,7 +2263,7 @@ Begin
       WrB(A, RdB(A) And Not M);
     End;
   End;
-  NtBmpSave(V, C Shr 3, (C + N - 1) Shr 3);
+  If Cur >= 0 Then NtBmpSaveSec(V, Cur);
 End;
 
 { Trouver et reserver au plus Want clusters contigus (a partir de Hint) }
@@ -2216,7 +2277,7 @@ Begin
   Done := False;
   While (N < Tot) And Not Done Do
   Begin
-    If ((C And 7) = 0) And (C + 8 <= Tot) And (RdB(Vols[V].Bmp + C Shr 3) = $FF) Then
+    If ((C And 7) = 0) And (C + 8 <= Tot) And (RdB(BmpAddr(V, C Shr 3)) = $FF) Then
     Begin
       C := C + 8; N := N + 8;
     End
@@ -4057,12 +4118,6 @@ Begin
   FmTot := Vols[V].TotSec;
   FmC := (FmTot - 1) Div 8;
   If FmC < 512 Then Exit;
-  If FmC > 4194304 Then
-  Begin
-    { 16 Go au plus avec des clusters de 4 Ko (bitmap de 512 Ko) }
-    FormatVol := ERROR_NOT_SUPPORTED;
-    Exit;
-  End;
   FormatVol := ERROR_NOT_ENOUGH_MEMORY;
   FmMft := HAlloc(65536);
   FmVal := HAlloc(4096);
@@ -4311,26 +4366,31 @@ End;
   chaque entree d'index doit designer un enregistrement en service de
   meme numero de sequence. Fix corrige les bitmaps. }
 
+Var
+  ChkBase, ChkLen : LongInt;   { clusters de la passe en cours }
+
 Procedure ChkMarkRuns(V, RA, RN : LongInt);
-Var I, C, L, K, A, M : LongInt;
+Var I, C, L, K, A, M, K0, K1 : LongInt;
 Begin
   For I := 0 To RN - 1 Do
   Begin
     C := RdL(RA + I * 12 + 4);
     L := RdL(RA + I * 12 + 8);
     If C >= 0 Then
-      For K := C To C + L - 1 Do
-        If (K < 0) Or (K >= Vols[V].NClus) Then Inc(ChkErrors)
+    Begin
+      If (C + L > Vols[V].NClus) And (ChkBase = 0) Then Inc(ChkErrors);
+      K0 := Max(C, ChkBase); K1 := Min(C + L, ChkBase + ChkLen);
+      For K := K0 To K1 - 1 Do
+      Begin
+        A := ChkMap + (K - ChkBase) Shr 3; M := 1 Shl ((K - ChkBase) And 7);
+        If (RdB(A) And M) <> 0 Then Inc(ChkErrors)
         Else
         Begin
-          A := ChkMap + K Shr 3; M := 1 Shl (K And 7);
-          If (RdB(A) And M) <> 0 Then Inc(ChkErrors)
-          Else
-          Begin
-            WrB(A, RdB(A) Or M);
-            Inc(ChkUsed);
-          End;
+          WrB(A, RdB(A) Or M);
+          Inc(ChkUsed);
         End;
+      End;
+    End;
   End;
 End;
 
@@ -4382,70 +4442,92 @@ Begin
 End;
 
 Function CheckVol(V : LongInt; Fix : Boolean; Var Lost : LongInt) : LongInt;
-Var R, RA, RN, N, P, C, InB, InM, Ret : LongInt; InUse, InBmp : Boolean;
+Var R, RA, RN, N, P, C, M, A, MapBytes, Ret : LongInt; InUse, InBmp, First : Boolean;
 Begin
   Ret := NO_ERROR;
   ChkErrors := 0; ChkLost := 0; ChkDirs := 0; ChkFiles := 0; ChkRecs := 0; ChkUsed := 0;
   Lost := 0;
-  ChkMap := HAlloc(Vols[V].NClus Div 8 + 16);
+  { carte des clusters references : tout le volume, ou des passes de
+    2 Mi clusters (tous les enregistrements sont relus a chaque passe) }
+  MapBytes := Min(Vols[V].NClus Div 8 + 1, ChkMapMax);
+  ChkMap := HAlloc(MapBytes + 16);
   R := HAlloc(Vols[V].RecSz);
   RA := HAlloc(RunBytes);
   If (ChkMap = 0) Or (R = 0) Or (RA = 0) Or (Vols[V].Bmp = 0) Then Ret := ERROR_NOT_ENOUGH_MEMORY
   Else
   Begin
-    For N := 0 To Vols[V].RecN - 1 Do
+    ChkBase := 0;
+    While ChkBase < Vols[V].NClus Do
     Begin
-      InBmp := False;
-      If (N Shr 3) < Vols[V].MBmpLen Then
-        InBmp := (RdB(Vols[V].MBmp + N Shr 3) And (1 Shl (N And 7))) <> 0;
-      InUse := False;
-      If NtReadRec(V, N, R) Then InUse := (RdW(R + $16) And 1) <> 0
-      Else If InBmp Then Inc(ChkErrors);
-      If InUse Then
+      First := ChkBase = 0;
+      ChkLen := Min(Vols[V].NClus - ChkBase, MapBytes * 8);
+      FillMem(ChkMap, MapBytes, 0);
+      For N := 0 To Vols[V].RecN - 1 Do
       Begin
-        Inc(ChkRecs);
-        If (Not InBmp) And (N >= FIRST_USER) Then Inc(ChkErrors);
-        P := R + RdW(R + $14);
-        While (P < R + Vols[V].RecSz - 8) And (RdL(P) <> -1) And (RdL(P) > 0) And (RdL(P + 4) > 0) Do
+        InBmp := False;
+        If (N Shr 3) < Vols[V].MBmpLen Then
+          InBmp := (RdB(Vols[V].MBmp + N Shr 3) And (1 Shl (N And 7))) <> 0;
+        InUse := False;
+        If NtReadRec(V, N, R) Then InUse := (RdW(R + $16) And 1) <> 0
+        Else If InBmp And First Then Inc(ChkErrors);
+        If InUse Then
         Begin
-          If RdB(P + 8) <> 0 Then
+          If First Then
           Begin
-            RN := 0;
-            If NtRunsDecode(P, RA, RN) Then ChkMarkRuns(V, RA, RN) Else Inc(ChkErrors);
+            Inc(ChkRecs);
+            If (Not InBmp) And (N >= FIRST_USER) Then Inc(ChkErrors);
           End;
-          P := P + RdL(P + 4);
+          P := R + RdW(R + $14);
+          While (P < R + Vols[V].RecSz - 8) And (RdL(P) <> -1) And (RdL(P) > 0) And (RdL(P + 4) > 0) Do
+          Begin
+            If RdB(P + 8) <> 0 Then
+            Begin
+              RN := 0;
+              If NtRunsDecode(P, RA, RN) Then ChkMarkRuns(V, RA, RN)
+              Else If First Then Inc(ChkErrors);
+            End;
+            P := P + RdL(P + 4);
+          End;
+        End
+        Else If InBmp And (N >= 24) And First Then
+        Begin
+          { enregistrement reserve mais libre : perdu }
+          Inc(Lost);
+          If Fix Then
+            WrB(Vols[V].MBmp + N Shr 3, RdB(Vols[V].MBmp + N Shr 3) And Not (1 Shl (N And 7)));
         End;
-      End
-      Else If InBmp And (N >= 24) Then
-      Begin
-        { enregistrement reserve mais libre : perdu }
-        Inc(Lost);
-        If Fix Then
-          WrB(Vols[V].MBmp + N Shr 3, RdB(Vols[V].MBmp + N Shr 3) And Not (1 Shl (N And 7)));
       End;
-    End;
-    If Fix And (Lost > 0) Then NtMBmpSave(V);
-    { comparaison avec $Bitmap }
-    For C := 0 To Vols[V].NClus - 1 Do
-    Begin
-      InM := RdB(ChkMap + C Shr 3) And (1 Shl (C And 7));
-      InB := RdB(Vols[V].Bmp + C Shr 3) And (1 Shl (C And 7));
-      If (InM <> 0) And (InB = 0) Then
+      If First And Fix And (Lost > 0) Then NtMBmpSave(V);
+      { comparaison avec $Bitmap }
+      For C := ChkBase To ChkBase + ChkLen - 1 Do
       Begin
-        Inc(ChkErrors);
-        If Fix Then WrB(Vols[V].Bmp + C Shr 3, RdB(Vols[V].Bmp + C Shr 3) Or (1 Shl (C And 7)));
-      End
-      Else If (InM = 0) And (InB <> 0) Then
-      Begin
-        Inc(Lost);
-        If Fix Then WrB(Vols[V].Bmp + C Shr 3, RdB(Vols[V].Bmp + C Shr 3) And Not (1 Shl (C And 7)));
+        M := 1 Shl (C And 7);
+        A := BmpAddr(V, C Shr 3);
+        If (RdB(ChkMap + (C - ChkBase) Shr 3) And (1 Shl ((C - ChkBase) And 7))) <> 0 Then
+        Begin
+          If (RdB(A) And M) = 0 Then
+          Begin
+            Inc(ChkErrors);
+            If Fix Then
+            Begin
+              WrB(A, RdB(A) Or M);
+              NtBmpSaveSec(V, (C Shr 3) Div 512);
+            End;
+          End;
+        End
+        Else If (RdB(A) And M) <> 0 Then
+        Begin
+          Inc(Lost);
+          If Fix Then
+          Begin
+            WrB(A, RdB(A) And Not M);
+            NtBmpSaveSec(V, (C Shr 3) Div 512);
+          End;
+        End;
       End;
+      ChkBase := ChkBase + ChkLen;
     End;
-    If Fix Then
-    Begin
-      NtBmpSave(V, 0, Vols[V].BmpLen - 1);
-      Vols[V].FreeClus := CountFree(V);
-    End;
+    If Fix Then Vols[V].FreeClus := CountFree(V);
     ChkDir(V, ROOT_REC, 0);
     NtInval;
   End;

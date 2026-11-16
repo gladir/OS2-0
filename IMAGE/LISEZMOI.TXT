@@ -3,7 +3,7 @@ IMAGE - CD-ROM amorcable de OS/2-0
 
 OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
-              FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
+              FKA.DLL, HPFS.IFS, NTFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
               KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
@@ -34,7 +34,7 @@ INSTALL\      CONFIG.SYS du CD-ROM d'installation.
 SONS\         Sons du systeme (DEMARRE.WAV, CLOCHE.WAV), copies sur le
               CD-ROM par KERNEL\BUILD.sh.
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
-              DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
+              DOSCALLS.DLL, FKA.DLL, HPFS.IFS, NTFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
               RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL,
@@ -94,6 +94,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\FKA.PAS                         -> FKA.DLL (touches de fonction)
   OS2PC DLL\TESTFKA.PAS                     -> TESTFKA.EXE (essai de FKA.DLL)
   OS2PC DLL\HPFS.PAS HPFS.IFS               -> HPFS.IFS (systeme de fichiers HPFS)
+  OS2PC DLL\NTFS.PAS NTFS.IFS               -> NTFS.IFS (systeme de fichiers NTFS)
+  OS2PC DLL\TESTNTFS.PAS                    -> TESTNTFS.EXE (essai de NTFS.IFS)
   OS2PC DLL\TESTHPFS.PAS                    -> TESTHPFS.EXE (essai de HPFS.IFS)
   OS2PC DLL\VIOCALLS.PAS                    -> VIOCALLS.DLL (sous-systeme video VIO)
   OS2PC DLL\TESTVIOR.PAS                    -> TESTVIOR.DLL (remplacement VIO d'essai)
@@ -241,6 +243,23 @@ d'unite, 3 = D:) ; HPFS.IFS lit et ecrit les secteurs par le service
 FSH_DOVOLIO du noyau. Les noms longs (254 caracteres) gardent leur casse
 et se comparent sans en tenir compte. TESTHPFS [unite] [GARDER] verifie
 les 43 points d'entree du pilote.
+
+NTFS.IFS
+--------
+Pilote NTFS (DLL\NTFS.PAS, porte de Pasdows 95) : lecture et ecriture
+des partitions 07h en NTFS 3.x (MFT, attributs residents et non
+residents, listes d'attributs, index $I30 en arbre B+, $UpCase, bitmaps,
+extension de la MFT, $MFTMirr ; $LogFile vide comme ntfs-3g), formatage
+(FS_FSCTL 8000h, ou KrnDiskCtl 11 avec 'NTFS'), verification (8001h).
+CONFIG.SYS : IFS=C:\NTFS.IFS /CACHE:64. OS/2-0 peut s'installer et
+demarrer sur une partition NTFS : choix NTFS de la page Formatage
+d'INSTALL (HPFS reste le choix par defaut ; SET INSTALL_FS=NTFS dans le
+CONFIG.SYS du CD d'installation le rend initial) ; NTFS.IFS va alors
+dans la zone d'amorcage et OS2LDR le charge. Limites : fichiers
+compresses ou chiffres non lus, attributs etendus d'OS/2 non
+enregistres, fichiers a liste d'attributs en lecture seule, fichiers de
+2 Go et plus en lecture seule, pas de noms 8.3 generes. TESTNTFS
+[unite] [GARDER | FORMATER [GRAND] | NOYAU] verifie le pilote.
 
 VIOCALLS.DLL
 ------------

@@ -53,7 +53,9 @@ Program INSTALL;
        disque dur (C: = la partition HPFS ou NTFS).
 
   Parametres : /AUTO (installation facile sans question, pour les
-  essais), /LANG:xx (langue de l'assistant). }
+  essais), /NTFS (formater en NTFS plutot qu'en HPFS, avec /AUTO ou
+  comme choix initial ; aussi SET INSTALL_FS=NTFS dans CONFIG.SYS),
+  /LANG:xx (langue de l'assistant). }
 
 Const
   { messages }
@@ -1080,6 +1082,12 @@ Begin
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 
+{ systeme de fichiers de la partition cible (textes) }
+Function FsTxt : String;
+Begin
+  If TgtNtfs Then FsTxt := 'NTFS' Else FsTxt := 'HPFS';
+End;
+
 Procedure ListFiles;
 Var H, N, Rc, Off, A, K : LongInt; S : String; Fb : Array[0..4095] Of Byte;
 Begin
@@ -1163,12 +1171,12 @@ Begin
         Hw := Check(30, 110, ID_FHPFS, L('HPFS - syst'#138'me de fichiers haute performance (recommand'#130')',
                     'HPFS - High Performance File System (recommended)', 'HPFS - High Performance File System (empfohlen)',
                     'HPFS - sistema de archivos de alto rendimiento', 'HPFS - file system ad alte prestazioni',
-                    'HPFS - sistem skedar'#137'sh me performanc'#137' t'#137' lart'#137), True,
+                    'HPFS - sistem skedar'#137'sh me performanc'#137' t'#137' lart'#137), Not TgtNtfs,
                     BS_AUTORADIOBUTTON Or WS_GROUP);
         Hw := Check(30, 134, ID_FNTFS, L('NTFS - syst'#138'me de fichiers de Windows NT (NTFS.IFS)',
                     'NTFS - Windows NT file system (NTFS.IFS)', 'NTFS - Dateisystem von Windows NT (NTFS.IFS)',
                     'NTFS - sistema de archivos de Windows NT (NTFS.IFS)', 'NTFS - file system di Windows NT (NTFS.IFS)',
-                    'NTFS - sistemi i skedar'#137've i Windows NT (NTFS.IFS)'), False, BS_AUTORADIOBUTTON);
+                    'NTFS - sistemi i skedar'#137've i Windows NT (NTFS.IFS)'), TgtNtfs, BS_AUTORADIOBUTTON);
         Hw := Check(30, 170, ID_FKEEP, L('Ne pas formater : conserver les fichiers de la partition (HPFS ou NTFS)',
                     'Do not format: keep the files of the partition (HPFS or NTFS)', 'Nicht formatieren: Dateien behalten',
                     'No formatear: conservar los archivos', 'Non formattare: conservare i file',
@@ -1467,12 +1475,12 @@ Begin
              'L''installazione di OS/2-0 '#138' completata.', 'Instalimi i OS/2-0 p'#137'rfundoi.'), CLR_DARKBLUE);
   H := WrapAt(Hps, 30, 80, (CW - 60) Div 8, IStr(CopiedFiles) + L(' fichiers copi'#130's (', ' files copied (',
        ' Dateien kopiert (', ' archivos copiados (', ' file copiati (', ' skedar'#137' u kopjuan (') + IStr(TotBytes Div 1024) +
-       ' Ko). ' + L('Le disque dur d'#130'marre maintenant OS/2-0 : la partition HPFS sera l''unit'#130' C:.',
-       'The hard disk now starts OS/2-0: the HPFS partition will be drive C:.',
-       'Die Festplatte startet jetzt OS/2-0: die HPFS-Partition wird Laufwerk C:.',
-       'El disco duro arranca ahora OS/2-0: la partici'#162'n HPFS ser'#160' la unidad C:.',
-       'Il disco fisso avvia ora OS/2-0: la partizione HPFS sar'#133' l''unit'#133' C:.',
-       'Disku nis tani OS/2-0: ndarja HPFS do t'#137' jet'#137' nj'#137'sia C:.'), CLR_BLACK);
+       ' Ko). ' + L('Le disque dur d'#130'marre maintenant OS/2-0 : la partition ' + FsTxt + ' sera l''unit'#130' C:.',
+       'The hard disk now starts OS/2-0: the ' + FsTxt + ' partition will be drive C:.',
+       'Die Festplatte startet jetzt OS/2-0: die ' + FsTxt + '-Partition wird Laufwerk C:.',
+       'El disco duro arranca ahora OS/2-0: la partici'#162'n ' + FsTxt + ' ser'#160' la unidad C:.',
+       'Il disco fisso avvia ora OS/2-0: la partizione ' + FsTxt + ' sar'#133' l''unit'#133' C:.',
+       'Disku nis tani OS/2-0: ndarja ' + FsTxt + ' do t'#137' jet'#137' nj'#137'sia C:.'), CLR_BLACK);
   H := WrapAt(Hps, 30, 170, (CW - 60) Div 8, L(
     'Retirez le CD-ROM du lecteur, puis s'#130'lectionnez Red'#130'marrer. La langue (' + LangName(Lang) + ') et les '
     + 'autres r'#130'glages pourront '#136'tre modifi'#130's dans la Configuration du syst'#138'me.',
@@ -2372,8 +2380,14 @@ BEGIN
   Begin
     P := UpStr(ParamStr(I));
     If P = '/AUTO' Then AutoMode := 1;
+    If P = '/NTFS' Then TgtNtfs := True;
     If Copy(P, 1, 6) = '/LANG:' Then Lang := LangOfCode(Copy(P, 7, 5));
   End;
+  { SET INSTALL_FS=NTFS dans CONFIG.SYS (le PROTSHELL ne recoit pas de
+    parametres) : NTFS par defaut }
+  I := 0;
+  If DosScanEnv(Z('INSTALL_FS'), LongInt(@I)) = 0 Then
+    If UpStr(GetZ(I)) = 'NTFS' Then TgtNtfs := True;
   InitConfig;
   ScanDisks;
   Hab := WinInitialize(0);
