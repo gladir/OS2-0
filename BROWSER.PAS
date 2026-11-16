@@ -16150,7 +16150,18 @@ Var
   Fl, Sw, Sh, Ww, Wh, K : LongInt;
   StartUrl : String;
 
+Var
+  BrFpuCw : Word;
+
 BEGIN
+  { coprocesseur : toutes les exceptions masquees (arithmetique IEEE du
+    JavaScript : 1/0 = Infinity, 0/0 = NaN). Le runtime d'OS2PC demasque
+    division par zero, operation invalide et debordement : sous VirtualBox
+    (CR0.NE), JsInf provoquait TRAP 0010 et le navigateur s'arretait. }
+  BrFpuCw := $037F;
+  asm
+    fldcw BrFpuCw
+  end;
   TraceOn := 0;
   ArenaInit; LaInit;
   SrcBuf := 0; ImgBuf := 0;
