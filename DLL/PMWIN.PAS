@@ -360,6 +360,15 @@ Var
   GCarX1, GCarY1, GCarX2, GCarY2 : LongInt;
   GCdX1, GCdY1, GCdX2, GCdY2 : LongInt;   { rectangle dessine }
   GShadow : Array[0..15999] Of Byte;      { caracteres de l'ecran (200 x 80 au plus) }
+  { VGA 640 x 480 x 16 : ecran fantome en memoire (un octet par pel,
+    couleur 0 a 15), dessine comme une memoire lineaire de 8 bits ; GFrn
+    est ce que le VGA affiche ; GFlush ne recopie que les groupes de 32
+    pels qui ont change, plan par plan, par mots de 32 bits }
+  GScr, GFrn : Array[0..307199] Of Byte;
+  GPlane : Array[0..38399] Of LongInt;    { 9600 groupes x 4 plans }
+  GGrp : Array[0..9599] Of LongInt;       { decalage du groupe dans A0000h }
+  GUni, GUniV : Array[0..9599] Of LongInt; { groupes d'une seule couleur : decalage, couleur x 01010101h }
+  GShad, GDirty, GFlushT, GFlushLock : LongInt;
   BrdX, BrdY, TitleH, MenuH, VsbW, HsbH, MRowH, MPad : LongInt;
   GPl : Array[0..11] Of LongInt;
   HwBit : LongInt;
@@ -1058,12 +1067,15 @@ End;
   octets par pel) ; les couleurs de PMWIN sont les 16 couleurs du VGA
   (GPixV) ou, avec l'indicateur 01000000h, une couleur RVB (bitmaps) --- }
 
+Function GNear(Rgb : LongInt) : LongInt; Forward;
+
 { valeur du peripherique d'une couleur RVB }
 Function GRgbDev(Rgb : LongInt) : LongInt;
 Var R, G, B : LongInt;
 Begin
   R := (Rgb Shr 16) And 255; G := (Rgb Shr 8) And 255; B := Rgb And 255;
   Case GBits Of
+    4 : GRgbDev := GNear(Rgb And $FFFFFF);
     8 : GRgbDev := 32 + ((R * 5 + 127) Div 255) * 36 + ((G * 5 + 127) Div 255) * 6 + (B * 5 + 127) Div 255;
     15 : GRgbDev := ((R Shr 3) Shl 10) Or ((G Shr 3) Shl 5) Or (B Shr 3);
     16 : GRgbDev := ((R Shr 3) Shl 11) Or ((G Shr 2) Shl 5) Or (B Shr 3);
@@ -1080,6 +1092,7 @@ End;
 
 Procedure LPut(A, V : LongInt);
 Begin
+  GDirty := 1;
   Case GBpp Of
     1 : WrB(A, V);
     2 : WrW(A, V);
@@ -1107,6 +1120,7 @@ Procedure LSpan(A, N, V : LongInt);
 Var K : LongInt;
 Begin
   If N <= 0 Then Exit;
+  GDirty := 1;
   Case GBpp Of
     1 : asm
           push edi
@@ -1144,6 +1158,7 @@ End;
 Procedure LMove(Src, Dst, N : LongInt);
 Begin
   If N <= 0 Then Exit;
+  GDirty := 1;
   If Dst <= Src Then
     asm
       push esi
@@ -1173,6 +1188,110 @@ Begin
       pop edi
       pop esi
     end;
+End;
+
+{ N mots de 32 bits identiques en A et B ? }
+Function MemSame(A, B, N : LongInt) : Boolean;
+Var R : LongInt;
+Begin
+  R := 0;
+  asm
+    push esi
+    push edi
+    mov esi,A
+    mov edi,B
+    mov ecx,N
+    cld
+    repe cmpsd
+    lahf
+    and eax,4000h
+    mov R,eax
+    pop edi
+    pop esi
+  end;
+  MemSame := R <> 0;
+End;
+
+{ ecran fantome -> VGA : les groupes de 32 pels changes depuis le dernier
+  vidage, plan par plan (4 ecritures de port en tout, une ecriture de 32
+  bits par groupe et par plan) ; ni lecture du VGA, ni zone redessinee a
+  l'identique. Sous VirtualBox au-dessus de Hyper-V, chaque acces au VGA
+  est une sortie de la machine virtuelle : le dessin direct dans les
+  plans en faisait des centaines de milliers. }
+Procedure GFlush;
+Var Y, G, N, NU, K, P, I, A, V, Bt, Base, Sa, Fa, C : LongInt; Uni : Boolean;
+Begin
+  If (GShad = 0) Or (GMode = 0) Or (GFlushLock <> 0) Then Exit;
+  If Not GMine Then Exit;
+  GFlushLock := 1;
+  GDirty := 0;
+  GFlushT := KGetTickCount;
+  Sa := LongInt(@GScr); Fa := LongInt(@GFrn);
+  N := 0; NU := 0;
+  For Y := 0 To 479 Do
+  Begin
+    Base := Y * 640;
+    If Not MemSame(Sa + Base, Fa + Base, 160) Then
+      For G := 0 To 19 Do
+      Begin
+        A := Base + G * 32;
+        If Not MemSame(Sa + A, Fa + A, 8) Then
+        Begin
+          { une seule couleur (fonds, barres) : une ecriture en mode 2 }
+          C := GScr[A];
+          Uni := MemSame(Sa + A, Sa + A + 1, 7) And (GScr[A + 28] = C) And (GScr[A + 29] = C) And
+                 (GScr[A + 30] = C) And (GScr[A + 31] = C);
+          If Uni Then
+          Begin
+            GUni[NU] := Y * 80 + G * 4;
+            GUniV[NU] := (C And 15) * $01010101;
+            For I := 0 To 31 Do GFrn[A + I] := C;
+            Inc(NU);
+          End
+          Else
+          Begin
+          For P := 0 To 3 Do
+          Begin
+            V := 0;
+            For K := 3 DownTo 0 Do
+            Begin
+              Bt := 0;
+              For I := 0 To 7 Do Bt := (Bt Shl 1) Or ((GScr[A + K * 8 + I] Shr P) And 1);
+              V := (V Shl 8) Or Bt;
+            End;
+            GPlane[N * 4 + P] := V;
+          End;
+          GGrp[N] := Y * 80 + G * 4;
+          For I := 0 To 31 Do GFrn[A + I] := GScr[A + I];
+          Inc(N);
+          End;
+        End;
+      End;
+  End;
+  If N + NU > 0 Then
+  Begin
+    { mode d'ecriture 0, remplacement, sans set/reset, tous les bits }
+    GOut($3CE, 5); GOut($3CF, 0);
+    GOut($3CE, 3); GOut($3CF, 0);
+    GOut($3CE, 1); GOut($3CF, 0);
+    GOut($3CE, 8); GOut($3CF, $FF);
+    For P := 0 To 3 Do
+    Begin
+      GOut($3C4, 2); GOut($3C5, 1 Shl P);
+      For I := 0 To N - 1 Do WrL($A0000 + GGrp[I], GPlane[I * 4 + P]);
+    End;
+    GOut($3C4, 2); GOut($3C5, $0F);
+    If NU > 0 Then
+    Begin
+      { mode d'ecriture 2 : chaque octet ecrit donne la couleur de ses 8
+        pels dans les 4 plans }
+      GOut($3CE, 5); GOut($3CF, 2);
+      For I := 0 To NU - 1 Do WrL($A0000 + GUni[I], GUniV[I]);
+      GOut($3CE, 5); GOut($3CF, 0);
+    End;
+    GMask := $FF;
+  End;
+  GFlushLock := 0;
 End;
 
 { couleur (0 a 15) la plus proche d'une valeur du peripherique }
@@ -6350,6 +6469,9 @@ Begin
   KeyInput(Q);
   MouseInput(Q);
   VBoxCheck;
+  { dessin continu (pas de repos de la file) : vidage au plus toutes les
+    60 ms }
+  If (GShad <> 0) And (GDirty <> 0) And (KGetTickCount - GFlushT >= 60) Then GFlush;
   { carte VMware SVGA II : l'hote recopie l'ecran }
   If GMode <> 0 Then Dummy := VioSvgaUpdate;
 End;
@@ -6408,7 +6530,12 @@ Begin
       LastClean := KGetTickCount;
       CleanupDead;
     End;
-    If (Not Got) And Wait Then Dummy := DcSleep(10);
+    If (Not Got) And Wait Then
+    Begin
+      { plus rien a traiter : l'ecran fantome va au VGA }
+      If (GShad <> 0) And ((GDirty <> 0) Or (KGetTickCount - GFlushT >= 250)) Then GFlush;
+      Dummy := DcSleep(10);
+    End;
   Until Got Or Not Wait;
   If Got Then
   Begin
@@ -12979,6 +13106,17 @@ Begin
   GWanted := Not ((S <> '') And (S[1] = 'T'));
 End;
 
+{ ecran fantome du VGA 16 couleurs, sauf SET PMSHADOW=NON }
+Function ShadowWanted : Boolean;
+Var P : LongInt; S : String;
+Begin
+  P := 0; S := '';
+  PutZ(LongInt(@NameZ2), 'PMSHADOW');
+  If DcScanEnv(LongInt(@NameZ2), LongInt(@P)) = 0 Then
+    If P <> 0 Then S := UpStr(GetZ(P));
+  ShadowWanted := Not ((S <> '') And (S[1] = 'N'));
+End;
+
 { VioSetMode en mode graphique W x H, Bits par pel ; memoire lineaire
   (VESA) ou plans du VGA (16 couleurs) }
 Function GSetMode(W, H, Bits : LongInt) : Boolean;
@@ -13002,6 +13140,20 @@ Begin
     GBpp := (GBits + 7) Div 8;
     For K := 0 To 15 Do
       If GBits = 8 Then GPixV[K] := K Else GPixV[K] := GRgbDev(VgaRgb[K]);
+  End;
+  { VGA 640 x 480 x 16 : dessin dans l'ecran fantome (SET PMSHADOW=NON :
+    dessin direct dans les plans, comme avant) }
+  GShad := 0;
+  If (GBits = 4) And (PmCurW = 640) And (PmCurH = 480) And ShadowWanted Then
+  Begin
+    GShad := 1;
+    GLfb := LongInt(@GScr); GPitch := 640; GBpp := 1;
+    For K := 0 To 15 Do GPixV[K] := K;
+    For K := 0 To 307199 Do
+    Begin
+      GScr[K] := 0; GFrn[K] := 255;
+    End;
+    GDirty := 1;
   End;
   GXor := 0;
   GSetMode := True;
@@ -13047,18 +13199,23 @@ Begin
     End;
   End;
   { mode demande (WINSETSCREENMODE : VESA), sinon SET PMRESOLUTION=LxHxB
-    de CONFIG.SYS, sinon 640 x 480 en memoire lineaire (VESA, 32 puis 16
-    bits par pel : les couleurs restent celles du VGA), sinon 640 x 480 x
-    16 (plans du VGA). Les plans du VGA demandent une lecture et une
-    ecriture de la fenetre A0000h par octet et des ecritures dans les
-    ports du VGA : sous VirtualBox au-dessus de Hyper-V chacune est une
-    sortie de la machine virtuelle et le dessin devenait tres lent ; la
-    memoire lineaire est ecrite directement. }
+    de CONFIG.SYS, sinon 640 x 480 en memoire lineaire (VESA, 32, 16,
+    24, 15 puis 8 bits par pel : les couleurs restent celles du VGA),
+    sinon 640 x 480 x 16 (plans du VGA). Les plans du VGA demandaient une
+    lecture et une ecriture de la fenetre A0000h par octet et des
+    ecritures dans les ports du VGA : sous VirtualBox au-dessus de Hyper-V
+    chacune est une sortie de la machine virtuelle et le dessin devenait
+    tres lent. La memoire lineaire est ecrite directement ; le VGA 16
+    couleurs est dessine dans un ecran fantome (GScr) que GFlush recopie
+    quand la file est au repos (groupes changes seulement). }
   If PmReqW <= 0 Then GEnvRes;
   If (PmReqW <= 0) Or Not GSetMode(PmReqW, PmReqH, PmReqBits) Then
     If Not GSetMode(640, 480, 32) Then
       If Not GSetMode(640, 480, 16) Then
-        If Not GSetMode(640, 480, 4) Then Exit;
+        If Not GSetMode(640, 480, 24) Then
+          If Not GSetMode(640, 480, 15) Then
+            If Not GSetMode(640, 480, 8) Then
+              If Not GSetMode(640, 480, 4) Then Exit;
   GMode := 1;
   GPtrOn := 0; GCarOn := 0; GCarWant := 0;
   For K := 0 To 15999 Do GShadow[K] := 32;
@@ -13102,6 +13259,7 @@ End;
   pointeur et le curseur avant un dessin direct a l'ecran }
 Function WinHideOverlays : LongInt;
 Begin
+  GDirty := 1;
   If GMode <> 0 Then GHideAll;
   WinHideOverlays := GMode;
 End;
@@ -13131,7 +13289,7 @@ Begin
     InvalScreen(0, 0, ScrCX, ScrCY);
     Exit;
   End;
-  If GBits < 8 Then GLfb := 0;
+  If (GBits < 8) And (GShad = 0) Then GLfb := 0;
   GMetrics;
   GSysVals;
   { fenetres principales ramenees dans l'ecran }
@@ -13159,6 +13317,15 @@ Begin
   WinSetPointerStyle := 1;
 End;
 
+{ WINQUERYSHADOW (ordinal 1010, interne : PMGPI.DLL) : adresse de l'ecran
+  fantome du VGA 640 x 480 x 16 (un octet par pel, 640 octets par ligne),
+  0 s'il n'y en a pas }
+Function WinQueryShadow : LongInt;
+Begin
+  If (GShad <> 0) And (GMode <> 0) Then WinQueryShadow := LongInt(@GScr) Else WinQueryShadow := 0;
+  GDirty := 1;
+End;
+
 { WINQUERYSCREENMODE (ordinal 1008, interne) : largeur, hauteur, bits par
   pel, memoire lineaire (1 : VESA) en p (16 octets) ; rend GMode }
 Function WinQueryScreenMode(P : LongInt) : LongInt;
@@ -13167,7 +13334,7 @@ Begin
   Begin
     WrL(P, ScrCX); WrL(P + 4, ScrCY);
     If GLfb <> 0 Then WrL(P + 8, GBits) Else WrL(P + 8, 4);
-    If GLfb <> 0 Then WrL(P + 12, 1) Else WrL(P + 12, 0);
+    If (GLfb <> 0) And (GShad = 0) Then WrL(P + 12, 1) Else WrL(P + 12, 0);
   End;
   WinQueryScreenMode := GMode;
 End;
@@ -15257,12 +15424,14 @@ exports
   WinQueryScreenTaken Index 1006 Name 'WINQUERYSCREENTAKEN',
   WinSetScreenMode Index 1007 Name 'WINSETSCREENMODE',
   WinQueryScreenMode Index 1008 Name 'WINQUERYSCREENMODE',
-  WinSetPointerStyle Index 1009 Name 'WINSETPOINTERSTYLE';
+  WinSetPointerStyle Index 1009 Name 'WINSETPOINTERSTYLE',
+  WinQueryShadow Index 1010 Name 'WINQUERYSHADOW';
 
 Var
   InitI : LongInt;
 
 BEGIN
+  GShad := 0; GDirty := 0; GFlushT := 0; GFlushLock := 0;
   VbxFn := 0; VbxNext := 0;
   HwBit := $80000000;
   DropCombo := -1; DropList := -1; DropFill := 0;

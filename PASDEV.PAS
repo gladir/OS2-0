@@ -243,6 +243,9 @@ Function DosSetCurrentDir(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function SetStdHandle(N, H : LongInt) : LongInt; External 'DOSCALLS';
 Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
 Function KTicks : LongInt; External 'DOSCALLS' Name 'GetTickCount';
+Function DosWaitChild(Action, Option, PRes, PPid, Pid : LongInt) : LongInt; External 'DOSCALLS';
+Function WinStartTimer(Hab, H, Id, Dt : LongInt) : LongInt; External 'PMWIN';
+Function WinStopTimer(Hab, H, Id : LongInt) : LongInt; External 'PMWIN';
 
 { ==================================================================== }
 { Utilitaires                                                           }
@@ -2285,11 +2288,27 @@ End;
 
 Var PendCmd : LongInt;                 { commande a reprendre apres Enregistrer sous }
 
+{ compilation en cours (OS2PC.EXE lance en asynchrone : l'EDI et le
+  bureau restent vivants ; un minuteur attend la fin du compilateur) }
+Var
+  CompBusy, PendRun : Boolean;
+  CompPid, CompT0 : LongInt;
+  CompEF : Text;
+  CompErrN : String;
+
+Procedure CompileDone(R, Code : LongInt); Forward;
+
 Function Compile : Boolean;
-Var W, R, K, T0 : LongInt; Src, Exe, ErrN, Args, S : String; EF : Text; Res : Array[0..1] Of LongInt;
+Var W, R, K, T0 : LongInt; Src, Exe, ErrN, Args, S : String; Res : Array[0..1] Of LongInt;
   PL : PLong;
 Begin
   Compile := False;
+  If CompBusy Then
+  Begin
+    StatusMsg := Acc('Compilation d^ej^a en cours...');
+    InvRect(0, WorkH, CW, CH);
+    Exit;
+  End;
   W := SrcWin;
   If W < 0 Then
   Begin
@@ -2314,15 +2333,15 @@ Begin
   Exe := ChangeExt(Src, '.EXE');
   ErrN := DirOf(Exe) + 'PASDEV.ERR';
   { repertoire du source en lecture seule (CD-ROM) : sorties dans le repertoire de travail }
-  Assign(EF, ErrN);
-  {$I-} Rewrite(EF); {$I+}
+  Assign(CompEF, ErrN);
+  {$I-} Rewrite(CompEF); {$I+}
   R := IOResult;
   If R <> 0 Then
   Begin
     Exe := WorkDir + NameOf(Exe);
     ErrN := WorkDir + 'PASDEV.ERR';
-    Assign(EF, ErrN);
-    {$I-} Rewrite(EF); {$I+}
+    Assign(CompEF, ErrN);
+    {$I-} Rewrite(CompEF); {$I+}
     R := IOResult;
     If R <> 0 Then
     Begin
@@ -2341,17 +2360,50 @@ Begin
   Args := Args + Src + ' ' + Exe;
   SetArgs(CompilerPath, Args);
   { sortie standard du compilateur -> fichier (heritee par l'enfant) }
-  PL := @EF;
+  PL := @CompEF;
   Dummy := SetStdHandle(-11, PL^);
   Res[0] := 0; Res[1] := 0;
-  T0 := KTicks;
-  R := DosExecPgm(LongInt(@FailBuf), 64, 0, LongInt(@ArgBuf), 0, LongInt(@Res), Z(CompilerPath));
-  LastTime := KTicks - T0;
+  CompT0 := KTicks;
+  CompErrN := ErrN;
+  { EXEC_ASYNCRESULT : le resultat est lu par DosWaitChild (minuteur) }
+  R := DosExecPgm(LongInt(@FailBuf), 64, 2, LongInt(@ArgBuf), 0, LongInt(@Res), Z(CompilerPath));
   Dummy := SetStdHandle(-11, 0);
-  Close(EF);
+  If R <> 0 Then
+  Begin
+    CompileDone(R, 0);
+    Exit;
+  End;
+  CompPid := Res[0];
+  CompBusy := True;
+  Dummy := WinStartTimer(Hab, Client, 7, 100);
+End;
+
+{ fin du compilateur (minuteur 7) : rend vrai quand il est termine }
+Function CompilePoll : Boolean;
+Var Res : Array[0..1] Of LongInt; Pid, R : LongInt;
+Begin
+  CompilePoll := False;
+  If Not CompBusy Then Exit;
+  Res[0] := 0; Res[1] := 0; Pid := 0;
+  { DCWA_PROCESS, DCWW_NOWAIT }
+  R := DosWaitChild(0, 1, LongInt(@Res), LongInt(@Pid), CompPid);
+  If R = 129 Then Exit;                  { ERROR_CHILD_NOT_COMPLETE }
+  CompBusy := False;
+  Dummy := WinStopTimer(Hab, Client, 7);
+  If R <> 0 Then Res[1] := 0;
+  CompileDone(0, Res[1]);
+  CompilePoll := True;
+End;
+
+Procedure CompileDone(R, Code : LongInt);
+Var K : LongInt; S, ErrN, Exe, Src : String; EF : Text;
+Begin
+  LastTime := KTicks - CompT0;
+  Close(CompEF);
   SetWait(False);
+  ErrN := CompErrN; Exe := LastExe; Src := LastSrc;
   MsgClear;
-  MsgAdd('Compilation de ' + Src + ' -> ' + Exe + ' (' + TargetName(Target) + ')', -1);
+  MsgAdd('Compilation de ' + Src + ' -> ' + Exe + ' (' + TargetName(LastTarget) + ')', -1);
   If R <> 0 Then
   Begin
     MsgAdd(Acc('Impossible de lancer le compilateur (erreur ') + IStr(R) + ').', -2);
@@ -2370,9 +2422,9 @@ Begin
       End;
       Close(EF);
     End;
-    If (Res[1] <> 0) And (LastErrs = 0) Then
+    If (Code <> 0) And (LastErrs = 0) Then
     Begin
-      MsgAdd(Acc('Le compilateur s''est termin^e avec le code ') + IStr(Res[1]) + '.', -2);
+      MsgAdd(Acc('Le compilateur s''est termin^e avec le code ') + IStr(Code) + '.', -2);
       Inc(LastErrs);
     End;
   End;
@@ -2392,6 +2444,7 @@ Begin
   Begin
     MsgAdd(Acc('Compilation ^echou^ee : ') + IStr(LastErrs) + ' erreur(s).', -2);
     StatusMsg := Acc('Compilation ^echou^ee : voir la fen^etre Messages');
+    PendRun := False;
   End;
   If (Not LastOk) Or (LastWarns > 0) Then
   Begin
@@ -2406,27 +2459,52 @@ Begin
       End;
   End;
   Redraw;
-  Compile := LastOk;
 End;
 
 Var ShieldOk : Boolean;
 
+{ le source ouvre-t-il des fenetres de PM ? (sinon, meme compile pour
+  OS/2 PM, ses WriteLn n'auraient nulle part ou s'afficher) }
+Function UsesPm(W : LongInt) : Boolean;
+Var I : LongInt; S : String;
+Begin
+  UsesPm := False;
+  For I := 0 To Wins[W].NLines - 1 Do
+  Begin
+    S := UpStr(GetLine(W, I));
+    If (Pos('WININITIALIZE', S) > 0) Or (Pos('WINCREATESTDWINDOW', S) > 0) Or
+       (Pos('WINCREATEWINDOW', S) > 0) Or (Pos('WINMESSAGEBOX', S) > 0) Then
+    Begin
+      UsesPm := True;
+      Exit;
+    End;
+  End;
+End;
+
 Procedure RunProgram;
-Var W, Rc, S, Hc : LongInt; Res : Array[0..1] Of LongInt; Exe, Cmd : String;
+Var W, Rc, S, Hc : LongInt; Res : Array[0..1] Of LongInt; Exe, Cmd, Note : String;
 Begin
   W := SrcWin;
   If W < 0 Then Exit;
   { compiler d'abord si le source a change depuis la derniere compilation }
   If (Not LastOk) Or (LastSrc <> Wins[W].FileName) Or Wins[W].Modified Or (LastTarget <> Target) Or
      Not FileExists(LastExe) Then
+  Begin
+    { compilation d'abord (asynchrone) : l'execution suit a sa fin }
+    PendRun := True;
     If Not Compile Then Exit;
+  End;
+  If CompBusy Then Exit;
   Exe := LastExe;
   { repeindre l'EDI maintenant : sinon le dessin en attente (compilation)
     passerait par-dessus la fenetre du programme }
   Dummy := WinUpdateWindow(Client);
   SetArgs(Exe, RunParams);
   Res[0] := 0; Res[1] := 0;
-  If Target = 0 Then
+  Note := '';
+  If (Target = 0) And Not UsesPm(W) Then
+    Note := Acc(' - sans fen^etre PM : ex^ecut^e en console');
+  If (Target = 0) And (Note = '') Then
   Begin
     { Presentation Manager : le programme ouvre ses propres fenetres }
     Rc := DosExecPgm(LongInt(@FailBuf), 64, 4, LongInt(@ArgBuf), 0, LongInt(@Res), Z(Exe));
@@ -2465,7 +2543,7 @@ Begin
     Hc := 0;
     If WinCreateConsole(HWND_DESKTOP, Z(NameOf(Exe)), 1 Or 2 Or (S Shl 8), LongInt(@Hc)) <> 0 Then
       Dummy := KSes(3, S, 0);
-    StatusMsg := Acc('Ex^ecution de ') + NameOf(Exe) + ' (OS/2 Console)';
+    StatusMsg := Acc('Ex^ecution de ') + NameOf(Exe) + ' (OS/2 Console)' + Note;
   End;
   { la barre d'etat seulement : la fenetre du programme est devant l'EDI }
   InvRect(0, WorkH, CW, CH);
@@ -3465,7 +3543,11 @@ Begin
     CM_OPENCUR : OpenAtCursor;
     CM_RUN : RunProgram;
     CM_PARAMS : OpenInput(DM_PARAMS, Acc('Param^etres'), Acc('Param^etres du programme :'), RunParams);
-    CM_COMPILE : If Compile Then ;
+    CM_COMPILE :
+      Begin
+        PendRun := False;
+        If Compile Then ;
+      End;
     CM_INFO : ShowInfo;
     CM_TGTPM : SetTarget(0);
     CM_TGTCON : SetTarget(1);
@@ -3983,6 +4065,17 @@ Begin
         CW := Rc[2]; CH := Rc[3];
       End;
     WM_PAINT : PaintAll(H);
+    WM_TIMER :
+      If (Mp1 And $FFFF) = 7 Then
+      Begin
+        { fin du compilateur ; Ctrl+F9 : execution ensuite }
+        If CompilePoll And PendRun Then
+        Begin
+          PendRun := False;
+          If LastOk Then RunProgram;
+        End;
+      End
+      Else MainProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
     WM_BUTTON1DOWN :
       Begin
         ButtonDown(S16(Mp1), CH - 1 - S16(Mp1 Shr 16), Hi16(Mp2), False);

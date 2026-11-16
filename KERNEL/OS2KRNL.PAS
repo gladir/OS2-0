@@ -7477,7 +7477,7 @@ Const
     $00, $00, $00, $00, $00, $00, $00, $00, $00, $00);
   BiosAt = $7000;
   BiosParm = $7E00;
-  VbeMax = 96;
+  VbeMax = 192;
 
 Var
   BiosReady : Boolean;
