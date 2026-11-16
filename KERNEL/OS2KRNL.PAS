@@ -105,9 +105,11 @@ Const
   ProcWinBase   = $00400000;
   ProcWinSize   = $00400000;
   ProcStackSize = $00040000;   { 256 Ko de pile par processus }
-  PhysProcBase  = $01000000;   { memoire physique des processus (>= 16 Mo) }
-  DllBase       = $00800000;   { region des DLL (8 Mo - 16 Mo), partagee }
-  DllTop        = $01000000;
+  PhysProcBase  = $01800000;   { memoire physique des processus (>= 24 Mo) }
+  { region des DLL (8 Mo - 24 Mo), partagee : 8 Mo ne suffisaient plus
+    (bureau, NTFS.IFS, TLS32.DLL, session DOS dans une fenetre...) }
+  DllBase       = $00800000;
+  DllTop        = $01800000;
   ModFirstCap   = 16;          { table des modules : 16 entrees, doublee au besoin }
   DllAlign      = $00010000;   { placement des DLL relogees : 64 Ko }
 
@@ -5891,7 +5893,7 @@ End;
 
 { --- Modules de liens dynamiques (DLL) ---
   Une DLL OS/2-0 (OS2PC, Library) est une image PE chargee (une seule
-  fois) dans la region 00800000h-00FFFFFFh, projetee a l'identique et
+  fois) dans la region 00800000h-017FFFFFh, projetee a l'identique et
   partagee par tous les processus. Elle est placee a sa base preferee
   (directive $IMAGEBASE d'OS2PC) si cette place est libre, sinon a la
   premiere place libre de la region : ses adresses absolues sont alors
@@ -6180,7 +6182,7 @@ Begin
     If (RelRva = 0) Or (RelSize = 0) Then
     Begin
       ConPutLn('SYS0191: ' + Path + ' n''est pas relocalisable et sa place (' + HexStr(Pref, 8) +
-               'h) est prise ou hors de la region des DLL (00800000h-00FFFFFFh).');
+               'h) est prise ou hors de la region des DLL (00800000h-017FFFFFh).');
       KFree(Buf);
       Exit;
     End;
@@ -18292,7 +18294,7 @@ BEGIN
   End;
   Banner;
   If PhysTop < PhysProcBase + $00400000 Then
-    KLog('OS2KRNL: au moins 12 Mo de memoire sont necessaires.');
+    KLog('OS2KRNL: au moins 28 Mo de memoire sont necessaires.');
   AtaInit;
   If (Not AtaFound) And (Not HdBoot) Then
   Begin
