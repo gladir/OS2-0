@@ -38,6 +38,7 @@ Program OS2LDR;
     +34 'HD' (4448h) : demarrage d'un disque dur (ecrit par le MBR)
     +38 debut de la partition d'amorcage  +3C sa taille (secteurs)
     +40 adresse de HPFS.IFS charge en memoire  +44 sa taille
+    +48 'N' : c'est NTFS.IFS (partition d'amorcage en NTFS)
   GDT temporaire en 0000:0A00, GDTR en 0000:0A20, code de transition
   32 bits en 0000:0A40.
 
@@ -46,9 +47,9 @@ Program OS2LDR;
   et suivants du disque, avant la premiere partition) et met 'HD' en +34.
   OS2LDR y lit alors des secteurs de 512 octets : repertoire au secteur
   1 ('OS20BOOT', nombre d'entrees, puis des entrees de 32 octets en +16 :
-  nom ASCIIZ de 16 octets, LBA, taille), OS2KRNL, et HPFS.IFS qu'il
-  recopie en 00600000h pour que le noyau puisse monter C: (partition HPFS
-  active) avant de lire ses fichiers. }
+  nom ASCIIZ de 16 octets, LBA, taille), OS2KRNL, et HPFS.IFS (ou
+  NTFS.IFS) qu'il recopie en 00600000h pour que le noyau puisse monter C:
+  (partition active, HPFS ou NTFS) avant de lire ses fichiers. }
 
 {$S-,R-,I-}
 
@@ -482,12 +483,20 @@ Begin
   End;
 End;
 
-{ demarrage d'un disque dur : HPFS.IFS en memoire pour le noyau }
+{ demarrage d'un disque dur : pilote de C: (HPFS.IFS, sinon NTFS.IFS) en
+  memoire pour le noyau ; +48h = 'N' quand c'est NTFS.IFS }
 Procedure LoadBootIfs;
 Begin
+  Mem[0:Info + $48] := 0;
   FindFile('HPFS.IFS');
-  If Not Found Then Fatal('HPFS.IFS introuvable dans la zone d''amorcage');
-  ReadFileTo(IfsAddr, 'HPFS.IFS');
+  If Found Then ReadFileTo(IfsAddr, 'HPFS.IFS')
+  Else
+  Begin
+    FindFile('NTFS.IFS');
+    If Not Found Then Fatal('HPFS.IFS ou NTFS.IFS introuvable dans la zone d''amorcage');
+    ReadFileTo(IfsAddr, 'NTFS.IFS');
+    Mem[0:Info + $48] := Ord('N');
+  End;
   MemW[0:Info + $40] := Word(IfsAddr); MemW[0:Info + $42] := Word(IfsAddr Shr 16);
   MemW[0:Info + $44] := Word(FileSize); MemW[0:Info + $46] := Word(FileSize Shr 16);
 End;

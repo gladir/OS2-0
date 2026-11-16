@@ -2,8 +2,8 @@
   @created: 2026
   @website(https://www.gladir.com/os2-0)
   @abstract(Target: OS2PC -COS2)
-  @description: WGET - telecharger une page ou un fichier par HTTP
-                (TCPIP32.DLL) d'OS/2-0.
+  @description: WGET - telecharger une page ou un fichier par HTTP ou
+                HTTPS (TCPIP32.DLL, TLS32.DLL) d'OS/2-0.
 }
 
 Program WGET;
@@ -12,8 +12,9 @@ Program WGET;
 
 { Compilation : OS2PC WGET.PAS   (produit WGET.EXE)
 
-  WGET http://hote[:port]/chemin [fichier]
-  Requete HTTP/1.0 GET sur une connexion TCP ; la reponse (ligne d'etat
+  WGET http[s]://hote[:port]/chemin [fichier]
+  Requete HTTP/1.0 GET sur une connexion TCP (https:// : chiffree en TLS
+  1.3 ou 1.2 par TLS32.DLL, certificat non verifie) ; la reponse (ligne d'etat
   et en-tetes) est affichee, le contenu est ecrit dans le fichier donne
   (ou dans le nom du chemin) ; sans fichier ni nom, il est affiche. }
 
@@ -25,6 +26,12 @@ Function Recv(S, B, L, F : LongInt) : LongInt; External 'TCPIP32' Name 'recv';
 Function SoClose(S : LongInt) : LongInt; External 'TCPIP32' Name 'soclose';
 Function SockErrno : LongInt; External 'TCPIP32' Name 'sock_errno';
 Function GetHostByName(P : LongInt) : LongInt; External 'TCPIP32' Name 'gethostbyname';
+Function TlsOpen(S, PHost : LongInt) : LongInt; External 'TLS32' Name 'TLSOPEN';
+Function TlsSend(H, B, L : LongInt) : LongInt; External 'TLS32' Name 'TLSSEND';
+Function TlsRecv(H, B, L : LongInt) : LongInt; External 'TLS32' Name 'TLSRECV';
+Function TlsClose(H : LongInt) : LongInt; External 'TLS32' Name 'TLSCLOSE';
+Function TlsError(B, Cb : LongInt) : LongInt; External 'TLS32' Name 'TLSERROR';
+Function TlsInfo(H : LongInt) : LongInt; External 'TLS32' Name 'TLSINFO';
 Function DosOpen(PName, PHf, PAction, Cb, Attr, Flags, Mode, PEa : LongInt) : LongInt; External 'DOSCALLS';
 Function DosWrite(H, Buf, Cb, PActual : LongInt) : LongInt; External 'DOSCALLS';
 Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
@@ -35,7 +42,7 @@ Var
   NameB : Array[0..255] Of Byte;
   Url, HostS, Path, OutF, Req, Hdr : String;
   S, H, A, K, N, Port, C, Fh, Act, W, Total, Body, State : LongInt;
-  InBody, ToFile : Boolean;
+  InBody, ToFile, Tls : Boolean;
   Dummy : LongInt;
 
 Function RdL(X : LongInt) : LongInt;
@@ -72,10 +79,16 @@ Begin
 End;
 
 BEGIN
-  If ParamCount < 1 Then Fail('WGET http://hote[:port]/chemin [fichier]');
+  If ParamCount < 1 Then Fail('WGET http[s]://hote[:port]/chemin [fichier]');
   Url := ParamStr(1);
+  Tls := False;
   If (Copy(Url, 1, 7) = 'http://') Or (Copy(Url, 1, 7) = 'HTTP://') Then Delete(Url, 1, 7)
-  Else If Pos('://', Url) > 0 Then Fail('seul le protocole http:// est pris en charge.');
+  Else If (Copy(Url, 1, 8) = 'https://') Or (Copy(Url, 1, 8) = 'HTTPS://') Then
+  Begin
+    Delete(Url, 1, 8);
+    Tls := True;
+  End
+  Else If Pos('://', Url) > 0 Then Fail('seuls les protocoles http:// et https:// sont pris en charge.');
   K := Pos('/', Url);
   If K > 0 Then
   Begin
@@ -85,7 +98,7 @@ BEGIN
   Begin
     HostS := Url; Path := '/';
   End;
-  Port := 80;
+  If Tls Then Port := 443 Else Port := 80;
   K := Pos(':', HostS);
   If K > 0 Then
   Begin
@@ -111,10 +124,30 @@ BEGIN
     Str(SockErrno, Hdr);
     Fail('connexion impossible (erreur ' + Hdr + ').');
   End;
+  If Tls Then
+  Begin
+    For K := 1 To Length(HostS) Do NameB[K - 1] := Ord(HostS[K]);
+    NameB[Length(HostS)] := 0;
+    If TlsOpen(S, LongInt(@NameB)) <> 1 Then
+    Begin
+      Dummy := TlsError(LongInt(@NameB), 250);
+      Hdr := '';
+      K := 0;
+      While (K < 250) And (NameB[K] <> 0) Do
+      Begin
+        Hdr := Hdr + Chr(NameB[K]);
+        Inc(K);
+      End;
+      Fail('connexion securisee impossible : ' + Hdr);
+    End;
+    If (TlsInfo(1) Shr 16) = $0304 Then Writeln('Connexion chiffree : TLS 1.3 (certificat non verifie)')
+    Else Writeln('Connexion chiffree : TLS 1.2 (certificat non verifie)');
+  End;
   Req := 'GET ' + Path + ' HTTP/1.0' + #13#10 + 'Host: ' + HostS + #13#10 + 'User-Agent: OS2-0-WGET/1.0' + #13#10 +
          'Connection: close' + #13#10#13#10;
   For K := 1 To Length(Req) Do Buf[K - 1] := Ord(Req[K]);
-  If Send(S, LongInt(@Buf), Length(Req), 0) <> Length(Req) Then Fail('envoi de la requete impossible.');
+  If Tls Then N := TlsSend(1, LongInt(@Buf), Length(Req)) Else N := Send(S, LongInt(@Buf), Length(Req), 0);
+  If N <> Length(Req) Then Fail('envoi de la requete impossible.');
   ToFile := OutF <> '';
   If ToFile Then
   Begin
@@ -127,7 +160,7 @@ BEGIN
   { en-tetes jusqu'a la ligne vide (CR LF CR LF) }
   InBody := False; State := 0; Total := 0; Body := 0; Hdr := '';
   Repeat
-    N := Recv(S, LongInt(@Buf), 4096, 0);
+    If Tls Then N := TlsRecv(1, LongInt(@Buf), 4096) Else N := Recv(S, LongInt(@Buf), 4096, 0);
     If N > 0 Then
     Begin
       Total := Total + N;
@@ -154,6 +187,7 @@ BEGIN
     End;
   Until N <= 0;
   If N < 0 Then Writeln('WGET : reception interrompue (erreur ', SockErrno, ').');
+  If Tls Then K := TlsClose(1);
   K := SoClose(S);
   If ToFile Then
   Begin

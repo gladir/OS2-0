@@ -71,7 +71,9 @@ Program BROWSER;
   - redessin partiel : seules les zones changees par un script sont
     redessinees (pas de scintillement).
 
-  HTTPS demande un proxy (Options - Proxy, ou SET HTTP_PROXY=hote:port).
+  HTTPS : TLS 1.3 ou 1.2 par TLS32.DLL (certificats non verifies : la
+  barre d'etat le rappelle) ; avec un proxy HTTP (Options - Proxy, ou SET
+  HTTP_PROXY=hote:port), tunnel CONNECT.
   SET BROWSER_TRACE=1 recopie la console et les etapes du chargement sur
   la sortie standard (journal du port serie sous QEMU). }
 
@@ -304,6 +306,13 @@ Function Recv(S, B, L, F : LongInt) : LongInt; External 'TCPIP32' Name 'recv';
 Function SoClose(S : LongInt) : LongInt; External 'TCPIP32' Name 'soclose';
 Function SockErrno : LongInt; External 'TCPIP32' Name 'sock_errno';
 Function GetHostByName(P : LongInt) : LongInt; External 'TCPIP32' Name 'gethostbyname';
+{ TLS32.DLL : connexions chiffrees (https://) }
+Function TlsOpen(S, PHost : LongInt) : LongInt; External 'TLS32' Name 'TLSOPEN';
+Function TlsSend(H, B, L : LongInt) : LongInt; External 'TLS32' Name 'TLSSEND';
+Function TlsRecv(H, B, L : LongInt) : LongInt; External 'TLS32' Name 'TLSRECV';
+Function TlsClose(H : LongInt) : LongInt; External 'TLS32' Name 'TLSCLOSE';
+Function TlsError(B, Cb : LongInt) : LongInt; External 'TLS32' Name 'TLSERROR';
+Function TlsInfo(H : LongInt) : LongInt; External 'TLS32' Name 'TLSINFO';
 
 { ==================================================================== }
 { Utilitaires                                                           }
@@ -1009,27 +1018,110 @@ Begin
   HostAddr := True;
 End;
 
+Var
+  NetTls : Boolean;          { connexion courante chiffree (TLS32.DLL) }
+  TlsDesc : String;          { "TLS 1.3" ou "TLS 1.2" de la derniere page }
+
+Function NSend(S, A, N : LongInt) : LongInt;
+Begin
+  If NetTls Then NSend := TlsSend(1, A, N) Else NSend := Send(S, A, N, 0);
+End;
+
+Function NRecv(S, A, N : LongInt) : LongInt;
+Begin
+  If NetTls Then NRecv := TlsRecv(1, A, N) Else NRecv := Recv(S, A, N, 0);
+End;
+
+Procedure NClose(S : LongInt);
+Begin
+  If NetTls Then Dummy := TlsClose(1);
+  NetTls := False;
+  Dummy := SoClose(S);
+End;
+
+{ https:// : tunnel CONNECT du proxy (s'il y en a un) puis poignee de
+  main TLS ; faux (FErr) en cas d'echec }
+Function TlsStart(S : LongInt) : Boolean;
+Var K, N, I, St : LongInt; Req, Line : String; B : Array[0..259] Of Byte;
+Begin
+  TlsStart := False;
+  If ProxyHost <> '' Then
+  Begin
+    Req := 'CONNECT ' + UHost + ':' + IStr(UPort) + ' HTTP/1.1' + #13#10 + 'Host: ' + UHost + ':' +
+           IStr(UPort) + #13#10#13#10;
+    For I := 1 To Length(Req) Do FNet[I - 1] := Ord(Req[I]);
+    If Send(S, LongInt(@FNet), Length(Req), 0) <> Length(Req) Then
+    Begin
+      FErr := 'Envoi de la requete CONNECT impossible au proxy.';
+      Exit;
+    End;
+    { reponse du proxy, octet par octet jusqu'a la ligne vide }
+    Line := ''; St := 0; K := 0;
+    Repeat
+      N := Recv(S, LongInt(@B), 1, 0);
+      If N <= 0 Then
+      Begin
+        FErr := 'Le proxy a ferme la connexion (CONNECT ' + UHost + ').';
+        Exit;
+      End;
+      If B[0] = 10 Then
+      Begin
+        If (St = 0) And (Line <> '') Then
+        Begin
+          I := Pos(' ', Line);
+          If I > 0 Then St := SVal(Copy(Line, I + 1, 3), 0);
+        End;
+        If Line = '' Then K := 1;
+        Line := '';
+      End
+      Else If (B[0] <> 13) And (Length(Line) < 250) Then Line := Line + Chr(B[0]);
+    Until K = 1;
+    If (St < 200) Or (St > 299) Then
+    Begin
+      FErr := 'Le proxy refuse le tunnel vers ' + UHost + ':' + IStr(UPort) + ' (code ' + IStr(St) + ').';
+      Exit;
+    End;
+  End;
+  For I := 1 To Length(UHost) Do B[I - 1] := Ord(UHost[I]);
+  B[Length(UHost)] := 0;
+  If TlsOpen(S, LongInt(@B)) <> 1 Then
+  Begin
+    Dummy := TlsError(LongInt(@B), 250);
+    Req := '';
+    I := 0;
+    While (I < 250) And (B[I] <> 0) Do
+    Begin
+      Req := Req + Chr(B[I]);
+      Inc(I);
+    End;
+    FErr := 'Connexion securisee impossible avec ' + UHost + ' : ' + Req;
+    Exit;
+  End;
+  If (TlsInfo(1) Shr 16) = $0304 Then TlsDesc := 'TLS 1.3' Else TlsDesc := 'TLS 1.2';
+  NetTls := True;
+  TlsStart := True;
+End;
+
 { une requete HTTP ; FStatus : code HTTP, ou -1 (erreur, FErr) }
 Procedure HttpOnce(Url : String);
 Var S, K, N, Hl, Port, St, Clen, Chunk, Ln, I : LongInt;
     Ad : Array[0..15] Of Byte; Ip : TIp4;
     Req, Host, Line, HName, HVal, PathQ : String;
-    Chunked, InHdr, Eoh : Boolean; C : Byte;
+    Chunked, InHdr, Eoh, Tls : Boolean; C : Byte;
 Begin
+  NetTls := False;
   FStatus := -1; FCType := ''; FLocation := ''; FTotal := 0;
   If Not SplitUrl(Url) Then
   Begin
     FErr := 'Adresse non valable : ' + Url;
     Exit;
   End;
-  If (UScheme <> 'http') And Not ((UScheme = 'https') And (ProxyHost <> '')) Then
+  If (UScheme <> 'http') And (UScheme <> 'https') Then
   Begin
-    If UScheme = 'https' Then
-      FErr := 'Les pages securisees (https://) demandent un proxy HTTP : menu Options - Proxy, ' +
-              'ou SET HTTP_PROXY=hote:port dans CONFIG.SYS.'
-    Else FErr := 'Protocole non pris en charge : ' + UScheme + '://';
+    FErr := 'Protocole non pris en charge : ' + UScheme + '://';
     Exit;
   End;
+  Tls := UScheme = 'https';
   If NetReady = 0 Then
   Begin
     If SockInit = 0 Then NetReady := 1 Else NetReady := -1;
@@ -1044,10 +1136,14 @@ Begin
   PathQ := UPath;
   If ProxyHost <> '' Then
   Begin
+    { proxy : adresse complete (http://) ou tunnel CONNECT (https://) }
     Host := ProxyHost; Port := ProxyPort;
-    PathQ := Url;
-    K := Pos('#', PathQ);
-    If K > 0 Then PathQ := Copy(PathQ, 1, K - 1);
+    If Not Tls Then
+    Begin
+      PathQ := Url;
+      K := Pos('#', PathQ);
+      If K > 0 Then PathQ := Copy(PathQ, 1, K - 1);
+    End;
   End;
   If Not HostAddr(Host, Ip) Then
   Begin
@@ -1069,10 +1165,17 @@ Begin
     Dummy := SoClose(S);
     Exit;
   End;
+  If Tls Then
+    If Not TlsStart(S) Then
+    Begin
+      Dummy := SoClose(S);
+      Exit;
+    End;
   { requete }
   If FPost <> '' Then Req := 'POST ' Else Req := 'GET ';
   Req := Req + PathQ + ' HTTP/1.1' + #13#10 + 'Host: ' + UHost;
-  If (UPort <> 80) And (UScheme = 'http') Then Req := Req + ':' + IStr(UPort);
+  If ((UPort <> 80) And (UScheme = 'http')) Or ((UPort <> 443) And (UScheme = 'https')) Then
+    Req := Req + ':' + IStr(UPort);
   K := 0;
   For I := 1 To Length(Req) Do
   Begin
@@ -1109,10 +1212,10 @@ Begin
     FNet[K] := Ord(FPost[I]);
     Inc(K);
   End;
-  If Send(S, LongInt(@FNet), K, 0) <> K Then
+  If NSend(S, LongInt(@FNet), K) <> K Then
   Begin
     FErr := 'Envoi de la requete impossible a ' + Host + '.';
-    Dummy := SoClose(S);
+    NClose(S);
     Exit;
   End;
   { reponse : en-tetes puis corps (Content-Length, blocs ou fin de
@@ -1125,7 +1228,7 @@ Begin
       FErr := 'Chargement interrompu.';
       Break;
     End;
-    N := Recv(S, LongInt(@FNet), SizeOf(FNet), 0);
+    N := NRecv(S, LongInt(@FNet), SizeOf(FNet));
     If N <= 0 Then Break;
     FBytes := FBytes + N;
     I := 0;
@@ -1218,7 +1321,7 @@ Begin
     If Clen = -2 Then Break;
     If FTotal >= FCap Then Break;
   Until False;
-  Dummy := SoClose(S);
+  NClose(S);
   If (FStatus = -1) And (FErr = '') Then
   Begin
     If FBytes = 0 Then FErr := 'Le serveur ' + Host + ' n''a rien repondu.'
@@ -1292,8 +1395,9 @@ Begin
   FPutS('<tr><td>Feuilles de style</td><td>Couleurs, fonds, alignement, gras, italique, soulignement, display: none</td></tr>');
   FPutS('<tr><td>Navigation</td><td>Pr' + Chr(130) + 'c' + Chr(130) + 'dent, Suivant, Actualiser, Arr' + Chr(136) +
         'ter, Accueil, historique, signets</td></tr>');
-  FPutS('<tr><td>R' + Chr(130) + 'seau</td><td>HTTP/1.1 par TCPIP32.DLL, proxy HTTP (n' + Chr(130) +
-        'cessaire pour https://)</td></tr></table>');
+  FPutS('<tr><td>R' + Chr(130) + 'seau</td><td>HTTP/1.1 par TCPIP32.DLL, proxy HTTP</td></tr>');
+  FPutS('<tr><td>S' + Chr(130) + 'curit' + Chr(130) + '</td><td>https:// : TLS 1.3 et TLS 1.2 par TLS32.DLL ' +
+        '(AES-128-GCM, X25519 ; certificats non v' + Chr(130) + 'rifi' + Chr(130) + 's)</td></tr></table>');
   FPutS('<p><small>OS/2-0 - programme ' + Chr(130) + 'crit en Pascal et compil' + Chr(130) + ' par OS2PC.</small></p>');
   FPutS('</body></html>');
 End;
@@ -12402,6 +12506,14 @@ Begin
   Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(T), Z2(C), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ fin du chargement : "termine", et pour https:// la connexion chiffree }
+Function DoneText : String;
+Begin
+  If StartsWith(LowStr(CurUrl), 'https:') And (TlsDesc <> '') Then
+    DoneText := 'Document : termine - connexion chiffree (' + TlsDesc + ', certificat non verifie)'
+  Else DoneText := 'Document : termine';
+End;
+
 Procedure SetStatus(S : String);
 Var Rc : Array[0..3] Of LongInt;
 Begin
@@ -13671,7 +13783,7 @@ Begin
   If (LoadingImg = 0) And (Pending = 0) Then
   Begin
     If NeedLayout <> 0 Then Relayout;
-    SetStatus('Document : termine');
+    SetStatus(DoneText);
   End;
 End;
 
@@ -14030,7 +14142,7 @@ Begin
   Begin
     LinkHover := S;
     If S <> '' Then SetStatus(S)
-    Else If (LoadingPage = 0) And (LoadingImg = 0) Then SetStatus('Document : termine');
+    Else If (LoadingPage = 0) And (LoadingImg = 0) Then SetStatus(DoneText);
   End;
 End;
 
@@ -15772,7 +15884,7 @@ Begin
         SetStatus('Page d''accueil : ' + CurUrl);
       End;
     CM_PROXY :
-      OpenInput(DM_PROXY, 'Proxy HTTP', 'Proxy (hote:port, vide : connexion directe ; necessaire pour https://) :',
+      OpenInput(DM_PROXY, 'Proxy HTTP', 'Proxy (hote:port, vide : connexion directe ; https:// par tunnel CONNECT) :',
                 PrfStr('BROWSER', 'PROXY'));
     CM_HELP :
       ShowMsg('Tapez une adresse puis Entree. Liens : clic ; Precedent / Suivant : Alt+fleches ; Actualiser : F5 ; ' +

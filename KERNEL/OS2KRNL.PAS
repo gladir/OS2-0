@@ -1582,7 +1582,7 @@ Begin
 End;
 
 Procedure InitMouse;
-Var Cb, X : LongInt;
+Var Cb, Cb2, X : LongInt;
 Begin
   MouOk := False;
   MouIdx := 0; MouHead := 0; MouTail := 0; MouLost := 0;
@@ -1605,7 +1605,12 @@ Begin
     If MouCmd($F6) Then                   { valeurs par defaut }
       If MouCmd($F4) Then                 { envoi des paquets }
         MouOk := True;
-    X := MouReadByte;
+    { octet en trop eventuel : attente courte (chaque lecture du port 64h
+      est une sortie de la machine virtuelle sous VirtualBox/Hyper-V ;
+      200 000 lectures retardaient le demarrage) }
+    Cb2 := 0;
+    While ((Port[$64] And 1) = 0) And (Cb2 < 2000) Do Inc(Cb2);
+    If (Port[$64] And 1) <> 0 Then X := Port[$60];
     If MouOk Then Cb := (Cb Or 2) And Not $20 Else Cb := Cb And Not 2;
     MouWaitIn;
     Port[$64] := $60;
@@ -2664,11 +2669,14 @@ Var
   Disks  : Array[0..3] Of TDisk;
   NDisk  : LongInt;
   { amorcage depuis un disque dur (MBR d'OS/2-0, zone d'amorcage) : C:
-    est la partition HPFS active ; OS2LDR a charge HPFS.IFS en memoire }
+    est la partition active (HPFS ou NTFS) ; OS2LDR a charge son pilote
+    (HPFS.IFS ou NTFS.IFS) en memoire }
   HdBoot      : Boolean;
   BootPartLba : LongInt;
   BootIfsBuf  : LongInt;
   BootIfsSize : LongInt;
+  BootIfsName : String;   { pilote de C: charge par OS2LDR : HPFS.IFS ou NTFS.IFS }
+  FmtIfs      : LongInt;  { pilote demande pour formater (KrnDiskCtl 11), -1 : defaut }
 
 Function HdWait(Base : LongInt) : LongInt;
 Var N, St : LongInt;
@@ -6106,11 +6114,11 @@ Begin
   LoadModule := -1;
   LastError := 126;                        { ERROR_MOD_NOT_FOUND }
   Buf := 0;
-  If HdBoot And (Not IfsVols[2].Mounted) And (BootIfsSize > 0) And (UpStr(BaseName(Trim(Name))) = 'HPFS.IFS') Then
+  If HdBoot And (Not IfsVols[2].Mounted) And (BootIfsSize > 0) And (UpStr(BaseName(Trim(Name))) = BootIfsName) Then
   Begin
     { demarrage d'un disque dur : le pilote de C: a ete charge en memoire
       par OS2LDR (zone d'amorcage), C: n'est pas encore monte }
-    Path := 'C:\HPFS.IFS';
+    Path := 'C:\' + BootIfsName;
     Size := BootIfsSize;
     Buf := KAlloc(Size + 1);
     If Buf = 0 Then Exit;
@@ -8146,7 +8154,7 @@ End;
   (FS_MOUNT 3 puis FS_FSCTL 8000h, nom Lbl) ; un disque virtuel non
   reconnu est toujours formate par le premier pilote }
 Function MountBlk(B, D : LongInt; Fmt : Boolean; Lbl : String) : Boolean;
-Var I, R, V, A : LongInt; Ok : Boolean; S1 : String;
+Var I, R, V, A, FI : LongInt; Ok : Boolean; S1 : String;
 Begin
   MountBlk := False;
   If (D < 2) Or (D > 25) Then Exit;
@@ -8175,11 +8183,18 @@ Begin
           IfsVols[D].Ifs := I;
         End;
       End;
-  If (Not Ok) And (Fmt Or (Blks[B].Kind = BlkRam)) And (NIfs > 0) And (Ifss[0].FFsCtl <> 0) Then
+  { pilote du formatage : celui demande (KrnDiskCtl 11), sinon HPFS.IFS
+    (disque virtuel, KrnDiskCtl 5), sinon le premier }
+  FI := 0;
+  If (FmtIfs >= 0) And (FmtIfs < NIfs) Then FI := FmtIfs
+  Else
+    For I := NIfs - 1 DownTo 0 Do
+      If UpStr(Ifss[I].Name) = 'HPFS' Then FI := I;
+  If (Not Ok) And (Fmt Or (Blks[B].Kind = BlkRam)) And (NIfs > 0) And (Ifss[FI].FFsCtl <> 0) Then
   Begin
     IfsArgs4(3, V, LongInt(@IfsVols[D].Vpfsd), D);
     IfsArg[4] := LongInt(@HdBuf);
-    IfsCall(Ifss[0].FMount, 5);
+    IfsCall(Ifss[FI].FMount, 5);
     If Lbl = '' Then
     Begin
       If Blks[B].Kind = BlkRam Then Lbl := 'RAMDISK' Else Lbl := 'OS2';
@@ -8191,18 +8206,18 @@ Begin
     IfsArgs4(0, 3, $8000, A);
     IfsArgs8(8, LongInt(@IfsCnt), 0, 0);
     IfsArg[8] := LongInt(@IfsCnt);
-    R := IfsCall(Ifss[0].FFsCtl, 9);
+    R := IfsCall(Ifss[FI].FFsCtl, 9);
     If R = 0 Then
     Begin
       Ok := True;
-      IfsVols[D].Ifs := 0;
+      IfsVols[D].Ifs := FI;
     End
     Else
     Begin
       KLog('SYS1719: formatage de ' + Chr(65 + D) + ': impossible (erreur ' + IntStr(R) + ').');
       IfsArgs4(2, V, LongInt(@IfsVols[D].Vpfsd), D);
       IfsArg[4] := 0;
-      IfsCall(Ifss[0].FMount, 5);
+      IfsCall(Ifss[FI].FMount, 5);
     End;
   End;
   If Ok And (Ifss[IfsVols[D].Ifs].FFsCtl <> 0) And Not Fmt Then
@@ -8342,6 +8357,8 @@ End;
     5 formater (HPFS) la partition du disque p1 : p2 = debut, nombre de
       secteurs, nom de volume ASCIIZ (ou 0), lettre en retour (+12) ; la
       partition est montee (rend 0, ou le code d'erreur)
+   11 comme 5, avec en +16 le systeme de fichiers ASCIIZ ('HPFS', 'NTFS' :
+      FS_NAME d'un pilote IFS charge ; 124 s'il n'y en a pas)
     6 demonter la partition du disque p1 qui commence au secteur p2
     7 monter la partition du disque p1 : p2 = debut, nombre, lettre en
       retour (+8) ; rend 0 si un pilote IFS la reconnait
@@ -8387,7 +8404,7 @@ Begin
           End;
         End;
     4 : KrnDiskCtl := PartLetter(P1, P2);
-    5 : If (P1 < 0) Or (P1 >= NDisk) Or (P2 = 0) Or (NIfs = 0) Then KrnDiskCtl := 15
+    5, 11 : If (P1 < 0) Or (P1 >= NDisk) Or (P2 = 0) Or (NIfs = 0) Then KrnDiskCtl := 15
         Else
         Begin
           D := PartLetter(P1, MemL[0:P2]);
@@ -8396,9 +8413,19 @@ Begin
           Begin
             If D >= 0 Then Unmount(D) Else D := FreeLetter;
             B := PartBlk(P1, MemL[0:P2], MemL[0:P2 + 4]);
-            If (B < 0) Or (D > 25) Then KrnDiskCtl := 8
+            FmtIfs := -1;
+            If (Op = 11) And (MemL[0:P2 + 16] <> 0) Then
+            Begin
+              { systeme de fichiers demande : FS_NAME du pilote (HPFS, NTFS) }
+              For K := NIfs - 1 DownTo 0 Do
+                If UpStr(Ifss[K].Name) = UpStr(PStr(MemL[0:P2 + 16])) Then FmtIfs := K;
+              If FmtIfs < 0 Then B := -2;
+            End;
+            If B = -2 Then KrnDiskCtl := 124
+            Else If (B < 0) Or (D > 25) Then KrnDiskCtl := 8
             Else If MountBlk(B, D, True, PStr(MemL[0:P2 + 8])) Then MemL[0:P2 + 12] := D
             Else KrnDiskCtl := 31;
+            FmtIfs := -1;
           End;
         End;
     6 : Begin
@@ -18222,11 +18249,14 @@ BEGIN
     +44h taille), recopie avant la pagination }
   NDisk := 0;
   HdBoot := MemW[0:BootInfo + $34] = $4448;
-  BootPartLba := 0; BootIfsBuf := 0; BootIfsSize := 0;
+  BootPartLba := 0; BootIfsBuf := 0; BootIfsSize := 0; FmtIfs := -1;
+  BootIfsName := 'HPFS.IFS';
   If HdBoot Then
   Begin
     BootPartLba := MemL[0:BootInfo + $38];
     BootIfsSize := MemL[0:BootInfo + $44];
+    { +48h = 'N' : la partition d'amorcage est en NTFS (NTFS.IFS) }
+    If Mem[0:BootInfo + $48] = Ord('N') Then BootIfsName := 'NTFS.IFS';
     If BootIfsSize > 0 Then
     Begin
       BootIfsBuf := KAlloc(BootIfsSize);
@@ -18268,7 +18298,7 @@ BEGIN
   Begin
     { C: : partition HPFS du disque dur, montee avant la lecture de
       CONFIG.SYS par le pilote charge en memoire par OS2LDR }
-    LoadIfs('C:\HPFS.IFS /CACHE:64 /AUTOCHECK:C');
+    LoadIfs('C:\' + BootIfsName + ' /CACHE:64 /AUTOCHECK:C');
     HdInit;
     MountIfsVolumes;
     If Not IfsVols[2].Mounted Then

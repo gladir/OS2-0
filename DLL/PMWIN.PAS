@@ -13047,10 +13047,18 @@ Begin
     End;
   End;
   { mode demande (WINSETSCREENMODE : VESA), sinon SET PMRESOLUTION=LxHxB
-    de CONFIG.SYS, sinon 640 x 480 x 16 }
+    de CONFIG.SYS, sinon 640 x 480 en memoire lineaire (VESA, 32 puis 16
+    bits par pel : les couleurs restent celles du VGA), sinon 640 x 480 x
+    16 (plans du VGA). Les plans du VGA demandent une lecture et une
+    ecriture de la fenetre A0000h par octet et des ecritures dans les
+    ports du VGA : sous VirtualBox au-dessus de Hyper-V chacune est une
+    sortie de la machine virtuelle et le dessin devenait tres lent ; la
+    memoire lineaire est ecrite directement. }
   If PmReqW <= 0 Then GEnvRes;
   If (PmReqW <= 0) Or Not GSetMode(PmReqW, PmReqH, PmReqBits) Then
-    If Not GSetMode(640, 480, 4) Then Exit;
+    If Not GSetMode(640, 480, 32) Then
+      If Not GSetMode(640, 480, 16) Then
+        If Not GSetMode(640, 480, 4) Then Exit;
   GMode := 1;
   GPtrOn := 0; GCarOn := 0; GCarWant := 0;
   For K := 0 To 15999 Do GShadow[K] := 32;

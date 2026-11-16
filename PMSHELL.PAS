@@ -16,7 +16,7 @@ Program PMSHELL;
   PMSHELL est le bureau d'OS/2-0 (Workplace Shell). Le noyau le lance a
   la place de CMD.EXE quand CONFIG.SYS contient PROTSHELL=C:\PMSHELL.EXE
   (et le relance s'il se termine). Il affiche le bureau en mode graphique
-  (640 x 480 x 16 couleurs, PMWIN.DLL), s'utilise a la souris et au
+  (640 x 480, memoire lineaire VESA ou plans du VGA, PMWIN.DLL), s'utilise a la souris et au
   clavier, et lance le LaunchPad (C:\LAUNCHPD.EXE, sauf si OS2.INI
   contient PMSHELL, LAUNCHPAD = 0).
 
@@ -3878,7 +3878,14 @@ Begin
         Dummy := WinQueryScreenMode(LongInt(@M));
         NbSelectMode(M[0], M[1], M[2]);
       End;
-    312 : NbSelectMode(640, 480, 4);
+    312 :
+      Begin
+        { par defaut : 640 x 480 en memoire lineaire (32, sinon 16 bits par
+          pel), sinon les plans du VGA ; le dernier mode present l'emporte }
+        NbSelectMode(640, 480, 4);
+        NbSelectMode(640, 480, 16);
+        NbSelectMode(640, 480, 32);
+      End;
     470, 471 :
       Begin
         If Id = 470 Then
