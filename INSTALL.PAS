@@ -1173,10 +1173,10 @@ Begin
                     'HPFS - sistema de archivos de alto rendimiento', 'HPFS - file system ad alte prestazioni',
                     'HPFS - sistem skedar'#137'sh me performanc'#137' t'#137' lart'#137), Not TgtNtfs,
                     BS_AUTORADIOBUTTON Or WS_GROUP);
-        Hw := Check(30, 134, ID_FNTFS, L('NTFS - syst'#138'me de fichiers de Windows NT (NTFS.IFS)',
-                    'NTFS - Windows NT file system (NTFS.IFS)', 'NTFS - Dateisystem von Windows NT (NTFS.IFS)',
-                    'NTFS - sistema de archivos de Windows NT (NTFS.IFS)', 'NTFS - file system di Windows NT (NTFS.IFS)',
-                    'NTFS - sistemi i skedar'#137've i Windows NT (NTFS.IFS)'), TgtNtfs, BS_AUTORADIOBUTTON);
+        Hw := Check(30, 134, ID_FNTFS, L('NTFS - partage avec Windows et Linux (NTFS.IFS)',
+                    'NTFS - shared with Windows and Linux (NTFS.IFS)', 'NTFS - mit Windows und Linux teilbar (NTFS.IFS)',
+                    'NTFS - compartido con Windows y Linux (NTFS.IFS)', 'NTFS - condiviso con Windows e Linux (NTFS.IFS)',
+                    'NTFS - i ndar'#137' me Windows dhe Linux (NTFS.IFS)'), TgtNtfs, BS_AUTORADIOBUTTON);
         Hw := Check(30, 170, ID_FKEEP, L('Ne pas formater : conserver les fichiers de la partition (HPFS ou NTFS)',
                     'Do not format: keep the files of the partition (HPFS or NTFS)', 'Nicht formatieren: Dateien behalten',
                     'No formatear: conservar los archivos', 'Non formattare: conservare i file',
@@ -2149,10 +2149,11 @@ Begin
                      'OS/2-0 se instala en una partici'#162'n primaria HPFS. Los primeros 4 MB quedan libres (arranque).',
                      'OS/2-0 si installa su una partizione primaria HPFS. I primi 4 MB restano liberi (avvio).',
                      'OS/2-0 instalohet n'#137' nj'#137' ndarje kryesore HPFS. 4 MB e para mbeten t'#137' lira (nisja).');
-    PG_FORMAT : S := L('HPFS (choix par d'#130'faut) est format'#130' par HPFS.IFS, NTFS par NTFS.IFS ; OS/2-0 d'#130'marre '
-                       + 'de l''un comme de l''autre. Ne pas formater : r'#130'installer en gardant les fichiers.',
-                       'HPFS (the default) is formatted by HPFS.IFS, NTFS by NTFS.IFS; OS/2-0 starts from either. Do not '
-                       + 'format: reinstall and keep the files.', 'HPFS.IFS formatiert die Partition.', 'HPFS.IFS formatea la partici'#162'n.',
+    PG_FORMAT : S := L('HPFS, le syst'#138'me de fichiers d''OS/2, est le choix par d'#130'faut. NTFS facilite le partage '
+                       + 'des fichiers avec Windows et Linux ; OS/2-0 d'#130'marre de l''un comme de l''autre. Ne pas '
+                       + 'formater : r'#130'installer en gardant les fichiers.',
+                       'HPFS, the OS/2 file system, is the default. NTFS makes it easier to share files with Windows and '
+                       + 'Linux; OS/2-0 starts from either. Do not format: reinstall and keep the files.', 'HPFS.IFS formatiert die Partition.', 'HPFS.IFS formatea la partici'#162'n.',
                        'HPFS.IFS formatta la partizione.', 'HPFS.IFS formaton ndarjen.');
   Else
     S := L('Utilisez la souris ou la touche Tab et Entr'#130'e pour choisir.', 'Use the mouse, or Tab and Enter.',

@@ -253,7 +253,9 @@ extension de la MFT, $MFTMirr ; $LogFile vide comme ntfs-3g), formatage
 (FS_FSCTL 8000h, ou KrnDiskCtl 11 avec 'NTFS'), verification (8001h).
 CONFIG.SYS : IFS=C:\NTFS.IFS /CACHE:64. OS/2-0 peut s'installer et
 demarrer sur une partition NTFS : choix NTFS de la page Formatage
-d'INSTALL (HPFS reste le choix par defaut ; SET INSTALL_FS=NTFS dans le
+d'INSTALL (HPFS, le systeme de fichiers d'OS/2, reste le choix par
+defaut ; NTFS facilite le partage des fichiers avec Windows et Linux ;
+SET INSTALL_FS=NTFS dans le
 CONFIG.SYS du CD d'installation le rend initial) ; NTFS.IFS va alors
 dans la zone d'amorcage et OS2LDR le charge. Limites : fichiers
 compresses ou chiffres non lus, attributs etendus d'OS/2 non
