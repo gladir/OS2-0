@@ -13,6 +13,7 @@ ECHO == Noyau (OS2PC)
 IF ERRORLEVEL 1 GOTO ERREUR
 ..\BUILD\OS2PC -COS2LDR OS2LDR.PAS ..\BUILD\CD\OS2LDR
 IF ERRORLEVEL 1 GOTO ERREUR
+REM (OS2KRNL.PAS inclut LOGO.INC : logo de l'ecran de demarrage, TOOLS\MKLOGO.PY)
 ..\BUILD\OS2PC -COS2KRNL OS2KRNL.PAS ..\BUILD\CD\OS2KRNL
 IF ERRORLEVEL 1 GOTO ERREUR
 ECHO == Commandes (OS2PC -COS2)
@@ -20,8 +21,8 @@ REM (dont les jeux KLONDIKE.PAS, ECHECS.PAS et MAHJONGG.PAS du dossier Jeux,
 REM DIGAUDIO.PAS, Audio numerique, du dossier Multimedia, TASKMGR.PAS,
 REM Gestionnaire des taches, du dossier Systeme OS/2, BROWSER.PAS,
 REM Navigateur Web, du bureau et du dossier Systeme OS/2, PASDEV.PAS,
-REM Pascal Developer, du dossier Developer Kit, et CALC.PAS, Calculatrice,
-REM du dossier Productivite)
+REM Pascal Developer, du dossier Developer Kit, CALC.PAS, Calculatrice, et
+REM EXPLORER.PAS, Explorateur OS2-0, du dossier Productivite)
 FOR %%F IN (..\*.PAS) DO ..\BUILD\OS2PC -Q %%F ..\BUILD\CD\%%~nF.EXE
 REM nom 8.3 sur le CD-ROM (ISO 9660 niveau 1)
 IF EXIST ..\BUILD\CD\LAUNCHPAD.EXE MOVE /Y ..\BUILD\CD\LAUNCHPAD.EXE ..\BUILD\CD\LAUNCHPD.EXE > NUL

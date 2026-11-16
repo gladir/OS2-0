@@ -150,7 +150,7 @@ Const
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
   OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
   OB_DEVKIT = 30; IC_PASDEV = 29;
-  OB_PRODUCT = 31; IC_CALC = 30;
+  OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -166,6 +166,7 @@ Const
   CM_OPEN = 100; CM_REFRESH = 101; CM_ARRANGE = 102; CM_WINLIST = 103; CM_INFO = 104; CM_SHUTDOWN = 105;
   CM_HELP = 106; CM_PROPS = 107; CM_DELETE = 108; CM_CLOSE = 109; CM_PARENT = 110; CM_CMDHERE = 111;
   CM_SHADOW = 112; CM_CREATE = 113; CM_SETTINGS = 114; CM_TASKMGR = 115; CM_BROWSER = 116;
+  CM_EXPLORER = 117;
 
 Type
   { objet d'une vue (icone) }
@@ -551,6 +552,20 @@ Begin
     S := Comspec;
     While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
     If (S <> '') And FileExists(S + 'CALC.EXE') Then CalcPath := S + 'CALC.EXE';
+  End;
+End;
+
+{ Explorateur OS2-0 (EXPLORER.EXE, dossier Productivite et menu du bureau) }
+Function ExplorerPath : String;
+Var S : String;
+Begin
+  ExplorerPath := '';
+  If FileExists('C:\EXPLORER.EXE') Then ExplorerPath := 'C:\EXPLORER.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'EXPLORER.EXE') Then ExplorerPath := S + 'EXPLORER.EXE';
   End;
 End;
 
@@ -1088,7 +1103,7 @@ Begin
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
-        If CalcPath <> '' Then Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
+        If (CalcPath <> '') Or (ExplorerPath <> '') Then Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
         Dummy := NewItem(V, IC_CMD, OB_DOSWIN, 'Fenetre DOS', '');
@@ -1115,8 +1130,11 @@ Begin
     VK_PRODUCT :
       Begin
         { Productivite (comme le dossier de Warp 3) : la Calculatrice,
-          portee de Pasdows 95 (Warp 3 n'en avait pas) }
+          portee de Pasdows 95 (Warp 3 n'en avait pas), et l'Explorateur }
         If CalcPath <> '' Then Dummy := NewItem(V, IC_CALC, OB_GAME, 'Calculatrice', CalcPath);
+        { Explorateur OS2-0 : explorateur de fichiers a deux volets dans le
+          style de Windows 95 (porte de l'Explorateur Pasdows) }
+        If ExplorerPath <> '' Then Dummy := NewItem(V, IC_EXPLORER, OB_GAME, 'Explorateur OS2-0', ExplorerPath);
       End;
     VK_DEVKIT :
       Begin
@@ -1448,6 +1466,17 @@ Begin
         GLn(Hps, X + 17, Y + 4, X + 30, Y + 20, CLR_YELLOW);
         GLn(Hps, X + 15, Y + 3, X + 16, Y + 4, CLR_BLACK);
       End;
+    IC_EXPLORER :
+      Begin
+        { dossier jaune et loupe (comme l'icone de l'Explorateur Pasdows) }
+        FBox(Hps, X + 3, Y + 4, X + 28, Y + 22, CLR_YELLOW, CLR_BLACK);
+        FBox(Hps, X + 3, Y + 21, X + 13, Y + 25, CLR_YELLOW, CLR_BLACK);
+        GLn(Hps, X + 4, Y + 21, X + 27, Y + 21, CLR_WHITE);
+        GBox(Hps, X + 13, Y + 8, X + 25, Y + 20, CLR_CYAN, DRO_FILL);
+        GBox(Hps, X + 13, Y + 8, X + 25, Y + 20, CLR_DARKBLUE, DRO_OUTLINE);
+        GLn(Hps, X + 14, Y + 8, X + 8, Y + 2, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 8, X + 9, Y + 2, CLR_BLACK);
+      End;
     IC_CALC :
       Begin
         { calculatrice : boitier, affichage et touches }
@@ -1599,6 +1628,7 @@ Begin
     MenuAdd(0, '');
     MenuAdd(CM_WINLIST, '~Liste des fenetres');
     If TaskMgrPath <> '' Then MenuAdd(CM_TASKMGR, '~Gestionnaire des taches');
+    If ExplorerPath <> '' Then MenuAdd(CM_EXPLORER, '~Explorateur OS2-0');
     If BrowserPath <> '' Then MenuAdd(CM_BROWSER, '~Navigateur Web');
     MenuAdd(CM_INFO, '~Informations systeme');
     MenuAdd(CM_SETTINGS, '~Parametres du systeme...');
@@ -2432,6 +2462,7 @@ Begin
     CM_SHUTDOWN : Shutdown;
     CM_TASKMGR : If TaskMgrPath <> '' Then RunPm(TaskMgrPath, '');
     CM_BROWSER : If BrowserPath <> '' Then RunPm(BrowserPath, '');
+    CM_EXPLORER : If ExplorerPath <> '' Then RunPm(ExplorerPath, '');
     CM_CLOSE : CloseView(V);
     CM_PARENT : ParentFolder(V);
     CM_CMDHERE : RunProgram(Comspec, '', Vw(V)^.Path, False);

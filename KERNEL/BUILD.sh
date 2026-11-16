@@ -7,6 +7,8 @@
 #        OS2PC -COS2BOOT OS2BOOT.PAS   -> OS2BOOT  (secteur d'amorce El Torito)
 #        OS2PC -COS2LDR  OS2LDR.PAS    -> OS2LDR   (chargeur 16 -> 32 bits)
 #        OS2PC -COS2KRNL OS2KRNL.PAS   -> OS2KRNL  (noyau 32 bits)
+#     (OS2KRNL.PAS inclut LOGO.INC, le logo de l'ecran de demarrage,
+#     produit par TOOLS/MKLOGO.PY depuis IMAGE/LOGO_OS2ZERO.png) ;
 #  3. compile CMD.PAS et les commandes de la racine du depot (OS2PC -COS2) ;
 #     dont les jeux du dossier Jeux du bureau : KLONDIKE.PAS (Solitaire -
 #     Klondike), ECHECS.PAS (Echecs) et MAHJONGG.PAS (Mahjongg Solitaire), et
@@ -14,8 +16,10 @@
 #     (Gestionnaire des taches, dossier Systeme OS/2) et BROWSER.PAS
 #     (Navigateur Web : HTML, CSS, JavaScript, codes QR, outils F12 ;
 #     bureau et dossier Systeme OS/2), PASDEV.PAS (Pascal Developer,
-#     environnement de developpement du dossier Developer Kit) et CALC.PAS
-#     (Calculatrice portee de Pasdows 95, dossier Productivite) ;
+#     environnement de developpement du dossier Developer Kit), CALC.PAS
+#     (Calculatrice portee de Pasdows 95, dossier Productivite) et
+#     EXPLORER.PAS (Explorateur OS2-0, porte de l'Explorateur Pasdows :
+#     dossier Productivite et menu contextuel du bureau) ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS) sont copies sur le CD-ROM ;

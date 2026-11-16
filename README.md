@@ -1,7 +1,51 @@
-# OS2-0
-Clone d'OS/2 en Pascal (Turbo Pascal ou Free Pascal)
+<p align="center">
+  <img src="IMAGE/LOGO_OS2ZERO.png" width="640" alt="OS/2 Zero (clone)">
+</p>
 
-![image](https://user-images.githubusercontent.com/11842176/146266141-ea1e72bd-4bb4-4132-93f9-2f753ed5cf58.png)
+<h1 align="center">OS2-0 (OS/2 Zero)</h1>
+
+<p align="center"><b>Un clone d'OS/2 Warp 3 écrit entièrement en Pascal : du secteur d'amorce au Workplace Shell.</b></p>
+
+OS2-0 est un système d'exploitation 32 bits qui reproduit OS/2 Warp 3 : un noyau multitâche protégé, les bibliothèques de l'API d'OS/2 (DOSCALLS, VIOCALLS, KBDCALLS, MOUCALLS, PMWIN, PMGPI, PMMERGE et une trentaine d'autres DLL, IFS compris), Presentation Manager et un bureau Workplace Shell avec ses dossiers d'objets, son LaunchPad et ses carnets de paramètres. Tout est écrit en Pascal, plus de 240 000 lignes, et compilé par **OS2PC**, le compilateur du projet, qui produit le secteur d'amorce, le chargeur, le noyau, les DLL et les programmes. OS2PC se compile aussi lui-même : OS2-0 peut donc reconstruire ses propres programmes avec Pascal Developer, son environnement de développement.
+
+OS2-0 démarre d'un CD-ROM ou d'un disque dur, dans QEMU, VirtualBox (y compris au-dessus de Hyper-V) ou VMware.
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/PMSHELL.png" width="400" alt="Le bureau Workplace Shell"><br><i>Le bureau (Workplace Shell) et ses dossiers d'objets</i></td>
+		<td align="center"><img src="IMAGE/EXPLORATEUR.png" width="400" alt="Explorateur OS2-0"><br><i>Explorateur OS2-0, un explorateur à deux volets</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/WEB_GLADIR.png" width="400" alt="Navigateur Web"><br><i>Navigateur Web : HTML, CSS, JavaScript, HTTPS (TLS 1.3)</i></td>
+		<td align="center"><img src="IMAGE/PASDEV.png" width="400" alt="Pascal Developer"><br><i>Pascal Developer : compiler et exécuter dans OS/2-0</i></td>
+	</tr>
+</table>
+
+<h2>Ce qu'OS2-0 sait faire</h2>
+
+<ul>
+	<li><b>Noyau 32 bits</b> (OS2KRNL) : mode protégé, pagination, tâches préemptives, sessions plein écran et fenêtrées, chargeur de programmes et de DLL 32 bits (PE et LX), programmes 16 bits d'OS/2 1.x (NE) et machine virtuelle DOS en mode V86 (Turbo Pascal 7, BGI, DPMI).</li>
+	<li><b>Systèmes de fichiers</b> : HPFS par défaut, NTFS en lecture, écriture et formatage pour partager ses fichiers avec Windows et Linux, FAT12 sur disquette, ISO 9660 sur CD-ROM, disque virtuel en mémoire ; pilotes IFS chargés par <code>IFS=</code> de CONFIG.SYS.</li>
+	<li><b>Presentation Manager et Workplace Shell</b> : fenêtres, menus, contrôles, GPI, presse-papiers, glisser-déposer, raccourcis, modèles, LaunchPad, carnets Système, Souris, Pays et Langue ; de 640 × 480 en 16 couleurs (VGA) à 1024 × 768 en 16 millions de couleurs (VESA).</li>
+	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
+	<li><b>Matériel</b> : disques IDE et ATAPI, lecteur de disquettes, cartes son (Sound Blaster, AC'97, AudioPCI), réseau (Intel PRO/1000, AMD PCnet) avec pile TCP/IP, DHCP, DNS et TLS ; outils invités de VirtualBox et de VMware (souris absolue, écran redimensionnable).</li>
+	<li><b>Installation</b> graphique dans le style de Warp 3, sur une partition HPFS ou NTFS, en six langues.</li>
+</ul>
+
+<h2>Essayer OS2-0</h2>
+
+Construire les images (Free Pascal) puis démarrer le CD-ROM dans QEMU :
+
+<pre>KERNEL/BUILD.sh
+qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
+
+Installer sur un disque dur, puis démarrer depuis le disque :
+
+<pre>qemu-img create -f raw disque.img 300M
+qemu-system-i386 -m 64 -cdrom IMAGE/OS2INST.ISO -hda disque.img -boot d
+qemu-system-i386 -m 64 -hda disque.img</pre>
+
+Sous Windows, <code>KERNEL\BUILD.BAT</code> fait la même construction. La documentation complète d'OS2-0 est dans <a href="IMAGE/LISEZMOI.TXT">IMAGE/LISEZMOI.TXT</a>, également copiée sur le CD-ROM.
 
 <h2>Liste des fichiers</h2>
 
@@ -71,6 +115,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		<tr>
 			<td><b>EXE2BIN.PAS</b></td>
 			<td>Cette commande permet de convertir un fichier EXE en binaire (COM).</td>
+		</tr>
+		<tr>
+			<td><b>EXPLORER.PAS</b></td>
+			<td>Explorateur OS2-0 : explorateur de fichiers à deux volets dans le style de Windows 95 (arbre des dossiers, Grandes icônes ou Détails, barre d'état), porté de l'Explorateur Pasdows ; application de Presentation Manager indépendante (Système OS/2 → Productivité, menu contextuel du bureau).</td>
 		</tr>
 		<tr>
 			<td><b>FIND.PAS</b></td>
@@ -739,6 +787,25 @@ OS/2 Warp 3 n'avait pas de calculatrice. OS/2-0 en a une : celle de Pasdows 95 (
 
 Le calcul est celui de Pasdows 95, en double précision : chiffres, virgule, +/-, quatre opérations, racine carrée (<code>sqrt</code>), pourcentage, inverse (<code>1/x</code>), égal qui répète la dernière opération, mémoire (MC, MR, MS, M+, indicateur <b>M</b>), Retour arrière, CE et C ; affichage sur 15 chiffres significatifs, notation scientifique au-delà (<code>1,5e+020</code>). Clavier : chiffres, <code>.</code> ou <code>,</code>, <code>+ - * /</code>, Entrée ou <code>=</code>, <code>@</code> (racine), <code>%</code>, <code>R</code> (1/x), F9 (+/-), Retour arrière, Suppr (CE), Échap (C), Ctrl+L, R, M, P (mémoire), Ctrl+C et Ctrl+V (le texte collé est tapé touche par touche). Les exceptions du coprocesseur sont masquées et chaque résultat est vérifié : une division par zéro ou un dépassement affiche un message (« Impossible de diviser par zéro. », « Dépassement de capacité. ») au lieu d'une TRAP 0010 sous VirtualBox.
 
+<h3>Explorateur OS2-0 (EXPLORER.PAS)</h3>
+
+Le Workplace Shell d'OS/2 montre les fichiers dans des dossiers d'objets, une fenêtre par dossier. Ce modèle convient à beaucoup de travaux, mais pas à tous : certains utilisateurs veulent parfois un explorateur à deux volets, l'arbre des dossiers d'un côté et le contenu de l'autre. <b>Explorateur OS2-0</b> répond à ce besoin sans toucher au bureau : c'est une application de Presentation Manager indépendante (comme un traitement de texte ou la Calculatrice), portée de l'Explorateur Pasdows de Pasdows 95, qui faisait partie du noyau <code>VMM32</code> et devient ici un programme qui utilise l'API d'OS/2. On l'ouvre de deux façons : l'objet <b>Explorateur OS2-0</b> du dossier <b>Productivité</b> (Système OS/2), ou le menu contextuel du bureau (bouton 2), entre <i>Gestionnaire des tâches</i> et <i>Navigateur Web</i>. <code>EXPLORER [dossier]</code> à l'invite l'ouvre aussi.
+
+<img width="640" height="480" alt="OS/2-0 : l'Explorateur OS2-0 (arbre des dossiers et contenu de C:, Grandes icônes)" src="IMAGE/EXPLORATEUR.png" />
+<img width="640" height="480" alt="OS/2-0 : l'Explorateur OS2-0 en mode Détails" src="IMAGE/EXPLORATEUR_DETAILS.png" />
+
+<table>
+	<tr><th>Partie</th><th>Description</th></tr>
+	<tr><td>Arbre « Tous les dossiers »</td><td>Bureau, Poste de travail, lecteurs (disque, CD-ROM, disquette), dossiers ; cases + et −, traits pointillés, branches dépliées à la demande ; l'arbre suit le dossier affiché. Clavier : flèches haut et bas (le contenu suit), gauche (replier ou remonter), droite (déplier).</td></tr>
+	<tr><td>« Contenu de »</td><td><b>Grandes icônes</b> (cellules de 100 × 70 comme Pasdows 95, étiquettes sur deux lignes) ou <b>Détails</b> (nom, taille en Ko, type, date de modification). Dossiers d'abord, puis fichiers, par ordre alphabétique. Barres de défilement, flèches, Début, Fin, Pg.préc., Pg.suiv., une lettre : objet suivant qui commence par elle.</td></tr>
+	<tr><td>Barre d'état</td><td>Nombre d'objets ou objet choisi (taille en octets ; espace libre et capacité d'un lecteur), espace disque libre du lecteur.</td></tr>
+	<tr><td>Ouvrir (double clic, Entrée)</td><td>Dossier ou lecteur : l'affiche. <code>.EXE</code>, <code>.COM</code> : lance le programme (nouvelle session, comme les objets programme du bureau) ; <code>.CMD</code>, <code>.BAT</code> : par CMD.EXE ; textes et sources (<code>.TXT</code>, <code>.PAS</code>, <code>.INI</code>…) : Pascal Developer ; <code>.WAV</code> : Audio numérique ; <code>.HTM</code> : Navigateur Web.</td></tr>
+	<tr><td>Menus</td><td>Fichier (Ouvrir, Propriétés, Fermer), Affichage (Grandes icônes, Détails, Actualiser F5), Aller à (Dossier parent : Retour arrière, Poste de travail), ? (À propos). Bouton 2 : menu contextuel Ouvrir et Propriétés. Tab passe de l'arbre au contenu.</td></tr>
+	<tr><td>Propriétés (Alt+Entrée)</td><td>Fichier : type, emplacement, taille, date, attributs. Lecteur : système de fichiers (HPFS, NTFS, FAT, CDFS), espace utilisé, libre, capacité.</td></tr>
+</table>
+
+Le portage remplace les services du noyau de Pasdows par l'API d'OS/2 : <code>DosFindFirst</code>/<code>DosFindNext</code> (FILEFINDBUF3 : nom, taille, attributs, date) au lieu du parcours direct des répertoires FAT et ISO 9660 ; <code>DosQueryCurrentDisk</code> pour les lecteurs, <code>DosQueryFSInfo</code> (étiquette de volume, espace libre) et <code>DosQueryFSAttach</code> (nom du système de fichiers) ; <code>DosExecPgm</code> pour ouvrir ; fenêtre standard, gabarit de menu, <code>WinPopupMenu</code> et <code>WinMessageBox</code> de PM. Les icônes de Pasdows 95 (grille de 32 × 32 mise à l'échelle : 32 points dans le contenu, 16 dans l'arbre et les Détails) sont redessinées par <code>WinFillRect</code> et <code>GpiLine</code> ; les reliefs, les en-têtes et la barre d'état gardent l'apparence de Windows 95. Langue : variable <code>LANGUAGE</code> (français, anglais, allemand, italien, espagnol).
+
 <h3>Multimédia : Audio numérique (DIGAUDIO.PAS), MDM.DLL et pilotes des cartes son</h3>
 
 Le dossier <b>Multimédia</b> (Système OS/2 → Multimédia) contient <b>Audio numérique</b>, l'application « Digital Audio » de MMPM/2 (le multimédia d'OS/2 Warp), et les sons du système ; un fichier <code>.WAV</code> ouvert depuis un dossier du bureau s'ouvre aussi dans Audio numérique. Tout est écrit en Pascal et compilé par OS2PC, avec trois nouveaux pilotes pour les cartes son les plus répandues.
@@ -1087,6 +1154,26 @@ Démarrage du disque dur : le secteur d'amorce principal (<b>KERNEL/HDBOOT.ASM</
 <pre>qemu-img create -f raw disque.img 300M
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2INST.ISO -hda disque.img -boot d
 qemu-system-i386 -m 64 -hda disque.img</pre>
+
+<h3>Écran de démarrage graphique</h3>
+
+Au démarrage du disque dur, les messages du noyau ne défilent plus à la console : OS2KRNL passe aussitôt en 640 × 480 × 16 couleurs (mode 12h du BIOS) et montre la boîte <b>Démarrage d'OS/2-0</b>, avec le logo d'OS/2 Zero, la liste des étapes et une progression faite de cercles. Chaque étape terminée est cochée en vert, une flèche et le gras désignent l'étape en cours, et les cercles se remplissent d'une étape à l'autre, ainsi qu'à chaque module (DLL, pilote IFS) chargé. La boîte reste à l'écran jusqu'à ce que Presentation Manager le prenne.
+
+<img width="640" height="480" alt="OS/2-0 : l'écran de démarrage (logo, étapes cochées, progression en cercles)" src="IMAGE/DEMARRAGE.png" />
+
+<table>
+	<tr><th>Étape</th><th>Travail du noyau</th></tr>
+	<tr><td>Mémoire, processeur et vidéo</td><td>Relevé des modes VESA (INT 10h, 4F00h/4F01h).</td></tr>
+	<tr><td>Disques durs et lecteur de CD-ROM</td><td>Contrôleurs IDE et lecteur ATAPI.</td></tr>
+	<tr><td>Partition d'amorçage (HPFS ou NTFS)</td><td>Pilote IFS chargé par OS2LDR, partitions, montage de C:.</td></tr>
+	<tr><td>Configuration (CONFIG.SYS)</td><td>Lecture de C:\CONFIG.SYS.</td></tr>
+	<tr><td>Bibliothèques du système</td><td>DOSCALLS.DLL.</td></tr>
+	<tr><td>Systèmes de fichiers installés</td><td>Lignes <code>IFS=</code>, autres volumes, disque virtuel.</td></tr>
+	<tr><td>Presentation Manager</td><td>Chargement du processeur de commandes (PMSHELL.EXE) et de ses DLL : un cercle par module.</td></tr>
+	<tr><td>Bureau (Workplace Shell)</td><td>Démarrage du bureau, jusqu'à la première file de messages de PM.</td></tr>
+</table>
+
+Le journal reste complet : les messages vont toujours au port série et dans l'écran texte de la session 0, dont les pages B8000h sont redirigées vers son tampon pendant que la carte est en mode graphique. <b>Échap</b> ramène la console texte avec tout le journal ; une erreur du noyau (<code>SYS…</code>, <code>OS2KRNL:</code>), une exception, un programme en mode texte qui lit le clavier (PROTSHELL=C:\CMD.EXE) ou un processeur de commandes qui se termine avant PM font de même. <code>SET BOOTSCREEN=TEXTE</code> dans CONFIG.SYS garde la console. Le dessin se fait dans un tampon d'un octet par point, recopié plan par plan dans la mémoire de la carte VGA, zones modifiées seulement. Le logo (128 × 172 points, palette de 16 couleurs programmée dans le DAC) est dans <b>KERNEL/LOGO.INC</b>, produit par <b>TOOLS/MKLOGO.PY</b> à partir de <b>IMAGE/LOGO_OS2ZERO.png</b>. VIOCALLS.DLL, chargée pendant l'écran de démarrage, ne lit plus l'état d'origine du VGA (police, palette, registres) sur la carte, alors en mode graphique, mais dans l'état du mode texte que le noyau a relevé juste avant (<code>KrnVideo</code> 6) : le bureau garde sa police et les sessions plein écran leurs couleurs.
 
 Langue : la variable <code>LANGUAGE</code> de CONFIG.SYS (convention commune avec MSDOS-0, Pasdows95...) vaut <code>FR</code> (français, par défaut), <code>EN</code> (anglais), <code>GR</code> (allemand), <code>SP</code> (espagnol), <code>IT</code> (italien), <code>ALB</code> ou <code>SQ</code> (albanais, shqip), <code>PT</code> ou <code>PRT</code> (portugais), <code>SE</code> ou <code>SWE</code> (suédois), <code>DK</code> ou <code>DNK</code> (danois), <code>JP</code> ou <code>JPN</code> (japonais en romaji) ; <code>ES</code> est aussi accepté pour l'espagnol. Après l'installation, elle se change dans <b>Système OS/2 → Configuration du système → Langue</b> (onglet Langue du carnet Système - Paramètres) : la ligne <code>SET LANGUAGE=</code> de C:\CONFIG.SYS est modifiée et l'environnement du système aussi (les programmes lancés ensuite, comme CMD.EXE et les commandes, utilisent la nouvelle langue).
 

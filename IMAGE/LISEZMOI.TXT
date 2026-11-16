@@ -14,7 +14,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
               DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
-              OS2PC.EXE, CALC.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
+              OS2PC.EXE, CALC.EXE, EXPLORER.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -165,6 +165,18 @@ Demarrage
    commandes (PROTSHELL : C:\PMSHELL.EXE, le bureau, sur le CD-ROM ;
    C:\CMD.EXE par defaut). S'il se termine, il est relance.
    Ctrl+Alt+Suppr redemarre l'ordinateur a tout moment.
+
+Ecran de demarrage graphique (disque dur) : au lieu des messages de la
+console, OS2KRNL affiche en 640 x 480 x 16 couleurs la boite "Demarrage
+d'OS/2-0" : logo d'OS/2 Zero, etapes cochees en vert (memoire et video,
+disques, partition d'amorcage, CONFIG.SYS, bibliotheques, systemes de
+fichiers, Presentation Manager, bureau) et progression en cercles (un
+cercle de plus par etape et par module charge). Elle reste jusqu'a ce que
+PM prenne l'ecran. Echap, une erreur du noyau, une exception ou un
+programme en mode texte qui lit le clavier ramenent la console avec tout
+le journal (qui va aussi au port serie). SET BOOTSCREEN=TEXTE dans
+CONFIG.SYS : console seulement. Logo : KERNEL\LOGO.INC (TOOLS\MKLOGO.PY,
+IMAGE\LOGO_OS2ZERO.png).
 
 Carte memoire
 -------------
@@ -981,6 +993,26 @@ Warp. Systeme OS/2 - Productivite - Calculatrice (ou CALC a l'invite).
     EN, GR, IT, SP) ;
   - division par zero ou depassement : message dans l'affichage (les
     exceptions du coprocesseur sont masquees : pas de TRAP 0010).
+
+Explorateur OS2-0 (EXPLORER.EXE, dossier Productivite)
+------------------------------------------------------
+Explorateur de fichiers a deux volets dans le style de Windows 95, porte
+de l'Explorateur Pasdows (source EXPLORER.PAS). Application de PM
+independante : le Workplace Shell ne change pas. Systeme OS/2 -
+Productivite - Explorateur OS2-0, ou bouton 2 sur le bureau -
+Explorateur OS2-0 (entre Gestionnaire des taches et Navigateur Web), ou
+EXPLORER [dossier] a l'invite.
+  - arbre "Tous les dossiers" : Bureau, Poste de travail, lecteurs,
+    dossiers (cases + et -) ; fleches haut/bas, gauche (replier), droite
+    (deplier) ;
+  - "Contenu de" : Grandes icones ou Details (nom, taille, type, date) ;
+  - barre d'etat : objets ou objet choisi, espace disque libre ;
+  - double clic ou Entree : ouvre un dossier, lance .EXE/.COM (.CMD, .BAT
+    par CMD.EXE), textes et sources dans Pascal Developer, .WAV dans Audio
+    numerique, .HTM dans le Navigateur Web ;
+  - Retour arriere : dossier parent ; F5 : actualiser ; Tab : arbre ou
+    contenu ; Alt+Entree : Proprietes ; bouton 2 : Ouvrir, Proprietes ;
+  - menus Fichier, Affichage, Aller a, ?.
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------

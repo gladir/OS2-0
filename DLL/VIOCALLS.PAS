@@ -1014,10 +1014,37 @@ Begin
   CurLine := R;
 End;
 
-{ Etat d'origine du VGA (chargement de la DLL) }
+{ Etat d'origine du VGA (chargement de la DLL). Demarrage du disque dur :
+  la DLL est chargee pendant l'ecran de demarrage graphique du noyau ; la
+  carte est alors en mode 12h et l'etat du mode texte (palette, registres,
+  police) est celui que le noyau a releve avant (KrnVideo 6). }
 Procedure HwCapture;
-Var I : LongInt;
+Var I : LongInt; Snap : Array[0..5119] Of Byte;
 Begin
+  If KVid(6, 0, LongInt(@Snap)) = 1 Then
+  Begin
+    CellHeight := (Snap[787] And $1F) + 1;
+    If (CellHeight < 8) Or (CellHeight > 32) Then CellHeight := 16;
+    CurStart := Snap[788] And $1F;
+    CurEnd := Snap[789] And $1F;
+    CurAttr := 0;
+    CurWidth := 1;
+    If CurStart > CurEnd Then
+    Begin
+      CurStart := CellHeight - 3;
+      CurEnd := CellHeight - 2;
+    End;
+    For I := 0 To 15 Do DefPal[I] := Snap[768 + I];
+    MoveB(LongInt(@Snap), LongInt(@DefDac), 768);
+    Overscan := Snap[768 + $11];
+    If (Snap[768 + $10] And 8) <> 0 Then Blink := 0 Else Blink := 1;
+    Underline := Snap[786] And $1F;
+    For I := 0 To 255 * 16 + 15 Do
+      If (I Mod 16) < CellHeight Then WrB(LongInt(@RomFont) + (I Div 16) * CellHeight + I Mod 16, Snap[1024 + I]);
+    MoveB(LongInt(@RomFont), LongInt(@FontBuf), 256 * CellHeight);
+    RomOk := True;
+    Exit;
+  End;
   CellHeight := (CrtcGet(9) And $1F) + 1;
   If (CellHeight < 8) Or (CellHeight > 32) Then CellHeight := 16;
   CurStart := CrtcGet($0A) And $1F;
