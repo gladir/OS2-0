@@ -1,7 +1,51 @@
-# OS2-0
-Clone d'OS/2 en Pascal (Turbo Pascal ou Free Pascal)
+<p align="center">
+  <img src="IMAGE/LOGO_OS2ZERO.png" width="640" alt="OS/2 Zero (clone)">
+</p>
 
-![image](https://user-images.githubusercontent.com/11842176/146266141-ea1e72bd-4bb4-4132-93f9-2f753ed5cf58.png)
+<h1 align="center">OS2-0 (OS/2 Zero)</h1>
+
+<p align="center"><b>Un clone d'OS/2 Warp 3 écrit entièrement en Pascal : du secteur d'amorce au Workplace Shell.</b></p>
+
+OS2-0 est un système d'exploitation 32 bits qui reproduit OS/2 Warp 3 : un noyau multitâche protégé, les bibliothèques de l'API d'OS/2 (DOSCALLS, VIOCALLS, KBDCALLS, MOUCALLS, PMWIN, PMGPI, PMMERGE et une trentaine d'autres DLL, IFS compris), Presentation Manager et un bureau Workplace Shell avec ses dossiers d'objets, son LaunchPad et ses carnets de paramètres. Tout est écrit en Pascal, plus de 240 000 lignes, et compilé par **OS2PC**, le compilateur du projet, qui produit le secteur d'amorce, le chargeur, le noyau, les DLL et les programmes. OS2PC se compile aussi lui-même : OS2-0 peut donc reconstruire ses propres programmes avec Pascal Developer, son environnement de développement.
+
+OS2-0 démarre d'un CD-ROM ou d'un disque dur, dans QEMU, VirtualBox (y compris au-dessus de Hyper-V) ou VMware.
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/PMSHELL.png" width="400" alt="Le bureau Workplace Shell"><br><i>Le bureau (Workplace Shell) et ses dossiers d'objets</i></td>
+		<td align="center"><img src="IMAGE/EXPLORATEUR.png" width="400" alt="Explorateur OS2-0"><br><i>Explorateur OS2-0, un explorateur à deux volets</i></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="IMAGE/WEB_GLADIR.png" width="400" alt="Navigateur Web"><br><i>Navigateur Web : HTML, CSS, JavaScript, HTTPS (TLS 1.3)</i></td>
+		<td align="center"><img src="IMAGE/PASDEV.png" width="400" alt="Pascal Developer"><br><i>Pascal Developer : compiler et exécuter dans OS/2-0</i></td>
+	</tr>
+</table>
+
+<h2>Ce qu'OS2-0 sait faire</h2>
+
+<ul>
+	<li><b>Noyau 32 bits</b> (OS2KRNL) : mode protégé, pagination, tâches préemptives, sessions plein écran et fenêtrées, chargeur de programmes et de DLL 32 bits (PE et LX), programmes 16 bits d'OS/2 1.x (NE) et machine virtuelle DOS en mode V86 (Turbo Pascal 7, BGI, DPMI).</li>
+	<li><b>Systèmes de fichiers</b> : HPFS par défaut, NTFS en lecture, écriture et formatage pour partager ses fichiers avec Windows et Linux, FAT12 sur disquette, ISO 9660 sur CD-ROM, disque virtuel en mémoire ; pilotes IFS chargés par <code>IFS=</code> de CONFIG.SYS.</li>
+	<li><b>Presentation Manager et Workplace Shell</b> : fenêtres, menus, contrôles, GPI, presse-papiers, glisser-déposer, raccourcis, modèles, LaunchPad, carnets Système, Souris, Pays et Langue ; de 640 × 480 en 16 couleurs (VGA) à 1024 × 768 en 16 millions de couleurs (VESA).</li>
+	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
+	<li><b>Matériel</b> : disques IDE et ATAPI, lecteur de disquettes, cartes son (Sound Blaster, AC'97, AudioPCI), réseau (Intel PRO/1000, AMD PCnet) avec pile TCP/IP, DHCP, DNS et TLS ; outils invités de VirtualBox et de VMware (souris absolue, écran redimensionnable).</li>
+	<li><b>Installation</b> graphique dans le style de Warp 3, sur une partition HPFS ou NTFS, en six langues.</li>
+</ul>
+
+<h2>Essayer OS2-0</h2>
+
+Construire les images (Free Pascal) puis démarrer le CD-ROM dans QEMU :
+
+<pre>KERNEL/BUILD.sh
+qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
+
+Installer sur un disque dur, puis démarrer depuis le disque :
+
+<pre>qemu-img create -f raw disque.img 300M
+qemu-system-i386 -m 64 -cdrom IMAGE/OS2INST.ISO -hda disque.img -boot d
+qemu-system-i386 -m 64 -hda disque.img</pre>
+
+Sous Windows, <code>KERNEL\BUILD.BAT</code> fait la même construction. La documentation complète d'OS2-0 est dans <a href="IMAGE/LISEZMOI.TXT">IMAGE/LISEZMOI.TXT</a>, également copiée sur le CD-ROM.
 
 <h2>Liste des fichiers</h2>
 
