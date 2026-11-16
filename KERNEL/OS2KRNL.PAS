@@ -7326,6 +7326,18 @@ Begin
             End;
           End;
         End;
+   { 19 : bloc permanent de P1 octets (sans proprietaire : jamais libere ;
+     ecran fantome du VGA de PMWIN, vu par tous les processus) }
+   19 : If P1 > 0 Then
+        Begin
+          Sz := (P1 + 4095) And Not 4095;
+          S := PAlloc(Sz);
+          If S <> 0 Then
+          Begin
+            FillMem(S, Sz, 0);
+            KrnTaskCtl := S;
+          End;
+        End;
    16 : For K := 0 To MaxXBlk - 1 Do
           If (P1 <> 0) And (XBase[K] = P1) Then
           Begin

@@ -254,6 +254,10 @@ Type
   PLong = ^LongInt;
   PWord = ^Word;
   PByte = ^Byte;
+  TBytes = Array[0..307199] Of Byte;
+  PBytes = ^TBytes;
+  TLongs = Array[0..38399] Of LongInt;
+  PLongs = ^TLongs;
 
 Var
   { --- fenetres --- }
@@ -364,11 +368,13 @@ Var
     couleur 0 a 15), dessine comme une memoire lineaire de 8 bits ; GFrn
     est ce que le VGA affiche ; GFlush ne recopie que les groupes de 32
     pels qui ont change, plan par plan, par mots de 32 bits }
-  GScr, GFrn : Array[0..307199] Of Byte;
-  GPlane : Array[0..38399] Of LongInt;    { 9600 groupes x 4 plans }
-  GGrp : Array[0..9599] Of LongInt;       { decalage du groupe dans A0000h }
-  GUni, GUniV : Array[0..9599] Of LongInt; { groupes d'une seule couleur : decalage, couleur x 01010101h }
-  GShad, GDirty, GFlushT, GFlushLock : LongInt;
+  { tampons dans un bloc permanent du noyau (KrnTaskCtl 19, alloue une
+    fois) : la zone des DLL ne peut pas les contenir }
+  GScr, GFrn : PBytes;                    { 640 x 480 octets chacun }
+  GPlane : PLongs;                        { 9600 groupes x 4 plans }
+  GGrp : PLongs;                          { decalage du groupe dans A0000h }
+  GUni, GUniV : PLongs;                   { groupes d'une seule couleur : decalage, couleur x 01010101h }
+  GShad, GDirty, GFlushT, GFlushLock, GShadBlk : LongInt;
   BrdX, BrdY, TitleH, MenuH, VsbW, HsbH, MRowH, MPad : LongInt;
   GPl : Array[0..11] Of LongInt;
   HwBit : LongInt;
@@ -1226,7 +1232,7 @@ Begin
   GFlushLock := 1;
   GDirty := 0;
   GFlushT := KGetTickCount;
-  Sa := LongInt(@GScr); Fa := LongInt(@GFrn);
+  Sa := LongInt(GScr); Fa := LongInt(GFrn);
   N := 0; NU := 0;
   For Y := 0 To 479 Do
   Begin
@@ -1238,14 +1244,14 @@ Begin
         If Not MemSame(Sa + A, Fa + A, 8) Then
         Begin
           { une seule couleur (fonds, barres) : une ecriture en mode 2 }
-          C := GScr[A];
-          Uni := MemSame(Sa + A, Sa + A + 1, 7) And (GScr[A + 28] = C) And (GScr[A + 29] = C) And
-                 (GScr[A + 30] = C) And (GScr[A + 31] = C);
+          C := GScr^[A];
+          Uni := MemSame(Sa + A, Sa + A + 1, 7) And (GScr^[A + 28] = C) And (GScr^[A + 29] = C) And
+                 (GScr^[A + 30] = C) And (GScr^[A + 31] = C);
           If Uni Then
           Begin
-            GUni[NU] := Y * 80 + G * 4;
-            GUniV[NU] := (C And 15) * $01010101;
-            For I := 0 To 31 Do GFrn[A + I] := C;
+            GUni^[NU] := Y * 80 + G * 4;
+            GUniV^[NU] := (C And 15) * $01010101;
+            For I := 0 To 31 Do GFrn^[A + I] := C;
             Inc(NU);
           End
           Else
@@ -1256,13 +1262,13 @@ Begin
             For K := 3 DownTo 0 Do
             Begin
               Bt := 0;
-              For I := 0 To 7 Do Bt := (Bt Shl 1) Or ((GScr[A + K * 8 + I] Shr P) And 1);
+              For I := 0 To 7 Do Bt := (Bt Shl 1) Or ((GScr^[A + K * 8 + I] Shr P) And 1);
               V := (V Shl 8) Or Bt;
             End;
-            GPlane[N * 4 + P] := V;
+            GPlane^[N * 4 + P] := V;
           End;
-          GGrp[N] := Y * 80 + G * 4;
-          For I := 0 To 31 Do GFrn[A + I] := GScr[A + I];
+          GGrp^[N] := Y * 80 + G * 4;
+          For I := 0 To 31 Do GFrn^[A + I] := GScr^[A + I];
           Inc(N);
           End;
         End;
@@ -1278,7 +1284,7 @@ Begin
     For P := 0 To 3 Do
     Begin
       GOut($3C4, 2); GOut($3C5, 1 Shl P);
-      For I := 0 To N - 1 Do WrL($A0000 + GGrp[I], GPlane[I * 4 + P]);
+      For I := 0 To N - 1 Do WrL($A0000 + GGrp^[I], GPlane^[I * 4 + P]);
     End;
     GOut($3C4, 2); GOut($3C5, $0F);
     If NU > 0 Then
@@ -1286,7 +1292,7 @@ Begin
       { mode d'ecriture 2 : chaque octet ecrit donne la couleur de ses 8
         pels dans les 4 plans }
       GOut($3CE, 5); GOut($3CF, 2);
-      For I := 0 To NU - 1 Do WrL($A0000 + GUni[I], GUniV[I]);
+      For I := 0 To NU - 1 Do WrL($A0000 + GUni^[I], GUniV^[I]);
       GOut($3CE, 5); GOut($3CF, 0);
     End;
     GMask := $FF;
@@ -13146,12 +13152,25 @@ Begin
   GShad := 0;
   If (GBits = 4) And (PmCurW = 640) And (PmCurH = 480) And ShadowWanted Then
   Begin
+    If GShadBlk = 0 Then
+    Begin
+      GShadBlk := KTask(19, 307200 * 2 + 38400 * 4 + 9600 * 4 * 3, 0, 0);
+      If GShadBlk <> 0 Then
+      Begin
+        GScr := Pointer(GShadBlk); GFrn := Pointer(GShadBlk + 307200);
+        GPlane := Pointer(GShadBlk + 614400); GGrp := Pointer(GShadBlk + 768000);
+        GUni := Pointer(GShadBlk + 806400); GUniV := Pointer(GShadBlk + 844800);
+      End;
+    End;
+  End;
+  If (GShadBlk <> 0) And (GBits = 4) And (PmCurW = 640) And (PmCurH = 480) And ShadowWanted Then
+  Begin
     GShad := 1;
-    GLfb := LongInt(@GScr); GPitch := 640; GBpp := 1;
+    GLfb := GShadBlk; GPitch := 640; GBpp := 1;
     For K := 0 To 15 Do GPixV[K] := K;
     For K := 0 To 307199 Do
     Begin
-      GScr[K] := 0; GFrn[K] := 255;
+      GScr^[K] := 0; GFrn^[K] := 255;
     End;
     GDirty := 1;
   End;
@@ -13322,7 +13341,7 @@ End;
   0 s'il n'y en a pas }
 Function WinQueryShadow : LongInt;
 Begin
-  If (GShad <> 0) And (GMode <> 0) Then WinQueryShadow := LongInt(@GScr) Else WinQueryShadow := 0;
+  If (GShad <> 0) And (GMode <> 0) Then WinQueryShadow := GShadBlk Else WinQueryShadow := 0;
   GDirty := 1;
 End;
 
@@ -15431,7 +15450,7 @@ Var
   InitI : LongInt;
 
 BEGIN
-  GShad := 0; GDirty := 0; GFlushT := 0; GFlushLock := 0;
+  GShad := 0; GDirty := 0; GFlushT := 0; GFlushLock := 0; GShadBlk := 0;
   VbxFn := 0; VbxNext := 0;
   HwBit := $80000000;
   DropCombo := -1; DropList := -1; DropFill := 0;
