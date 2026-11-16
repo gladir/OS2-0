@@ -150,7 +150,7 @@ Const
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
   OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
   OB_DEVKIT = 30; IC_PASDEV = 29;
-  OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31;
+  OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1127,6 +1127,7 @@ Begin
         If FileExists('C:\ECHECS.EXE') Then Dummy := NewItem(V, IC_CHESS, OB_GAME, 'Echecs', 'C:\ECHECS.EXE');
         If FileExists('C:\KLONDIKE.EXE') Then
           Dummy := NewItem(V, IC_CARDS, OB_GAME, 'Solitaire - Klondike', 'C:\KLONDIKE.EXE');
+        If FileExists('C:\SUDOKU.EXE') Then Dummy := NewItem(V, IC_SUDOKU, OB_GAME, 'Sudoku', 'C:\SUDOKU.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1363,6 +1364,18 @@ Begin
         FBox(Hps, X + 12, Y + 8, X + 20, Y + 19, CLR_BLACK, CLR_BLACK);
         FBox(Hps, X + 8, Y + 17, X + 19, Y + 24, CLR_BLACK, CLR_BLACK);
         FBox(Hps, X + 15, Y + 24, X + 19, Y + 27, CLR_BLACK, CLR_BLACK);
+      End;
+    IC_SUDOKU :
+      Begin
+        { grille de 3 x 3 carres et quelques chiffres }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 11, Y + 2, X + 11, Y + 29, CLR_BLACK);
+        GLn(Hps, X + 20, Y + 2, X + 20, Y + 29, CLR_BLACK);
+        GLn(Hps, X + 2, Y + 11, X + 29, Y + 11, CLR_BLACK);
+        GLn(Hps, X + 2, Y + 20, X + 29, Y + 20, CLR_BLACK);
+        GBox(Hps, X + 12, Y + 12, X + 19, Y + 19, CLR_YELLOW, DRO_FILL);
+        GText(Hps, X + 3, Y + 20, '5', CLR_BLACK, CLR_WHITE);
+        GText(Hps, X + 21, Y + 3, '3', CLR_DARKBLUE, CLR_WHITE);
       End;
     IC_TILES :
       Begin

@@ -12,7 +12,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               PMCTLS.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL,
               ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, TLS32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
-              INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
+              INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, SUDOKU.EXE,
               DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
@@ -72,6 +72,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC KLONDIKE.PAS                        -> KLONDIKE.EXE (Solitaire - Klondike)
   OS2PC ECHECS.PAS                          -> ECHECS.EXE (Echecs)
   OS2PC MAHJONGG.PAS                        -> MAHJONGG.EXE (Mahjongg Solitaire)
+  OS2PC SUDOKU.PAS                          -> SUDOKU.EXE (Sudoku)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
   OS2PC DLL\SBAUDIO.PAS                     -> SBAUDIO.DLL (pilote Sound Blaster)
@@ -789,7 +790,12 @@ traditionnels, composant Jeux de l'installation) :
   Mahjongg Solitaire (MAHJONGG.EXE) : 144 tuiles, disposition de la
   tortue (5 etages) ; retirer les paires de tuiles libres ; donnes
   toujours faisables ; I indice, Ctrl+Z annuler, recommencer.
-Parametre /SEED:n (Klondike, Mahjongg) : donne reproductible.
+  Sudoku (SUDOKU.EXE) : grille de 9 x 9 a solution unique, construite au
+  hasard (Facile, Moyen, Difficile) ; cliquer une case puis un chiffre du
+  pave ou taper 1 a 9 ; bouton 2, Suppr ou Espace : effacer ; chiffres
+  en conflit en rouge ; I indice, V verifier, Ctrl+Z annuler, Solution,
+  chronometre. Porte du prototype SODOKU.PAS de 7iles.
+Parametre /SEED:n (Klondike, Mahjongg, Sudoku) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------
