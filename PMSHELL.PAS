@@ -150,8 +150,9 @@ Const
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
   OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
   OB_DEVKIT = 30; IC_PASDEV = 29;
+  OB_PRODUCT = 31; IC_CALC = 30;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
-  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11;
+  VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
   BS_PUSHBUTTON = 0; BS_AUTOCHECKBOX = 2; BS_AUTORADIOBUTTON = 4; SS_TEXT = 1; SS_GROUPBOX = 2;
@@ -539,6 +540,20 @@ Begin
   End;
 End;
 
+{ Calculatrice (CALC.EXE, dossier Productivite) : memes emplacements }
+Function CalcPath : String;
+Var S : String;
+Begin
+  CalcPath := '';
+  If FileExists('C:\CALC.EXE') Then CalcPath := 'C:\CALC.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'CALC.EXE') Then CalcPath := S + 'CALC.EXE';
+  End;
+End;
+
 Procedure ShowMsg(Text, Cap : String; Style : LongInt);
 Begin
   Dummy := WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z(Text), Z2(Cap), 0, Style Or MB_MOVEABLE);
@@ -889,7 +904,7 @@ Begin
     OB_COUNTRY : Icon := IC_GLOBE;
     OB_COLORS : Icon := IC_PALETTE;
     OB_LANG : Icon := IC_LANG;
-    OB_GAMES, OB_MMFOLDER, OB_DEVKIT : Icon := IC_FOLDER;
+    OB_GAMES, OB_MMFOLDER, OB_DEVKIT, OB_PRODUCT : Icon := IC_FOLDER;
   Else
     Icon := IC_FILE;
   End;
@@ -1073,6 +1088,7 @@ Begin
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
+        If CalcPath <> '' Then Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
         Dummy := NewItem(V, IC_CMD, OB_DOSWIN, 'Fenetre DOS', '');
@@ -1095,6 +1111,12 @@ Begin
         If FileExists('C:\ECHECS.EXE') Then Dummy := NewItem(V, IC_CHESS, OB_GAME, 'Echecs', 'C:\ECHECS.EXE');
         If FileExists('C:\KLONDIKE.EXE') Then
           Dummy := NewItem(V, IC_CARDS, OB_GAME, 'Solitaire - Klondike', 'C:\KLONDIKE.EXE');
+      End;
+    VK_PRODUCT :
+      Begin
+        { Productivite (comme le dossier de Warp 3) : la Calculatrice,
+          portee de Pasdows 95 (Warp 3 n'en avait pas) }
+        If CalcPath <> '' Then Dummy := NewItem(V, IC_CALC, OB_GAME, 'Calculatrice', CalcPath);
       End;
     VK_DEVKIT :
       Begin
@@ -1425,6 +1447,23 @@ Begin
         GLn(Hps, X + 16, Y + 4, X + 29, Y + 20, CLR_BROWN);
         GLn(Hps, X + 17, Y + 4, X + 30, Y + 20, CLR_YELLOW);
         GLn(Hps, X + 15, Y + 3, X + 16, Y + 4, CLR_BLACK);
+      End;
+    IC_CALC :
+      Begin
+        { calculatrice : boitier, affichage et touches }
+        FBox(Hps, X + 5, Y + 1, X + 26, Y + 30, CLR_PALEGRAY, CLR_BLACK);
+        GLn(Hps, X + 6, Y + 29, X + 25, Y + 29, CLR_WHITE);
+        GLn(Hps, X + 6, Y + 2, X + 6, Y + 29, CLR_WHITE);
+        FBox(Hps, X + 8, Y + 22, X + 23, Y + 27, CLR_WHITE, CLR_DARKGRAY);
+        GLn(Hps, X + 16, Y + 24, X + 21, Y + 24, CLR_BLACK);
+        For K := 0 To 3 Do
+        Begin
+          GBox(Hps, X + 8, Y + 15 - K * 4, X + 10, Y + 17 - K * 4, CLR_BLUE, DRO_FILL);
+          GBox(Hps, X + 13, Y + 15 - K * 4, X + 15, Y + 17 - K * 4, CLR_BLUE, DRO_FILL);
+          GBox(Hps, X + 18, Y + 15 - K * 4, X + 20, Y + 17 - K * 4, CLR_BLUE, DRO_FILL);
+          GBox(Hps, X + 22, Y + 15 - K * 4, X + 23, Y + 17 - K * 4, CLR_RED, DRO_FILL);
+        End;
+        GBox(Hps, X + 8, Y + 19, X + 23, Y + 20, CLR_DARKRED, DRO_FILL);
       End;
     IC_INFO, IC_HELP :
       Begin
@@ -2257,6 +2296,7 @@ Begin
     OB_COUNTRY : OpenNb(2, 0);
     OB_GAMES : OpenFolder(VK_GAMES, '', 'Jeux');
     OB_DEVKIT : OpenFolder(VK_DEVKIT, '', 'Developer Kit');
+    OB_PRODUCT : OpenFolder(VK_PRODUCT, '', 'Productivite');
     OB_GAME : RunPm(It(K)^.Path, '');
     OB_MMFOLDER : OpenFolder(VK_MM, '', 'Multimedia');
     OB_SOUND :
