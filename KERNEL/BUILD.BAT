@@ -19,8 +19,9 @@ ECHO == Commandes (OS2PC -COS2)
 REM (dont les jeux KLONDIKE.PAS, ECHECS.PAS et MAHJONGG.PAS du dossier Jeux,
 REM DIGAUDIO.PAS, Audio numerique, du dossier Multimedia, TASKMGR.PAS,
 REM Gestionnaire des taches, du dossier Systeme OS/2, BROWSER.PAS,
-REM Navigateur Web, du bureau et du dossier Systeme OS/2, et PASDEV.PAS,
-REM Pascal Developer, du dossier Developer Kit)
+REM Navigateur Web, du bureau et du dossier Systeme OS/2, PASDEV.PAS,
+REM Pascal Developer, du dossier Developer Kit, et CALC.PAS, Calculatrice,
+REM du dossier Productivite)
 FOR %%F IN (..\*.PAS) DO ..\BUILD\OS2PC -Q %%F ..\BUILD\CD\%%~nF.EXE
 REM nom 8.3 sur le CD-ROM (ISO 9660 niveau 1)
 IF EXIST ..\BUILD\CD\LAUNCHPAD.EXE MOVE /Y ..\BUILD\CD\LAUNCHPAD.EXE ..\BUILD\CD\LAUNCHPD.EXE > NUL

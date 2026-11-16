@@ -14,7 +14,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
               DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
-              OS2PC.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
+              OS2PC.EXE, CALC.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -961,6 +961,26 @@ TLS32.DLL, la barre d'etat l'indique ("connexion chiffree (TLS 1.3,
 certificat non verifie)") ; proxy HTTP facultatif (Options - Proxy, ou
 SET HTTP_PROXY=hote:port : tunnel CONNECT). SET BROWSER_TRACE=1
 copie la console et les etapes du chargement sur la sortie standard.
+
+Calculatrice (CALC.EXE, dossier Productivite)
+---------------------------------------------
+OS/2 Warp 3 n'avait pas de calculatrice : celle de Pasdows 95 (source
+CALC.PAS) est portee vers l'API d'OS/2 (PMWIN, PMGPI) et l'apparence de
+Warp. Systeme OS/2 - Productivite - Calculatrice (ou CALC a l'invite).
+  - mode Standard : chiffres, virgule, +/-, + - * /, racine carree
+    (sqrt), pourcentage, 1/x, egal (repete la derniere operation),
+    memoire MC, MR, MS, M+ (indicateur M), Retour, CE, C ; double
+    precision, 15 chiffres significatifs, notation scientifique au-dela ;
+  - clavier : chiffres, . ou , , + - * /, Entree ou =, @ (racine), %,
+    R (1/x), F9 (+/-), Retour arriere, Suppr (CE), Echap (C), Ctrl+L,
+    Ctrl+R, Ctrl+M, Ctrl+P (memoire), Ctrl+C (copier), Ctrl+V (coller :
+    le texte est tape touche par touche) ;
+  - menus Edition (Copier, Coller), Affichage (Standard), Aide (A propos) ;
+    presse-papiers de PM (CF_TEXT) ;
+  - separateur decimal du carnet Pays (sDecimal), langue de LANGUAGE (FR,
+    EN, GR, IT, SP) ;
+  - division par zero ou depassement : message dans l'affichage (les
+    exceptions du coprocesseur sont masquees : pas de TRAP 0010).
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------

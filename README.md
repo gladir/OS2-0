@@ -29,6 +29,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Navigateur Web de Presentation Manager avec l'apparence d'OS/2 Warp 3 (adapté du BROWSER.PAS de DEV-COOLS) : HTML, CSS, JavaScript, images GIF, PNG, JPEG et BMP, code source, codes QR, menu contextuel et outils de développement F12 (Inspecteur, Débogueur, Éditeur de style, Console, Réseau).</td>
 		</tr>
 		<tr>
+			<td><b>CALC.PAS</b></td>
+			<td>Calculatrice de Presentation Manager (Système OS/2 → Productivité), portée de celle de Pasdows 95 vers l'API d'OS/2 (PMWIN, PMGPI) et l'apparence de Warp 3 : mode Standard, mémoire, presse-papiers de PM.</td>
+		</tr>
+		<tr>
 			<td><b>CHKDSK.PAS</b></td>
 			<td>Cette commande permet de vérifier le disque. Cette commande est inspiré du DOS.</td>
 		</tr>		
@@ -713,6 +717,27 @@ Comme OS/2 Warp 3, le bureau a un dossier <b>Jeux</b> (Système OS/2 → Jeux) a
 <img width="640" height="480" alt="OS/2-0 : Mahjongg Solitaire" src="IMAGE/MAHJONGG.png" />
 
 Écrire ces jeux a fait apparaître des limites d'OS2PC. La borne d'une boucle <code>For</code> était gardée dans une variable statique : dans une fonction récursive (la recherche alpha-bêta des Échecs), un appel intérieur écrasait la borne de la boucle de l'appelant, qui ne se terminait plus. OS2PC la range maintenant dans le cadre de pile de la procédure (une case par <code>For</code> du corps, sous les variables locales) ; seul le programme principal garde une variable statique. Les tableaux à deux dimensions dans un enregistrement et la copie d'enregistrements entiers ne sont pas encore fiables (les jeux utilisent des tableaux globaux à une dimension).
+
+<h3>Calculatrice (CALC.PAS)</h3>
+
+OS/2 Warp 3 n'avait pas de calculatrice. OS/2-0 en a une : celle de Pasdows 95 (<code>APPS/CALC.PAS</code>, programme Win32), portée vers l'API d'OS/2 et l'apparence de Warp. Elle est dans le nouveau dossier <b>Productivité</b> de Système OS/2 (objet <b>Calculatrice</b>) ; <code>CALC</code> à l'invite de commandes la lance aussi. Le programme d'installation la copie toujours.
+
+<img width="640" height="480" alt="OS/2-0 : la Calculatrice, ouverte depuis le dossier Productivité de Système OS/2" src="IMAGE/CALCULATRICE.png" />
+
+<table>
+	<tr><th>Élément</th><th>Pasdows 95 (Win32)</th><th>OS/2-0 (Presentation Manager)</th></tr>
+	<tr><td>Fenêtre</td><td>RegisterClassA, CreateWindowExA, AdjustWindowRect</td><td>WinRegisterClass, WinCreateStdWindow (titre, menu système, réduction, liste des fenêtres, bordure de dialogue : taille fixe), taille du cadre calculée par WinQueryWindowRect</td></tr>
+	<tr><td>Menus</td><td>CreateMenu, AppendMenuA</td><td>Gabarit de menu de PM (MENUTEMPLATE) et WinCreateMenu : <u>É</u>dition (Copier Ctrl+C, Coller Ctrl+V), <u>A</u>ffichage (Standard coché, Scientifique désactivé), A<u>i</u>de (À propos)</td></tr>
+	<tr><td>Dessin</td><td>GDI : FillRect, crayons, LineTo, TextOutA</td><td>WinFillRect, GpiSetColor, GpiMove, GpiLine, WinDrawText (DT_CENTER, DT_RIGHT, DT_VCENTER) ; origine en bas à gauche</td></tr>
+	<tr><td>Apparence</td><td>Boutons en relief de Windows 95</td><td>Boutons poussoirs de PMWIN (blanc et noir à l'extérieur, gris foncé à l'intérieur ; inversés quand enfoncés), affichage en creux comme une zone de saisie, couleurs foncées lisibles même en VGA 16 couleurs</td></tr>
+	<tr><td>Clavier et souris</td><td>WM_CHAR, WM_KEYDOWN, SetCapture</td><td>WM_CHAR de PM (KC_CHAR, KC_VIRTUALKEY, KC_CTRL), WM_BUTTON1DOWN/UP, WinSetCapture</td></tr>
+	<tr><td>Presse-papiers</td><td>GlobalAlloc, SetClipboardData</td><td>WinOpenClipbrd, WinSetClipbrdData (CF_TEXT, CFI_POINTER), WinQueryClipbrdData</td></tr>
+	<tr><td>Séparateur décimal</td><td>GetLocaleInfoA</td><td>Carnet Pays (OS2.INI, PM_National, sDecimal), sinon DosQueryCtryInfo</td></tr>
+	<tr><td>Langue</td><td colspan="2">Variable <code>LANGUAGE</code> de CONFIG.SYS : français, anglais, allemand, italien, espagnol</td></tr>
+	<tr><td>À propos, bip</td><td>MessageBoxA, MessageBeep</td><td>WinMessageBox, WinAlarm</td></tr>
+</table>
+
+Le calcul est celui de Pasdows 95, en double précision : chiffres, virgule, +/-, quatre opérations, racine carrée (<code>sqrt</code>), pourcentage, inverse (<code>1/x</code>), égal qui répète la dernière opération, mémoire (MC, MR, MS, M+, indicateur <b>M</b>), Retour arrière, CE et C ; affichage sur 15 chiffres significatifs, notation scientifique au-delà (<code>1,5e+020</code>). Clavier : chiffres, <code>.</code> ou <code>,</code>, <code>+ - * /</code>, Entrée ou <code>=</code>, <code>@</code> (racine), <code>%</code>, <code>R</code> (1/x), F9 (+/-), Retour arrière, Suppr (CE), Échap (C), Ctrl+L, R, M, P (mémoire), Ctrl+C et Ctrl+V (le texte collé est tapé touche par touche). Les exceptions du coprocesseur sont masquées et chaque résultat est vérifié : une division par zéro ou un dépassement affiche un message (« Impossible de diviser par zéro. », « Dépassement de capacité. ») au lieu d'une TRAP 0010 sous VirtualBox.
 
 <h3>Multimédia : Audio numérique (DIGAUDIO.PAS), MDM.DLL et pilotes des cartes son</h3>
 

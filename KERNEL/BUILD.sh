@@ -13,8 +13,9 @@
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), TASKMGR.PAS
 #     (Gestionnaire des taches, dossier Systeme OS/2) et BROWSER.PAS
 #     (Navigateur Web : HTML, CSS, JavaScript, codes QR, outils F12 ;
-#     bureau et dossier Systeme OS/2) et PASDEV.PAS (Pascal Developer,
-#     environnement de developpement du dossier Developer Kit) ;
+#     bureau et dossier Systeme OS/2), PASDEV.PAS (Pascal Developer,
+#     environnement de developpement du dossier Developer Kit) et CALC.PAS
+#     (Calculatrice portee de Pasdows 95, dossier Productivite) ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS) sont copies sur le CD-ROM ;
