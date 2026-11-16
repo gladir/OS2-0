@@ -46,14 +46,12 @@ Program OS2PC;
   {$H-}
 {$ENDIF}
 {$I-}
+{$R-}  { comme la construction FPC (sans -Cr) : OS2PC verifie les bornes par defaut }
 
-{$IFDEF FPC}
-{ Sous FPC, Integer vaut 16 bits en mode TP : les index de jetons, tailles  }
-{ de types et offsets du compilateur depassent 32767 sur les gros sources,  }
-{ on redefinit donc Integer en 32 bits pour tout le compilateur.            }
-Type
-  Integer = LongInt;
-{$ENDIF}
+{ Integer vaut 16 bits en mode TP (FPC comme OS2PC) : les index de jetons,  }
+{ tailles de types et offsets du compilateur depassent 32767 sur les gros   }
+{ sources ; le compilateur utilise donc LongInt partout (OS2PC ne permet pas }
+{ de redefinir le type predefini Integer).                                  }
 
 { ============================================================ }
 { TODO 01 - INFRASTRUCTURE ET OPTIONS                [IMPLEMENTE] }
@@ -169,7 +167,7 @@ Type
     AsmOutput : Boolean;   { -asm : produire aussi un .ASM        }
     ObjOnly   : Boolean;   { -obj : produire seulement un .OBJ    }
     Dos16Mode : Boolean;   { -dos16 : generer un exe DOS 16 bits  }
-    TPVersion : Integer;   { version TP cible (1..8, 55=5.5)      }
+    TPVersion : LongInt;   { version TP cible (1..8, 55=5.5)      }
     { Options compatibles TPC 7.0 (TODO 25) }
     BuildAll  : Boolean;   { -B : build all units (DOS 16 seulement)  }
     Defines   : TString;   { -D<syms> : symboles conditionnels        }
@@ -191,7 +189,7 @@ Type
     QuickPascal : Boolean;   { --quickpascal : mode QuickPascal (MSGraph) }
     ApplePascal : Boolean;   { --applepascal : mode Apple Pascal (SANE+TRANSCEND) }
     Sane        : Boolean;   { --sane : mode SANE seul (sans TRANSCEND) }
-    DestTarget  : Integer;   { -CD/-CP/-CW/-CW32/-CZ80/-CATARIST/-CAMIGA/-CAPPLEII/-CC64/-CCOCO3/-CTRS80/-CATARI400/-CATARI800/-CMSX/-CNES/-CATARI2600/-CADAM/-CCRAY1/-CTO7 : destination }
+    DestTarget  : LongInt;   { -CD/-CP/-CW/-CW32/-CZ80/-CATARIST/-CAMIGA/-CAPPLEII/-CC64/-CCOCO3/-CTRS80/-CATARI400/-CATARI800/-CMSX/-CNES/-CATARI2600/-CADAM/-CCRAY1/-CTO7 : destination }
     AppleII     : Boolean;   { True si la plateforme est Apple II (CPU = 6502) }
     C64         : Boolean;   { True si la plateforme est Commodore 64 (CPU = 6510 ~ 6502) }
     CoCo3       : Boolean;   { True si la plateforme est Tandy CoCo 3 (CPU = 6809) }
@@ -204,7 +202,7 @@ Type
     Adam        : Boolean;   { True si la plateforme est Coleco Adam (CPU = Z80, CP/M 2.2) }
     Cray1       : Boolean;   { True si la plateforme est Cray-1 (COS Absolute Binary, emballage symbolique) }
     TO7         : Boolean;   { True si la plateforme est Thomson TO7 (CPU = 6809) }
-    Os2Flat     : Integer;   { OS2F_BOOT / OS2F_LDR : image brute 16 bits (D16) }
+    Os2Flat     : LongInt;   { OS2F_BOOT / OS2F_LDR : image brute 16 bits (D16) }
   End;
 
 Var
@@ -212,8 +210,8 @@ Var
   Opts : TOptions;
 
   { Compteurs generaux }
-  ErrorCount : Integer;
-  WarnCount  : Integer;
+  ErrorCount : LongInt;
+  WarnCount  : LongInt;
   TotalLines : LongInt;
 
   { Fichier de sortie interne (pour future emission) }
@@ -252,7 +250,7 @@ End;
 
 Function StrUpperCase(Const S : TString) : TString;
 Var
-  I   : Integer;
+  I   : LongInt;
   Tmp : TString;
 Begin
   Tmp := S;
@@ -264,7 +262,7 @@ End;
 
 Function StrLowerCase(Const S : TString) : TString;
 Var
-  I   : Integer;
+  I   : LongInt;
   Tmp : TString;
 Begin
   Tmp := S;
@@ -277,7 +275,7 @@ End;
 { Retourne l extension d un chemin (avec le point, en minuscules) }
 Function ExtractExt(Const Path : TString) : TString;
 Var
-  I, LastDot, LastSep : Integer;
+  I, LastDot, LastSep : LongInt;
 Begin
   LastDot := 0;
   LastSep := 0;
@@ -298,7 +296,7 @@ End;
 { Remplace l extension d un chemin }
 Function ReplaceExt(Const Path, NewExt : TString) : TString;
 Var
-  I, LastDot, LastSep : Integer;
+  I, LastDot, LastSep : LongInt;
 Begin
   LastDot := 0;
   LastSep := 0;
@@ -318,7 +316,7 @@ End;
 { Retourne le repertoire d un chemin (avec le separateur final) }
 Function ExtractDir(Const Path : TString) : TString;
 Var
-  I, LastSep : Integer;
+  I, LastSep : LongInt;
 Begin
   LastSep := 0;
   For I := 1 To Length(Path) Do
@@ -331,7 +329,7 @@ Begin
 End;
 
 { Retourne une chaine representant la version TP }
-Function TPVersionStr(V : Integer) : TString;
+Function TPVersionStr(V : LongInt) : TString;
 Begin
   If V = TP_VER_55 Then
     TPVersionStr := '5.5'
@@ -341,7 +339,7 @@ End;
 
 { Retourne un rang sequentiel pour comparer les versions TP }
 { 1->1, 2->2, 4->3, 5->4, 55->5, 6->6, 7->7, 8->8 }
-Function TPVersionOrd(V : Integer) : Integer;
+Function TPVersionOrd(V : LongInt) : LongInt;
 Begin
   Case V Of
     1  : TPVersionOrd := 1;
@@ -358,7 +356,7 @@ Begin
 End;
 
 { Retourne True si la version TP courante est >= MinVer }
-Function TPVersionAtLeast(MinVer : Integer) : Boolean;
+Function TPVersionAtLeast(MinVer : LongInt) : Boolean;
 Begin
   TPVersionAtLeast := TPVersionOrd(Opts.TPVersion) >= TPVersionOrd(MinVer);
 End;
@@ -547,7 +545,7 @@ End;
 
 Procedure ParseArgs;
 Var
-  I    : Integer;
+  I    : LongInt;
   Arg  : TString;
   Ext  : TString;
   UA   : TString;
@@ -929,9 +927,9 @@ Type
     Val      : TString;      { valeur textuelle brute             }
     IntVal   : LongInt;      { valeur entiere (TK_INTEGER/CHAR)   }
     RealVal  : Real;         { valeur reelle (TK_REAL)            }
-    RealKind : Integer;      { TK_REAL : 4 Single, 8 Double, 10 Extended (plus petit type exact, comme FPC) }
-    Line     : Integer;      { ligne source (1-base)              }
-    Col      : Integer;      { colonne source (1-base)            }
+    RealKind : LongInt;      { TK_REAL : 4 Single, 8 Double, 10 Extended (plus petit type exact, comme FPC) }
+    Line     : LongInt;      { ligne source (1-base)              }
+    Col      : LongInt;      { colonne source (1-base)            }
   End;
 
 Var
@@ -939,20 +937,20 @@ Var
   LexSrcF   : Text;          { handle du fichier source           }
   LexOpened : Boolean;        { fichier ouvert ?                   }
   LexLine   : TString;       { ligne courante                     }
-  LexLineNo : Integer;        { numero de ligne courante           }
-  LexColNo  : Integer;        { colonne courante dans LexLine      }
+  LexLineNo : LongInt;        { numero de ligne courante           }
+  LexColNo  : LongInt;        { colonne courante dans LexLine      }
   LexEOF    : Boolean;        { fin de fichier atteinte ?          }
   CurToken  : TToken;         { token courant                      }
 
   { TODO 03 : Directives et inclusions }
   DefineTab      : Array[0..63] Of TString;
-  DefineCount    : Integer;
+  DefineCount    : LongInt;
   IncSavedFName  : Array[0..7] Of TString;
   IncSavedLine   : Array[0..7] Of TString;
-  IncSavedLineNo : Array[0..7] Of Integer;
-  IncSavedColNo  : Array[0..7] Of Integer;
+  IncSavedLineNo : Array[0..7] Of LongInt;
+  IncSavedColNo  : Array[0..7] Of LongInt;
   IncSavedEOF    : Array[0..7] Of Boolean;
-  IncTop         : Integer;
+  IncTop         : LongInt;
   LexSrcFName    : TString;
   OptIO          : Boolean;
   OptRange       : Boolean;
@@ -1056,7 +1054,7 @@ Type
   { Taille connue d un type Turbo Pascal }
   TTPSizeInfo = Record
     Name : TString;         { nom du type (Integer, Char, etc.)        }
-    Size : Integer;         { taille en octets                          }
+    Size : LongInt;         { taille en octets                          }
   End;
 
 Const
@@ -1067,7 +1065,7 @@ Var
   { Adresses a resoudre dans les constantes typees (PChar, @variable, @procedure) : }
   { octet marque dans DataInitFixMark, label dans DataInitFixLbl ('@NOM' = variable }
   { _TPV_NOM ou procedure _TPF_NOM, resolu a l edition de liens)                     }
-  DataInitFixCnt  : Integer;
+  DataInitFixCnt  : LongInt;
   DataInitFixOfs  : Array[0..DATA_INIT_FIX_MAX - 1] Of LongInt;
   { table allouee au demarrage (AllocTables) }
 Type
@@ -1082,7 +1080,7 @@ Type
   TArr_DataTab = Array[0..MAX_DATA - 1] Of TDataRec;
 Var
   DataTab    : ^TArr_DataTab;
-  DataCount  : Integer;
+  DataCount  : LongInt;
   { Octets d initialisation des constantes typees (DK_INIT) }
   { table allouee au demarrage (AllocTables) }
 Type
@@ -1092,7 +1090,7 @@ Var
   DataInitCount : LongInt;
 
   { Compteur de labels auto-generes }
-  LabelGenSeq : Integer;
+  LabelGenSeq : LongInt;
 
   { Pool de tokens (pour le parseur futur) }
   { table allouee au demarrage (AllocTables) }
@@ -1142,15 +1140,15 @@ Type
     Name        : TLblStr;     { nom original (majuscules)              }
     MangledName : TLblStr;     { nom mangled pour emission ASM          }
     Kind        : TSymKind;    { categorie du symbole                   }
-    TypeIdx     : Integer;     { index du type dans TypeTab (-1=aucun)  }
-    Offset      : Integer;     { offset stack ou data segment           }
-    ScopeLevel  : Integer;     { niveau de scope (0 = global)           }
-    ScopeId     : Integer;     { id unique du scope                     }
+    TypeIdx     : LongInt;     { index du type dans TypeTab (-1=aucun)  }
+    Offset      : LongInt;     { offset stack ou data segment           }
+    ScopeLevel  : LongInt;     { niveau de scope (0 = global)           }
+    ScopeId     : LongInt;     { id unique du scope                     }
     IsGlobal    : Boolean;     { visible globalement ?                  }
     IsExternal  : Boolean;     { declare dans une unite externe ?       }
     UnitName    : TIdStr;      { nom de l unite d origine (ou '')       }
     ImmVal      : LongInt;     { valeur immediate (const, enum)         }
-    ParamCount  : Integer;     { nombre de parametres (proc/func)       }
+    ParamCount  : LongInt;     { nombre de parametres (proc/func)       }
     IsAbsolute  : Boolean;     { variable absolute $Seg:$Ofs (TODO 28)  }
     AbsSeg      : LongInt;     { segment absolute (ex: $0040)           }
     AbsOfs      : LongInt;     { offset absolute (ex: $0013)            }
@@ -1171,16 +1169,16 @@ Type
 Var
   { Table des symboles }
   SymTab      : ^TArr_SymTab;
-  SymCount    : Integer;
+  SymCount    : LongInt;
 
   { Gestion des portees }
-  CurScopeLevel : Integer;   { niveau de scope courant (0 = global)    }
-  CurScopeId    : Integer;   { id du scope courant                     }
-  ScopeIdSeq    : Integer;   { sequence pour generer des ids uniques    }
+  CurScopeLevel : LongInt;   { niveau de scope courant (0 = global)    }
+  CurScopeId    : LongInt;   { id du scope courant                     }
+  ScopeIdSeq    : LongInt;   { sequence pour generer des ids uniques    }
 
   { Table des unites importees (TODO 26) }
   UsesUnits    : Array[0..MAX_USES_UNITS - 1] Of TTPUInfo;
-  UsesCount    : Integer;
+  UsesCount    : LongInt;
 
 { Forward declarations TODO 05 }
 { TokIsP : le jeton I est la ponctuation P ; un litteral chaine ou
@@ -1256,7 +1254,7 @@ Type
   { Un champ de record ou d objet }
   TFieldRec = Record
     Name    : TIdStr;      { nom du champ                              }
-    TypeIdx : Integer;     { index du type dans TypeTab                }
+    TypeIdx : LongInt;     { index du type dans TypeTab                }
     Offset  : LongInt;     { offset en octets depuis le debut du record}
   End;
 
@@ -1265,13 +1263,13 @@ Type
     Kind        : TTypeKind;   { categorie du type                     }
     Name        : TLblStr;     { nom du type ('' si anonyme)           }
     Size        : LongInt;     { taille en octets                      }
-    Align       : Integer;     { alignement en octets                  }
-    BaseTypeIdx : Integer;     { type de base (pointeur, tableau, alias)}
+    Align       : LongInt;     { alignement en octets                  }
+    BaseTypeIdx : LongInt;     { type de base (pointeur, tableau, alias)}
     Lo          : LongInt;     { borne inferieure (subrange, array)    }
     Hi          : LongInt;     { borne superieure (subrange, array)    }
-    FieldCount  : Integer;     { nombre de champs (record, objet)      }
+    FieldCount  : LongInt;     { nombre de champs (record, objet)      }
     Fields      : Array[0..MAX_FIELDS - 1] Of TFieldRec;
-    EnumCount   : Integer;     { nombre de valeurs (enum)              }
+    EnumCount   : LongInt;     { nombre de valeurs (enum)              }
     IsPacked    : Boolean;     { type PACKED ?                         }
     IsUnsigned  : Boolean;     { type non signe ?                      }
   End;
@@ -1281,24 +1279,24 @@ Type
 Var
   { Table des types }
   TypeTab   : ^TArr_TypeTab;
-  TypeCount : Integer;
+  TypeCount : LongInt;
 
   { WITH statement : pile de variables-record en cours }
   WithVarName  : Array[0..7] Of TString; { nom de la variable record   }
-  WithVarPI    : Array[0..7] Of Integer; { index proc (PI) du WITH     }
-  WithTypeIdx  : Array[0..7] Of Integer; { TypeIdx du record            }
-  WithDepth    : Integer;                { profondeur WITH (0 = aucun)  }
+  WithVarPI    : Array[0..7] Of LongInt; { index proc (PI) du WITH     }
+  WithTypeIdx  : Array[0..7] Of LongInt; { TypeIdx du record            }
+  WithDepth    : LongInt;                { profondeur WITH (0 = aucun)  }
 
 { Forward declarations TODO 06 }
 Procedure TypeInit; Forward;
-Function  TypeSizeofIdx(Idx : Integer) : LongInt; Forward;
-Function  TypeFindByName(Const AName : TString) : Integer; Forward;
-Function  TypeResolve(Idx : Integer) : Integer; Forward;
-Function  TypeIsOrdinal(Idx : Integer) : Boolean; Forward;
-Function  TypeIsNumeric(Idx : Integer) : Boolean; Forward;
-Function  TypeIsPointer(Idx : Integer) : Boolean; Forward;
-Function  TypeCoerce(IdxA, IdxB : Integer) : Integer; Forward;
-Function  TypeCompatible(IdxDest, IdxSrc : Integer) : Boolean; Forward;
+Function  TypeSizeofIdx(Idx : LongInt) : LongInt; Forward;
+Function  TypeFindByName(Const AName : TString) : LongInt; Forward;
+Function  TypeResolve(Idx : LongInt) : LongInt; Forward;
+Function  TypeIsOrdinal(Idx : LongInt) : Boolean; Forward;
+Function  TypeIsNumeric(Idx : LongInt) : Boolean; Forward;
+Function  TypeIsPointer(Idx : LongInt) : Boolean; Forward;
+Function  TypeCoerce(IdxA, IdxB : LongInt) : LongInt; Forward;
+Function  TypeCompatible(IdxDest, IdxSrc : LongInt) : Boolean; Forward;
 
 { ------------------------------------------------------------ }
 { Fonctions de classification de caracteres                    }
@@ -1329,7 +1327,7 @@ Begin
                 ((Ch >= 'a') And (Ch <= 'f'));
 End;
 
-Function HexVal(Ch : Char) : Integer;
+Function HexVal(Ch : Char) : LongInt;
 Begin
   If (Ch >= '0') And (Ch <= '9') Then
     HexVal := Ord(Ch) - Ord('0')
@@ -1559,15 +1557,15 @@ Var
   NegExp  : Boolean;
   FracDiv : Real;
   FracVal : Real;
-  ExpVal  : Integer;
+  ExpVal  : LongInt;
   FltVal  : Real;
   FracInt : Int64;      { chiffres de la partie decimale (entier) }
-  FracDig : Integer;    { nombre de ces chiffres (-1 = trop)      }
+  FracDig : LongInt;    { nombre de ces chiffres (-1 = trop)      }
   HasExp  : Boolean;    { exposant E present                      }
   RInt    : Real;       { partie entiere en reel (sans debordement) }
   Mant    : Int64;
   Pow5    : Int64;
-  K       : Integer;
+  K       : LongInt;
 Begin
   N       := 0;
   IsReal  := False;
@@ -2125,7 +2123,7 @@ Const
 { ---- DefineDefined : teste si un symbole est defini ---- }
 Function DefineDefined(Const Name : TString) : Boolean;
 Var
-  I : Integer;
+  I : LongInt;
   N : TString;
 Begin
   N := StrUpperCase(Name);
@@ -2158,7 +2156,7 @@ End;
 { ---- DefineRemove : supprimer un symbole ---- }
 Procedure DefineRemove(Const Name : TString);
 Var
-  I : Integer;
+  I : LongInt;
   N : TString;
 Begin
   N := StrUpperCase(Name);
@@ -2231,7 +2229,7 @@ End;
 { ---- IncludePop : depiler et restaurer le fichier precedent ---- }
 Procedure IncludePop;
 Var
-  I : Integer;
+  I : LongInt;
   Dummy : TString;
 Begin
   If IncTop < 0 Then Exit;
@@ -2256,8 +2254,8 @@ End;
 { Saute jusqu a trouver $ELSE ou $ENDIF au meme niveau }
 Procedure LexSkipCondFalse;
 Var
-  Depth : Integer;
-  P     : Integer;
+  Depth : LongInt;
+  P     : LongInt;
   Dir   : TString;
 Begin
   Depth := 1;
@@ -2319,12 +2317,12 @@ End;
 Var
   IoSwitchPos : Array[0..255] Of LongInt;
   IoSwitchOn  : Array[0..255] Of Boolean;
-  IoSwitchCnt : Integer;
+  IoSwitchCnt : LongInt;
 { Etat du commutateur R (verification des bornes) par position dans le pool de jetons   }
 { (cible Win32). Actif par defaut comme les references FPC (-Cr) ; R- le desactive.      }
   RangeSwitchPos : Array[0..255] Of LongInt;
   RangeSwitchOn  : Array[0..255] Of Boolean;
-  RangeSwitchCnt : Integer;
+  RangeSwitchCnt : LongInt;
 
 (* ---- LexHandleDollarDirective : traiter dollar-directives *)
 (* Appelee quand LexColNo pointe sur accolade et le suivant est dollar *)
@@ -2332,7 +2330,7 @@ Var
 (* ELSE, ENDIF, et les commutations I+/I-/R+/R-/etc. *)
 { Directive IMAGEBASE : $hex, 0xhex, hexh ou decimal }
 Function ParseImageBase(A : TString) : LongInt;
-Var V : LongInt; I, D : Integer; Hex : Boolean; C : Char;
+Var V : LongInt; I, D : LongInt; Hex : Boolean; C : Char;
 Begin
   While (Length(A) > 0) And (A[1] = ' ') Do Delete(A, 1, 1);
   Hex := False;
@@ -2549,7 +2547,7 @@ End;
 
 { ---- PPInitDefines : initialiser symboles predefinis ---- }
 Procedure PPInitDefines;
-Var DefSym : TString; DefI : Integer;
+Var DefSym : TString; DefI : LongInt;
 Begin
   DefineCount := 0;
   IncTop      := -1;
@@ -2660,7 +2658,7 @@ Const
 
 { ---- DataInit : initialiser le pool de donnees ---- }
 Procedure DataInit;
-Var I : Integer;
+Var I : LongInt;
 Begin
   DataCount   := 0;
   DataInitCount := 0;
@@ -2681,7 +2679,7 @@ End;
 { ---- DataAdd : ajouter une entree generique dans le pool ---- }
 Function DataAdd(Const Lbl : TString; Kind : TDataKind;
                  AIntVal : LongInt; Const AStrVal : TString;
-                 AElemCount : LongInt; AElemSize : LongInt) : Integer;
+                 AElemCount : LongInt; AElemSize : LongInt) : LongInt;
 Begin
   If DataCount >= MAX_DATA Then
   Begin
@@ -2703,7 +2701,7 @@ End;
 { ---- DataAddStr : ajouter une chaine avec label auto-genere ---- }
 { Retourne le label (ex: _TPK_1) }
 Function DataAddStr(Const S : TString) : TString;
-Var Lbl : TString; K : Integer;
+Var Lbl : TString; K : LongInt;
 Begin
   Inc(LabelGenSeq);
   Lbl := TP_STR_PFX + IntToStr_(LabelGenSeq);
@@ -2720,13 +2718,13 @@ Begin
 End;
 
 { ---- DataAddDWord : ajouter une valeur 32 bits avec label ---- }
-Function DataAddDWord(Const Lbl : TString; Val : LongInt) : Integer;
+Function DataAddDWord(Const Lbl : TString; Val : LongInt) : LongInt;
 Begin
   DataAddDWord := DataAdd(Lbl, DK_DWORD, Val, '', 0, 0);
 End;
 
 { ---- DataAddByte : ajouter une valeur 8 bits avec label ---- }
-Function DataAddByte(Const Lbl : TString; Val : Integer) : Integer;
+Function DataAddByte(Const Lbl : TString; Val : LongInt) : LongInt;
 Begin
   DataAddByte := DataAdd(Lbl, DK_BYTE, Val, '', 0, 0);
 End;
@@ -2734,33 +2732,33 @@ End;
 { ---- DataAddArray : ajouter un tableau avec label ---- }
 Function DataAddArray(Const Lbl : TString;
                       AElemCount : LongInt;
-                      AElemSize : LongInt) : Integer;
+                      AElemSize : LongInt) : LongInt;
 Begin
   DataAddArray := DataAdd(Lbl, DK_ARRAY, 0, '', AElemCount, AElemSize);
 End;
 
 { ---- DataAddRes : ajouter un espace reserve avec label ---- }
-Function DataAddRes(Const Lbl : TString; Size : LongInt) : Integer;
+Function DataAddRes(Const Lbl : TString; Size : LongInt) : LongInt;
 Begin
   DataAddRes := DataAdd(Lbl, DK_RES, Size, '', 0, 0);
 End;
 
 { ---- DataAddStruct : ajouter un record/structure ---- }
-Function DataAddStruct(Const Lbl : TString; Size : LongInt) : Integer;
+Function DataAddStruct(Const Lbl : TString; Size : LongInt) : LongInt;
 Begin
   DataAddStruct := DataAdd(Lbl, DK_STRUCT, Size, '', 0, 0);
 End;
 
 { ---- DataAddZero : ajouter un espace initialise a zero ---- }
-Function DataAddZero(Const Lbl : TString; Size : LongInt) : Integer;
+Function DataAddZero(Const Lbl : TString; Size : LongInt) : LongInt;
 Begin
   DataAddZero := DataAdd(Lbl, DK_ZERO, Size, '', 0, 0);
 End;
 
 { ---- DataFindStr : rechercher si une chaine est deja dans le pool ---- }
 { Retourne l index ou -1 si absente }
-Function DataFindStr(Const S : TString) : Integer;
-Var I : Integer;
+Function DataFindStr(Const S : TString) : LongInt;
+Var I : LongInt;
 Begin
   DataFindStr := -1;
   For I := 0 To DataCount - 1 Do
@@ -2774,7 +2772,7 @@ End;
 { ---- DataGetOrAddStr : retourne le label d une chaine existante ---- }
 { ou l ajoute si elle n existe pas encore (deduplication) }
 Function DataGetOrAddStr(Const S : TString) : TString;
-Var Idx : Integer;
+Var Idx : LongInt;
 Begin
   Idx := DataFindStr(S);
   If Idx >= 0 Then
@@ -2787,7 +2785,7 @@ End;
 { Retourne -1 si le type est inconnu }
 Function TPTypeSizeof(Const TypeName : TString) : LongInt;
 Var
-  I : Integer;
+  I : LongInt;
   N : TString;
 Begin
   TPTypeSizeof := -1;
@@ -2810,17 +2808,17 @@ End;
 { Supporte : entiers, hex, Ord, Chr, SizeOf, MaxInt, True, False, Nil }
 { Operateurs : + - * DIV MOD AND OR XOR NOT SHL SHR ( )  }
 
-Function ConstEvalExpr(Const S : TString; Var Pos : Integer) : LongInt;
+Function ConstEvalExpr(Const S : TString; Var Pos : LongInt) : LongInt;
   Forward;
 
-Function ConstEvalAtom(Const S : TString; Var Pos : Integer) : LongInt;
+Function ConstEvalAtom(Const S : TString; Var Pos : LongInt) : LongInt;
 Var
   N   : LongInt;
   Neg : Boolean;
   Id  : TString;
-  Sz  : Integer;
+  Sz  : LongInt;
   Arg : TString;
-  Depth : Integer;
+  Depth : LongInt;
 Begin
   N := 0;
 
@@ -3120,7 +3118,7 @@ End;
 
 { ---- ConstEvalExpr : evaluer une expression constante entiere ---- }
 { Operateurs TP : + - * DIV MOD AND OR XOR SHL SHR = <> < > <= >= }
-Function ConstEvalExpr(Const S : TString; Var Pos : Integer) : LongInt;
+Function ConstEvalExpr(Const S : TString; Var Pos : LongInt) : LongInt;
 Var
   L, R : LongInt;
   Op   : TString;
@@ -3201,7 +3199,7 @@ End;
 { ---- ConstEval : evaluer une expression constante complete ---- }
 { Encapsulation avec initialisation de Pos }
 Function ConstEval(Const S : TString) : LongInt;
-Var P : Integer;
+Var P : LongInt;
 Begin
   P := 1;
   ConstEval := ConstEvalExpr(S, P);
@@ -3234,7 +3232,7 @@ End;
 { ni un type pointeur (apres ':', ou apres '=' / OF et suivi de ';' ')'). }
 Procedure TokenPoolMergeCaretChars;
 Var
-  I, J : Integer;
+  I, J : LongInt;
   Ch : Char;
   IsDeref, IsType : Boolean;
 Begin
@@ -3291,7 +3289,7 @@ End;
 { retire devant un identificateur : les sous-programmes de ces unites sont integres. }
 Procedure TokenPoolStripUnitQualifiers;
 Var
-  I, J : Integer;
+  I, J : LongInt;
   Up : TString;
 Begin
   I := 0;
@@ -3321,7 +3319,7 @@ End;
 { ---- TokenPoolRegisterStrings : enregistrer toutes les chaines ---- }
 { du pool de tokens dans le pool de donnees, en evitant les doublons }
 Procedure TokenPoolRegisterStrings;
-Var I : Integer;
+Var I : LongInt;
 Begin
   For I := 0 To TokenCount - 1 Do
   Begin
@@ -3339,7 +3337,7 @@ End;
 { ------------------------------------------------------------ }
 
 Procedure SymInit;
-Var I : Integer;
+Var I : LongInt;
 Begin
   SymCount      := 0;
   CurScopeLevel := 0;
@@ -3397,9 +3395,9 @@ End;
 { ------------------------------------------------------------ }
 
 Function SymFindInScope(Const Name : TString;
-                        Level : Integer) : Integer;
+                        Level : LongInt) : LongInt;
 Var
-  I  : Integer;
+  I  : LongInt;
   Up : TString;
 Begin
   Up := StrUpperCase(Name);
@@ -3421,9 +3419,9 @@ End;
 { Retourne l index ou -1 si non trouve                         }
 { ------------------------------------------------------------ }
 
-Function SymFind(Const Name : TString) : Integer;
+Function SymFind(Const Name : TString) : LongInt;
 Var
-  I  : Integer;
+  I  : LongInt;
   Up : TString;
 Begin
   Up := StrUpperCase(Name);
@@ -3444,9 +3442,9 @@ End;
 { Ex: Crt.ClrScr -> chercher ClrScr avec UnitName='CRT'       }
 { ------------------------------------------------------------ }
 
-Function SymFindInUnit(Const UName, Name : TString) : Integer;
+Function SymFindInUnit(Const UName, Name : TString) : LongInt;
 Var
-  I  : Integer;
+  I  : LongInt;
   Up : TString;
   UU : TString;
 Begin
@@ -3470,10 +3468,10 @@ End;
 { ------------------------------------------------------------ }
 
 Function SymAdd(Const Name : TString; Kind : TSymKind;
-                TIdx : Integer) : Integer;
+                TIdx : LongInt) : LongInt;
 Var
   Up  : TString;
-  Dup : Integer;
+  Dup : LongInt;
 Begin
   If SymCount >= MAX_SYM Then
   Begin
@@ -3599,12 +3597,12 @@ End;
 
 Procedure SymRegisterBuiltins;
 Var
-  DosSearchRecIdx : Integer;
-  DosSymIdx       : Integer;
+  DosSearchRecIdx : LongInt;
+  DosSymIdx       : LongInt;
 
   { Registrer un type predefini }
   Procedure RegType(Const Name : TString);
-  Var R, TIdx : Integer;
+  Var R, TIdx : LongInt;
   Begin
     TIdx := TypeFindByName(Name);
     R := SymAdd(Name, SK_TYPE, TIdx);
@@ -3614,7 +3612,7 @@ Var
 
   { Registrer une constante predefinie avec valeur }
   Procedure RegConst(Const Name : TString; Val : LongInt);
-  Var R : Integer;
+  Var R : LongInt;
   Begin
     R := SymAdd(Name, SK_CONST, -1);
     If R >= 0 Then
@@ -3626,7 +3624,7 @@ Var
 
   { Registrer une procedure predefinie }
   Procedure RegProc(Const Name : TString);
-  Var R : Integer;
+  Var R : LongInt;
   Begin
     R := SymAdd(Name, SK_PROC, -1);
     If R >= 0 Then
@@ -3637,8 +3635,8 @@ Var
   End;
 
   { Registrer une variable du RTL sur une donnee du runtime (Label) }
-  Procedure RegRtlVar(Const Name, Lbl : TString; TIdx : Integer);
-  Var R : Integer;
+  Procedure RegRtlVar(Const Name, Lbl : TString; TIdx : LongInt);
+  Var R : LongInt;
   Begin
     R := SymAdd(Name, SK_VAR, TIdx);
     If R >= 0 Then
@@ -3651,7 +3649,7 @@ Var
 
   { Registrer une fonction predefinie }
   Procedure RegFunc(Const Name : TString);
-  Var R : Integer;
+  Var R : LongInt;
   Begin
     R := SymAdd(Name, SK_FUNC, -1);
     If R >= 0 Then
@@ -4312,9 +4310,9 @@ End;
 { ------------------------------------------------------------ }
 
 Function TypeAdd(Kind : TTypeKind; Const AName : TString;
-                 ASize : LongInt; AAlign : Integer;
+                 ASize : LongInt; AAlign : LongInt;
                  AUnsigned : Boolean;
-                 ABaseTypeIdx : Integer) : Integer;
+                 ABaseTypeIdx : LongInt) : LongInt;
 Begin
   If TypeCount >= MAX_TYPE Then
   Begin
@@ -4346,11 +4344,11 @@ End;
 { ------------------------------------------------------------ }
 
 Var
-  SetGenTypeIdx : Integer;   { type ensemble generique (constructeur [..], operations) }
-  SetBufSeq     : Integer;   { anneau des tampons SETBUF0..7 }
+  SetGenTypeIdx : LongInt;   { type ensemble generique (constructeur [..], operations) }
+  SetBufSeq     : LongInt;   { anneau des tampons SETBUF0..7 }
 
 Procedure TypeInit;
-Var I, TI : Integer;
+Var I, TI : LongInt;
 Begin
   TypeCount := 0;
   WithDepth := 0;
@@ -4465,9 +4463,9 @@ End;
 { Retourne l index ou -1 si non trouve                         }
 { ------------------------------------------------------------ }
 
-Function TypeFindByName(Const AName : TString) : Integer;
+Function TypeFindByName(Const AName : TString) : LongInt;
 Var
-  I  : Integer;
+  I  : LongInt;
   Up : TString;
 Begin
   TypeFindByName := -1;
@@ -4484,7 +4482,7 @@ End;
 { TypeSizeofIdx : retourne la taille d un type par son index   }
 { ------------------------------------------------------------ }
 
-Function TypeSizeofIdx(Idx : Integer) : LongInt;
+Function TypeSizeofIdx(Idx : LongInt) : LongInt;
 Begin
   If (Idx >= 0) And (Idx < TypeCount) Then
     TypeSizeofIdx := TypeTab^[Idx].Size
@@ -4500,7 +4498,7 @@ End;
 
 Procedure RegisterSearchRecType;
 Var
-  TI, SI : Integer;
+  TI, SI : LongInt;
 Begin
   TI := TypeAdd(TYK_RECORD, 'SEARCHREC', 268, 4, False, -1);
   If TI >= 0 Then
@@ -4535,9 +4533,9 @@ Procedure RegisterRegistersType;
 Const
   WN : Array[0..9] Of String[5] = ('AX','BX','CX','DX','BP','SI','DI','DS','ES','FLAGS');
   BN : Array[0..7] Of String[2] = ('AL','AH','BL','BH','CL','CH','DL','DH');
-  BO : Array[0..7] Of Integer   = (0, 1, 4, 5, 8, 9, 12, 13);
+  BO : Array[0..7] Of LongInt   = (0, 1, 4, 5, 8, 9, 12, 13);
 Var
-  TI, SI, K : Integer;
+  TI, SI, K : LongInt;
 Begin
   TI := TypeAdd(TYK_RECORD, 'REGISTERS', 40, 4, False, -1);
   If TI >= 0 Then
@@ -4567,7 +4565,7 @@ End;
 
 Procedure RegisterDateTimeType;
 Var
-  TI, SI : Integer;
+  TI, SI : LongInt;
 Begin
   TI := TypeAdd(TYK_RECORD, 'DATETIME', 12, 2, False, -1);
   If TI >= 0 Then
@@ -4603,7 +4601,7 @@ End;
 
 Procedure RegisterVideoConfigType;
 Var
-  TI, SI : Integer;
+  TI, SI : LongInt;
 Begin
   TI := TypeAdd(TYK_RECORD, '_VIDEOCONFIG', 44, 4, False, -1);
   If TI >= 0 Then
@@ -4654,10 +4652,10 @@ End;
 { Retourne l index du type final                               }
 { ------------------------------------------------------------ }
 
-Function TypeResolve(Idx : Integer) : Integer;
+Function TypeResolve(Idx : LongInt) : LongInt;
 Var
-  Depth : Integer;
-  Cur   : Integer;
+  Depth : LongInt;
+  Cur   : LongInt;
 Begin
   Cur   := Idx;
   Depth := 0;
@@ -4685,8 +4683,8 @@ End;
 {  Subrange)                                                    }
 { ------------------------------------------------------------ }
 
-Function TypeIsOrdinal(Idx : Integer) : Boolean;
-Var R : Integer;
+Function TypeIsOrdinal(Idx : LongInt) : Boolean;
+Var R : LongInt;
 Begin
   R := TypeResolve(Idx);
   If (R < 0) Or (R >= TypeCount) Then
@@ -4708,8 +4706,8 @@ End;
 { (tout ordinal + Real, Single, Double, Extended, Comp)        }
 { ------------------------------------------------------------ }
 
-Function TypeIsNumeric(Idx : Integer) : Boolean;
-Var R : Integer;
+Function TypeIsNumeric(Idx : LongInt) : Boolean;
+Var R : LongInt;
 Begin
   R := TypeResolve(Idx);
   If (R < 0) Or (R >= TypeCount) Then
@@ -4732,8 +4730,8 @@ End;
 { (Pointer, PChar, nil)                                        }
 { ------------------------------------------------------------ }
 
-Function TypeIsPointer(Idx : Integer) : Boolean;
-Var R : Integer;
+Function TypeIsPointer(Idx : LongInt) : Boolean;
+Var R : LongInt;
 Begin
   R := TypeResolve(Idx);
   If (R < 0) Or (R >= TypeCount) Then
@@ -4754,8 +4752,8 @@ End;
 { (String, PChar)                                              }
 { ------------------------------------------------------------ }
 
-Function TypeIsString(Idx : Integer) : Boolean;
-Var R : Integer;
+Function TypeIsString(Idx : LongInt) : Boolean;
+Var R : LongInt;
 Begin
   R := TypeResolve(Idx);
   If (R < 0) Or (R >= TypeCount) Then
@@ -4776,8 +4774,8 @@ End;
 { (Real, Single, Double, Extended, Comp)                       }
 { ------------------------------------------------------------ }
 
-Function TypeIsReal(Idx : Integer) : Boolean;
-Var R : Integer;
+Function TypeIsReal(Idx : LongInt) : Boolean;
+Var R : LongInt;
 Begin
   R := TypeResolve(Idx);
   If (R < 0) Or (R >= TypeCount) Then
@@ -4799,9 +4797,9 @@ End;
 { Retourne l index du type promu                               }
 { ------------------------------------------------------------ }
 
-Function TypeCoerce(IdxA, IdxB : Integer) : Integer;
+Function TypeCoerce(IdxA, IdxB : LongInt) : LongInt;
 Var
-  RA, RB : Integer;
+  RA, RB : LongInt;
   KA, KB : TTypeKind;
 Begin
   RA := TypeResolve(IdxA);
@@ -4860,9 +4858,9 @@ End;
 { Retourne True si compatible                                  }
 { ------------------------------------------------------------ }
 
-Function TypeCompatible(IdxDest, IdxSrc : Integer) : Boolean;
+Function TypeCompatible(IdxDest, IdxSrc : LongInt) : Boolean;
 Var
-  RD, RS : Integer;
+  RD, RS : LongInt;
   KD, KS : TTypeKind;
 Begin
   RD := TypeResolve(IdxDest);
@@ -5004,11 +5002,11 @@ End;
 
 Var
   { Compteur de labels interne a l emetteur }
-  EmitLabelSeq    : Integer;
+  EmitLabelSeq    : LongInt;
   { True si un programme principal est detecte }
   HasProgram      : Boolean;
   { Nombre d entrees DataTab deja emises }
-  DataEmittedCount: Integer;
+  DataEmittedCount: LongInt;
   { True si le source est une unite (commence par UNIT) (TODO 27) }
   IsUnitSource    : Boolean;
   { Nom de l unite source (TODO 27) }
@@ -5361,15 +5359,15 @@ End;
 { et les variables runtime du compilateur                      }
 { ------------------------------------------------------------ }
 
-Function DataInitFixAt(Ofs : LongInt) : Integer; Forward;
-Function DataInitFixAsmLabel(F : Integer) : TString; Forward;
+Function DataInitFixAt(Ofs : LongInt) : LongInt; Forward;
+Function DataInitFixAsmLabel(F : LongInt) : TString; Forward;
 
 Procedure EmitDataSeg;
 Var
-  I, J : Integer;
+  I, J : LongInt;
   S    : TString;
   Pfx  : TString;
-  FixI : Integer;
+  FixI : LongInt;
   C    : Char;
 Begin
   EmitComment('--- Segment de donnees ---');
@@ -5739,7 +5737,7 @@ End;
 
 Procedure EmitDataSegLate;
 Var
-  I, J : Integer;
+  I, J : LongInt;
   S    : TString;
   C    : Char;
 Begin
@@ -5875,7 +5873,7 @@ End;
 { ------------------------------------------------------------ }
 
 Var
-  StaticVarSeq : Integer;
+  StaticVarSeq : LongInt;
 
 { ------------------------------------------------------------ }
 { DataAddGlobalVar : creer une entree dans le DataTab pour une }
@@ -5886,11 +5884,11 @@ Var
 
 Function DataAddGlobalVar(Const Name : TString;
                           Const TypeName : TString;
-                          InitVal : LongInt) : Integer;
+                          InitVal : LongInt) : LongInt;
 Var
   Lbl : TString;
   Up  : TString;
-  Sz  : Integer;
+  Sz  : LongInt;
 Begin
   Lbl := TP_VAR_PFX + StrUpperCase(Name);
   Up  := StrUpperCase(TypeName);
@@ -5933,11 +5931,11 @@ End;
 Function DataAddTypedConst(Const Name : TString;
                            Const TypeName : TString;
                            InitVal : LongInt;
-                           Const InitStr : TString) : Integer;
+                           Const InitStr : TString) : LongInt;
 Var
   Lbl : TString;
   Up  : TString;
-  Sz  : Integer;
+  Sz  : LongInt;
 Begin
   Lbl := TP_VAR_PFX + StrUpperCase(Name);
   Up  := StrUpperCase(TypeName);
@@ -5979,7 +5977,7 @@ Function DataAddStaticVar(Const TypeName : TString;
 Var
   Lbl : TString;
   Up  : TString;
-  Sz  : Integer;
+  Sz  : LongInt;
 Begin
   Inc(StaticVarSeq);
   Lbl := TP_STA_PFX + IntToStr_(StaticVarSeq);
@@ -6007,12 +6005,12 @@ End;
 { ------------------------------------------------------------ }
 
 { Forward declaration pour SkipToMatchingEnd (TODO 09) }
-Procedure SkipToMatchingEnd(Var I : Integer); Forward;
+Procedure SkipToMatchingEnd(Var I : LongInt); Forward;
 
 { TokIsProcType : le mot-cle PROCEDURE/FUNCTION au jeton I est un type   }
 { procedural (TName = Procedure... ou Var F : Procedure...) et non le     }
 { debut d une declaration de sous-programme                               }
-Function TokIsProcType(I : Integer) : Boolean;
+Function TokIsProcType(I : LongInt) : Boolean;
 Begin
   TokIsProcType := (I > 0) And (I < TokenCount) And
     ((TokenPool^[I - 1].Val = '=') Or (TokIsP(I - 1, ':')));
@@ -6028,49 +6026,49 @@ End;
 { ============================================================ }
 
 Var
-  PendPtr2Idx  : Array[0..255] Of Integer;   { pointeurs ^T vers types non encore declares }
+  PendPtr2Idx  : Array[0..255] Of LongInt;   { pointeurs ^T vers types non encore declares }
   PendPtr2Name : Array[0..255] Of TString;
-  PendPtr2Cnt  : Integer;
+  PendPtr2Cnt  : LongInt;
 
 Procedure ResolvePendingPtrTypes;
-Var K : Integer;
+Var K : LongInt;
 Begin
   For K := 0 To PendPtr2Cnt - 1 Do
     If (PendPtr2Idx[K] >= 0) And (TypeTab^[PendPtr2Idx[K]].BaseTypeIdx < 0) Then
       TypeTab^[PendPtr2Idx[K]].BaseTypeIdx := TypeFindByName(PendPtr2Name[K]);
 End;
 
-Function TokIsPunct(I : Integer; Const V : TString) : Boolean;
+Function TokIsPunct(I : LongInt; Const V : TString) : Boolean;
 Begin
   TokIsPunct := (I < TokenCount) And (TokenPool^[I].Kind = TK_PUNCT) And (TokenPool^[I].Val = V);
 End;
 
-Function TokIsOp(I : Integer; Const V : TString) : Boolean;
+Function TokIsOp(I : LongInt; Const V : TString) : Boolean;
 Begin
   TokIsOp := (I < TokenCount) And (TokenPool^[I].Kind = TK_OP) And (TokenPool^[I].Val = V);
 End;
 
-Function TokIsKw(I : Integer; Const V : TString) : Boolean;
+Function TokIsKw(I : LongInt; Const V : TString) : Boolean;
 Begin
   TokIsKw := (I < TokenCount) And ((TokenPool^[I].Kind = TK_KEYWORD) Or (TokenPool^[I].Kind = TK_IDENT)) And
              (StrUpperCase(TokenPool^[I].Val) = V);
 End;
 
-Function ParseTypeExprAt(Var I : Integer) : Integer; Forward;
+Function ParseTypeExprAt(Var I : LongInt) : LongInt; Forward;
 
 { --- Expression constante sur les jetons : entiers, caracteres, constantes nommees, }
 {     + - * DIV MOD SHL SHR AND OR XOR, parentheses, Ord Chr SizeOf Pred Succ Abs    }
-Function ConstTokExprAt(Var I : Integer) : LongInt; Forward;
+Function ConstTokExprAt(Var I : LongInt) : LongInt; Forward;
 
 { Constante pas encore declaree dans la table des symboles : les
   sections TYPE sont analysees avant les sections CONST, si bien qu'un
   "Array[0..MAXN] Of T" d'une section TYPE voyait MAXN = 0 (taille du
   type et des variables fausses). On cherche "NOM = expression" dans une
   section CONST du source (constante non typee) et on l'evalue. }
-Var ConstSrcDepth : Integer;
+Var ConstSrcDepth : LongInt;
 
 Function ConstFromSource(Const Up : TString; Var Found : Boolean) : LongInt;
-Var K, J, Lvl : Integer; InConst : Boolean;
+Var K, J, Lvl : LongInt; InConst : Boolean;
 Begin
   ConstFromSource := 0; Found := False;
   If ConstSrcDepth > 8 Then Exit;
@@ -6099,11 +6097,11 @@ Begin
   If Lvl = 0 Then;
 End;
 
-Function ConstTokAtomAt(Var I : Integer) : LongInt;
+Function ConstTokAtomAt(Var I : LongInt) : LongInt;
 Var
   V : LongInt;
   Up : TString;
-  SI, TI : Integer;
+  SI, TI : LongInt;
   Found : Boolean;
 Begin
   V := 0;
@@ -6197,7 +6195,7 @@ Begin
   ConstTokAtomAt := V;
 End;
 
-Function ConstTokTermAt(Var I : Integer) : LongInt;
+Function ConstTokTermAt(Var I : LongInt) : LongInt;
 Var V, R : LongInt; Up : TString;
 Begin
   V := ConstTokAtomAt(I);
@@ -6222,7 +6220,7 @@ Begin
   ConstTokTermAt := V;
 End;
 
-Function ConstTokExprAt(Var I : Integer) : LongInt;
+Function ConstTokExprAt(Var I : LongInt) : LongInt;
 Var V, R : LongInt; Up : TString;
 Begin
   V := ConstTokTermAt(I);
@@ -6246,9 +6244,9 @@ Begin
 End;
 
 { --- Bornes d un index de tableau : lo..hi, ou un type ordinal (Byte, Char, enum, sous-intervalle) --- }
-Procedure ParseIndexRangeAt(Var I : Integer; Var Lo, Hi : LongInt);
+Procedure ParseIndexRangeAt(Var I : LongInt; Var Lo, Hi : LongInt);
 Var
-  TI, Save : Integer;
+  TI, Save : LongInt;
 Begin
   Lo := 0; Hi := 0;
   Save := I;
@@ -6283,8 +6281,8 @@ Begin
 End;
 
 { --- Sauter un groupe de jetons equilibre a partir du jeton ouvrant --- }
-Procedure SkipBalancedAt(Var I : Integer);
-Var Depth : Integer;
+Procedure SkipBalancedAt(Var I : LongInt);
+Var Depth : LongInt;
 Begin
   Depth := 0;
   While I < TokenCount Do
@@ -6302,7 +6300,7 @@ End;
 { --- Liste de champs d un record (jusqu a END ou ')') ; gere CASE ... OF variantes --- }
 { TypeAlignOf : alignement d un champ de ce type dans un record non packed    }
 { (regle de Free Pascal sur i386 : taille naturelle, 4 au plus ; chaines 1) }
-Function TypeAlignOf(T : Integer) : Integer;
+Function TypeAlignOf(T : LongInt) : LongInt;
 Var Sz : LongInt;
 Begin
   TypeAlignOf := 1;
@@ -6326,7 +6324,7 @@ Begin
 End;
 
 { RecAlignOfs : aligner l offset Ofs sur Al (record non packed) et noter l alignement du record }
-Procedure RecAlignOfs(TIdx : Integer; Var Ofs : Integer; Al : Integer);
+Procedure RecAlignOfs(TIdx : LongInt; Var Ofs : LongInt; Al : LongInt);
 Begin
   { Free Pascal en mode TP (reference Win32) range les champs sans remplissage,    }
   { comme Turbo Pascal : ICO2C lit idEntries a l offset 6 d un record Word,Word,Word }
@@ -6338,11 +6336,11 @@ Begin
   If Al > TypeTab^[TIdx].Align Then TypeTab^[TIdx].Align := Al;
 End;
 
-Procedure ParseRecordFieldsAt(TIdx : Integer; Var I : Integer; Var Ofs : Integer);
+Procedure ParseRecordFieldsAt(TIdx : LongInt; Var I : LongInt; Var Ofs : LongInt);
 Var
   FNames : Array[0..31] Of TString;
-  FNC, K, FTIdx, FSz, FC : Integer;
-  VarOfs, MaxVarSz, CurOfs : Integer;
+  FNC, K, FTIdx, FSz, FC : LongInt;
+  VarOfs, MaxVarSz, CurOfs : LongInt;
   Up : TString;
 Begin
   While I < TokenCount Do
@@ -6438,14 +6436,14 @@ Begin
   End;
 End;
 
-Function ParseTypeExprAt(Var I : Integer) : Integer;
+Function ParseTypeExprAt(Var I : LongInt) : LongInt;
 Var
   Up, BaseTN : TString;
-  TI, BT, K, Depth : Integer;
+  TI, BT, K, Depth : LongInt;
   IsPk : Boolean;
   Lo, Hi : LongInt;
   DimLo, DimHi : Array[0..7] Of LongInt;
-  DimCount, Ofs, ElemSz : Integer;
+  DimCount, Ofs, ElemSz : LongInt;
 Begin
   ParseTypeExprAt := TY_IDX_INTEGER;
   If I >= TokenCount Then Exit;
@@ -6683,8 +6681,8 @@ Begin
 End;
 
 { DataInitFixAt : index du fixup commencant a l offset Ofs, ou -1 }
-Function DataInitFixAt(Ofs : LongInt) : Integer;
-Var K : Integer;
+Function DataInitFixAt(Ofs : LongInt) : LongInt;
+Var K : LongInt;
 Begin
   DataInitFixAt := -1;
   If (Ofs < 0) Or (Ofs >= DATA_INIT_MAX) Then Exit;
@@ -6698,8 +6696,8 @@ Begin
 End;
 
 { DataInitFixAsmLabel : label ASM d un fixup ('@NOM' -> _TPV_NOM si variable connue, sinon _TPF_NOM) }
-Function DataInitFixAsmLabel(F : Integer) : TString;
-Var Nm : TString; K : Integer;
+Function DataInitFixAsmLabel(F : LongInt) : TString;
+Var Nm : TString; K : LongInt;
 Begin
   DataInitFixAsmLabel := DataInitFixLbl^[F];
   If (Length(DataInitFixLbl^[F]) > 1) And (DataInitFixLbl^[F][1] = '@') Then
@@ -6714,7 +6712,7 @@ Begin
 End;
 
 { RealSizeCode : 4 / 8 / 10 pour le formatage (Write, Str) }
-Function RealSizeCode(T : Integer) : Integer;
+Function RealSizeCode(T : LongInt) : LongInt;
 Begin
   RealSizeCode := 8;
   If (T >= 0) And (T < TypeCount) Then
@@ -6725,7 +6723,7 @@ Begin
 End;
 
 { ParamStackSize : octets occupes sur la pile par un parametre }
-Function ParamStackSize(T : Integer; IsVar : Boolean) : Integer;
+Function ParamStackSize(T : LongInt; IsVar : Boolean) : LongInt;
 Begin
   ParamStackSize := 4;
   If IsVar Or (Not TypeIsReal(T)) Then Exit;
@@ -6737,17 +6735,17 @@ Begin
 End;
 
 Var
-  RealConstSeq : Integer;    { numerotation des constantes reelles _TPR_n }
+  RealConstSeq : LongInt;    { numerotation des constantes reelles _TPR_n }
   LastExprIsLit : Boolean;   { la derniere expression primaire est un litteral numerique }
 
 { DataInitPutReal : ecrire la valeur V au format du type T dans le pool d initialisation }
-Procedure DataInitPutReal(Base : LongInt; T : Integer; V : Real);
+Procedure DataInitPutReal(Base : LongInt; T : LongInt; V : Real);
 Var
   Sg : Single;
   Db : Double;
   Ex : Extended;
   I64 : Int64;
-  K, Sz : Integer;
+  K, Sz : LongInt;
   Buf : Array[0..9] Of Byte;
 Begin
   If Base < 0 Then Exit;
@@ -6782,8 +6780,8 @@ Begin
   RealConstLabel := Lbl;
 End;
 
-Procedure DataInitPutInt(Base : LongInt; Sz : Integer; V : LongInt);
-Var K : Integer;
+Procedure DataInitPutInt(Base : LongInt; Sz : LongInt; V : LongInt);
+Var K : LongInt;
 Begin
   If Base < 0 Then Exit;
   For K := 0 To Sz - 1 Do
@@ -6797,10 +6795,10 @@ Begin
 End;
 
 { --- Encoder l initialiseur d une constante typee de type T a partir du jeton I --- }
-Procedure EncodeConstInitAt(T : Integer; Var I : Integer; Base : LongInt);
+Procedure EncodeConstInitAt(T : LongInt; Var I : LongInt; Base : LongInt);
 Var
   Kd : TTypeKind;
-  Sz, K, N, ElemSz, FT, FJ : Integer;
+  Sz, K, N, ElemSz, FT, FJ : LongInt;
   Up, SVal : TString;
   V : LongInt;
   FOfs : LongInt;
@@ -7007,7 +7005,7 @@ End;
 { CASE d instructions. Utilise par tous les compteurs de profondeur BEGIN/END. }
 Procedure MarkVariantCases;
 Var
-  I, Depth : Integer;
+  I, Depth : LongInt;
   IsRec : Array[0..255] Of Boolean;
   Up : TString;
 Begin
@@ -7037,36 +7035,36 @@ End;
 
 Procedure ParseDataDecls;
 Var
-  I       : Integer;
-  Depth   : Integer;  { profondeur BEGIN/END }
+  I       : LongInt;
+  Depth   : LongInt;  { profondeur BEGIN/END }
   Names   : Array[0..63] Of TString;
-  NCount  : Integer;
+  NCount  : LongInt;
   TName   : TString;
-  TIdx    : Integer;
-  DIdx    : Integer;
-  SIdx    : Integer;
-  J       : Integer;
+  TIdx    : LongInt;
+  DIdx    : LongInt;
+  SIdx    : LongInt;
+  J       : LongInt;
   InitVal : LongInt;
   InitStr : TString;
   RealLit : Boolean;     { constante reelle non typee }
   CxGen   : Boolean;     { expression constante generale a evaluer }
   RealV   : Real;
-  RealK   : Integer;
+  RealK   : LongInt;
   VName   : TString;
   Up      : TString;
   ArrLo   : LongInt;
   ArrHi   : LongInt;
   ArrElem : LongInt;
   ElemType: TString;
-  ElemSz  : Integer;
-  FOfs    : Integer;
-  FC      : Integer;
+  ElemSz  : LongInt;
+  FOfs    : LongInt;
+  FC      : LongInt;
   FName   : TString;
   FTName  : TString;
-  FTIdx   : Integer;
-  FSz     : Integer;
+  FTIdx   : LongInt;
+  FSz     : LongInt;
   BaseTN  : TString;
-  BTIdx   : Integer;
+  BTIdx   : LongInt;
 Begin
   ResolvePendingPtrTypes;
   If Opts.DebugMode Then
@@ -7611,6 +7609,13 @@ Begin
               DIdx := DataAddArray(TP_VAR_PFX + Names[J],
                 TypeTab^[TIdx].Hi - TypeTab^[TIdx].Lo + 1,
                 TypeSizeofIdx(TypeTab^[TIdx].BaseTypeIdx))
+            Else If (TIdx >= 0) And (TIdx < TypeCount) And
+                    (TypeTab^[TIdx].Kind = TYK_STRING) And
+                    (TPTypeSizeof(StrUpperCase(TName)) < 0) Then
+              { Alias de String (Type TNom = String[n]) : la chaine entiere, }
+              { et non 4 octets (l affectation deborderait sur les voisines) }
+              DIdx := DataAdd(TP_VAR_PFX + StrUpperCase(Names[J]), DK_ARRAY, 0, '',
+                              TypeTab^[TIdx].Size, 1)
             Else
               DIdx := DataAddGlobalVar(Names[J], TName, 0);
             SIdx := SymAdd(Names[J], SK_VAR, TIdx);
@@ -7914,8 +7919,8 @@ Type
   { Un parametre de procedure/fonction }
   TParamRec = Record
     Name    : TIdStr;      { nom du parametre (majuscules)         }
-    TypeIdx : Integer;     { index du type dans TypeTab             }
-    Offset  : Integer;     { offset dans la pile [EBP+N]           }
+    TypeIdx : LongInt;     { index du type dans TypeTab             }
+    Offset  : LongInt;     { offset dans la pile [EBP+N]           }
     IsVar   : Boolean;     { parametre VAR (par reference) ?       }
     IsConst : Boolean;     { parametre CONST (lecture seule) ?     }
   End;
@@ -7923,7 +7928,7 @@ Type
   { Une variable locale }
   TLocalVar = Record
     Name      : TIdStr;      { nom de la variable (majuscules)      }
-    TypeIdx   : Integer;     { index du type dans TypeTab            }
+    TypeIdx   : LongInt;     { index du type dans TypeTab            }
     Offset    : LongInt;     { offset dans la pile [EBP-N]          }
     Size      : LongInt;     { taille en octets                     }
     IsStatic  : Boolean;     { variable statique (ABSOLUTE) ?       }
@@ -7938,20 +7943,20 @@ Type
     Name        : TLblStr;     { nom (majuscules)                     }
     MangledName : TLblStr;     { nom mangled (_TPF_XXX)               }
     IsFunction  : Boolean;     { True = function, False = procedure   }
-    RetTypeIdx  : Integer;     { type de retour (-1 si procedure)     }
-    ParamCount  : Integer;     { nombre de parametres                 }
+    RetTypeIdx  : LongInt;     { type de retour (-1 si procedure)     }
+    ParamCount  : LongInt;     { nombre de parametres                 }
     Params      : Array[0..MAX_PARAM - 1] Of TParamRec;
-    LocalCount  : Integer;     { nombre de variables locales          }
+    LocalCount  : LongInt;     { nombre de variables locales          }
     Locals      : Array[0..MAX_LOCAL - 1] Of TLocalVar;
     LocalSize   : LongInt;     { taille totale du cadre local (octets)}
-    BodyStart   : Integer;     { index debut du corps dans TokenPool  }
-    BodyEnd     : Integer;     { index fin du corps dans TokenPool    }
+    BodyStart   : LongInt;     { index debut du corps dans TokenPool  }
+    BodyEnd     : LongInt;     { index fin du corps dans TokenPool    }
     IsForward   : Boolean;     { declaration FORWARD ?                }
     IsExternal  : Boolean;     { declaration EXTERNAL ?               }
-    SymIdx      : Integer;     { index dans SymTab                    }
-    ParentIdx   : Integer;     { procedure englobante (-1 = globale)  }
+    SymIdx      : LongInt;     { index dans SymTab                    }
+    ParentIdx   : LongInt;     { procedure englobante (-1 = globale)  }
     VarMask     : LongInt;     { bitmask des parametres VAR           }
-    RetOffset   : Integer;     { offset de la valeur de retour [EBP] }
+    RetOffset   : LongInt;     { offset de la valeur de retour [EBP] }
   End;
 
 Type
@@ -7959,7 +7964,7 @@ Type
 Var
   { Table des procedures/fonctions }
   ProcTab   : ^TArr_ProcTab;
-  ProcCount : Integer;
+  ProcCount : LongInt;
   { OS/2 noyau : procedure declaree Interrupt (PUSHAD ... POPAD/IRETD) }
   ProcIntr  : Array[0..MAX_PROC - 1] Of Boolean;
   { OS/2 : procedure External 'DLL' [Name 'nom'] : importation d une DLL }
@@ -7968,9 +7973,9 @@ Var
   { OS/2 : bibliotheque (Library ... exports ...) }
   IsLibrary   : Boolean;
   LibName     : TString;
-  ExpCount    : Integer;
+  ExpCount    : LongInt;
   ExpNames    : Array[0..MAX_EXP - 1] Of String[63];   { nom exporte (casse d origine) }
-  ExpProcs    : Array[0..MAX_EXP - 1] Of Integer;      { procedure Pascal }
+  ExpProcs    : Array[0..MAX_EXP - 1] Of LongInt;      { procedure Pascal }
   ExpProcNm   : Array[0..MAX_EXP - 1] Of String[63];   { nom Pascal (majuscules) }
   ExpIndex    : Array[0..MAX_EXP - 1] Of LongInt;      { ordinal (Index n), 0 = automatique }
   { exportation de donnees : constante Const NOM = 'chaine' ou entier
@@ -7980,16 +7985,16 @@ Var
   ExpDataInt  : Array[0..MAX_EXP - 1] Of LongInt;
   ExpDataStr  : Array[0..MAX_EXP - 1] Of String[63];
   { importations declarees par External 'DLL' }
-  DllImpCnt   : Integer;
+  DllImpCnt   : LongInt;
   DllImpApi   : Array[0..MAX_DLLIMP - 1] Of String[63];
   DllImpDll   : Array[0..MAX_DLLIMP - 1] Of String[63];
 
   { Variables de contexte pour la compilation }
-  CurFrameOffset : Integer;   { offset courant dans le cadre local    }
+  CurFrameOffset : LongInt;   { offset courant dans le cadre local    }
   CurFuncName    : TString;   { nom de la fonction en cours           }
-  CurFuncRetOfs  : Integer;   { offset valeur de retour [EBP-N]      }
+  CurFuncRetOfs  : LongInt;   { offset valeur de retour [EBP-N]      }
   CurRetLabel    : TString;   { label de retour de la fonction        }
-  CurProcIdx     : Integer;   { index de la proc courante dans ProcTab}
+  CurProcIdx     : LongInt;   { index de la proc courante dans ProcTab}
 
 { ------------------------------------------------------------ }
 { EBPOfs : generer une reference [EBP+N] ou [EBP-N]           }
@@ -8008,9 +8013,9 @@ End;
 { Retourne l index dans ProcTab^[PI].Locals ou -1               }
 { ------------------------------------------------------------ }
 
-Function FindLocal(PI : Integer; Const Name : TString) : Integer;
+Function FindLocal(PI : LongInt; Const Name : TString) : LongInt;
 Var
-  J   : Integer;
+  J   : LongInt;
   Up  : TString;
 Begin
   FindLocal := -1;
@@ -8029,9 +8034,9 @@ End;
 { Retourne l index dans ProcTab^[PI].Params ou -1               }
 { ------------------------------------------------------------ }
 
-Function FindParam(PI : Integer; Const Name : TString) : Integer;
+Function FindParam(PI : LongInt; Const Name : TString) : LongInt;
 Var
-  J   : Integer;
+  J   : LongInt;
   Up  : TString;
 Begin
   FindParam := -1;
@@ -8051,11 +8056,11 @@ End;
 { Retourne 'DWORD PTR [EBP-N]' ou 'DWORD PTR [_TPV_X]' etc   }
 { ------------------------------------------------------------ }
 
-Function GenVarRef(PI : Integer; Const Name : TString) : TString;
+Function GenVarRef(PI : LongInt; Const Name : TString) : TString;
 Var
-  LI, ParI, SI : Integer;
+  LI, ParI, SI : LongInt;
   Up           : TString;
-  Sz           : Integer;
+  Sz           : LongInt;
   Pfx          : TString;
 Begin
   Up := StrUpperCase(Name);
@@ -8103,9 +8108,9 @@ End;
 { variable (LEA-friendly)                                       }
 { ------------------------------------------------------------ }
 
-Function GenVarAddr(PI : Integer; Const Name : TString) : TString;
+Function GenVarAddr(PI : LongInt; Const Name : TString) : TString;
 Var
-  LI, ParI, SI : Integer;
+  LI, ParI, SI : LongInt;
   Up           : TString;
 Begin
   Up := StrUpperCase(Name);
@@ -8138,9 +8143,9 @@ End;
 { jusqu au END correspondant au BEGIN courant                   }
 { ------------------------------------------------------------ }
 
-Procedure SkipToMatchingEnd(Var I : Integer);
+Procedure SkipToMatchingEnd(Var I : LongInt);
 Var
-  Depth : Integer;
+  Depth : LongInt;
   Up    : TString;
 Begin
   Depth := 1;
@@ -8174,14 +8179,14 @@ End;
 { statiques (IsStatic, label _TPST_n) ; types -> TypeTab.        }
 { ------------------------------------------------------------ }
 
-Procedure ParseLocalConstType(PI : Integer; Var I : Integer; Var LC : Integer);
+Procedure ParseLocalConstType(PI : LongInt; Var I : LongInt; Var LC : LongInt);
 Var
   IsType : Boolean;
   Name, Lbl, Up : TString;
-  TI, SI, K : Integer;
+  TI, SI, K : LongInt;
   Sz, Base, V : LongInt;
 
-  Procedure AddLocalEntry(Const AName : TString; ATI : Integer; Const ALbl : TString;
+  Procedure AddLocalEntry(Const AName : TString; ATI : LongInt; Const ALbl : TString;
                           ASz : LongInt; AConst : Boolean; AVal : LongInt);
   Begin
     If LC >= MAX_LOCAL Then Exit;
@@ -8308,64 +8313,64 @@ Begin
   End;
 End;
 
-Function W32IsAggregate(T : Integer) : Boolean; Forward;
+Function W32IsAggregate(T : LongInt) : Boolean; Forward;
 
 Procedure ParseProcDecls;
 Var
-  I         : Integer;
-  Depth     : Integer;
-  AbsOfs    : Integer;    { X : T absolute Y : offset de Y }
+  I         : LongInt;
+  Depth     : LongInt;
+  AbsOfs    : LongInt;    { X : T absolute Y : offset de Y }
   AbsFound  : Boolean;
   AbsInd    : Boolean;    { Y est un parametre VAR : acces indirect }
   Up        : TString;
-  PI        : Integer;
+  PI        : LongInt;
   PName     : TString;
   IsFunc    : Boolean;
   IsVarP    : Boolean;
   IsConstP  : Boolean;
-  GrpStart  : Integer;
+  GrpStart  : LongInt;
   TName     : TString;
-  TIdx      : Integer;
-  PC        : Integer;  { param count local }
-  J         : Integer;
+  TIdx      : LongInt;
+  PC        : LongInt;  { param count local }
+  J         : LongInt;
   LocalOfs  : LongInt;
   VM        : LongInt;
-  SIdx      : Integer;
-  RetTIdx   : Integer;
+  SIdx      : LongInt;
+  RetTIdx   : LongInt;
   LTName    : TString;
-  LTIdx     : Integer;
-  LSz       : Integer;
-  LC        : Integer;
+  LTIdx     : LongInt;
+  LSz       : LongInt;
+  LC        : LongInt;
   { Variables pour procedures imbriquees (TODO 14) }
   { Variables pour ARRAY inline dans var locales }
   ArrLo     : LongInt;
   ArrHi     : LongInt;
   ArrElem   : LongInt;
   ElemType  : TString;
-  ElemSz    : Integer;
-  BTIdx     : Integer;
+  ElemSz    : LongInt;
+  BTIdx     : LongInt;
   { RegisterNested : procedure ou fonction imbriquee dans la procedure PPI ; I est sur le }
   { mot PROCEDURE/FUNCTION. Recursif : une procedure imbriquee peut en contenir d autres.  }
-  Procedure RegisterNested(PPI : Integer);
+  Procedure RegisterNested(PPI : LongInt);
   Var
-    NI : Integer;
+    NI : LongInt;
     NIsFunc : Boolean;
     NName : TString;
-    NPC : Integer;
+    NPC : LongInt;
     NVM : LongInt;
     NIsVarP : Boolean;
     NIsConstP : Boolean;
-    NGrpSt : Integer;
+    NGrpSt : LongInt;
     NTName : TString;
-    NTIdx : Integer;
-    NRetTIdx : Integer;
-    NSIdx : Integer;
-    NLC : Integer;
+    NTIdx : LongInt;
+    NRetTIdx : LongInt;
+    NSIdx : LongInt;
+    NLC : LongInt;
     NLocalOfs : LongInt;
     NLTName : TString;
-    NLTIdx : Integer;
-    NLSz : Integer;
-    NK : Integer;
+    NLTIdx : LongInt;
+    NLSz : LongInt;
+    NK : LongInt;
   Begin
     { Parser les procedures/fonctions imbriquees (TODO 14) }
     { Elles deviennent des entrees separees dans ProcTab }
@@ -9338,42 +9343,42 @@ End;
 
 Procedure ParseTypeDecls;
 Var
-  I       : Integer;
-  Depth   : Integer;
+  I       : LongInt;
+  Depth   : LongInt;
   Up      : TString;
   TName   : TString;
-  TIdx    : Integer;
-  SIdx    : Integer;
+  TIdx    : LongInt;
+  SIdx    : LongInt;
   FName   : TString;
   FTName  : TString;
-  FTIdx   : Integer;
-  FOfs    : Integer;
-  FSz     : Integer;
-  FC      : Integer;
+  FTIdx   : LongInt;
+  FOfs    : LongInt;
+  FSz     : LongInt;
+  FC      : LongInt;
   FNames  : Array[0..15] Of TString;  { noms de champs multi (X, Y: Integer) }
-  FNC     : Integer;                   { nombre de noms collectes             }
-  FNI     : Integer;                   { index de boucle noms                 }
-  VarOfs  : Integer;                   { offset debut partie variante         }
-  MaxVarSz: Integer;                   { taille max parmi les variantes       }
-  CurVarSz: Integer;                   { taille variante courante             }
+  FNC     : LongInt;                   { nombre de noms collectes             }
+  FNI     : LongInt;                   { index de boucle noms                 }
+  VarOfs  : LongInt;                   { offset debut partie variante         }
+  MaxVarSz: LongInt;                   { taille max parmi les variantes       }
+  CurVarSz: LongInt;                   { taille variante courante             }
   ArrLo   : LongInt;
   ArrHi   : LongInt;
   ArrElem : LongInt;
   ElemType: TString;
-  ElemSz  : Integer;
+  ElemSz  : LongInt;
   BaseTN  : TString;
-  BTIdx   : Integer;
+  BTIdx   : LongInt;
   ObjPar  : TString;
   { Multi-dim arrays }
   DimLo   : Array[0..7] Of LongInt;
   DimHi   : Array[0..7] Of LongInt;
-  DimCount: Integer;
-  DimK    : Integer;
+  DimCount: LongInt;
+  DimK    : LongInt;
   { pointeurs vers des types declares plus loin : resolus en fin d analyse }
-  PendPtrIdx  : Array[0..255] Of Integer;
+  PendPtrIdx  : Array[0..255] Of LongInt;
   PendPtrName : Array[0..255] Of TString;
-  PendPtrCnt  : Integer;
-  PK          : Integer;
+  PendPtrCnt  : LongInt;
+  PK          : LongInt;
 Begin
   I := 0;
   Depth := 0;
@@ -9853,12 +9858,12 @@ End;
 { FSize retourne la taille du champ.                           }
 { ------------------------------------------------------------ }
 
-Function FindFieldOffset(TIdx : Integer; Const FName : TString;
+Function FindFieldOffset(TIdx : LongInt; Const FName : TString;
                          Var FSize : LongInt) : LongInt;
 Var
-  J    : Integer;
+  J    : LongInt;
   Up   : TString;
-  FTI  : Integer;
+  FTI  : LongInt;
 Begin
   FindFieldOffset := -1;
   FSize := 4;
@@ -9898,9 +9903,9 @@ End;
 { imbriquees). Level = nombre de cadres a remonter, OPI = procedure proprietaire,  }
 { LI / ParI = index de la locale / du parametre. Le cadre de la procedure            }
 { englobante est atteint par les EBP sauvegardes (appel direct depuis le parent).   }
-Function FindOuterVar(PI : Integer; Const Up : TString;
-                      Var Level, OPI, LI, ParI : Integer) : Boolean;
-Var Q : Integer;
+Function FindOuterVar(PI : LongInt; Const Up : TString;
+                      Var Level, OPI, LI, ParI : LongInt) : Boolean;
+Var Q : LongInt;
 Begin
   FindOuterVar := False;
   Level := 0; OPI := -1; LI := -1; ParI := -1;
@@ -9920,7 +9925,7 @@ End;
 { IsShadowGlobal : Up est une variable globale declaree sous le nom d un sous-     }
 { programme predefini (Var Pos : Word ; Var Line : String) : la variable l emporte  }
 Function IsShadowGlobal(Const Up : TString) : Boolean;
-Var SI : Integer;
+Var SI : LongInt;
 Begin
   SI := SymFind(Up);
   IsShadowGlobal := (SI >= 0) And (SymTab^[SI].Kind = SK_VAR) And SymTab^[SI].IsGlobal And
@@ -9928,15 +9933,15 @@ Begin
 End;
 
 { IsOuterVarName : Up est une variable ou un parametre d une procedure englobante }
-Function IsOuterVarName(PI : Integer; Const Up : TString) : Boolean;
-Var OLevel, OPI, OLI, OParI : Integer;
+Function IsOuterVarName(PI : LongInt; Const Up : TString) : Boolean;
+Var OLevel, OPI, OLI, OParI : LongInt;
 Begin
   IsOuterVarName := (Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) And FindOuterVar(PI, Up, OLevel, OPI, OLI, OParI);
 End;
 
 { EmitOuterFrame : EDX = EBP de la procedure englobante situee Level cadres plus haut }
-Procedure EmitOuterFrame(Level : Integer);
-Var K : Integer;
+Procedure EmitOuterFrame(Level : LongInt);
+Var K : LongInt;
 Begin
   EmitInstr('MOV EDX,DWORD PTR [EBP]');
   For K := 2 To Level Do EmitInstr('MOV EDX,DWORD PTR [EDX]');
@@ -9949,7 +9954,7 @@ Begin
 End;
 
 { OuterVarAddrEAX : EAX = adresse de la variable englobante (locale, parametre) }
-Procedure OuterVarAddrEAX(Level, OPI, LI, ParI : Integer);
+Procedure OuterVarAddrEAX(Level, OPI, LI, ParI : LongInt);
 Begin
   If LI >= 0 Then
   Begin
@@ -9970,13 +9975,13 @@ Begin
     EmitInstr('LEA EAX,' + EDXOfs(ProcTab^[OPI].Params[ParI].Offset));
 End;
 
-Procedure GenLoadFromAddr(T : Integer); Forward;
+Procedure GenLoadFromAddr(T : LongInt); Forward;
 
-Function GetVarTypeIdx(PI : Integer; Const Name : TString) : Integer;
+Function GetVarTypeIdx(PI : LongInt; Const Name : TString) : LongInt;
 Var
-  LI, ParI, SI : Integer;
+  LI, ParI, SI : LongInt;
   Up : TString;
-  OLevel, OPI, OLI, OParI : Integer;
+  OLevel, OPI, OLI, OParI : LongInt;
 Begin
   GetVarTypeIdx := -1;
   Up := StrUpperCase(Name);
@@ -10016,8 +10021,8 @@ End;
 
 Var
   { Curseur de lecture dans TokenPool pour le parsing du corps }
-  EP      : Integer;   { position courante dans TokenPool         }
-  EPEnd   : Integer;   { borne superieure (exclusive)             }
+  EP      : LongInt;   { position courante dans TokenPool         }
+  EPEnd   : LongInt;   { borne superieure (exclusive)             }
   RetLbl  : TString;   { label de retour de la fonction courante  }
   { bornes des boucles FOR de la procedure courante : cases du cadre de
     pile (une par FOR du corps, sous les locales), pour qu un appel
@@ -10027,14 +10032,14 @@ Var
   ForSlotNext : LongInt;
   ForSlotMax  : LongInt;
   LastPrimaryName : TString; { dernier ident charge par ParsePrimary }
-  LastVarTypeIdx : Integer; { type index du dernier ident charge }
+  LastVarTypeIdx : LongInt; { type index du dernier ident charge }
   LastExprIsPascalStr : Boolean; { True = EAX pointe sur format Pascal [len][chars][NUL] }
   WantCharLit : Boolean;   { contexte Char : un litteral d un caractere est un code, pas une chaine }
 
   { Pile de boucles pour Break/Continue (TODO 13) }
   LoopBreakLbl : Array[0..31] Of TString;
   LoopContLbl  : Array[0..31] Of TString;
-  LoopTop      : Integer;
+  LoopTop      : LongInt;
 
 { ------------------------------------------------------------ }
 { EPAtEnd : le curseur est-il a la fin ?                       }
@@ -10099,7 +10104,7 @@ End;
 { ShortInt/Integer/SmallInt, zero sinon), 4 octets directs.     }
 { ------------------------------------------------------------ }
 
-Function TypeIsSignedSmall(T : Integer) : Boolean;
+Function TypeIsSignedSmall(T : LongInt) : Boolean;
 Begin
   TypeIsSignedSmall := (T >= 0) And (T < TypeCount) And (Not TypeTab^[T].IsUnsigned) And
     ((TypeTab^[T].Kind = TYK_INTEGER) Or (TypeTab^[T].Kind = TYK_SHORTINT) Or
@@ -10118,7 +10123,7 @@ Begin
 End;
 
 { RealMemPfx : prefixe de taille memoire pour FLD/FSTP }
-Function RealMemPfx(T : Integer) : TString;
+Function RealMemPfx(T : LongInt) : TString;
 Begin
   RealMemPfx := 'QWORD PTR';
   If (T >= 0) And (T < TypeCount) Then
@@ -10129,7 +10134,7 @@ Begin
 End;
 
 { GenRealLoad / GenRealStore : charger / ranger ST(0) a l adresse Mem selon T }
-Procedure GenRealLoad(Const Mem : TString; T : Integer);
+Procedure GenRealLoad(Const Mem : TString; T : LongInt);
 Begin
   If (T >= 0) And (T < TypeCount) And (TypeTab^[T].Kind = TYK_COMP) Then
     EmitInstr('FILD QWORD PTR ' + Mem)
@@ -10137,7 +10142,7 @@ Begin
     EmitInstr('FLD ' + RealMemPfx(T) + ' ' + Mem);
 End;
 
-Procedure GenRealStore(Const Mem : TString; T : Integer);
+Procedure GenRealStore(Const Mem : TString; T : LongInt);
 Begin
   If (T >= 0) And (T < TypeCount) And (TypeTab^[T].Kind = TYK_COMP) Then
     EmitInstr('FISTP QWORD PTR ' + Mem)
@@ -10164,8 +10169,8 @@ Begin
 End;
 
 { RealResultType : type du resultat d une operation entre A et B (le plus grand) }
-Function RealResultType(A, B : Integer) : Integer;
-Var SA, SB : Integer;
+Function RealResultType(A, B : LongInt) : LongInt;
+Var SA, SB : LongInt;
 Begin
   If TypeIsReal(A) Then SA := RealSizeCode(A) Else SA := 0;
   If TypeIsReal(B) Then SB := RealSizeCode(B) Else SB := 0;
@@ -10177,7 +10182,7 @@ End;
 { GenRealBuiltin : Sqrt/Sin/Cos/ArcTan/Ln/Exp sur ST(0) ; le resultat garde le type   }
 { de l argument (Extended pour un entier), comme FPC                                   }
 Procedure GenRealBuiltin(Const Nm : TString);
-Var RT : Integer;
+Var RT : LongInt;
 Begin
   If Not W32Fpu Then
   Begin
@@ -10202,7 +10207,7 @@ End;
 { unite absente...) recoit un emplacement de 4 octets au lieu de viser le debut   }
 { de la section de donnees                                                        }
 Procedure EnsureImplicitGlobal(Const Up : TString);
-Var SI, K : Integer;
+Var SI, K : LongInt;
 Begin
   If SymFind(Up) >= 0 Then Exit;
   For K := 0 To DataCount - 1 Do
@@ -10218,7 +10223,7 @@ Begin
   End;
 End;
 
-Procedure GenLoadScalar(Const Mem : TString; T : Integer);
+Procedure GenLoadScalar(Const Mem : TString; T : LongInt);
 Var Sz : LongInt;
 Begin
   If TypeIsReal(T) And W32Fpu Then
@@ -10241,7 +10246,7 @@ Begin
     EmitInstr('MOV EAX,DWORD PTR ' + Mem);
 End;
 
-Procedure GenStoreScalar(Const Mem : TString; T : Integer);
+Procedure GenStoreScalar(Const Mem : TString; T : LongInt);
 Var Sz : LongInt;
 Begin
   If TypeIsReal(T) And W32Fpu Then
@@ -10265,12 +10270,12 @@ Begin
   Else EmitInstr('MOV DWORD PTR ' + Mem + ',EAX');
 End;
 
-Procedure GenLoadVar(PI : Integer; Const Name : TString);
+Procedure GenLoadVar(PI : LongInt; Const Name : TString);
 Var
-  LI, ParI, SI : Integer;
+  LI, ParI, SI : LongInt;
   Up           : TString;
   Ref          : TString;
-  OLevel, OPI, OLI, OParI : Integer;
+  OLevel, OPI, OLI, OParI : LongInt;
 Begin
   Up := StrUpperCase(Name);
   LastVarTypeIdx := GetVarTypeIdx(PI, Up);
@@ -10494,7 +10499,7 @@ End;
 { tableau, objet) : la copie se fait octet par octet            }
 { ------------------------------------------------------------ }
 
-Function W32IsAggregate(T : Integer) : Boolean;
+Function W32IsAggregate(T : LongInt) : Boolean;
 Begin
   W32IsAggregate := (T >= 0) And (T < TypeCount) And
     ((TypeTab^[T].Kind = TYK_RECORD) Or (TypeTab^[T].Kind = TYK_ARRAY) Or
@@ -10509,7 +10514,7 @@ End;
 
 { IsCharArray / CoerceCharArray : un Array[..] Of Char (idiome TP) utilise dans un
   contexte de chaine est copie en chaine Pascal dans l anneau STRRING }
-Function IsCharArray(T : Integer) : Boolean;
+Function IsCharArray(T : LongInt) : Boolean;
 Begin
   IsCharArray := (T >= 0) And (T < TypeCount) And (TypeTab^[T].Kind = TYK_ARRAY) And
     (TypeTab^[T].BaseTypeIdx >= 0) And (TypeTab^[T].BaseTypeIdx < TypeCount) And
@@ -10561,7 +10566,7 @@ End;
 { l adresse EBX selon le type T de la destination               }
 { ------------------------------------------------------------ }
 
-Procedure GenStoreToAddr(T : Integer);
+Procedure GenStoreToAddr(T : LongInt);
 Begin
   If (T >= 0) And (T < TypeCount) Then
   Begin
@@ -10598,7 +10603,7 @@ End;
 { (les agregats et chaines restent representes par l adresse)   }
 { ------------------------------------------------------------ }
 
-Procedure GenLoadFromAddr(T : Integer);
+Procedure GenLoadFromAddr(T : LongInt);
 Begin
   LastVarTypeIdx := T;
   LastExprIsPascalStr := False;
@@ -10619,13 +10624,13 @@ End;
 { variable                                                      }
 { ------------------------------------------------------------ }
 
-Procedure GenStoreVar(PI : Integer; Const Name : TString);
+Procedure GenStoreVar(PI : LongInt; Const Name : TString);
 Var
-  LI, ParI, SI : Integer;
+  LI, ParI, SI : LongInt;
   Up           : TString;
   Ref          : TString;
-  VarTI        : Integer;
-  OLevel, OPI, OLI, OParI : Integer;
+  VarTI        : LongInt;
+  OLevel, OPI, OLI, OParI : LongInt;
 Begin
   Up := StrUpperCase(Name);
 
@@ -10760,12 +10765,12 @@ End;
 { GenLoadAddr : charger l adresse d une variable               }
 { ------------------------------------------------------------ }
 
-Procedure GenLoadAddr(PI : Integer; Const Name : TString);
+Procedure GenLoadAddr(PI : LongInt; Const Name : TString);
 Var
-  LI, ParI, SI : Integer;
+  LI, ParI, SI : LongInt;
   Up           : TString;
   VarRef       : TString;
-  OLevel, OPI, OLI, OParI : Integer;
+  OLevel, OPI, OLI, OParI : LongInt;
 Begin
   Up := StrUpperCase(Name);
 
@@ -10852,18 +10857,18 @@ End;
 { Forward declarations TODO 10                                  }
 { ------------------------------------------------------------ }
 
-Procedure ParseExpr(PI : Integer); Forward;
-Procedure ParseExprPrec(PI : Integer; MinPrec : Integer); Forward;
-Procedure ParseBody(PI : Integer); Forward;
-Function ParseLValueAddrW32(PI : Integer; Var T : Integer) : Boolean; Forward;
-Function WithFieldIndex(Const Up : TString; Var FOfs : LongInt) : Integer; Forward;
+Procedure ParseExpr(PI : LongInt); Forward;
+Procedure ParseExprPrec(PI : LongInt; MinPrec : LongInt); Forward;
+Procedure ParseBody(PI : LongInt); Forward;
+Function ParseLValueAddrW32(PI : LongInt; Var T : LongInt) : Boolean; Forward;
+Function WithFieldIndex(Const Up : TString; Var FOfs : LongInt) : LongInt; Forward;
 
 { ParseVarArgAddr : argument "var" sans type (Move, FillChar, BlockRead...) : EAX = adresse }
 { d une variable, d un element de tableau, d un champ ou d un pointeur dereference ;   }
 { sinon la valeur de l expression (pointeur, agregat deja represente par son adresse)   }
-Procedure ParseVarArgAddr(PI : Integer);
+Procedure ParseVarArgAddr(PI : LongInt);
 Var
-  T, SI : Integer;
+  T, SI : LongInt;
   FOfs : LongInt;
   Up : TString;
   IsVarName : Boolean;
@@ -10893,14 +10898,14 @@ End;
 { Forward declarations TODO 13                                  }
 { ------------------------------------------------------------ }
 
-Procedure ParseStmt(PI : Integer); Forward;
-Procedure ParseIfStmt(PI : Integer); Forward;
-Procedure ParseCaseStmt(PI : Integer); Forward;
-Procedure ParseWhileStmt(PI : Integer); Forward;
-Procedure ParseRepeatStmt(PI : Integer); Forward;
-Procedure ParseForStmt(PI : Integer); Forward;
-Procedure ParseGotoStmt(PI : Integer); Forward;
-Procedure ParseAsmBlock(PI : Integer); Forward;
+Procedure ParseStmt(PI : LongInt); Forward;
+Procedure ParseIfStmt(PI : LongInt); Forward;
+Procedure ParseCaseStmt(PI : LongInt); Forward;
+Procedure ParseWhileStmt(PI : LongInt); Forward;
+Procedure ParseRepeatStmt(PI : LongInt); Forward;
+Procedure ParseForStmt(PI : LongInt); Forward;
+Procedure ParseGotoStmt(PI : LongInt); Forward;
+Procedure ParseAsmBlock(PI : LongInt); Forward;
 
 { ------------------------------------------------------------ }
 { FileVarType : index de type d une variable fichier (locale,   }
@@ -10910,7 +10915,7 @@ Procedure ParseAsmBlock(PI : Integer); Forward;
 { ------------------------------------------------------------ }
 { IoCheckAt : la verification des E/S est-elle active a la position P du pool ? }
 Function IoCheckAt(P : LongInt) : Boolean;
-Var K : Integer;
+Var K : LongInt;
 Begin
   IoCheckAt := True;
   For K := 0 To IoSwitchCnt - 1 Do
@@ -10929,7 +10934,7 @@ End;
 { RangeCheckAt : la verification des bornes (R+) est-elle active a la position P ? }
 { Actif par defaut pour la cible Win32, comme les references FPC compilees avec -Cr. }
 Function RangeCheckAt(P : LongInt) : Boolean;
-Var K : Integer;
+Var K : LongInt;
 Begin
   RangeCheckAt := True;
   For K := 0 To RangeSwitchCnt - 1 Do
@@ -10939,8 +10944,8 @@ End;
 
 { RangeBoundsOf : bornes d un type ordinal etroit (Byte, Word, ShortInt, Integer 16 bits, }
 { sous-intervalle, enumeration). Faux pour les types 32 bits et les autres types.          }
-Function RangeBoundsOf(T : Integer; Var Lo, Hi : LongInt) : Boolean;
-Var R : Integer;
+Function RangeBoundsOf(T : LongInt; Var Lo, Hi : LongInt) : Boolean;
+Var R : LongInt;
 Begin
   RangeBoundsOf := False;
   If (T < 0) Or (T >= TypeCount) Then Exit;
@@ -10983,7 +10988,7 @@ Begin
 End;
 
 { GenRangeCheck : EAX = valeur a ranger dans une variable de type T ; erreur 201 si hors bornes }
-Procedure GenRangeCheck(T : Integer);
+Procedure GenRangeCheck(T : LongInt);
 Var Lo, Hi : LongInt;
 Begin
   If Not ((Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode)) Then Exit;
@@ -10995,7 +11000,7 @@ End;
 { GenRangeCheckAssign : apres ParseExpr d une affectation vers une variable de type T.   }
 { Pas de verification pour un litteral entier seul (verifie a la compilation par FPC), ni }
 { quand l expression est deja du type etroit de la destination (Byte := Byte).            }
-Procedure GenRangeCheckAssign(T : Integer);
+Procedure GenRangeCheckAssign(T : LongInt);
 Var Lo, Hi : LongInt;
 Begin
   If (EP >= 2) And (TokenPool^[EP - 1].Kind = TK_INTEGER) And
@@ -11005,8 +11010,8 @@ Begin
   GenRangeCheck(T);
 End;
 
-Function FileVarType(PI : Integer; Const Name : TString) : Integer;
-Var Up : TString; LI, SI : Integer;
+Function FileVarType(PI : LongInt; Const Name : TString) : LongInt;
+Var Up : TString; LI, SI : LongInt;
 Begin
   FileVarType := -1;
   Up := StrUpperCase(Name);
@@ -11021,14 +11026,14 @@ Begin
   If SI >= 0 Then FileVarType := SymTab^[SI].TypeIdx;
 End;
 
-Function IsFileVarType(T : Integer) : Boolean;
+Function IsFileVarType(T : LongInt) : Boolean;
 Begin
   IsFileVarType := (T >= 0) And (T < TypeCount) And
                    ((TypeTab^[T].Kind = TYK_TEXT) Or (TypeTab^[T].Kind = TYK_FILE));
 End;
 
-Function FileRecSize(T : Integer) : Integer;
-Var R : Integer;
+Function FileRecSize(T : LongInt) : LongInt;
+Var R : LongInt;
 Begin
   FileRecSize := 0;
   If (T < 0) Or (T >= TypeCount) Then Exit;
@@ -11046,19 +11051,21 @@ End;
 { Convention stdcall : args gauche-a-droite                     }
 { ------------------------------------------------------------ }
 
-Procedure ParseFuncCall(PI : Integer; Const ProcName : TString);
+Procedure ParseFuncCall(PI : LongInt; Const ProcName : TString);
 Var
-  ArgCount  : Integer;
-  ArgBytes  : Integer;
-  PT        : Integer;
+  ArgCount  : LongInt;
+  ArgBytes  : LongInt;
+  PT        : LongInt;
   Up        : TString;
-  SI        : Integer;
+  SI        : LongInt;
   MName     : TString;
-  CalledPI  : Integer;
-  J         : Integer;
+  CalledPI  : LongInt;
+  J         : LongInt;
   IsVarArg  : Boolean;
   ArgName   : TString;
   IsProcVarCall : Boolean;
+  LinkPI    : LongInt;
+  LinkUp    : LongInt;
 Begin
   Up := StrUpperCase(ProcName);
   ArgCount := 0;
@@ -11085,6 +11092,30 @@ Begin
       CalledPI := J;
       Break;
     End;
+
+  { Procedure imbriquee appelee depuis une procedure soeur ou plus      }
+  { profonde (ou elle-meme) : son [EBP] doit etre le cadre de sa parente }
+  { (et non celui de l appelant). LinkUp = cadres a remonter.            }
+  LinkUp := 0;
+  If (Not IsProcVarCall) And (Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And
+     (Not Opts.Dos16Mode) And (PI >= 0) And (PI < ProcCount) Then
+  Begin
+    LinkPI := -1;
+    For J := 0 To ProcCount - 1 Do
+      If ProcTab^[J].MangledName = MName Then Begin LinkPI := J; Break; End;
+    If (LinkPI >= 0) And (ProcTab^[LinkPI].ParentIdx >= 0) And
+       (ProcTab^[LinkPI].ParentIdx <> PI) Then
+    Begin
+      J := PI;
+      While (J >= 0) And (J < ProcCount) And (J <> ProcTab^[LinkPI].ParentIdx) And (LinkUp < 8) Do
+      Begin
+        Inc(LinkUp);
+        J := ProcTab^[J].ParentIdx;
+      End;
+      If J <> ProcTab^[LinkPI].ParentIdx Then LinkUp := 0;
+    End;
+  End;
+  If LinkUp > 0 Then EmitInstr('PUSH EBP');
 
   { Consommer '(' si present }
   If EPMatch('(') Then
@@ -11179,12 +11210,19 @@ Begin
     GenLoadVar(PI, Up);
     EmitInstr('CALL EAX');
   End
+  Else If LinkUp > 0 Then
+  Begin
+    EmitOuterFrame(LinkUp);
+    EmitInstr('MOV EBP,EDX');
+    EmitInstr('CALL ' + MName);
+  End
   Else
     EmitInstr('CALL ' + MName);
 
   { Nettoyer la pile (convention cdecl/stdcall-like pour nos procs Pascal) }
   If ArgBytes > 0 Then
     EmitInstr('ADD ESP,' + IntToStr_(ArgBytes));
+  If LinkUp > 0 Then EmitInstr('POP EBP');
 End;
 
 { ------------------------------------------------------------ }
@@ -11195,7 +11233,7 @@ End;
 { ------------------------------------------------------------ }
 
 Var
-  LastSuccPredType : Integer;   { type de l operande du dernier Succ/Pred }
+  LastSuccPredType : LongInt;   { type de l operande du dernier Succ/Pred }
   LastIndexIsStrLen : Boolean;  { la derniere lvalue indexee est S[0] (octet de longueur) }
 
 { CharLitArgFollows : l argument qui suit est un litteral d un seul caractere : ('x') }
@@ -11208,7 +11246,7 @@ End;
 
 { TypeBoundValue : Low/High d un type (tableau : bornes d index ; chaine : 0..255 ;
   enumeration, sous-intervalle, ordinaux) }
-Function TypeBoundValue(TI : Integer; IsHigh : Boolean) : LongInt;
+Function TypeBoundValue(TI : LongInt; IsHigh : Boolean) : LongInt;
 Begin
   TypeBoundValue := 0;
   If (TI < 0) Or (TI >= TypeCount) Then Exit;
@@ -11229,19 +11267,20 @@ Begin
   End;
 End;
 
-Procedure ParsePrimaryInner(PI : Integer);
+Procedure ParsePrimaryInner(PI : LongInt);
 Var
   Up     : TString;
   GmCast : Boolean;    { GetMem(Pointer(V), n) }
   Lbl    : TString;
-  SI     : Integer;
-  LI     : Integer;
-  ParI   : Integer;
-  WI     : Integer;
+  SI     : LongInt;
+  LI     : LongInt;
+  ParI   : LongInt;
+  WI     : LongInt;
   WFOfs  : LongInt;
   WFSize : LongInt;
-  WJ     : Integer;
+  WJ     : LongInt;
   LblDone : TString;
+  PosSubP : Boolean;   { Pos : SubStr au format Pascal }
   LblLoop : TString;
 Begin
   LastPrimaryName := '';
@@ -14341,19 +14380,32 @@ Begin
           Else
           Begin
             { --- Intel 80386 (Win32) --- }
+            { Deux chaines Pascal (dont un Char converti) : _TPRT_PPOS,  }
+            { qui suit les longueurs (Pos(#0, S), chaines contenant #0). }
+            { Sinon (un litteral ASCIIZ) : _TPRT_POS.                    }
             ParseExpr(PI);
             CoerceCharArray;
-            If LastExprIsPascalStr Then
-              EmitInstr('INC EAX');
+            PosSubP := LastExprIsPascalStr;
             EmitInstr('PUSH EAX');
             EPMatch(',');
             ParseExpr(PI);
             CoerceCharArray;
-            If LastExprIsPascalStr Then
-              EmitInstr('INC EAX');
-            EmitInstr('MOV ESI,EAX');
-            EmitInstr('POP EDI');
-            EmitInstr('CALL ' + TP_RT_PFX + 'POS');
+            If PosSubP And LastExprIsPascalStr Then
+            Begin
+              EmitInstr('MOV ESI,EAX');
+              EmitInstr('POP EDI');
+              EmitInstr('CALL ' + TP_RT_PFX + 'PPOS');
+            End
+            Else
+            Begin
+              If LastExprIsPascalStr Then
+                EmitInstr('INC EAX');
+              EmitInstr('MOV ESI,EAX');
+              EmitInstr('POP EDI');
+              If PosSubP Then
+                EmitInstr('INC EDI');
+              EmitInstr('CALL ' + TP_RT_PFX + 'POS');
+            End;
           End;
         End; { Case }
         EPMatch(')');
@@ -19063,7 +19115,7 @@ End;
 { resultat de la fonction et non celui de son dernier argument :  }
 { Length(S) = 0 compilait en comparaison de chaines et plantait.  }
 { ------------------------------------------------------------ }
-Function BuiltinFuncResultKind(Const Up : TString) : Integer;
+Function BuiltinFuncResultKind(Const Up : TString) : LongInt;
 { 0 = inconnu/entier, 1 = chaine, 2 = caractere, 3 = booleen }
 Begin
   BuiltinFuncResultKind := 0;
@@ -19082,15 +19134,19 @@ Begin
     BuiltinFuncResultKind := 3;
 End;
 
-Procedure ParsePrimary(PI : Integer);
+Procedure ParsePrimary(PI : LongInt);
 Var
-  Up : TString; SI, K : Integer;
+  Up : TString; SI, K : LongInt;
 Begin
   Up := '';
   If (Not EPAtEnd) And ((TokenPool^[EP].Kind = TK_IDENT) Or (TokenPool^[EP].Kind = TK_KEYWORD)) Then
     Up := StrUpperCase(TokenPool^[EP].Val);
   ParsePrimaryInner(PI);
   If Up = '' Then Exit;
+  { variable locale, parametre ou variable englobante portant le nom d une }
+  { fonction integree (Mem, Pos, Line...) : le type pose par le chargement  }
+  If (PI >= 0) And (PI < ProcCount) And
+     ((FindLocal(PI, Up) >= 0) Or (FindParam(PI, Up) >= 0) Or IsOuterVarName(PI, Up)) Then Exit;
   SI := SymFind(Up);
   If (SI < 0) Or (SymTab^[SI].Kind <> SK_FUNC) Then Exit;
   If SymTab^[SI].IsExternal Then
@@ -19126,9 +19182,9 @@ End;
 { (dimensions separees par ',') ; T devient le type element.    }
 { ------------------------------------------------------------ }
 
-Procedure ParseIndexW32(PI : Integer; Var T : Integer);
+Procedure ParseIndexW32(PI : LongInt; Var T : LongInt);
 Var
-  ElemSz, ET : Integer;
+  ElemSz, ET : LongInt;
   IsZero : Boolean;
 Begin
   LastIndexIsStrLen := False;
@@ -19183,11 +19239,11 @@ End;
 { destination, T = son type                                      }
 { ------------------------------------------------------------ }
 
-Procedure ParseLValueSuffixW32(PI : Integer; Var T : Integer);
+Procedure ParseLValueSuffixW32(PI : LongInt; Var T : LongInt);
 Var
   Up : TString;
   FOfs, FSize : LongInt;
-  K : Integer;
+  K : LongInt;
 Begin
   While Not EPAtEnd Do
   Begin
@@ -19245,7 +19301,7 @@ Begin
   End;
 End;
 
-Procedure ParseLValueW32(PI : Integer; Const VName : TString; Var T : Integer);
+Procedure ParseLValueW32(PI : LongInt; Const VName : TString; Var T : LongInt);
 Begin
   GenLoadAddr(PI, VName);
   T := GetVarTypeIdx(PI, VName);
@@ -19257,9 +19313,9 @@ End;
 { WITH actif ? Retourne la profondeur (ou -1) et l offset       }
 { ------------------------------------------------------------ }
 
-Function WithFieldIndex(Const Up : TString; Var FOfs : LongInt) : Integer;
+Function WithFieldIndex(Const Up : TString; Var FOfs : LongInt) : LongInt;
 Var
-  WI : Integer;
+  WI : LongInt;
   FSize : LongInt;
 Begin
   WithFieldIndex := -1;
@@ -19284,10 +19340,10 @@ End;
 { Retourne False si le jeton n est pas un identificateur.        }
 { ------------------------------------------------------------ }
 
-Function ParseLValueAddrW32(PI : Integer; Var T : Integer) : Boolean;
+Function ParseLValueAddrW32(PI : LongInt; Var T : LongInt) : Boolean;
 Var
   Up : TString;
-  WI, K : Integer;
+  WI, K : LongInt;
   FOfs : LongInt;
 Begin
   ParseLValueAddrW32 := False;
@@ -19328,13 +19384,13 @@ End;
 { primaire : [index], .champ, ^dereference                     }
 { ------------------------------------------------------------ }
 
-Procedure ParsePostfix(PI : Integer);
+Procedure ParsePostfix(PI : LongInt);
 Var
   Up : TString;
-  ElemSz : Integer;
+  ElemSz : LongInt;
   FOfs : LongInt;
   FSize : LongInt;
-  SavedTypeIdx : Integer;
+  SavedTypeIdx : LongInt;
 Begin
   While Not EPAtEnd Do
   Begin
@@ -19417,10 +19473,10 @@ End;
 { NOT, @, -, +                                                  }
 { ------------------------------------------------------------ }
 
-Procedure ParseUnary(PI : Integer);
+Procedure ParseUnary(PI : LongInt);
 Var
   Up : TString;
-  ATIdx : Integer;
+  ATIdx : LongInt;
 Begin
   If EPAtEnd Then Exit;
 
@@ -19516,7 +19572,7 @@ End;
 {   1 : = <> < > <= >= IN        (relationnel)                  }
 { ------------------------------------------------------------ }
 
-Function BinOpPrec(Const Op : TString) : Integer;
+Function BinOpPrec(Const Op : TString) : LongInt;
 Var
   U : TString;
 Begin
@@ -19668,16 +19724,16 @@ End;
 { Gere le court-circuit pour AND et OR booleens.                }
 { ------------------------------------------------------------ }
 
-Procedure ParseExprPrec(PI : Integer; MinPrec : Integer);
+Procedure ParseExprPrec(PI : LongInt; MinPrec : LongInt);
 Var
   Op       : TString;
-  Prec     : Integer;
+  Prec     : LongInt;
   LblF     : TString;
   LblE     : TString;
   LeftIsStr : Boolean;
   LeftPascal : Boolean;
   LeftReal, RightReal : Boolean;
-  LeftT    : Integer;
+  LeftT    : LongInt;
 Begin
   ParseUnary(PI);
 
@@ -20005,7 +20061,7 @@ End;
 { Appelle ParseExprPrec avec la precedence minimale (1).        }
 { ------------------------------------------------------------ }
 
-Procedure ParseExpr(PI : Integer);
+Procedure ParseExpr(PI : LongInt);
 Begin
   ParseExprPrec(PI, 1);
 End;
@@ -20020,19 +20076,19 @@ End;
 { Retourne un TY_IDX_* valide.                                 }
 { ------------------------------------------------------------ }
 
-Function InferExprType(PI : Integer) : Integer;
+Function InferExprType(PI : LongInt) : LongInt;
 Var
   Up : TString;
-  SI, LI : Integer;
-  SP, SDepth : Integer;
-  ResultType : Integer;
+  SI, LI : LongInt;
+  SP, SDepth : LongInt;
+  ResultType : LongInt;
   FUp : TString;
-  FJ  : Integer;
+  FJ  : LongInt;
 
   { Descendre dans les types ARRAY si un '[' suit }
-  Function ResolveArrayElement(TI : Integer) : Integer;
+  Function ResolveArrayElement(TI : LongInt) : LongInt;
   { suit les suffixes ^ [i,j] .champ qui suivent l identificateur en EP }
-  Var P, Depth, FJ : Integer; FUp : TString;
+  Var P, Depth, FJ : LongInt; FUp : TString;
   Begin
     P := EP + 1;
     While (P < EPEnd) And (TI >= 0) And (TI < TypeCount) Do
@@ -20198,7 +20254,7 @@ End;
 { Integer -> conversion en chaine puis affichage               }
 { ------------------------------------------------------------ }
 
-Procedure EmitPrintEAX(TypeIdx : Integer);
+Procedure EmitPrintEAX(TypeIdx : LongInt);
 Var
   LblFalse, LblDone : TString;
   IsStrType : Boolean;
@@ -20294,7 +20350,7 @@ End;
 { Meme logique que EmitPrintEAX mais ecrit dans le fichier.     }
 { ------------------------------------------------------------ }
 
-Procedure EmitFilePrintEAX(TypeIdx : Integer);
+Procedure EmitFilePrintEAX(TypeIdx : LongInt);
 Var
   LblFalse, LblDone : TString;
   IsStrType : Boolean;
@@ -20350,9 +20406,9 @@ End;
 { ------------------------------------------------------------ }
 
 Var
-  CurFmtDec : Integer;   { decimales du Write/Str courant : -1 aucune, -2 dynamique (EDX) }
+  CurFmtDec : LongInt;   { decimales du Write/Str courant : -1 aucune, -2 dynamique (EDX) }
 
-Procedure EmitWriteValue(TIdx : Integer; Width : Integer; ToFile : Boolean);
+Procedure EmitWriteValue(TIdx : LongInt; Width : LongInt; ToFile : Boolean);
 Var
   LblFalse, LblDone : TString;
   IsStrType : Boolean;
@@ -20435,17 +20491,17 @@ Const
   AII_CT_MAX_ARRS  = 16;
   AII_CT_MAX_ELEMS = 256;
 Var
-  AIICTVarCnt  : Integer;
+  AIICTVarCnt  : LongInt;
   AIICTVarName : Array[0..AII_CT_MAX_VARS - 1] Of TString;
   AIICTVarVal  : Array[0..AII_CT_MAX_VARS - 1] Of LongInt;
-  AIICTArrCnt  : Integer;
+  AIICTArrCnt  : LongInt;
   AIICTArrName : Array[0..AII_CT_MAX_ARRS - 1] Of TString;
   AIICTArrIsCh : Array[0..AII_CT_MAX_ARRS - 1] Of Boolean;
   AIICTArrVal  : Array[0..AII_CT_MAX_ARRS - 1, 0..AII_CT_MAX_ELEMS - 1]
                  Of LongInt;
 
-Function AIICTFindVar(Const N: TString): Integer;
-Var I: Integer; U: TString;
+Function AIICTFindVar(Const N: TString): LongInt;
+Var I: LongInt; U: TString;
 Begin
   U := StrUpperCase(N);
   AIICTFindVar := -1;
@@ -20454,7 +20510,7 @@ Begin
 End;
 
 Procedure AIICTSetVar(Const N: TString; V: LongInt);
-Var I: Integer; U: TString;
+Var I: LongInt; U: TString;
 Begin
   U := StrUpperCase(N);
   I := AIICTFindVar(U);
@@ -20467,8 +20523,8 @@ Begin
   AIICTVarVal[I] := V;
 End;
 
-Function AIICTFindArr(Const N: TString): Integer;
-Var I: Integer; U: TString;
+Function AIICTFindArr(Const N: TString): LongInt;
+Var I: LongInt; U: TString;
 Begin
   U := StrUpperCase(N);
   AIICTFindArr := -1;
@@ -20476,8 +20532,8 @@ Begin
     If AIICTArrName[I] = U Then Begin AIICTFindArr := I; Exit; End;
 End;
 
-Function AIICTFindOrAddArr(Const N: TString; IsCh: Boolean): Integer;
-Var I: Integer;
+Function AIICTFindOrAddArr(Const N: TString; IsCh: Boolean): LongInt;
+Var I: LongInt;
 Begin
   I := AIICTFindArr(N);
   If I < 0 Then
@@ -20497,7 +20553,7 @@ Procedure ParseStmtAppleII; Forward;
 
 { Verifier si l identifiant est un BYTESTREAM (char) declare dans SymTab }
 Function AIIIsByteStreamSym(Const N: TString): Boolean;
-Var SI, TI: Integer;
+Var SI, TI: LongInt;
 Begin
   AIIIsByteStreamSym := False;
   SI := SymFind(StrUpperCase(N));
@@ -20509,7 +20565,7 @@ Begin
 End;
 
 Function AIIIsWordStreamSym(Const N: TString): Boolean;
-Var SI, TI: Integer;
+Var SI, TI: LongInt;
 Begin
   AIIIsWordStreamSym := False;
   SI := SymFind(StrUpperCase(N));
@@ -20524,10 +20580,10 @@ End;
 Function AIICTEvalPrimary(Var V: LongInt; Var IsCh: Boolean): Boolean;
 Var
   Up : TString;
-  K  : Integer;
+  K  : LongInt;
   IdxV : LongInt;
   IdxCh : Boolean;
-  ArrI : Integer;
+  ArrI : LongInt;
 Begin
   AIICTEvalPrimary := False;
   IsCh := False; V := 0;
@@ -20771,7 +20827,7 @@ End;
 { Avancer EP au-dela d une instruction (BEGIN..END ou single stmt). }
 Procedure AIISkipStmt;
 Var
-  D : Integer;
+  D : LongInt;
   Up : TString;
 Begin
   If EPAtEnd Then Exit;
@@ -20815,7 +20871,7 @@ End;
 Procedure AIIEmitWriteValue(V: LongInt; IsCh: Boolean);
 Var
   Lbl, S : TString;
-  Ch : Integer;
+  Ch : LongInt;
 Begin
   If IsCh Then
   Begin
@@ -20925,7 +20981,7 @@ End;
 Procedure ParseWriteStmtAppleII(IsWriteLn : Boolean);
 Var
   Lbl, S : TString;
-  Depth, I : Integer;
+  Depth, I : LongInt;
   Ch : LongInt;
   Done : Boolean;
 Begin
@@ -21181,15 +21237,15 @@ Var
   Up, IdName : TString;
   IdxV, RhsV : LongInt;
   IdxCh, RhsCh : Boolean;
-  ArrI, AIIDepth : Integer;
-  StartEP : Integer;
+  ArrI, AIIDepth : LongInt;
+  StartEP : LongInt;
   LoopFrom, LoopTo, LoopI : LongInt;
   LoopCh : Boolean;
   IsDownTo : Boolean;
-  BodyEP : Integer;
+  BodyEP : LongInt;
   SaveVal : LongInt;
   HadVar : Boolean;
-  VIdx : Integer;
+  VIdx : LongInt;
 Begin
   If EPAtEnd Then Exit;
 
@@ -21494,18 +21550,18 @@ Begin
   Inc(EP);
 End;
 
-Procedure ParseWriteStmt(PI : Integer; IsWriteLn : Boolean);
+Procedure ParseWriteStmt(PI : LongInt; IsWriteLn : Boolean);
 Var
-  TIdx : Integer;
-  FmtWidth : Integer;
-  FmtDec   : Integer;
+  TIdx : LongInt;
+  FmtWidth : LongInt;
+  FmtDec   : LongInt;
   IsFileWrite : Boolean;
-  FVarTIdx    : Integer;
-  FileArgTIdx : Integer;
+  FVarTIdx    : LongInt;
+  FileArgTIdx : LongInt;
   FileArgName : TString;
   Up          : TString;
-  LI, SI      : Integer;
-  SavedTIdx : Integer;
+  LI, SI      : LongInt;
+  SavedTIdx : LongInt;
   SavedPascal : Boolean;
 Begin
   { Branche specialisee 6502 (Apple II / C64) : code natif }
@@ -21771,15 +21827,15 @@ End;
 { Lit une ligne depuis STDIN, puis parse les variables.         }
 { ------------------------------------------------------------ }
 
-Procedure ParseReadStmt(PI : Integer; IsReadLn : Boolean);
+Procedure ParseReadStmt(PI : LongInt; IsReadLn : Boolean);
 Var
   VName, Up : TString;
-  SI, LI    : Integer;
-  TIdx      : Integer;
+  SI, LI    : LongInt;
+  TIdx      : LongInt;
   IsFileRead: Boolean;
-  FVarTIdx  : Integer;
+  FVarTIdx  : LongInt;
   FileArgName  : TString;   { variable fichier de Read(F, ...) }
-  FileArgTIdx  : Integer;
+  FileArgTIdx  : LongInt;
   FileByRecord : Boolean;   { File Of T : un enregistrement par variable }
   FileByChar   : Boolean;   { Read(F, C) : caractere par caractere }
 Begin
@@ -22014,9 +22070,9 @@ End;
 { Convertit un nombre en chaine.                               }
 { ------------------------------------------------------------ }
 
-Procedure ParseStrStmt(PI : Integer);
+Procedure ParseStrStmt(PI : LongInt);
 Var
-  Width, T, Dec : Integer;
+  Width, T, Dec : LongInt;
   IsRealArg : Boolean;
 Begin
   EmitComment('str');
@@ -22113,9 +22169,9 @@ Begin
 End;
 
 
-Procedure ParseValStmt(PI : Integer);
+Procedure ParseValStmt(PI : LongInt);
 Var
-  T : Integer;
+  T : LongInt;
 Begin
   EmitComment('val');
 
@@ -22204,7 +22260,7 @@ End;
 { EP pointe sur IF a l entree.                                  }
 { ------------------------------------------------------------ }
 
-Procedure ParseIfStmt(PI : Integer);
+Procedure ParseIfStmt(PI : LongInt);
 Var
   LblElse  : TString;
   LblEndIf : TString;
@@ -22259,7 +22315,7 @@ End;
 { EP pointe sur CASE a l entree.                                }
 { ------------------------------------------------------------ }
 
-Procedure ParseCaseStmt(PI : Integer);
+Procedure ParseCaseStmt(PI : LongInt);
 Var
   LblEnd  : TString;
   LblNext : TString;
@@ -22268,7 +22324,7 @@ Var
   CaseVal : LongInt;
   RangeHi : LongInt;
   LblRng  : TString;
-  SI      : Integer;
+  SI      : LongInt;
 Begin
   EmitComment('case');
 
@@ -22445,7 +22501,7 @@ End;
 { Labels : _TPL_WTEST_N, _TPL_WEND_N                           }
 { ------------------------------------------------------------ }
 
-Procedure ParseWhileStmt(PI : Integer);
+Procedure ParseWhileStmt(PI : LongInt);
 Var
   LblTest : TString;
   LblEnd  : TString;
@@ -22507,12 +22563,12 @@ End;
 { Labels : _TPL_RBEG_N, _TPL_REND_N                            }
 { ------------------------------------------------------------ }
 
-Procedure ParseRepeatStmt(PI : Integer);
+Procedure ParseRepeatStmt(PI : LongInt);
 Var
   LblBeg : TString;
   LblEnd : TString;
   LblCont : TString;
-  SI : Integer;
+  SI : LongInt;
 Begin
   EmitComment('repeat');
 
@@ -22576,7 +22632,7 @@ End;
 { Labels : _TPL_FTEST_N, _TPL_FCONT_N, _TPL_FEND_N            }
 { ------------------------------------------------------------ }
 
-Procedure ParseForStmt(PI : Integer);
+Procedure ParseForStmt(PI : LongInt);
 Var
   VarName  : TString;
   LimLabel : TString;
@@ -22586,7 +22642,7 @@ Var
   LblCont  : TString;
   LblBody  : TString;
   IsDownTo : Boolean;
-  AIIDepth : Integer;
+  AIIDepth : LongInt;
   AIIUp    : TString;
 Begin
   EmitComment('for');
@@ -22722,7 +22778,7 @@ End;
 { EP pointe sur GOTO a l entree.                                }
 { ------------------------------------------------------------ }
 
-Procedure ParseGotoStmt(PI : Integer);
+Procedure ParseGotoStmt(PI : LongInt);
 Var
   LblName : TString;
 Begin
@@ -22758,9 +22814,9 @@ End;
 { n est pas suivi de ^ (simple appel de fonction).               }
 { ------------------------------------------------------------ }
 
-Function FuncDerefAssignW32(PI : Integer; Const Up : TString) : Boolean;
+Function FuncDerefAssignW32(PI : LongInt; Const Up : TString) : Boolean;
 Var
-  LI, T : Integer;
+  LI, T : LongInt;
 Begin
   FuncDerefAssignW32 := False;
   If EPAtEnd Then Exit;
@@ -22800,21 +22856,21 @@ Begin
     FatalError('":=" attendu apres ' + Up + '(...)^');
 End;
 
-Procedure ParseStmt(PI : Integer);
+Procedure ParseStmt(PI : LongInt);
 Var
   Up    : TString;
   VName : TString;
   Lbl   : TString;
   Lbl2  : TString;
   ArgName : TString;      { variable resultat de BlockRead/BlockWrite }
-  RecSz   : Integer;      { taille d enregistrement pour Reset/Rewrite }
-  SI    : Integer;
-  LI    : Integer;
-  TIdx    : Integer;
+  RecSz   : LongInt;      { taille d enregistrement pour Reset/Rewrite }
+  SI    : LongInt;
+  LI    : LongInt;
+  TIdx    : LongInt;
   FOfs    : LongInt;
   FSize   : LongInt;
-  ElemSz  : Integer;
-  WI      : Integer;
+  ElemSz  : LongInt;
+  WI      : LongInt;
   FDeref  : Boolean;     { F(args)^... := expr }
 Begin
   If EPAtEnd Then Exit;
@@ -28237,10 +28293,10 @@ End;
 { Utilise ParseStmt pour chaque instruction.                    }
 { ------------------------------------------------------------ }
 
-Procedure ParseBody(PI : Integer);
+Procedure ParseBody(PI : LongInt);
 Var
   Up      : TString;
-  SaveEP, SaveEnd, PrevEP : Integer;
+  SaveEP, SaveEnd, PrevEP : LongInt;
 Begin
   { Sauvegarder le contexte si necessaire }
   SaveEP  := EP;
@@ -28309,8 +28365,8 @@ End;
 
 Procedure EmitProcedures;
 Var
-  FI       : Integer;
-  PK       : Integer;
+  FI       : LongInt;
+  PK       : LongInt;
   Extra, CopyOfs, CopySz, NFor : LongInt;
 Begin
   For FI := 0 To ProcCount - 1 Do
@@ -28526,10 +28582,10 @@ End;
 { memoire avec adressage indirect [BX+SI+disp] etc.            }
 { ------------------------------------------------------------ }
 
-Function TranslateAsmOperand(PI : Integer; Const Op : TString) : TString;
+Function TranslateAsmOperand(PI : LongInt; Const Op : TString) : TString;
 Var
   R     : TString;
-  I     : Integer;
+  I     : LongInt;
   C     : Char;
   Tok   : TString;
   Up    : TString;
@@ -28635,7 +28691,7 @@ End;
 
 Function AsmTrimSpaces(Const S : TString) : TString;
 Var
-  A, B : Integer;
+  A, B : LongInt;
 Begin
   A := 1;
   While (A <= Length(S)) And (S[A] = ' ') Do Inc(A);
@@ -28655,15 +28711,15 @@ End;
 { LOOP/LOOPZ/LOOPNZ -> DEC ECX + Jcc equivalent                }
 { ------------------------------------------------------------ }
 
-Procedure TranslateAsmLine(PI : Integer; Const Line : TString);
+Procedure TranslateAsmLine(PI : LongInt; Const Line : TString);
 Var
   S      : TString;
   Mne    : TString;
   Rest   : TString;
   Op1    : TString;
   Op2    : TString;
-  I, J   : Integer;
-  Depth  : Integer;
+  I, J   : LongInt;
+  Depth  : LongInt;
   Up     : TString;
   LblEnd : TString;
 Begin
@@ -28994,11 +29050,11 @@ End;
 { Noyau OS/2 : une instruction par ligne (ou separees par ;), la ligne
   est reconstruite d apres les colonnes des jetons ; les labels locaux
   @nom / @@nom sont propres a chaque bloc ASM. }
-Procedure ParseAsmBlockNative(PI : Integer);
+Procedure ParseAsmBlockNative(PI : LongInt);
 Var
   AsmLine, T, Lbl : TString;
   Up      : TString;
-  CurLine, LastEnd : Integer;
+  CurLine, LastEnd : LongInt;
 
   Function LocalLabel(Const Nm : TString) : TString;
   Begin
@@ -29092,7 +29148,7 @@ Begin
   EmitComment('--- Fin bloc ASM natif ---');
 End;
 
-Procedure ParseAsmBlock(PI : Integer);
+Procedure ParseAsmBlock(PI : LongInt);
 Var
   AsmLine : TString;
   Up      : TString;
@@ -29183,9 +29239,9 @@ End;
 
 Procedure EmitMainBlock;
 Var
-  I    : Integer;
+  I    : LongInt;
   Up   : TString;
-  Depth: Integer;
+  Depth: LongInt;
 Begin
   { Chercher le dernier BEGIN au niveau global = bloc principal }
   I := TokenCount - 1;
@@ -31908,6 +31964,67 @@ Begin
   EmitLabel(TP_RT_PFX + 'POS_N');
   EmitInstr('XOR EAX,EAX');        { pas trouve }
   EmitLabel(TP_RT_PFX + 'POS_D');
+  EmitInstr('POP EDI');
+  EmitInstr('POP ESI');
+  EmitInstr('POP EDX');
+  EmitInstr('POP ECX');
+  EmitInstr('POP EBX');
+  EmitInstr('RET');
+
+  { ------ _TPRT_PPOS : Pos(SubStr, S) sur chaines Pascal ----- }
+  { Entree : EDI = sous-chaine, ESI = chaine (octet de longueur) }
+  { Sortie : EAX = position 1-based, 0 si absente ou SubStr vide }
+  EmitBlankLine;
+  EmitLabel(TP_RT_PFX + 'PPOS');
+  EmitInstr('PUSH EBX');
+  EmitInstr('PUSH ECX');
+  EmitInstr('PUSH EDX');
+  EmitInstr('PUSH ESI');
+  EmitInstr('PUSH EDI');
+  EmitInstr('MOVZX EBX,BYTE PTR [EDI]');   { EBX = longueur de SubStr }
+  EmitInstr('MOVZX ECX,BYTE PTR [ESI]');   { ECX = longueur de S      }
+  EmitInstr('TEST EBX,EBX');
+  EmitInstr('JZ ' + TP_RT_PFX + 'PPOS_N');
+  EmitInstr('CMP ECX,EBX');
+  EmitInstr('JB ' + TP_RT_PFX + 'PPOS_N');
+  EmitInstr('SUB ECX,EBX');
+  EmitInstr('INC ECX');                    { ECX = positions a essayer }
+  EmitInstr('INC ESI');
+  EmitInstr('INC EDI');
+  EmitInstr('PUSH ESI');                   { debut des caracteres de S }
+  EmitLabel(TP_RT_PFX + 'PPOS_O');
+  EmitInstr('PUSH ECX');
+  EmitInstr('PUSH ESI');
+  EmitInstr('PUSH EDI');
+  EmitInstr('MOV ECX,EBX');
+  EmitLabel(TP_RT_PFX + 'PPOS_M');
+  EmitInstr('MOVZX EAX,BYTE PTR [ESI]');
+  EmitInstr('MOVZX EDX,BYTE PTR [EDI]');
+  EmitInstr('CMP EAX,EDX');
+  EmitInstr('JNE ' + TP_RT_PFX + 'PPOS_X');
+  EmitInstr('INC ESI');
+  EmitInstr('INC EDI');
+  EmitInstr('DEC ECX');
+  EmitInstr('JNZ ' + TP_RT_PFX + 'PPOS_M');
+  EmitInstr('POP EDI');                    { trouve }
+  EmitInstr('POP ESI');
+  EmitInstr('POP ECX');
+  EmitInstr('POP EDX');
+  EmitInstr('MOV EAX,ESI');
+  EmitInstr('SUB EAX,EDX');
+  EmitInstr('INC EAX');
+  EmitInstr('JMP ' + TP_RT_PFX + 'PPOS_D');
+  EmitLabel(TP_RT_PFX + 'PPOS_X');
+  EmitInstr('POP EDI');
+  EmitInstr('POP ESI');
+  EmitInstr('POP ECX');
+  EmitInstr('INC ESI');
+  EmitInstr('DEC ECX');
+  EmitInstr('JNZ ' + TP_RT_PFX + 'PPOS_O');
+  EmitInstr('POP EDX');
+  EmitLabel(TP_RT_PFX + 'PPOS_N');
+  EmitInstr('XOR EAX,EAX');
+  EmitLabel(TP_RT_PFX + 'PPOS_D');
   EmitInstr('POP EDI');
   EmitInstr('POP ESI');
   EmitInstr('POP EDX');
@@ -37490,13 +37607,13 @@ Type
   TBcFixup = Record
     CodeOfs  : LongInt;    { offset dans BcCode ou ecrire la valeur   }
     LblName  : TLblStr;    { nom du label cible                       }
-    Kind     : Integer;    { BC_FIX_REL32, BC_FIX_ABS32_DATA, etc.   }
+    Kind     : LongInt;    { BC_FIX_REL32, BC_FIX_ABS32_DATA, etc.   }
     Addend   : LongInt;    { deplacemenent additionnel                }
   End;
   TBcImport = Record
     ApiName  : TIdStr;     { nom normalise de l API (ex: ExitProcess) }
     DllName  : TIdStr;     { nom de la DLL (ex: kernel32.dll)         }
-    IatSlot  : Integer;    { index dans l IAT                         }
+    IatSlot  : LongInt;    { index dans l IAT                         }
   End;
 
 { --- Variables du mini-assembleur binaire --- }
@@ -37519,13 +37636,13 @@ Type
   TArr_BcLabels = Array[0..BC_MAX_LABEL-1] Of TBcLabel;
 Var
   BcLabels   : ^TArr_BcLabels;
-  BcLabelCnt : Integer;
+  BcLabelCnt : LongInt;
   { table allouee au demarrage (AllocTables) }
 Type
   TArr_BcDLabels = Array[0..BC_MAX_DLABEL-1] Of TBcLabel;
 Var
   BcDLabels  : ^TArr_BcDLabels;
-  BcDLabelCnt: Integer;
+  BcDLabelCnt: LongInt;
   { table allouee au demarrage (AllocTables) }
 Type
   TArr_BcFixups = Array[0..BC_MAX_FIXUP-1] Of TBcFixup;
@@ -37541,7 +37658,7 @@ Var
   BcDFixLbl  : ^TArr_BcDFixLbl;
   BcFixupCnt : LongInt;
   BcImports  : Array[0..BC_MAX_IMP-1] of TBcImport;
-  BcImportCnt: Integer;
+  BcImportCnt: LongInt;
 
 { --- Helpers ecriture binaire --- }
 
@@ -37567,7 +37684,7 @@ Begin
 End;
 
 Procedure PEWrName8(S: TString);
-Var I: Integer;
+Var I: LongInt;
 Begin
   For I := 1 To 8 Do
     If I <= Length(S) Then PEWrB(Byte(S[I]))
@@ -37575,13 +37692,13 @@ Begin
 End;
 
 Procedure PEWrStrNoZ(S: TString);
-Var I: Integer;
+Var I: LongInt;
 Begin
   For I := 1 To Length(S) Do PEWrB(Byte(S[I]));
 End;
 
 Procedure PEWrStr(S: TString);
-Var I: Integer;
+Var I: LongInt;
 Begin
   For I := 1 To Length(S) Do PEWrB(Byte(S[I]));
   PEWrB(0);
@@ -37644,7 +37761,7 @@ Begin
 End;
 
 Procedure BcDataStr(Const S: TString);
-Var I: Integer;
+Var I: LongInt;
 Begin
   For I := 1 To Length(S) Do BcDataB(Byte(S[I]));
   BcDataB(0);
@@ -37659,7 +37776,7 @@ End;
 { BcDataInitBytes : copier Count octets du pool d initialisation en reservant }
 { les emplacements d adresses (fixups) resolus par BcResolveFixups            }
 Procedure BcDataInitBytes(PoolOfs, Count: LongInt);
-Var J: LongInt; F: Integer;
+Var J: LongInt; F: LongInt;
 Begin
   J := 0;
   While J < Count Do
@@ -37696,7 +37813,7 @@ Var
   BcDLblNext : Array[0..BC_MAX_DLABEL - 1] Of LongInt;
 
 Function BcHashName(Const Nm: TString): LongInt;
-Var I: Integer; H: LongInt;
+Var I: LongInt; H: LongInt;
 Begin
   H := 0;
   For I := 1 To Length(Nm) Do H := ((H * 31) + Ord(Nm[I])) And $FFFFFF;
@@ -37795,7 +37912,7 @@ Begin
 End;
 
 { --- Gestion des fixups --- }
-Procedure BcAddFixup(Kind: Integer; Const Lbl: TString; Addend: LongInt);
+Procedure BcAddFixup(Kind: LongInt; Const Lbl: TString; Addend: LongInt);
 Begin
   If BcFixupCnt < BC_MAX_FIXUP Then
   Begin
@@ -37809,7 +37926,7 @@ End;
 
 { --- Gestion des imports --- }
 Function BcNormalizeApi(Const Raw: TString): TString;
-Var S: TString; P: Integer;
+Var S: TString; P: LongInt;
 Begin
   S := Raw;
   If (Length(S) > 0) And (S[1] = '_') Then Delete(S, 1, 1);
@@ -37819,8 +37936,8 @@ Begin
 End;
 
 { Rang (1..) d une API de la couche du noyau OS/2-0, 0 sinon }
-Function BcOs2ApiIndex(Const U: TString): Integer;
-Var K: Integer;
+Function BcOs2ApiIndex(Const U: TString): LongInt;
+Var K: LongInt;
 Begin
   BcOs2ApiIndex := 0;
   For K := 1 To OS2_API_COUNT Do
@@ -37832,7 +37949,7 @@ Begin
 End;
 
 Function BcApiToDll(Const Api: TString): TString;
-Var U: TString; DI: Integer;
+Var U: TString; DI: LongInt;
 Begin
   U := StrUpperCase(Api);
   { OS/2 : fonction declaree External 'DLL' }
@@ -37887,8 +38004,8 @@ Begin
     BcApiToDll := 'kernel32.dll';
 End;
 
-Function BcFindOrAddImport(Const RawName: TString): Integer;
-Var Api: TString; I: Integer;
+Function BcFindOrAddImport(Const RawName: TString): LongInt;
+Var Api: TString; I: LongInt;
 Begin
   Api := BcNormalizeApi(RawName);
   For I := 0 To BcImportCnt - 1 Do
@@ -37906,7 +38023,7 @@ Begin
 End;
 
 Function BcIsImport(Const Name: TString): Boolean;
-Var U: TString; DI: Integer;
+Var U: TString; DI: LongInt;
 Begin
   U := StrUpperCase(BcNormalizeApi(Name));
   { OS/2 : fonctions declarees External 'DLL' }
@@ -37987,7 +38104,7 @@ End;
 
 { --- Parseur d operandes x86 --- }
 
-Function BcParseReg32(Const S: TString): Integer;
+Function BcParseReg32(Const S: TString): LongInt;
 Var U: TString;
 Begin
   U := StrUpperCase(S);
@@ -38002,7 +38119,7 @@ Begin
   Else BcParseReg32 := -1;
 End;
 
-Function BcParseReg8(Const S: TString): Integer;
+Function BcParseReg8(Const S: TString): LongInt;
 Var U: TString;
 Begin
   U := StrUpperCase(S);
@@ -38017,7 +38134,7 @@ Begin
   Else BcParseReg8 := -1;
 End;
 
-Function BcParseReg16(Const S: TString): Integer;
+Function BcParseReg16(Const S: TString): LongInt;
 Var U: TString;
 Begin
   U := StrUpperCase(S);
@@ -38034,7 +38151,7 @@ End;
 
 {$Q-}{$R-}  { Disable overflow/range checks: hex values like 80000000h exceed LongInt }
 Function BcParseImm(Const S: TString; Var V: LongInt): Boolean;
-Var T: TString; I: Integer; Neg: Boolean; Ch: Char; U: LongWord;
+Var T: TString; I: LongInt; Neg: Boolean; Ch: Char; U: LongWord;
 Begin
   BcParseImm := False; V := 0; U := 0;
   T := S;
@@ -38079,16 +38196,16 @@ Begin
   If Neg Then V := -V;
   BcParseImm := True;
 End;
-{$Q+}{$R+}
+{$IFNDEF OS2PC}{$Q+}{$R+}{$ENDIF}  { OS2PC applique l etat final des options a tout le programme }
 
 { Emettre ModR/M + SIB + displacement pour operande memoire }
 { Retourne True si l operande est un label de donnee (fixup necessaire) }
 { RegField est le champ /r (0-7) du ModR/M }
-Function BcEmitMemRM(Const Mem: TString; RegField: Integer;
+Function BcEmitMemRM(Const Mem: TString; RegField: LongInt;
                      Var DataLbl: TString; Var DataAdd: LongInt): Boolean;
 Var
   Inner, Part1, Part2, DP, DP2: TString;
-  P, BaseReg, IdxReg, Idx: Integer;
+  P, BaseReg, IdxReg, Idx: LongInt;
   Disp: LongInt;
   HasDisp, Neg2: Boolean;
 Begin
@@ -38272,14 +38389,14 @@ End;
 Procedure BcAssemble(Const S: TString);
 Var
   Line, Mnem, Op1, Op2, Tmp, Rest, ImOp2, ImOp3, R2: TString;
-  P, Reg1, Reg2, Imm8Reg, Slot, AluOp, Cp: Integer;
+  P, Reg1, Reg2, Imm8Reg, Slot, AluOp, Cp: LongInt;
   ImmVal: LongInt;
   DataLbl: TString;
   DataAdd: LongInt;
   IsByte, IsWord, Neg3: Boolean;
 
   Procedure SplitOps(Const Rest: TString);
-  Var J, Depth: Integer;
+  Var J, Depth: LongInt;
   Begin
     Op1 := ''; Op2 := '';
     J := 1; Depth := 0;
@@ -38304,7 +38421,7 @@ Var
   End;
 
   Function StartsWithBracket(Const X: TString): Boolean;
-  Var I: Integer;
+  Var I: LongInt;
   Begin
     StartsWithBracket := False;
     For I := 1 To Length(X) Do
@@ -38313,7 +38430,7 @@ Var
   End;
 
   Function StripSizePrefix(Const X: TString): TString;
-  Var U, Res: TString; Idx2: Integer;
+  Var U, Res: TString; Idx2: LongInt;
   Begin
     U := StrUpperCase(X);
     If Copy(U, 1, 10) = 'DWORD PTR ' Then Res := Copy(X, 11, 255)
@@ -38343,7 +38460,7 @@ Var
 
   { ParseOffsetOperand : 'OFFSET label[+/-disp]' -> label et deplacement }
   Procedure ParseOffsetOperand(Const X: TString; Var Lbl: TString; Var Add: LongInt);
-  Var T2, R2: TString; Q: Integer; Ng: Boolean;
+  Var T2, R2: TString; Q: LongInt; Ng: Boolean;
   Begin
     T2 := Copy(X, 8, 255);
     While (Length(T2) > 0) And (T2[1] = ' ') Do Delete(T2, 1, 1);
@@ -38369,7 +38486,7 @@ Var
   { Assemble16 : formes 16 bits (prefixe 66h) de MOV/ADD/SUB/CMP/AND/OR/XOR/TEST/INC/DEC }
   { Retourne True si l instruction a ete traitee.                                      }
   Function Assemble16 : Boolean;
-  Var R1, R2, AOp: Integer; Iv: LongInt; T2: TString;
+  Var R1, R2, AOp: LongInt; Iv: LongInt; T2: TString;
   Begin
     Assemble16 := False;
     R1 := BcParseReg16(Op1);
@@ -38447,9 +38564,9 @@ Var
   Function AssembleX87 : Boolean;
   Var
     M : TString;
-    Esc, RegF, Sz, I2 : Integer;
+    Esc, RegF, Sz, I2 : LongInt;
 
-    Function MemSize(Const X : TString) : Integer;
+    Function MemSize(Const X : TString) : LongInt;
     Var U : TString;
     Begin
       U := StrUpperCase(X);
@@ -38461,7 +38578,7 @@ Var
     End;
 
     { StIdx : 'ST' -> 0, 'ST(i)' -> i, sinon -1 }
-    Function StIdx(Const X : TString) : Integer;
+    Function StIdx(Const X : TString) : LongInt;
     Var U : TString;
     Begin
       U := StrUpperCase(X);
@@ -38472,7 +38589,7 @@ Var
       Else StIdx := -1;
     End;
 
-    Procedure EmitMem(AEsc : Integer; ARegF : Integer);
+    Procedure EmitMem(AEsc : LongInt; ARegF : LongInt);
     Begin
       BcEmitB(AEsc);
       BcEmitMemRM(StripSizePrefix(Op1), ARegF, DataLbl, DataAdd);
@@ -39419,12 +39536,12 @@ End;
 Function BcAssembleSys(Const S: TString): Boolean;
 Var
   Line, Mnem, Rest, Op1, Op2, U1, U2, DataLbl, Conv, Item : TString;
-  P, R, R2, Sr, Before, Opc, J, Depth : Integer;
+  P, R, R2, Sr, Before, Opc, J, Depth : LongInt;
   V, DataAdd : LongInt;
   InQ, Has16, HasImm : Boolean;
 
   Procedure Split(Const X: TString);
-  Var K, D: Integer;
+  Var K, D: LongInt;
   Begin
     Op1 := ''; Op2 := ''; D := 0;
     For K := 1 To Length(X) Do
@@ -39441,7 +39558,7 @@ Var
     Op1 := AsmTrimSpaces(X);
   End;
 
-  Function SRegIdx(Const X: TString): Integer;
+  Function SRegIdx(Const X: TString): LongInt;
   Begin
     If X = 'ES' Then SRegIdx := 0 Else If X = 'CS' Then SRegIdx := 1
     Else If X = 'SS' Then SRegIdx := 2 Else If X = 'DS' Then SRegIdx := 3
@@ -39449,8 +39566,8 @@ Var
     Else SRegIdx := -1;
   End;
 
-  Function AnyReg(Const X: TString): Integer;
-  Var RR: Integer;
+  Function AnyReg(Const X: TString): LongInt;
+  Var RR: LongInt;
   Begin
     RR := BcParseReg32(X);
     If RR < 0 Then RR := BcParseReg16(X);
@@ -39458,7 +39575,7 @@ Var
   End;
 
   Function MemOp(Const X: TString): TString;
-  Var T: TString; K: Integer;
+  Var T: TString; K: LongInt;
   Begin
     T := X;
     K := Pos('[', T);
@@ -39466,14 +39583,14 @@ Var
     MemOp := T;
   End;
 
-  Procedure EmitMem(Const X: TString; Field: Integer);
+  Procedure EmitMem(Const X: TString; Field: LongInt);
   Begin
     BcEmitMemRM(MemOp(X), Field, DataLbl, DataAdd);
   End;
 
   { remplacer les registres 16 bits par leur equivalent 32 bits }
   Function Widen(Const X: TString): TString;
-  Var T, W, Res: TString; K: Integer;
+  Var T, W, Res: TString; K: LongInt;
   Begin
     Res := ''; K := 1; T := X;
     While K <= Length(T) Do
@@ -39753,14 +39870,14 @@ End;
 Procedure BcAssemble8086(Const S: TString);
 Var
   Line, Mnem, Tmp, Op1, Op2: TString;
-  P: Integer;
+  P: LongInt;
   Reg1, Reg2, ImmVal: LongInt;
   DataLbl: TString;
   DataAdd: LongInt;
   UOp1, UOp2: TString;
 
   Procedure SplitOps8086(Const Rest: TString);
-  Var J: Integer;
+  Var J: LongInt;
   Begin
     Op1 := ''; Op2 := '';
     J := 1;
@@ -39782,7 +39899,7 @@ Var
       Delete(Op1, Length(Op1), 1);
   End;
 
-  Function Reg16(Const S: TString): Integer;
+  Function Reg16(Const S: TString): LongInt;
   { Retourne 0-7 pour registre 16 bits (traduit E?? en ??) }
   Var U: TString;
   Begin
@@ -39798,7 +39915,7 @@ Var
     Else Reg16 := -1;
   End;
 
-  Function Reg8(Const S: TString): Integer;
+  Function Reg8(Const S: TString): LongInt;
   Var U: TString;
   Begin
     U := StrUpperCase(S);
@@ -39814,7 +39931,7 @@ Var
   End;
 
   Function ParseImm16(Const S: TString; Var V: LongInt): Boolean;
-  Var U: TString; Code: Integer; W: LongInt;
+  Var U: TString; Code: LongInt; W: LongInt;
   Begin
     ParseImm16 := False;
     U := StrUpperCase(S);
@@ -39843,7 +39960,7 @@ Var
 
   Procedure ParseMemLabel(Const S: TString; Var Lbl: TString; Var Disp: LongInt);
   { Parse [LABEL] or [LABEL+disp] or [LABEL-disp] }
-  Var U, R2: TString; J: Integer;
+  Var U, R2: TString; J: LongInt;
   Begin
     Lbl := ''; Disp := 0;
     U := S;
@@ -40371,7 +40488,7 @@ Var
   P: LongInt;
 
   Procedure SplitOpsZ80(Const Rest: TString);
-  Var J: Integer;
+  Var J: LongInt;
   Begin
     Op1 := ''; Op2 := '';
     J := 1;
@@ -40682,7 +40799,7 @@ End;
 Function BcParseNum6502(Const S: TString): LongInt;
 Var
   T: TString;
-  I: Integer;
+  I: LongInt;
   Neg: Boolean;
   V: LongInt;
   C: Char;
@@ -40724,7 +40841,7 @@ Var
   P: LongInt;
 
   Procedure SplitOps6502(Const Rest: TString);
-  Var J: Integer;
+  Var J: LongInt;
   Begin
     Op1 := ''; Op2 := '';
     J := 1;
@@ -41103,7 +41220,7 @@ Var
   P: LongInt;
 
   Procedure SplitOps6809(Const Rest: TString);
-  Var J: Integer;
+  Var J: LongInt;
   Begin
     Op1 := ''; Op2 := '';
     J := 1;
@@ -41289,11 +41406,11 @@ End;
 Procedure BcAssemble68000(Const S: TString);
 Var
   Line, Mnem, Tmp, Op1, Op2: TString;
-  P: Integer;
+  P: LongInt;
   Val: LongInt;
 
   Procedure SplitOps68000(Const Rest: TString);
-  Var J: Integer;
+  Var J: LongInt;
   Begin
     Op1 := ''; Op2 := '';
     J := 1;
@@ -41327,7 +41444,7 @@ Var
   End;
 
   { Parser un numero de registre Dn ou An }
-  Function ParseDn(Const S: TString): Integer;
+  Function ParseDn(Const S: TString): LongInt;
   Begin
     ParseDn := -1;
     If (Length(S) = 2) And ((S[1] = 'D') Or (S[1] = 'd')) And
@@ -41335,7 +41452,7 @@ Var
       ParseDn := Ord(S[2]) - Ord('0');
   End;
 
-  Function ParseAn(Const S: TString): Integer;
+  Function ParseAn(Const S: TString): LongInt;
   Begin
     ParseAn := -1;
     If (Length(S) = 2) And ((S[1] = 'A') Or (S[1] = 'a')) And
@@ -41346,7 +41463,7 @@ Var
 
   { Parser un immediat #xxx }
   Function ParseImm(Const S: TString; Var V: LongInt): Boolean;
-  Var I: Integer; Neg: Boolean; C: Char;
+  Var I: LongInt; Neg: Boolean; C: Char;
   Begin
     ParseImm := False;
     If (Length(S) < 2) Or (S[1] <> '#') Then Exit;
@@ -41397,7 +41514,7 @@ Var
 
   { Extraire le nom de label (Op1 sans prefixe ni suffixe) }
   Function IsLabel(Const S: TString): Boolean;
-  Var I: Integer;
+  Var I: LongInt;
   Begin
     IsLabel := False;
     If Length(S) = 0 Then Exit;
@@ -41416,7 +41533,7 @@ Var
   { Calculer le masque de registres pour MOVEM }
   Function ParseRegList(Const S: TString): Word;
   Var
-    I, J, R1, R2: Integer;
+    I, J, R1, R2: LongInt;
     Mask: Word;
     U: TString;
     Part: TString;
@@ -41456,7 +41573,7 @@ Var
 
   { Inverser les bits du masque MOVEM pour predecrement }
   Function ReverseMask(M: Word): Word;
-  Var I: Integer; R: Word;
+  Var I: LongInt; R: Word;
   Begin
     R := 0;
     For I := 0 To 15 Do
@@ -42022,7 +42139,7 @@ End;
 
 { --- Construction de la section .data binaire --- }
 Procedure BcBuildData;
-Var I, J: Integer; S: TString;
+Var I, J: LongInt; S: TString;
 Begin
   BcDataLen := 0; BcDLabelCnt := 0; BcDFixCnt := 0;
   BcHashCheck; BcHashResetData;
@@ -42883,7 +43000,7 @@ Type
 Var
   CrayCode     : Array[0..CRAY_MAX_PARCELS-1] Of TCrayParcel;
   CrayCodeLen  : LongInt;  { nombre de parcels emis }
-  CraySaveDepth: Integer;  { profondeur pile registre S2..S6 (Phase 2e) }
+  CraySaveDepth: LongInt;  { profondeur pile registre S2..S6 (Phase 2e) }
 
 { Reinitialise le buffer code Cray-1. }
 Procedure CrayCodeInit;
@@ -43006,7 +43123,7 @@ Const
 Var
   CrayVarName : Array[0..CRAY_MAX_VARS-1] Of TString;
   CrayVarAddr : Array[0..CRAY_MAX_VARS-1] Of LongInt;
-  CrayVarCount: Integer;
+  CrayVarCount: LongInt;
 
 Procedure CrayVarInit;
 Begin
@@ -43017,7 +43134,7 @@ End;
 { au premier usage. Allocation en mots 64 bits = 4 parcels.      }
 Function CrayLookupVarAddr(Const Name: TString): LongInt;
 Var
-  J: Integer;
+  J: LongInt;
   Up: TString;
 Begin
   Up := StrUpperCase(Name);
@@ -43065,10 +43182,10 @@ Const
 Var
   CrayLblName  : Array[0..CRAY_MAX_LABELS-1] Of TString;
   CrayLblPos   : Array[0..CRAY_MAX_LABELS-1] Of LongInt;
-  CrayLblCount : Integer;
+  CrayLblCount : LongInt;
   CrayFxParcel : Array[0..CRAY_MAX_FIXUPS-1] Of LongInt;  { pos parcel0 du jump }
   CrayFxName   : Array[0..CRAY_MAX_FIXUPS-1] Of TString;
-  CrayFxCount  : Integer;
+  CrayFxCount  : LongInt;
 
 Procedure CrayLabelInit;
 Begin
@@ -43085,7 +43202,7 @@ Begin
 End;
 
 Function CrayFindLabel(Const Name: TString): LongInt;
-Var J: Integer;
+Var J: LongInt;
 Begin
   For J := 0 To CrayLblCount - 1 Do
     If CrayLblName[J] = Name Then
@@ -43118,7 +43235,7 @@ Begin
 End;
 
 Procedure CrayResolveFixups;
-Var J: Integer; Tgt: LongInt;
+Var J: LongInt; Tgt: LongInt;
 Begin
   For J := 0 To CrayFxCount - 1 Do
   Begin
@@ -43193,8 +43310,8 @@ Const
 Var
   CrayDFxParcel : Array[0..CRAY_MAX_DFXUPS-1] Of LongInt;
   CrayDFxName   : Array[0..CRAY_MAX_DFXUPS-1] Of TString;
-  CrayDFxCount  : Integer;
-  CrayPrintMode : Integer;  { 0=str  1=newline  2=int already printed }
+  CrayDFxCount  : LongInt;
+  CrayPrintMode : LongInt;  { 0=str  1=newline  2=int already printed }
 
 Procedure CrayDFxInit;
 Begin
@@ -43225,7 +43342,7 @@ Begin
 End;
 
 { Emet une instruction EX i,j,k (trap COS). Service code 6-bit dans j,k. }
-Procedure CrayEmitTrap(Service: Integer);
+Procedure CrayEmitTrap(Service: LongInt);
 Begin
   CrayEmitFmt1(CRAY_OP_EX, 0,
                (Service Shr 3) And $07,
@@ -43272,11 +43389,11 @@ End;
 {   ERR                    halt CPU                            }
 { ============================================================ }
 
-Function CrayParseSReg(Const S: TString): Integer;
+Function CrayParseSReg(Const S: TString): LongInt;
 { Parse un registre 'Si' (i = 0..7) ou retourne -1 si invalide. }
 Var
   T: TString;
-  N: Integer;
+  N: LongInt;
 Begin
   T := S;
   While (Length(T) > 0) And (T[1] = ' ') Do Delete(T, 1, 1);
@@ -43297,7 +43414,7 @@ Var
   T: TString;
   Neg: Boolean;
   V: LongInt;
-  J: Integer;
+  J: LongInt;
 Begin
   T := S;
   While (Length(T) > 0) And (T[1] = ' ') Do Delete(T, 1, 1);
@@ -43322,8 +43439,8 @@ Procedure BcAssembleCray1(Const S: TString);
 Var
   Line, Mnem, Tmp: TString;
   Parts: Array[0..3] Of TString;
-  NParts, P, J: Integer;
-  Si, Sj, Sk: Integer;
+  NParts, P, J: LongInt;
+  Si, Sj, Sk: LongInt;
   Imm: LongInt;
   Declare_LblTrue, Declare_LblEnd: TString;
 Begin
@@ -43697,7 +43814,7 @@ Var
   P: TCrayParcel;
 
   Procedure WriteWord64BE(Value: LongInt);
-  Var J: Integer;
+  Var J: LongInt;
   Begin
     For J := 0 To 7 Do W[J] := 0;
     W[7] := Value And $FF;
@@ -44752,12 +44869,12 @@ Const
 Type
   TDllGroup = Record
     DllName: TString;
-    Idxs: Array[0..MAX_IMP_PER_DLL-1] Of Integer;
-    Cnt: Integer;
+    Idxs: Array[0..MAX_IMP_PER_DLL-1] Of LongInt;
+    Cnt: LongInt;
   End;
 Var
   DllGroups: Array[0..MAX_DLL_PE-1] Of TDllGroup;
-  DllGrpCnt: Integer;
+  DllGrpCnt: LongInt;
   TextRawSize, DataRawSize, IdataRawSize: LongInt;
   DataRVA, IdataRVA: LongInt;
   DataVA, IdataVA: LongInt;
@@ -44770,10 +44887,10 @@ Var
   DnmPerDll: Array[0..MAX_DLL_PE-1] Of LongInt;
   IatVA: LongInt;
   CurOfs: LongInt;
-  DI, AI: Integer;
+  DI, AI: LongInt;
   I, J: LongInt;
   Found: Boolean;
-  ImpIdx: Integer;
+  ImpIdx: LongInt;
   IdataVirtSize: LongInt;
   IatSlotOfs: Array[0..BC_MAX_IMP-1] Of LongInt;
   FxOfs, ValIat, IATTotalSize, IdataFileBase, MainOfs: LongInt;
@@ -44781,13 +44898,13 @@ Var
   EntryPointRVA: LongInt;
   { OS/2-0 noyau : section .edata (exportations DOSCALLS.DLL) }
   Krnl, HasExp: Boolean;
-  ExpN: Integer;
+  ExpN: LongInt;
   { ordinaux : base, nombre d entrees de l EAT, ordinal de chaque exportation }
   OrdBase, NFunc, OrdMax: LongInt;
   ExpOrd: Array[0..MAX_EXP - 1] Of LongInt;
   ExpDll: TString;
   HdrSize, EdataRVA, EdataSize, EdataRawSize, EdataFileBase: LongInt;
-  ExpOrder: Array[0..MAX_EXP - 1] Of Integer;
+  ExpOrder: Array[0..MAX_EXP - 1] Of LongInt;
   ExpNameOfs: Array[0..MAX_EXP - 1] Of LongInt;
   EatOfs, NptOfs, OrdOfs, ExpDllOfs, TmpI, ThunkOfs: LongInt;
   { OS/2-0 bibliotheque : section .reloc }
@@ -44799,14 +44916,14 @@ Var
 
   Function HexMap(V: LongInt): TString;
   Const HX: String[16] = '0123456789ABCDEF';
-  Var R: TString; K: Integer;
+  Var R: TString; K: LongInt;
   Begin
     R := '';
     For K := 1 To 8 Do Begin R := HX[(V And 15) + 1] + R; V := V Shr 4; End;
     HexMap := R;
   End;
 
-  Function ExpNameOf(K: Integer): TString;
+  Function ExpNameOf(K: LongInt): TString;
   Begin
     If Krnl Then ExpNameOf := BcImports[K].ApiName Else ExpNameOf := ExpNames[K];
   End;
@@ -45456,10 +45573,10 @@ Var
   TextOfs, DataOfs: LongInt;
   NumSymbols: LongInt;
   NameOfs: LongInt;
-  I: Integer;
+  I: LongInt;
 
   Procedure COFFWrName8(S: TString);
-  Var J: Integer;
+  Var J: LongInt;
   Begin
     For J := 1 To 8 Do
       If J <= Length(S) Then PEWrB(Byte(S[J]))
@@ -45604,7 +45721,7 @@ End;
 { --- EmitDataSegDos16 : segment de donnees DOS 16 bits --- }
 Procedure EmitDataSegDos16;
 Var
-  I, J : Integer;
+  I, J : LongInt;
   S    : TString;
   C    : Char;
 Begin
@@ -45746,9 +45863,9 @@ Var
   FName : TString;
   TF    : File;
   Dirs  : TString;
-  P     : Integer;
+  P     : LongInt;
   Dir   : TString;
-  IORes : Integer;
+  IORes : LongInt;
 Begin
   FName := UnitName + '.TPU';
   { 1. Current directory }
@@ -45790,12 +45907,12 @@ Var
   TF    : File;
   Hdr   : Array[0..95] Of Byte; { max 0x60 bytes for TP7 }
   NRead : {$IFDEF FPC}LongInt{$ELSE}Word{$ENDIF};
-  IORes : Integer;
+  IORes : LongInt;
   IsTP7 : Boolean;
   OfsThisUnit : Word;
   NameLen : Byte;
   NameBuf : Array[0..63] Of Byte;
-  J     : Integer;
+  J     : LongInt;
 Begin
   LoadTPUHeader := False;
   Ver := 0; UnitNameOut := ''; SymSize := 0;
@@ -45860,9 +45977,9 @@ End;
 
 Procedure MarkUnitSymbols(Const UName : TString);
 { Mark existing symbols in SymTab with their UnitName }
-Var Up : TString; I : Integer;
+Var Up : TString; I : LongInt;
   Procedure MarkIf(Const SName, UNm : TString);
-  Var J : Integer;
+  Var J : LongInt;
   Begin
     For J := 0 To SymCount - 1 Do
       If SymTab^[J].Name = SName Then SymTab^[J].UnitName := UNm;
@@ -46076,9 +46193,9 @@ Var
   FName : TString;
   TF    : File;
   Dirs  : TString;
-  P     : Integer;
+  P     : LongInt;
   Dir   : TString;
-  IORes : Integer;
+  IORes : LongInt;
 Begin
   FName := UnitName + '.QPU';
   { 1. Current directory }
@@ -46121,11 +46238,11 @@ Var
   TF    : File;
   Hdr   : Array[0..95] Of Byte;  { max header bytes to read }
   NRead : {$IFDEF FPC}LongInt{$ELSE}Word{$ENDIF};
-  IORes : Integer;
+  IORes : LongInt;
   HdrSz : Word;
   DepOfs: Word;
   NameLen: Byte;
-  J     : Integer;
+  J     : LongInt;
 Begin
   LoadQPUHeader := False;
   UnitNameOut := ''; SymSize := 0; CodeSize := 0; FixupSize := 0; DepCount := 0;
@@ -46165,7 +46282,7 @@ End;
 
 Procedure ParseUsesClause;
 Var
-  I, SI      : Integer;
+  I, SI      : LongInt;
   Up, UName  : TString;
   InUses     : Boolean;
   TPUPath    : TString;
@@ -46363,29 +46480,29 @@ Const
 Type
   TD16Label = Record
     Name   : String[40];
-    Seg    : Integer;      { -1 = non defini, 0..n-1 code, 255 = donnees }
+    Seg    : LongInt;      { -1 = non defini, 0..n-1 code, 255 = donnees }
     Ofs    : LongInt;      { offset dans le segment                     }
     Next   : LongInt;      { chainage de hachage                        }
   End;
   TD16Fixup = Record
-    Seg    : Integer;      { segment de code contenant le fixup (255 = donnees) }
+    Seg    : LongInt;      { segment de code contenant le fixup (255 = donnees) }
     Ofs    : LongInt;      { offset dans le segment                      }
-    Kind   : Integer;
+    Kind   : LongInt;
     Lbl    : LongInt;      { index du label cible                         }
     Addend : LongInt;
     Line   : LongInt;      { ligne source pour les messages              }
   End;
   { Operande decode par l assembleur }
   TD16Operand = Record
-    Kind   : Integer;      { 0 rien, 1 reg8, 2 reg16, 3 sreg, 4 mem, 5 imm }
-    Reg    : Integer;
-    Size   : Integer;      { 1, 2, 4 ou 0 inconnu                        }
-    SegOvr : Integer;      { -1 aucun, 0 ES,1 CS,2 SS,3 DS                }
-    RM     : Integer;      { champ r/m (base/index) ; 6 = disp seul      }
+    Kind   : LongInt;      { 0 rien, 1 reg8, 2 reg16, 3 sreg, 4 mem, 5 imm }
+    Reg    : LongInt;
+    Size   : LongInt;      { 1, 2, 4 ou 0 inconnu                        }
+    SegOvr : LongInt;      { -1 aucun, 0 ES,1 CS,2 SS,3 DS                }
+    RM     : LongInt;      { champ r/m (base/index) ; 6 = disp seul      }
     HasBase: Boolean;
     Disp   : LongInt;
     Lbl    : LongInt;      { label reference dans le deplacement / imm   }
-    ImmKind: Integer;      { 0 valeur, 1 OFFSET lbl, 2 SEG lbl           }
+    ImmKind: LongInt;      { 0 valeur, 1 OFFSET lbl, 2 SEG lbl           }
     Far    : Boolean;      { FAR PTR                                     }
     Short  : Boolean;      { SHORT                                       }
   End;
@@ -46394,8 +46511,8 @@ Var
   D16Code     : Array[0..D16_MAX_CODE-1] Of Byte;
   D16CodeLen  : LongInt;                         { octets emis au total      }
   D16SegStart : Array[0..D16_MAX_SEG] Of LongInt;{ debut de chaque segment   }
-  D16SegCount : Integer;
-  D16CurSeg   : Integer;
+  D16SegCount : LongInt;
+  D16CurSeg   : LongInt;
   D16Data     : Array[0..D16_MAX_DATA-1] Of Byte;
   D16DataLen  : LongInt;                         { donnees initialisees     }
   D16BssLen   : LongInt;                         { zone non initialisee      }
@@ -46425,7 +46542,7 @@ End;
 { ------------------------------------------------------------ }
 
 Function D16HashName(Const S : TString) : LongInt;
-Var I : Integer; H : LongInt;
+Var I : LongInt; H : LongInt;
 Begin
   H := 0;
   For I := 1 To Length(S) Do
@@ -46567,7 +46684,7 @@ Begin
 End;
 
 { Taille du segment courant }
-Function D16SegSize(S : Integer) : LongInt;
+Function D16SegSize(S : LongInt) : LongInt;
 Begin
   If S = D16CurSeg Then D16SegSize := D16CodeLen - D16SegStart[S]
   Else D16SegSize := D16SegStart[S + 1] - D16SegStart[S];
@@ -46587,7 +46704,7 @@ Const
   D16_MAX_RANGE = {$IFDEF OS2PC}64{$ELSE}{$IFDEF FPC}16384{$ELSE}512{$ENDIF}{$ENDIF};
 Type
   TD16Range = Record
-    Seg      : Integer;
+    Seg      : LongInt;
     StartOfs : LongInt;
     EndOfs   : LongInt;
     Keep     : Boolean;
@@ -46599,7 +46716,7 @@ Var
   D16NoElim   : Boolean;                                { desactive l elimination }
   D16ElimBytes: LongInt;                                { octets retires }
 
-Procedure D16AddRange(Seg : Integer; StartOfs, EndOfs : LongInt; Root : Boolean);
+Procedure D16AddRange(Seg : LongInt; StartOfs, EndOfs : LongInt; Root : Boolean);
 Begin
   { au-dela de la capacite, les procedures sans plage sont simplement conservees }
   If (D16RangeCnt >= D16_MAX_RANGE) Or (EndOfs <= StartOfs) Then Exit;
@@ -46611,7 +46728,7 @@ Begin
 End;
 
 { Plage contenant l adresse de code Seg:Ofs, -1 si hors plage }
-Function D16RangeOfAddr(Seg : Integer; Ofs : LongInt) : LongInt;
+Function D16RangeOfAddr(Seg : LongInt; Ofs : LongInt) : LongInt;
 Var A, Lo, Hi, Mid : LongInt;
 Begin
   D16RangeOfAddr := -1;
@@ -46628,7 +46745,7 @@ Begin
 End;
 
 { Derniere plage du segment Seg qui commence strictement avant l offset Ofs, -1 si aucune }
-Function D16RangeBefore(Seg : Integer; Ofs : LongInt) : LongInt;
+Function D16RangeBefore(Seg : LongInt; Ofs : LongInt) : LongInt;
 Var A, Lo, Hi, Mid, R : LongInt;
 Begin
   A := D16SegStart[Seg] + Ofs; R := -1;
@@ -46647,10 +46764,10 @@ Var
   I, R, T, L, N : LongInt; Changed : Boolean;
   Before, After : Array[0..D16_MAX_RANGE - 1] Of LongInt;  { octets retires avant / apres la plage, dans son segment }
   NewStart : Array[0..D16_MAX_SEG] Of LongInt;
-  P, Cur, SegEnd, A, Sz, Removed : LongInt; S : Integer;
+  P, Cur, SegEnd, A, Sz, Removed : LongInt; S : LongInt;
   NewOfs : LongInt; Dead : Boolean;
 
-  Procedure Remap(Seg : Integer; Ofs : LongInt; Var NewO : LongInt; Var IsDead : Boolean);
+  Procedure Remap(Seg : LongInt; Ofs : LongInt; Var NewO : LongInt; Var IsDead : Boolean);
   Var Rg : LongInt;
   Begin
     IsDead := False; NewO := Ofs;
@@ -46767,7 +46884,7 @@ End;
   ils restent coherents puisque label et fixup sont deplaces ensemble. }
 Procedure D16SplitSegmentAt(Start : LongInt);
 Var
-  Old, Nw : Integer; Rel, Lim, I : LongInt;
+  Old, Nw : LongInt; Rel, Lim, I : LongInt;
 Begin
   If D16SegCount >= D16_MAX_SEG Then
   Begin
@@ -46796,7 +46913,7 @@ Begin
     End;
 End;
 
-Procedure D16AddFixup(Kind : Integer; Lbl : LongInt; Addend : LongInt);
+Procedure D16AddFixup(Kind : LongInt; Lbl : LongInt; Addend : LongInt);
 Begin
   If D16FixupCnt >= D16_MAX_FIXUP Then
   Begin
@@ -46812,7 +46929,7 @@ Begin
 End;
 
 { Fixup dans le segment de donnees (DW label) }
-Procedure D16AddDataFixup(Kind : Integer; Lbl : LongInt; Addend : LongInt);
+Procedure D16AddDataFixup(Kind : LongInt; Lbl : LongInt; Addend : LongInt);
 Begin
   If D16FixupCnt >= D16_MAX_FIXUP Then Exit;
   D16Fixups[D16FixupCnt].Seg := 255;
@@ -46860,7 +46977,7 @@ Begin
   For I := 1 To N Do D16DataB(0);
 End;
 
-Procedure D16DataAlign(N : Integer);
+Procedure D16DataAlign(N : LongInt);
 Begin
   While (D16DataLen Mod N) <> 0 Do D16DataB(0);
 End;
@@ -46870,7 +46987,7 @@ End;
 { ------------------------------------------------------------ }
 
 Function D16Trim(Const S : TString) : TString;
-Var A, B : Integer;
+Var A, B : LongInt;
 Begin
   A := 1; B := Length(S);
   While (A <= B) And ((S[A] = ' ') Or (S[A] = #9)) Do Inc(A);
@@ -46884,8 +47001,8 @@ Begin
 End;
 
 { Lire un nombre decimal ou hexa ($ ou suffixe h) a partir de P }
-Function D16ReadNum(Const S : TString; Var P : Integer) : LongInt;
-Var V : LongInt; Hex : Boolean; Q : Integer;
+Function D16ReadNum(Const S : TString; Var P : LongInt) : LongInt;
+Var V : LongInt; Hex : Boolean; Q : LongInt;
 Begin
   V := 0; Hex := False;
   If (P <= Length(S)) And (S[P] = '$') Then Begin Hex := True; Inc(P) End
@@ -46908,22 +47025,22 @@ Begin
   D16ReadNum := V;
 End;
 
-Function D16RegIndex16(Const U : TString) : Integer;
-Var I : Integer;
+Function D16RegIndex16(Const U : TString) : LongInt;
+Var I : LongInt;
 Begin
   D16RegIndex16 := -1;
   For I := 0 To 7 Do If U = D16_REGS16[I] Then Begin D16RegIndex16 := I; Exit End;
 End;
 
-Function D16RegIndex8(Const U : TString) : Integer;
-Var I : Integer;
+Function D16RegIndex8(Const U : TString) : LongInt;
+Var I : LongInt;
 Begin
   D16RegIndex8 := -1;
   For I := 0 To 7 Do If U = D16_REGS8[I] Then Begin D16RegIndex8 := I; Exit End;
 End;
 
-Function D16SRegIndex(Const U : TString) : Integer;
-Var I : Integer;
+Function D16SRegIndex(Const U : TString) : LongInt;
+Var I : LongInt;
 Begin
   D16SRegIndex := -1;
   For I := 0 To 3 Do If U = D16_SREGS[I] Then Begin D16SRegIndex := I; Exit End;
@@ -46938,8 +47055,8 @@ End;
 { Decode une expression memoire entre crochets : BX+SI+label+disp ... }
 Procedure D16ParseMemExpr(Const E : TString; Var O : TD16Operand);
 Var
-  P : Integer; Sign : Integer; Id : TString; HasBX, HasBP, HasSI, HasDI : Boolean;
-  V : LongInt; R : Integer;
+  P : LongInt; Sign : LongInt; Id : TString; HasBX, HasBP, HasSI, HasDI : Boolean;
+  V : LongInt; R : LongInt;
 Begin
   P := 1; HasBX := False; HasBP := False; HasSI := False; HasDI := False;
   O.Disp := 0; O.Lbl := -1;
@@ -46988,7 +47105,7 @@ End;
 
 Procedure D16ParseOperand(S : TString; Var O : TD16Operand);
 Var
-  U, W : TString; P, Q, R : Integer; V : LongInt; Neg : Boolean;
+  U, W : TString; P, Q, R : LongInt; V : LongInt; Neg : Boolean;
 Begin
   O.Kind := 0; O.Reg := 0; O.Size := 0; O.SegOvr := -1; O.RM := 0;
   O.HasBase := False; O.Disp := 0; O.Lbl := -1; O.ImmKind := 0; O.Far := False;
@@ -47091,7 +47208,7 @@ End;
 
 { Emet le prefixe de segment si necessaire (defaut SS pour BP) }
 Procedure D16EmitSegPrefix(Const O : TD16Operand);
-Var Def : Integer;
+Var Def : LongInt;
 Begin
   If O.SegOvr < 0 Then Exit;
   If O.HasBase And ((O.RM = 2) Or (O.RM = 3) Or (O.RM = 6)) Then Def := 2 Else Def := 3;
@@ -47105,7 +47222,7 @@ Begin
 End;
 
 { Emet l octet ModRM (+ deplacement) pour un operande memoire ou registre }
-Procedure D16EmitModRM(RegField : Integer; Const O : TD16Operand);
+Procedure D16EmitModRM(RegField : LongInt; Const O : TD16Operand);
 Begin
   If (O.Kind = 1) Or (O.Kind = 2) Or (O.Kind = 3) Then
   Begin
@@ -47138,7 +47255,7 @@ Begin
 End;
 
 { Emet un immediat 8 ou 16 bits (avec fixup OFFSET/SEG) }
-Procedure D16EmitImm(Const O : TD16Operand; Size : Integer);
+Procedure D16EmitImm(Const O : TD16Operand; Size : LongInt);
 Begin
   If O.ImmKind = 1 Then
   Begin
@@ -47159,14 +47276,14 @@ End;
 Procedure D16Asm(Const Line : TString);
 Var
   S, Mnem, Rest, U : TString;
-  P, I, N : Integer;
+  P, I, N : LongInt;
   O1, O2 : TD16Operand;
-  NOps : Integer;
-  Op, Sz : Integer;
+  NOps : LongInt;
+  Op, Sz : LongInt;
   Prefix : Boolean;
 
   Procedure SplitOps(Const R : TString);
-  Var J, Depth : Integer; InQ : Boolean;
+  Var J, Depth : LongInt; InQ : Boolean;
   Begin
     NOps := 0;
     If D16Trim(R) = '' Then Exit;
@@ -47189,7 +47306,7 @@ Var
     D16ParseOperand(R, O1); NOps := 1;
   End;
 
-  Function OpSize : Integer;
+  Function OpSize : LongInt;
   Begin
     If O1.Size <> 0 Then OpSize := O1.Size
     Else If (NOps = 2) And (O2.Size <> 0) Then OpSize := O2.Size
@@ -47206,8 +47323,8 @@ Var
   Begin IsRM := IsReg(O) Or IsMem(O) End;
 
   { Groupe ALU : ADD OR ADC SBB AND SUB XOR CMP }
-  Procedure AluOp(Op : Integer);
-  Var Sz : Integer;
+  Procedure AluOp(Op : LongInt);
+  Var Sz : LongInt;
   Begin
     Sz := OpSize;
     If NOps <> 2 Then Begin D16AsmError('deux operandes attendus', Line); Exit End;
@@ -47247,8 +47364,8 @@ Var
   End;
 
   { Groupe F6/F7 et FE/FF : NOT NEG MUL IMUL DIV IDIV INC DEC }
-  Procedure Grp3Op(Base : Byte; Sub : Integer);
-  Var Sz : Integer;
+  Procedure Grp3Op(Base : Byte; Sub : LongInt);
+  Var Sz : LongInt;
   Begin
     Sz := OpSize;
     If (NOps <> 1) Or (Sz = 0) Then Begin D16AsmError('operande invalide', Line); Exit End;
@@ -47256,8 +47373,8 @@ Var
     D16EmitB(Base + (Sz - 1)); D16EmitModRM(Sub, O1);
   End;
 
-  Procedure ShiftOp(Sub : Integer);
-  Var Sz, K : Integer;
+  Procedure ShiftOp(Sub : LongInt);
+  Var Sz, K : LongInt;
   Begin
     Sz := O1.Size;
     If Sz = 0 Then Begin D16AsmError('taille inconnue', Line); Exit End;
@@ -47312,10 +47429,10 @@ Var
     D16EmitB($E9); D16AddFixup(D16_FX_REL16, L, 0); D16EmitW(0);
   End;
 
-  Procedure DataDirective(Sz : Integer);
-  Var J, K : Integer; InQ : Boolean; Item : TString; O : TD16Operand;
+  Procedure DataDirective(Sz : LongInt);
+  Var J, K : LongInt; InQ : Boolean; Item : TString; O : TD16Operand;
     Procedure Flush;
-    Var T : TString; Q : Integer; Neg : Boolean; V : LongInt;
+    Var T : TString; Q : LongInt; Neg : Boolean; V : LongInt;
     Begin
       T := D16Trim(Item); Item := '';
       If T = '' Then Exit;
@@ -47704,7 +47821,7 @@ Var
   D16EntryLbl  : TString;
   D16FlatSeg   : LongInt;   { segment de chargement d une image brute OS/2 }
 
-Procedure D16AddReloc(Seg : Integer; Ofs : LongInt);
+Procedure D16AddReloc(Seg : LongInt; Ofs : LongInt);
 Begin
   If D16RelocCnt >= D16_MAX_RELOC Then Begin D16AsmError('trop de relocations', ''); Exit End;
   D16Relocs[D16RelocCnt] := (LongInt(Seg) Shl 16) Or (Ofs And $FFFF);
@@ -47712,13 +47829,13 @@ Begin
 End;
 
 { Paragraphe (relatif au debut de l image) d un segment }
-Function D16SegPara(Seg : Integer) : LongInt;
+Function D16SegPara(Seg : LongInt) : LongInt;
 Begin
   If Seg >= 254 Then D16SegPara := D16DataSeg
   Else D16SegPara := D16SegStart[Seg] Div 16;
 End;
 
-Procedure D16PutW(Seg : Integer; Ofs : LongInt; W : LongInt);
+Procedure D16PutW(Seg : LongInt; Ofs : LongInt; W : LongInt);
 Var A : LongInt;
 Begin
   If Seg = 255 Then
@@ -47783,7 +47900,7 @@ End;
 { Image binaire brute OS/2 (OS2BOOT, OS2LDR) : code puis donnees, sans   }
 { en-tete ; segments resolus pour le segment de chargement D16FlatSeg.   }
 { Le premier octet de l image est un JMP FAR vers START.                 }
-Function D16HexL(V : LongInt; Digits : Integer) : TString;
+Function D16HexL(V : LongInt; Digits : LongInt) : TString;
 Const HX : String[16] = '0123456789ABCDEF';
 Var R : TString;
 Begin
@@ -47982,27 +48099,27 @@ Type
   TD16Type = Record
     Kind    : Byte;
     Size    : LongInt;
-    Base    : Integer;     { element / cible / type de base            }
-    Index   : Integer;     { type d index (tableaux)                   }
+    Base    : LongInt;     { element / cible / type de base            }
+    Index   : LongInt;     { type d index (tableaux)                   }
     Lo, Hi  : LongInt;     { bornes (sous-intervalle, enum, index)     }
     FStart  : LongInt;     { premier champ (record) / parametre (procvar) }
-    FCount  : Integer;
-    RetType : Integer;     { type de retour (procvar)                  }
+    FCount  : LongInt;
+    RetType : LongInt;     { type de retour (procvar)                  }
     FwdName : String[63];  { ^Nom en attente de resolution             }
     Name    : String[63];
   End;
   TD16Field = Record
     Name    : String[63];
-    TypeIdx : Integer;
+    TypeIdx : LongInt;
     Offset  : LongInt;
   End;
   TD16Sym = Record
     Name    : String[63];
     Kind    : Byte;
     Loc     : Byte;
-    TypeIdx : Integer;
-    Level   : Integer;
-    UnitId  : Integer;
+    TypeIdx : LongInt;
+    Level   : LongInt;
+    UnitId  : LongInt;
     Hidden  : Boolean;
     Ofs     : LongInt;      { offset BP / offset dans le label / offset absolu }
     Seg     : LongInt;      { segment absolu                                 }
@@ -48010,23 +48127,23 @@ Type
     Val     : LongInt;      { valeur constante ordinale / id builtin / label }
     RVal    : Double;
     SVal    : TString;
-    ProcIdx : Integer;
+    ProcIdx : LongInt;
     Next    : LongInt;
     Used    : Boolean;
   End;
   TD16Param = Record
     Name    : String[63];
-    TypeIdx : Integer;
+    TypeIdx : LongInt;
     Mode    : Byte;
     Ofs     : LongInt;
   End;
   TD16Proc = Record
     Lbl       : String[40];
-    Level     : Integer;
+    Level     : LongInt;
     PStart    : LongInt;
-    PCount    : Integer;
+    PCount    : LongInt;
     ParamBytes: LongInt;
-    RetType   : Integer;
+    RetType   : LongInt;
     IsForward : Boolean;
     Defined   : Boolean;
     IsInterrupt : Boolean;
@@ -48038,13 +48155,13 @@ Type
     ResultOfs : LongInt;    { offset BP du resultat (ordinal) ou du pointeur (grands types) }
     BodyTok   : LongInt;
     InlineStart : LongInt;  { tokens du code Inline(...) }
-    UnitId    : Integer;
-    Exits     : Integer;    { nombre de Exit (pour le label de sortie) }
+    UnitId    : LongInt;
+    Exits     : LongInt;    { nombre de Exit (pour le label de sortie) }
   End;
   { Valeur constante }
   TD16Const = Record
     Kind  : Byte;           { DT_INT ordinal, DT_REAL, DT_STRING, DT_SET, DT_NIL, DT_POINTER(adresse) }
-    TypeIdx : Integer;
+    TypeIdx : LongInt;
     IVal  : LongInt;
     RVal  : Double;
     SVal  : TString;
@@ -48062,10 +48179,10 @@ Type
     SegVal: LongInt;
   End;
   TD16With = Record
-    TypeIdx : Integer;
+    TypeIdx : LongInt;
     Addr    : TD16Addr;
     TempOfs : LongInt;      { pointeur sauve dans un temporaire (si dynamique) }
-    Level   : Integer;
+    Level   : LongInt;
   End;
   TD16Switch = Record
     Tok  : LongInt;
@@ -48075,13 +48192,13 @@ Type
   TD16Lit = Record
     Lbl  : LongInt;
     Ofs  : LongInt;
-    Len  : Integer;
+    Len  : LongInt;
     Hash : LongInt;
   End;
 
 Var
   D16Types   : Array[0..D16_MAX_TYPES-1] Of TD16Type;
-  D16TypeCnt : Integer;
+  D16TypeCnt : LongInt;
   D16Fields  : Array[0..D16_MAX_FIELDS-1] Of TD16Field;
   D16FieldCnt: LongInt;
   D16Syms    : Array[0..D16_MAX_SYMS-1] Of TD16Sym;
@@ -48090,7 +48207,7 @@ Var
   D16Params  : Array[0..D16_MAX_PARAMS-1] Of TD16Param;
   D16ParamCnt: LongInt;
   D16Procs   : Array[0..D16_MAX_PROCS-1] Of TD16Proc;
-  D16ProcCnt : Integer;
+  D16ProcCnt : LongInt;
   D16Lits    : Array[0..D16_MAX_LIT-1] Of TD16Lit;
   D16LitCnt  : LongInt;
   D16Switches: Array[0..D16_MAX_SWITCH-1] Of TD16Switch;
@@ -48098,22 +48215,22 @@ Var
   D16SwitchPos : LongInt;
   D16UnitUsed  : Array[0..D16_MAX_UNITS] Of Boolean;
   D16UnitNames : Array[0..D16_MAX_UNITS] Of String[15];
-  D16UnitCount : Integer;
-  D16CurUnit   : Integer;      { 0 = programme, 1.. = unite en cours }
+  D16UnitCount : LongInt;
+  D16CurUnit   : LongInt;      { 0 = programme, 1.. = unite en cours }
 
   { Etat du parseur }
   D16Pos     : LongInt;        { index du token courant }
   D16End     : LongInt;        { fin de la zone de tokens courante }
-  D16Level   : Integer;        { niveau d imbrication courant (0 = principal) }
-  D16CurProc : Integer;        { -1 = bloc principal }
+  D16Level   : LongInt;        { niveau d imbrication courant (0 = principal) }
+  D16CurProc : LongInt;        { -1 = bloc principal }
   D16LocalOfs: LongInt;        { prochain offset local libre (negatif) }
   D16MaxLocal: LongInt;        { profondeur maximale du cadre }
   D16LabelSeq: LongInt;
   D16WithStack : Array[0..D16_MAX_WITH-1] Of TD16With;
-  D16WithCnt : Integer;
+  D16WithCnt : LongInt;
   D16LoopBreak : Array[0..D16_MAX_LOOP-1] Of TString;
   D16LoopCont  : Array[0..D16_MAX_LOOP-1] Of TString;
-  D16LoopCnt : Integer;
+  D16LoopCnt : LongInt;
   D16ExitLbl : TString;
   D16IoCheck : Boolean;
   D16RangeCheck : Boolean;
@@ -48123,7 +48240,7 @@ Var
   D16IsUnit  : Boolean;
   D16Errors  : LongInt;
   D16InInterface : Boolean;
-  D16SysUnit : Integer;        { id de l unite SYSTEM integree }
+  D16SysUnit : LongInt;        { id de l unite SYSTEM integree }
   D16RtUsed  : Array[0..255] Of Boolean;  { routines runtime asm utilisees }
   D16TokLimit : LongInt;
   D16MainBodyPos : LongInt;
@@ -48303,7 +48420,7 @@ End;
 { Types                                                        }
 { ------------------------------------------------------------ }
 
-Function D16TypeAdd(Kind : Byte; Size : LongInt; Base : Integer) : Integer;
+Function D16TypeAdd(Kind : Byte; Size : LongInt; Base : LongInt) : LongInt;
 Begin
   If D16TypeCnt >= D16_MAX_TYPES Then D16Error('trop de types');
   D16Types[D16TypeCnt].Kind := Kind;
@@ -48321,12 +48438,12 @@ Begin
   Inc(D16TypeCnt);
 End;
 
-Function D16IsOrdinal(T : Integer) : Boolean;
+Function D16IsOrdinal(T : LongInt) : Boolean;
 Begin
   D16IsOrdinal := D16Types[T].Kind In [DT_INT, DT_UINT, DT_BOOL, DT_CHAR, DT_ENUM, DT_SUBRANGE];
 End;
 
-Function D16IsInteger(T : Integer) : Boolean;
+Function D16IsInteger(T : LongInt) : Boolean;
 Var K : Byte;
 Begin
   K := D16Types[T].Kind;
@@ -48335,14 +48452,14 @@ Begin
 End;
 
 { Type de base d un sous-intervalle }
-Function D16BaseType(T : Integer) : Integer;
+Function D16BaseType(T : LongInt) : LongInt;
 Begin
   While D16Types[T].Kind = DT_SUBRANGE Do T := D16Types[T].Base;
   D16BaseType := T;
 End;
 
-Function D16IsSigned(T : Integer) : Boolean;
-Var B : Integer;
+Function D16IsSigned(T : LongInt) : Boolean;
+Var B : LongInt;
 Begin
   B := D16BaseType(T);
   If D16Types[B].Kind = DT_INT Then D16IsSigned := True
@@ -48350,42 +48467,42 @@ Begin
   Else D16IsSigned := False;
 End;
 
-Function D16IsString(T : Integer) : Boolean;
+Function D16IsString(T : LongInt) : Boolean;
 Begin
   D16IsString := D16Types[T].Kind = DT_STRING;
 End;
 
-Function D16IsReal(T : Integer) : Boolean;
+Function D16IsReal(T : LongInt) : Boolean;
 Begin
   D16IsReal := D16Types[T].Kind = DT_REAL;
 End;
 
-Function D16IsPointer(T : Integer) : Boolean;
+Function D16IsPointer(T : LongInt) : Boolean;
 Begin
   D16IsPointer := (D16Types[T].Kind = DT_POINTER) Or (D16Types[T].Kind = DT_NIL) Or
                   (D16Types[T].Kind = DT_PROCVAR);
 End;
 
-Function D16IsCharArray(T : Integer) : Boolean;
+Function D16IsCharArray(T : LongInt) : Boolean;
 Begin
   D16IsCharArray := (D16Types[T].Kind = DT_ARRAY) And
                     (D16Types[D16BaseType(D16Types[T].Base)].Kind = DT_CHAR);
 End;
 
 { Les grands types vivent en memoire : l expression fournit une adresse }
-Function D16IsLarge(T : Integer) : Boolean;
+Function D16IsLarge(T : LongInt) : Boolean;
 Begin
   D16IsLarge := D16Types[T].Kind In [DT_REAL, DT_STRING, DT_ARRAY, DT_RECORD, DT_SET,
                                      DT_FILE, DT_TEXT, DT_OBJECT];
 End;
 
-Function D16TypeSize(T : Integer) : LongInt;
+Function D16TypeSize(T : LongInt) : LongInt;
 Begin
   D16TypeSize := D16Types[T].Size;
 End;
 
 { Bornes d un type ordinal }
-Procedure D16OrdBounds(T : Integer; Var Lo, Hi : LongInt);
+Procedure D16OrdBounds(T : LongInt; Var Lo, Hi : LongInt);
 Begin
   Case D16Types[T].Kind Of
     DT_INT :
@@ -48404,7 +48521,7 @@ Begin
   End;
 End;
 
-Function D16TypeName(T : Integer) : TString;
+Function D16TypeName(T : LongInt) : TString;
 Begin
   If D16Types[T].Name <> '' Then D16TypeName := D16Types[T].Name
   Else Case D16Types[T].Kind Of
@@ -48433,7 +48550,7 @@ End;
 { ------------------------------------------------------------ }
 
 Function D16SymHashOf(Const S : TString) : LongInt;
-Var I : Integer; H : LongInt;
+Var I : LongInt; H : LongInt;
 Begin
   H := 0;
   For I := 1 To Length(S) Do H := (H * 31 + Ord(S[I])) And $7FFFFFFF;
@@ -48477,7 +48594,7 @@ Begin
 End;
 
 { Recherche limitee au niveau courant (redeclaration) }
-Function D16LookupLevel(Const Name : TString; Level : Integer) : LongInt;
+Function D16LookupLevel(Const Name : TString; Level : LongInt) : LongInt;
 Var I : LongInt;
 Begin
   I := D16SymHash[D16SymHashOf(Name)];
@@ -48491,7 +48608,7 @@ Begin
   D16LookupLevel := -1;
 End;
 
-Function D16SymAdd(Const Name : TString; Kind : Byte; TypeIdx : Integer) : LongInt;
+Function D16SymAdd(Const Name : TString; Kind : Byte; TypeIdx : LongInt) : LongInt;
 Var H, I : LongInt;
 Begin
   If D16SymCnt >= D16_MAX_SYMS Then D16Error('trop de symboles');
@@ -48587,7 +48704,7 @@ End;
 
 Procedure D16RealTo6(V : Double; Var B : Array Of Byte);
 Var
-  E : Integer; Neg : Boolean; M : Double; I : Integer; Bits : Double;
+  E : LongInt; Neg : Boolean; M : Double; I : LongInt; Bits : Double;
   Mant : Array[0..4] Of Byte;
   W : LongInt;
 Begin
@@ -48629,16 +48746,16 @@ End;
 { Declarations anticipees                                      }
 { ------------------------------------------------------------ }
 
-Function D16ParseType : Integer; Forward;
+Function D16ParseType : LongInt; Forward;
 Procedure D16ConstExpr(Var C : TD16Const); Forward;
-Procedure D16Block(ProcIdx : Integer); Forward;
+Procedure D16Block(ProcIdx : LongInt); Forward;
 Procedure D16ParseProcDecl(IsFunc : Boolean); Forward;
 
 { ------------------------------------------------------------ }
 { Expressions constantes                                       }
 { ------------------------------------------------------------ }
 
-Procedure D16ConstInt(Var C : TD16Const; V : LongInt; T : Integer);
+Procedure D16ConstInt(Var C : TD16Const; V : LongInt; T : LongInt);
 Begin
   C.Kind := DT_INT; C.IVal := V; C.TypeIdx := T; C.RVal := V; C.SVal := ''; C.Lbl := -1;
 End;
@@ -48657,7 +48774,7 @@ Begin
 End;
 
 { Type entier le plus petit contenant la valeur (regle TP) }
-Function D16IntTypeFor(V : LongInt) : Integer;
+Function D16IntTypeFor(V : LongInt) : LongInt;
 Begin
   If (V >= -32768) And (V <= 32767) Then D16IntTypeFor := DTI_INTEGER
   Else If (V >= 0) And (V <= 65535) Then D16IntTypeFor := DTI_WORD
@@ -48674,7 +48791,7 @@ End;
 
 Procedure D16ConstFactor(Var C : TD16Const);
 Var
-  S : LongInt; U : TString; T : Integer; C2 : TD16Const; I : Integer;
+  S : LongInt; U : TString; T : LongInt; C2 : TD16Const; I : LongInt;
   Lo, Hi : LongInt;
 Begin
   C.Kind := DT_INT; C.IVal := 0; C.RVal := 0; C.SVal := ''; C.TypeIdx := DTI_INTEGER; C.Lbl := -1;
@@ -48925,7 +49042,7 @@ Begin
 End;
 
 Procedure D16ConstTerm(Var C : TD16Const);
-Var C2 : TD16Const; Op : TString; I : Integer;
+Var C2 : TD16Const; Op : TString; I : LongInt;
 Begin
   D16ConstFactor(C);
   While (D16IsOp('*') Or D16IsOp('/') Or D16IsKw('div') Or D16IsKw('mod') Or
@@ -48973,7 +49090,7 @@ Begin
 End;
 
 Procedure D16ConstSimple(Var C : TD16Const);
-Var C2 : TD16Const; Op : TString; I : Integer;
+Var C2 : TD16Const; Op : TString; I : LongInt;
 Begin
   D16ConstTerm(C);
   While D16IsOp('+') Or D16IsOp('-') Or D16IsKw('or') Or D16IsKw('xor') Do
@@ -49017,7 +49134,7 @@ Begin
 End;
 
 Procedure D16ConstExpr(Var C : TD16Const);
-Var C2 : TD16Const; Op : TString; R : Boolean; I : Integer;
+Var C2 : TD16Const; Op : TString; R : Boolean; I : LongInt;
 Begin
   D16ConstSimple(C);
   If D16IsOp('=') Or D16IsOp('<>') Or D16IsOp('<') Or D16IsOp('>') Or
@@ -49081,7 +49198,7 @@ Begin
 End;
 
 { Constante ordinale (bornes, cases) }
-Function D16ConstOrd(Var T : Integer) : LongInt;
+Function D16ConstOrd(Var T : LongInt) : LongInt;
 Var C : TD16Const;
 Begin
   D16ConstExpr(C);
@@ -49104,7 +49221,7 @@ Begin
 End;
 
 { Taille d un ensemble selon le type de base (comme TP : octets Lo div 8 .. Hi div 8) }
-Function D16SetSizeFor(Base : Integer) : LongInt;
+Function D16SetSizeFor(Base : LongInt) : LongInt;
 Var Lo, Hi : LongInt;
 Begin
   D16OrdBounds(Base, Lo, Hi);
@@ -49113,8 +49230,8 @@ Begin
 End;
 
 { Sous-intervalle a partir de deux constantes }
-Function D16MakeSubrange(Lo, Hi : LongInt; Base : Integer) : Integer;
-Var T : Integer;
+Function D16MakeSubrange(Lo, Hi : LongInt; Base : LongInt) : LongInt;
+Var T : LongInt;
 Begin
   If Lo > Hi Then D16Error('borne inferieure superieure a la borne superieure');
   Base := D16BaseType(Base);
@@ -49135,11 +49252,11 @@ Begin
 End;
 
 { Liste de parametres formels (procedures et types procedure) }
-Procedure D16ParseParams(Var PStart : LongInt; Var PCount : Integer; Var Bytes : LongInt;
+Procedure D16ParseParams(Var PStart : LongInt; Var PCount : LongInt; Var Bytes : LongInt;
                          HasLink : Boolean);
 Var
   Names : Array[0..31] Of String[63];
-  N, I, T, Mode : Integer; Sz : LongInt; First, J : LongInt;
+  N, I, T, Mode : LongInt; Sz : LongInt; First, J : LongInt;
   U : TString; S : LongInt;
 Begin
   PStart := D16ParamCnt; PCount := 0; Bytes := 0;
@@ -49218,12 +49335,12 @@ End;
 
 { Champs d un record (avec partie variable) ; retourne la taille }
 Procedure D16ParseFields(Var Size : LongInt; BaseOfs : LongInt; Var FStart : LongInt;
-                         Var FCount : Integer);
+                         Var FCount : LongInt);
 Var
   Names : Array[0..63] Of String[63];
-  N, I, T : Integer; Ofs, MaxSize, VarSize, SaveSize : LongInt;
-  TagType : Integer; C : TD16Const; U : TString;
-  SubStart : LongInt; SubCount : Integer;
+  N, I, T : LongInt; Ofs, MaxSize, VarSize, SaveSize : LongInt;
+  TagType : LongInt; C : TD16Const; U : TString;
+  SubStart : LongInt; SubCount : LongInt;
 Begin
   Size := 0; MaxSize := 0;
   While Not (D16IsKw('end') Or D16IsPunct(')') Or D16IsKw('case')) Do
@@ -49295,13 +49412,13 @@ Begin
   End;
 End;
 
-Function D16ParseType : Integer;
+Function D16ParseType : LongInt;
 Var
-  U : TString; S : LongInt; T, B, I, E : Integer;
-  Lo, Hi : LongInt; C : TD16Const; LT : Integer;
-  Idx : Array[0..15] Of Integer; NIdx, K : Integer;
-  Sz : LongInt; PS : LongInt; PC : Integer; PB : LongInt;
-  SaveLevel : Integer;
+  U : TString; S : LongInt; T, B, I, E : LongInt;
+  Lo, Hi : LongInt; C : TD16Const; LT : LongInt;
+  Idx : Array[0..15] Of LongInt; NIdx, K : LongInt;
+  Sz : LongInt; PS : LongInt; PC : LongInt; PB : LongInt;
+  SaveLevel : LongInt;
 Begin
   { Packed : ignore }
   If D16IsKw('packed') Then D16Next;
@@ -49468,8 +49585,8 @@ Begin
 End;
 
 { Resoudre les pointeurs ^Nom declares avant leur type }
-Procedure D16ResolveForwardTypes(FromType : Integer);
-Var I : Integer; S : LongInt;
+Procedure D16ResolveForwardTypes(FromType : LongInt);
+Var I : LongInt; S : LongInt;
 Begin
   For I := FromType To D16TypeCnt - 1 Do
     If (D16Types[I].Kind = DT_POINTER) And (D16Types[I].FwdName <> '') Then
@@ -49495,11 +49612,11 @@ Var
     ne doivent jamais etre inserees au milieu d un tableau ou d un record }
   D16PendingZ : Array[0..D16_MAX_PENDZ - 1] Of LongInt;
   D16PendingZStr : Array[0..D16_MAX_PENDZ - 1] Of TString;
-  D16PendingZCnt : Integer;
+  D16PendingZCnt : LongInt;
 
 { Emettre les chaines ASCIIZ en attente (apres une constante typee) }
 Procedure D16FlushPendingZ;
-Var I, J : Integer;
+Var I, J : LongInt;
 Begin
   For I := 0 To D16PendingZCnt - 1 Do
   Begin
@@ -49511,7 +49628,7 @@ Begin
   D16PendingZCnt := 0;
 End;
 
-Procedure D16EmitTypedConst(T : Integer);
+Procedure D16EmitTypedConst(T : LongInt);
 Var
   C : TD16Const; I, K : LongInt; B : Array[0..5] Of Byte; F : LongInt; Fnd : Boolean;
   U : TString; Start : LongInt; Cnt : LongInt; Nm : TString;
@@ -49653,7 +49770,7 @@ End;
 
 Procedure D16ParseConstDecl;
 Var
-  U : TString; S : LongInt; T : Integer; C : TD16Const; I : Integer; Nm : TString;
+  U : TString; S : LongInt; T : LongInt; C : TD16Const; I : LongInt; Nm : TString;
 Begin
   D16Next;
   While D16IsIdent Do
@@ -49697,7 +49814,7 @@ Begin
 End;
 
 Procedure D16ParseTypeDecl;
-Var U : TString; S : LongInt; T, FromType : Integer;
+Var U : TString; S : LongInt; T, FromType : LongInt;
 Begin
   D16Next;
   FromType := D16TypeCnt;
@@ -49714,7 +49831,7 @@ Begin
 End;
 
 { Declaration d une variable globale ou locale }
-Procedure D16DeclareVar(Const Name : TString; T : Integer; Var AbsSym : LongInt);
+Procedure D16DeclareVar(Const Name : TString; T : LongInt; Var AbsSym : LongInt);
 Var S : LongInt; Nm : TString; Sz : LongInt;
 Begin
   S := D16SymAdd(Name, DSK_VAR, T);
@@ -49741,7 +49858,7 @@ End;
 Procedure D16ParseVarDecl;
 Var
   Names : Array[0..63] Of String[63];
-  N, I, T : Integer; S, A : LongInt; C : TD16Const; U : TString;
+  N, I, T : LongInt; S, A : LongInt; C : TD16Const; U : TString;
 Begin
   D16Next;
   While D16IsIdent Do
@@ -49800,7 +49917,7 @@ Const
   CC_L = 12; CC_GE = 13; CC_LE = 14; CC_G = 15;
 
 Var
-  D16PendCC : Integer;     { condition en attente (-1 aucune) : le resultat
+  D16PendCC : LongInt;     { condition en attente (-1 aucune) : le resultat
                              booleen n a pas encore ete materialise dans AL }
   D16FoldOK : Boolean;     { le prochain facteur est en tete d expression }
   D16ConstLine : LongInt;  { blocs asm : l expression constante ne depasse pas cette ligne (-1 = libre) }
@@ -49872,7 +49989,7 @@ Begin
 End;
 
 { Texte de l operande memoire : "WORD PTR SS:[BP-6]" }
-Function D16Opnd(Const A : TD16Addr; Size : Integer; Extra : LongInt) : TString;
+Function D16Opnd(Const A : TD16Addr; Size : LongInt; Extra : LongInt) : TString;
 Var S, Inner : TString; D : LongInt;
 Begin
   Case Size Of
@@ -49997,8 +50114,8 @@ End;
 
 { Charger le cadre du niveau Lvl dans BX (acces aux variables des
   procedures englobantes) ; resultat SS:[BX] }
-Procedure D16LoadFrame(Lvl : Integer; Var A : TD16Addr);
-Var K : Integer;
+Procedure D16LoadFrame(Lvl : LongInt; Var A : TD16Addr);
+Var K : LongInt;
 Begin
   D16E('MOV BX,SS:[BP+6]');
   For K := 1 To D16Level - 1 - Lvl Do D16E('MOV BX,SS:[BX+6]');
@@ -50050,7 +50167,7 @@ End;
 { ------------------------------------------------------------ }
 
 { Charger la valeur de type T situee a l adresse A dans les registres }
-Procedure D16Load(Const A : TD16Addr; T : Integer);
+Procedure D16Load(Const A : TD16Addr; T : LongInt);
 Var Sz : LongInt;
 Begin
   If D16IsLarge(T) Then
@@ -50071,7 +50188,7 @@ Begin
 End;
 
 { Ranger la valeur (registres) de type T a l adresse A }
-Procedure D16Store(Const A : TD16Addr; T : Integer);
+Procedure D16Store(Const A : TD16Addr; T : LongInt);
 Var Sz : LongInt;
 Begin
   Sz := D16Types[T].Size;
@@ -50128,7 +50245,7 @@ Begin
 End;
 
 { Empiler la valeur courante de type T }
-Procedure D16Push(T : Integer);
+Procedure D16Push(T : LongInt);
 Begin
   D16Flush;
   If D16IsLarge(T) Or D16IsPointer(T) Or (D16Types[T].Size = 4) Then
@@ -50137,7 +50254,7 @@ Begin
 End;
 
 { Conversion de la valeur courante vers le type cible (ordinaux) }
-Procedure D16Convert(From, Target : Integer);
+Procedure D16Convert(From, Target : LongInt);
 Var SF, ST : LongInt; Sg : Boolean;
 Begin
   If D16IsLarge(Target) Then Exit;
@@ -50159,8 +50276,8 @@ Begin
 End;
 
 { Type arithmetique d un operande entier (regle TP) }
-Function D16ArithType(T : Integer) : Integer;
-Var B : Integer;
+Function D16ArithType(T : LongInt) : LongInt;
+Var B : LongInt;
 Begin
   B := D16BaseType(T);
   Case D16Types[B].Kind Of
@@ -50174,8 +50291,8 @@ Begin
 End;
 
 { Type commun de deux operandes entiers }
-Function D16CommonInt(T1, T2 : Integer) : Integer;
-Var A1, A2 : Integer;
+Function D16CommonInt(T1, T2 : LongInt) : LongInt;
+Var A1, A2 : LongInt;
 Begin
   A1 := D16ArithType(T1); A2 := D16ArithType(T2);
   If (A1 = DTI_LONGINT) Or (A2 = DTI_LONGINT) Then D16CommonInt := DTI_LONGINT
@@ -50187,8 +50304,8 @@ End;
 { Compatibilite des types                                      }
 { ------------------------------------------------------------ }
 
-Function D16SameOrdClass(T1, T2 : Integer) : Boolean;
-Var B1, B2 : Integer;
+Function D16SameOrdClass(T1, T2 : LongInt) : Boolean;
+Var B1, B2 : LongInt;
 Begin
   B1 := D16BaseType(T1); B2 := D16BaseType(T2);
   If D16IsInteger(B1) And D16IsInteger(B2) Then D16SameOrdClass := True
@@ -50199,7 +50316,7 @@ End;
 
 { Verifie que la valeur de type Src peut etre affectee a Dst ; emet la
   conversion ; retourne le type reel a ranger }
-Procedure D16CheckAssign(Dst, Src : Integer);
+Procedure D16CheckAssign(Dst, Src : LongInt);
 Var KD, KS : Byte;
 Begin
   KD := D16Types[Dst].Kind; KS := D16Types[Src].Kind;
@@ -50240,13 +50357,13 @@ End;
 { Declarations anticipees des expressions                      }
 { ------------------------------------------------------------ }
 
-Function D16Expr : Integer; Forward;
-Function D16ExprTo(Target : Integer) : Integer; Forward;
-Procedure D16StrToTemp(T : Integer; Var A : TD16Addr); Forward;
-Function D16Designator(Var A : TD16Addr; Var IsConst : Boolean) : Integer; Forward;
-Function D16CallProc(P : Integer) : Integer; Forward;
-Function D16Builtin(Const U : TString; Var IsFunc : Boolean) : Integer; Forward;
-Function D16CallProcVar(Const A : TD16Addr; T : Integer) : Integer; Forward;
+Function D16Expr : LongInt; Forward;
+Function D16ExprTo(Target : LongInt) : LongInt; Forward;
+Procedure D16StrToTemp(T : LongInt; Var A : TD16Addr); Forward;
+Function D16Designator(Var A : TD16Addr; Var IsConst : Boolean) : LongInt; Forward;
+Function D16CallProc(P : LongInt) : LongInt; Forward;
+Function D16Builtin(Const U : TString; Var IsFunc : Boolean) : LongInt; Forward;
+Function D16CallProcVar(Const A : TD16Addr; T : LongInt) : LongInt; Forward;
 Procedure D16Statement; Forward;
 Procedure D16AsmBlock; Forward;
 Procedure D16InlineStmt; Forward;
@@ -50258,7 +50375,7 @@ Procedure D16Statements; Forward;
 
 { Convertit la valeur courante de type T en chaine temporaire ; met son
   adresse dans DX:AX et dans A }
-Procedure D16StrToTemp(T : Integer; Var A : TD16Addr);
+Procedure D16StrToTemp(T : LongInt; Var A : TD16Addr);
 Var O : LongInt; K : Byte;
 Begin
   D16Flush;
@@ -50298,8 +50415,8 @@ End;
 { ------------------------------------------------------------ }
 
 { Empiler le lien statique pour appeler une procedure de niveau Lvl }
-Procedure D16PushStaticLink(Lvl : Integer);
-Var K : Integer;
+Procedure D16PushStaticLink(Lvl : LongInt);
+Var K : LongInt;
 Begin
   If Lvl < 2 Then Exit;
   If D16Level = Lvl - 1 Then D16E('PUSH BP')
@@ -50312,9 +50429,9 @@ Begin
 End;
 
 { Analyse d un argument effectif et empilement selon le mode }
-Procedure D16PushArg(PType : Integer; Mode : Byte);
+Procedure D16PushArg(PType : LongInt; Mode : Byte);
 Var
-  T : Integer; A : TD16Addr; IsConst : Boolean; O : LongInt; SaveCC : Integer; AtVar : Boolean;
+  T : LongInt; A : TD16Addr; IsConst : Boolean; O : LongInt; SaveCC : LongInt; AtVar : Boolean;
 Begin
   If (Mode <> PM_VALUE) And (PType = DTI_NONE) Then
   Begin
@@ -50441,9 +50558,9 @@ Begin
 End;
 
 { Analyse de la liste d arguments et appel }
-Function D16CallProc(P : Integer) : Integer;
+Function D16CallProc(P : LongInt) : LongInt;
 Var
-  I : Integer; RT : Integer; O : LongInt; A : TD16Addr; HasArgs : Boolean; Save : LongInt;
+  I : LongInt; RT : LongInt; O : LongInt; A : TD16Addr; HasArgs : Boolean; Save : LongInt;
 Begin
   RT := D16Procs[P].RetType;
   If D16Procs[P].IsInline Then
@@ -50498,8 +50615,8 @@ Begin
 End;
 
 { Appel via une variable procedure (adresse A, type T) }
-Function D16CallProcVar(Const A : TD16Addr; T : Integer) : Integer;
-Var I : Integer; RT : Integer; O : LongInt; SaveA : TD16Addr;
+Function D16CallProcVar(Const A : TD16Addr; T : LongInt) : LongInt;
+Var I : LongInt; RT : LongInt; O : LongInt; SaveA : TD16Addr;
 Begin
   RT := D16Types[T].RetType;
   O := 0;
@@ -50550,7 +50667,7 @@ Begin
   D16PendCC := -1;
 End;
 
-Function D16SysProc(Const Name : TString) : Integer;
+Function D16SysProc(Const Name : TString) : LongInt;
 Var S : LongInt;
 Begin
   S := D16LookupSys(Name);
@@ -50574,7 +50691,7 @@ End;
 { ------------------------------------------------------------ }
 
 { Recherche d un champ dans un record ; retourne l index du champ ou -1 }
-Function D16FindField(T : Integer; Const U : TString) : LongInt;
+Function D16FindField(T : LongInt; Const U : TString) : LongInt;
 Var F : LongInt;
 Begin
   D16FindField := -1;
@@ -50584,9 +50701,9 @@ Begin
 End;
 
 { Indexation : A = adresse du tableau de type T ; analyse [i,j,...] }
-Function D16IndexArray(Var A : TD16Addr; T : Integer) : Integer;
+Function D16IndexArray(Var A : TD16Addr; T : LongInt) : LongInt;
 Var
-  IT, ET : Integer; C : TD16Const; ESz : LongInt; Lo : LongInt; Save : LongInt;
+  IT, ET : LongInt; C : TD16Const; ESz : LongInt; Lo : LongInt; Save : LongInt;
   IsStr : Boolean; Dyn : Boolean;
 Begin
   Repeat
@@ -50651,7 +50768,7 @@ Begin
 End;
 
 { Suffixes de designateur : .champ [index] ^ }
-Function D16Selectors(Var A : TD16Addr; T : Integer) : Integer;
+Function D16Selectors(Var A : TD16Addr; T : LongInt) : LongInt;
 Var U : TString; F : LongInt;
 Begin
   While True Do
@@ -50695,9 +50812,9 @@ End;
 { Designateur complet a partir d un identificateur ; retourne le type.
   IsConst : vrai si c est une constante (non affectable). Pour une
   constante chaine / ordinale, l adresse ou la valeur est fournie. }
-Function D16Designator(Var A : TD16Addr; Var IsConst : Boolean) : Integer;
+Function D16Designator(Var A : TD16Addr; Var IsConst : Boolean) : LongInt;
 Var
-  U : TString; S, F : LongInt; T : Integer; W : Integer; Found : Boolean;
+  U : TString; S, F : LongInt; T : LongInt; W : LongInt; Found : Boolean;
 Begin
   IsConst := False;
   D16AddrClear(A);
@@ -50799,7 +50916,7 @@ End;
 { Une expression entiere purement constante suit-elle (au moins un operateur) ?
   Permet de replier 32767 + 1 en Longint comme Turbo Pascal. }
 Function D16ConstAhead : Boolean;
-Var P : LongInt; Depth, Ops, Operands : Integer; S : LongInt; U : TString; Ok : Boolean;
+Var P : LongInt; Depth, Ops, Operands : LongInt; S : LongInt; U : TString; Ok : Boolean;
 Begin
   D16ConstAhead := False;
   P := D16Pos; Depth := 0; Ops := 0; Operands := 0; Ok := True;
@@ -50843,11 +50960,11 @@ Begin
 End;
 
 { Facteur : constante, variable, appel, (expr), not, -, @, [ensemble] }
-Function D16Factor : Integer;
+Function D16Factor : LongInt;
 Var
-  U : TString; S : LongInt; T, T2 : Integer; A : TD16Addr; IsConst : Boolean;
-  C : TD16Const; L : LongInt; O : LongInt; IsFunc : Boolean; P : Integer;
-  I : Integer; B : Array[0..5] Of Byte; Lbl : TString; CanFold : Boolean; Lit : TString;
+  U : TString; S : LongInt; T, T2 : LongInt; A : TD16Addr; IsConst : Boolean;
+  C : TD16Const; L : LongInt; O : LongInt; IsFunc : Boolean; P : LongInt;
+  I : LongInt; B : Array[0..5] Of Byte; Lbl : TString; CanFold : Boolean; Lit : TString;
 Begin
   D16PendCC := -1;
   CanFold := D16FoldOK; D16FoldOK := False;
@@ -51263,7 +51380,7 @@ Begin
 End;
 
 { Emission d une operation binaire entiere sur AX (droite) et pile (gauche) }
-Procedure D16IntBinOp(Const Op : TString; T : Integer);
+Procedure D16IntBinOp(Const Op : TString; T : LongInt);
 Var L1, L2 : TString;
 Begin
   { Convention : operande gauche sur la pile (PUSH), droite dans AX / DX:AX }
@@ -51351,7 +51468,7 @@ Begin
 End;
 
 { Convertir la valeur courante (type T) en reel temporaire ; adresse DX:AX }
-Procedure D16ToReal(T : Integer);
+Procedure D16ToReal(T : LongInt);
 Var O : LongInt;
 Begin
   If D16Types[T].Kind = DT_REAL Then Exit;
@@ -51365,9 +51482,9 @@ Begin
 End;
 
 { Terme : facteur ( * / div mod and shl shr facteur ) }
-Function D16Term : Integer;
+Function D16Term : LongInt;
 Var
-  T, T2, R : Integer; Op : TString; O : LongInt; LEnd : TString;
+  T, T2, R : LongInt; Op : TString; O : LongInt; LEnd : TString;
 Begin
   T := D16Factor;
   While D16IsOp('*') Or D16IsOp('/') Or D16IsKw('div') Or D16IsKw('mod') Or
@@ -51485,9 +51602,9 @@ Begin
 End;
 
 { Expression simple : terme ( + - or xor terme ) }
-Function D16Simple : Integer;
+Function D16Simple : LongInt;
 Var
-  T, T2, R : Integer; Op : TString; O : LongInt; LEnd : TString; A : TD16Addr;
+  T, T2, R : LongInt; Op : TString; O : LongInt; LEnd : TString; A : TD16Addr;
 Begin
   T := D16Term;
   While D16IsOp('+') Or D16IsOp('-') Or D16IsKw('or') Or D16IsKw('xor') Do
@@ -51669,9 +51786,9 @@ Begin
 End;
 
 { Expression : simple [ relop simple ] }
-Function D16Expr : Integer;
+Function D16Expr : LongInt;
 Var
-  T, T2, R : Integer; Op : TString; Sg : Boolean; A : TD16Addr; O : LongInt;
+  T, T2, R : LongInt; Op : TString; Sg : Boolean; A : TD16Addr; O : LongInt;
 Begin
   D16FoldOK := True;
   T := D16Simple;
@@ -51889,7 +52006,7 @@ End;
   pour les grands types retourne l adresse DX:AX }
 { Litteral chaine utilise comme PChar : ASCIIZ en donnees, adresse dans DX:AX }
 Procedure D16PCharLiteral(Const S : TString);
-Var Nm : TString; I : Integer;
+Var Nm : TString; I : LongInt;
 Begin
   Nm := 'Z' + IntToStr_(D16DataSeq); Inc(D16DataSeq);
   D16DefineDataLabel(Nm, D16DataLen);
@@ -51898,14 +52015,14 @@ Begin
   D16E('MOV AX,OFFSET ' + Nm); D16E('MOV DX,DS');
 End;
 
-Function D16IsPCharType(T : Integer) : Boolean;
+Function D16IsPCharType(T : LongInt) : Boolean;
 Begin
   D16IsPCharType := (D16Types[T].Kind = DT_POINTER) And (D16Types[T].Base = DTI_CHAR);
 End;
 
 { Une expression constante chaine suit-elle (litteraux, ^X, constantes, +) ? }
 Function D16StrConstAhead : Boolean;
-Var P : LongInt; S : LongInt; Ok : Boolean; N : Integer;
+Var P : LongInt; S : LongInt; Ok : Boolean; N : LongInt;
 Begin
   D16StrConstAhead := False;
   P := D16Pos; Ok := True; N := 0;
@@ -51935,8 +52052,8 @@ Begin
   D16StrConstAhead := True;
 End;
 
-Function D16ExprTo(Target : Integer) : Integer;
-Var T : Integer; A : TD16Addr; C : TD16Const;
+Function D16ExprTo(Target : LongInt) : LongInt;
+Var T : LongInt; A : TD16Addr; C : TD16Const;
 Begin
   If D16IsPCharType(Target) And D16StrConstAhead Then
   Begin
@@ -51981,7 +52098,7 @@ End;
 
 { Nombre avec suffixe hexadecimal eventuel (0FFh lexe en 0 + FFh) }
 Function D16AsmNumber : LongInt;
-Var V : LongInt; S : TString; I : Integer; Nxt : TString;
+Var V : LongInt; S : TString; I : LongInt; Nxt : TString;
 Begin
   V := TokenPool^[D16Pos].IntVal;
   S := TokenPool^[D16Pos].Val;
@@ -52004,7 +52121,7 @@ Begin
   D16AsmNumber := V;
 End;
 
-Function D16AsmConstAhead(Line : Integer) : Boolean;
+Function D16AsmConstAhead(Line : LongInt) : Boolean;
 Begin
   D16ConstLine := Line;
   D16AsmConstAhead := D16ConstAhead;
@@ -52019,10 +52136,10 @@ Begin
 End;
 
 { Un operande : retourne son texte pour D16Asm }
-Function D16AsmOperand(Line : Integer) : TString;
+Function D16AsmOperand(Line : LongInt) : TString;
 Var
-  U, Res, Pre, Ovr, Regs, Lbl : TString; Size : Integer; IsOffset, IsSeg, IsMem, HasBP : Boolean;
-  Disp : LongInt; S, F : LongInt; T : Integer; Sym : LongInt; Sg : Integer; V : LongInt;
+  U, Res, Pre, Ovr, Regs, Lbl : TString; Size : LongInt; IsOffset, IsSeg, IsMem, HasBP : Boolean;
+  Disp : LongInt; S, F : LongInt; T : LongInt; Sym : LongInt; Sg : LongInt; V : LongInt;
   C : TD16Const;
 
   Function AtEnd : Boolean;
@@ -52043,7 +52160,7 @@ Var
 
   { contenu entre crochets }
   Procedure Bracket;
-  Var Sign : Integer; U2 : TString; S2 : LongInt;
+  Var Sign : LongInt; U2 : TString; S2 : LongInt;
   Begin
     D16Next; { [ }
     Sign := 1;
@@ -52091,7 +52208,7 @@ Var
   End;
 
   { suffixes apres une variable : .champ .Word [index] }
-  Procedure Suffixes(T : Integer);
+  Procedure Suffixes(T : LongInt);
   Var U2 : TString; F2 : LongInt;
   Begin
     While Not AtEnd Do
@@ -52353,7 +52470,7 @@ End;
 { Bloc asm ... end }
 Procedure D16AsmBlock;
 Var
-  Line : Integer; Mnem, Ops, Op : TString; U : TString; N : LongInt;
+  Line : LongInt; Mnem, Ops, Op : TString; U : TString; N : LongInt;
 Begin
   D16Next; { asm }
   D16HasAsmBlocks := True;
@@ -52485,10 +52602,10 @@ End;
 
 { Adresse d un fichier texte en argument optionnel : si le prochain
   argument est un fichier, empile son adresse ; sinon empile Output/Input }
-Function D16PushFileArg(IsInput : Boolean; Var FileType : Integer) : Boolean;
+Function D16PushFileArg(IsInput : Boolean; Var FileType : LongInt) : Boolean;
 Var
-  Save : LongInt; U : TString; S : LongInt; T : Integer; A : TD16Addr; IsConst : Boolean;
-  W : Integer;
+  Save : LongInt; U : TString; S : LongInt; T : LongInt; A : TD16Addr; IsConst : Boolean;
+  W : LongInt;
 Begin
   D16PushFileArg := False;
   FileType := DTI_TEXT;
@@ -52550,7 +52667,7 @@ End;
 { Write / WriteLn }
 Procedure D16Write(Ln : Boolean);
 Var
-  FT, T : Integer; HasFile : Boolean; HasArgs : Boolean; A : TD16Addr; O : LongInt;
+  FT, T : LongInt; HasFile : Boolean; HasArgs : Boolean; A : TD16Addr; O : LongInt;
   FileTemp : LongInt; W, D : Boolean;
 Begin
   HasArgs := D16IsPunct('(');
@@ -52668,7 +52785,7 @@ End;
 { Read / ReadLn }
 Procedure D16Read(Ln : Boolean);
 Var
-  FT, T : Integer; HasFile, HasArgs, IsConst : Boolean; A : TD16Addr; FileTemp, O : LongInt;
+  FT, T : LongInt; HasFile, HasArgs, IsConst : Boolean; A : TD16Addr; FileTemp, O : LongInt;
 Begin
   HasArgs := D16IsPunct('(');
   HasFile := False;
@@ -52774,7 +52891,7 @@ End;
 
 { Str(x[:w[:d]], s) }
 Procedure D16StrProc;
-Var T, ST : Integer; A : TD16Addr; IsConst, W, D : Boolean;
+Var T, ST : LongInt; A : TD16Addr; IsConst, W, D : Boolean;
 Begin
   D16ExpectPunct('(');
   T := D16Expr; D16Flush; ST := T;
@@ -52805,7 +52922,7 @@ End;
 
 { Val(s, v, code) }
 Procedure D16ValProc;
-Var T, T2 : Integer; A, A2 : TD16Addr; IsConst : Boolean; O : LongInt;
+Var T, T2 : LongInt; A, A2 : TD16Addr; IsConst : Boolean; O : LongInt;
 Begin
   D16ExpectPunct('(');
   T := D16Expr; D16Flush;
@@ -52842,7 +52959,7 @@ End;
 
 { Inc / Dec }
 Procedure D16IncDec(IsInc : Boolean);
-Var T : Integer; A : TD16Addr; IsConst : Boolean; Op, Op2 : TString; Sz : LongInt;
+Var T : LongInt; A : TD16Addr; IsConst : Boolean; Op, Op2 : TString; Sz : LongInt;
 Begin
   D16ExpectPunct('(');
   T := D16Designator(A, IsConst);
@@ -52885,13 +53002,13 @@ End;
 
 { Fonctions et procedures standard. Retourne le type du resultat (0 pour
   une procedure) ; IsFunc indique si c etait une fonction. }
-Function D16Builtin(Const U : TString; Var IsFunc : Boolean) : Integer;
+Function D16Builtin(Const U : TString; Var IsFunc : Boolean) : LongInt;
 Var
-  T, T2, R : Integer; A, A2 : TD16Addr; IsConst : Boolean; O : LongInt; L1, L2 : TString;
+  T, T2, R : LongInt; A, A2 : TD16Addr; IsConst : Boolean; O : LongInt; L1, L2 : TString;
   C : TD16Const; S : LongInt; Sz : LongInt; HasArg : Boolean; Lo, Hi : LongInt;
-  Save : LongInt; N : Integer;
+  Save : LongInt; N : LongInt;
 
-  Procedure PushAddrOf(Var T : Integer);
+  Procedure PushAddrOf(Var T : LongInt);
   Begin
     T := D16Designator(A, IsConst);
     D16AddrToDXAX(A, 0);
@@ -53580,8 +53697,8 @@ End;
 { ------------------------------------------------------------ }
 
 { Affectation vers l adresse A de type T (la valeur suit :=) }
-Procedure D16AssignTo(Const A : TD16Addr; T : Integer);
-Var T2 : Integer; Dyn : Boolean; A2 : TD16Addr; B : TD16Addr; K : Byte;
+Procedure D16AssignTo(Const A : TD16Addr; T : LongInt);
+Var T2 : LongInt; Dyn : Boolean; A2 : TD16Addr; B : TD16Addr; K : Byte;
 Begin
   Dyn := D16AddrDynamic(A);
   B := A;
@@ -53635,8 +53752,8 @@ Begin
 End;
 
 { Affectation au resultat d une fonction (ProcIdx) }
-Procedure D16AssignResult(P : Integer);
-Var A : TD16Addr; RT : Integer;
+Procedure D16AssignResult(P : LongInt);
+Var A : TD16Addr; RT : LongInt;
 Begin
   RT := D16Procs[P].RetType;
   D16AddrClear(A);
@@ -53652,7 +53769,7 @@ Begin
 End;
 
 Procedure D16IfStmt;
-Var LElse, LEnd : TString; T : Integer;
+Var LElse, LEnd : TString; T : LongInt;
 Begin
   D16Next;
   T := D16Expr;
@@ -53674,7 +53791,7 @@ Begin
 End;
 
 Procedure D16WhileStmt;
-Var LTop, LEnd : TString; T : Integer;
+Var LTop, LEnd : TString; T : LongInt;
 Begin
   D16Next;
   LTop := D16NewLabel; LEnd := D16NewLabel;
@@ -53692,7 +53809,7 @@ Begin
 End;
 
 Procedure D16RepeatStmt;
-Var LTop, LEnd, LCont : TString; T : Integer;
+Var LTop, LEnd, LCont : TString; T : LongInt;
 Begin
   D16Next;
   LTop := D16NewLabel; LEnd := D16NewLabel; LCont := D16NewLabel;
@@ -53711,7 +53828,7 @@ End;
 
 Procedure D16ForStmt;
 Var
-  A, LimA : TD16Addr; T, T2 : Integer; IsConst, Down, Sg : Boolean; LTop, LEnd, LCont : TString;
+  A, LimA : TD16Addr; T, T2 : LongInt; IsConst, Down, Sg : Boolean; LTop, LEnd, LCont : TString;
   LimTemp : LongInt; Sz : LongInt; LimConst : Boolean; LimVal : LongInt; C : TD16Const;
   Save : LongInt; CmpOp : TString;
 Begin
@@ -53804,7 +53921,7 @@ End;
 
 Procedure D16CaseStmt;
 Var
-  T : Integer; LEnd, LNext, LBody : TString; Sz : LongInt; SelTemp : LongInt; A : TD16Addr;
+  T : LongInt; LEnd, LNext, LBody : TString; Sz : LongInt; SelTemp : LongInt; A : TD16Addr;
   C1, C2 : TD16Const; Sg : Boolean; First : Boolean;
 
   Procedure CmpSel(V : LongInt);
@@ -53875,7 +53992,7 @@ Begin
 End;
 
 Procedure D16WithStmt;
-Var T : Integer; A : TD16Addr; IsConst : Boolean; SaveCnt : Integer; O : LongInt;
+Var T : LongInt; A : TD16Addr; IsConst : Boolean; SaveCnt : LongInt; O : LongInt;
 Begin
   D16Next;
   SaveCnt := D16WithCnt;
@@ -53943,8 +54060,8 @@ End;
 { Instruction commencant par un identificateur : affectation ou appel }
 Procedure D16IdentStmt;
 Var
-  U : TString; S : LongInt; T : Integer; A : TD16Addr; IsConst : Boolean; P : Integer;
-  IsFunc : Boolean; W : Integer;
+  U : TString; S : LongInt; T : LongInt; A : TD16Addr; IsConst : Boolean; P : LongInt;
+  IsFunc : Boolean; W : LongInt;
 Begin
   U := D16UVal;
   { label d instruction  nom: }
@@ -54108,8 +54225,8 @@ End;
 { Procedures et fonctions                                      }
 { ------------------------------------------------------------ }
 
-Function D16ProcLabel(Const Name : TString; Idx : Integer) : TString;
-Var S : TString; I : Integer;
+Function D16ProcLabel(Const Name : TString; Idx : LongInt) : TString;
+Var S : TString; I : LongInt;
 Begin
   S := '';
   For I := 1 To Length(Name) Do
@@ -54119,8 +54236,8 @@ Begin
 End;
 
 { Prologue : declarer les parametres comme symboles }
-Procedure D16DeclareParams(P : Integer);
-Var I : Integer; S : LongInt; T : Integer; Pr : LongInt;
+Procedure D16DeclareParams(P : LongInt);
+Var I : LongInt; S : LongInt; T : LongInt; Pr : LongInt;
 Begin
   For I := 0 To D16Procs[P].PCount - 1 Do
   Begin
@@ -54148,7 +54265,7 @@ End;
 
 { Copier les parametres par valeur de grands types dans le cadre }
 Procedure D16CopyLargeParams(FirstSym : LongInt);
-Var S : LongInt; T : Integer; Sz : LongInt; A : TD16Addr;
+Var S : LongInt; T : LongInt; Sz : LongInt; A : TD16Addr;
 Begin
   For S := FirstSym To D16SymCnt - 1 Do
     If (D16Syms[S].Kind = DSK_VAR) And (D16Syms[S].Val = 1) And (D16Syms[S].Loc = LOC_REFPARAM) Then
@@ -54177,10 +54294,10 @@ End;
 
 Procedure D16ParseProcDecl(IsFunc : Boolean);
 Var
-  U : TString; S, FirstSym : LongInt; P : Integer; PS, PB : LongInt; PC : Integer;
-  RT : Integer; SaveLevel : Integer; SaveProc : Integer; SaveOfs, SaveMax : LongInt;
-  SaveExit : TString; SaveWith : Integer; SaveLoop : Integer; HasLink : Boolean;
-  Existing : LongInt; IsFwdDef : Boolean; I : Integer; FrameLbl : TString;
+  U : TString; S, FirstSym : LongInt; P : LongInt; PS, PB : LongInt; PC : LongInt;
+  RT : LongInt; SaveLevel : LongInt; SaveProc : LongInt; SaveOfs, SaveMax : LongInt;
+  SaveExit : TString; SaveWith : LongInt; SaveLoop : LongInt; HasLink : Boolean;
+  Existing : LongInt; IsFwdDef : Boolean; I : LongInt; FrameLbl : TString;
   SaveListing : Boolean;
 Begin
   D16Next;
@@ -54325,9 +54442,9 @@ Begin
 End;
 
 { Bloc : declarations + corps ; ProcIdx = -1 pour le programme principal }
-Procedure D16Block(ProcIdx : Integer);
+Procedure D16Block(ProcIdx : LongInt);
 Var
-  FirstSym : LongInt; FrameLbl : TString; P : Integer; RT : Integer; A : TD16Addr;
+  FirstSym : LongInt; FrameLbl : TString; P : LongInt; RT : LongInt; A : TD16Addr;
   S : LongInt; BodyStart : LongInt; SaveListing : Boolean;
 Begin
   FirstSym := D16SymCnt;
@@ -58242,12 +58359,12 @@ End;
 { ------------------------------------------------------------ }
 
 Var
-  D16EmbSel : Integer;                      { source integre en cours de lecture }
+  D16EmbSel : LongInt;                      { source integre en cours de lecture }
   D16UnitStart, D16UnitEnd : Array[0..D16_MAX_UNITS] Of LongInt;
   D16UnitCompiled : Array[0..D16_MAX_UNITS] Of Boolean;
 
 { Nombre de lignes et texte d une ligne d un source integre }
-Function D16EmbCount(Sel : Integer) : LongInt;
+Function D16EmbCount(Sel : LongInt) : LongInt;
 Begin
   Case Sel Of
     1 : D16EmbCount := D16SRC_SYS_N;
@@ -58290,7 +58407,7 @@ Var
   D16MStack, D16MHeapMin, D16MHeapMax : LongInt;
 
 Procedure D16MDirective(Const Arg : TString);
-Var P : Integer; V : LongInt; N : Integer;
+Var P : LongInt; V : LongInt; N : LongInt;
 Begin
   If Not D16MSet Then Begin D16MStack := 0; D16MHeapMin := -1; D16MHeapMax := -1 End;
   P := 1; N := 0;
@@ -58320,9 +58437,9 @@ End;
 
 { Types et constantes predefinis }
 Procedure D16Predefine;
-Var T : Integer; S : LongInt;
+Var T : LongInt; S : LongInt;
 
-  Procedure AddType(Const Name : TString; T : Integer);
+  Procedure AddType(Const Name : TString; T : LongInt);
   Var S : LongInt;
   Begin
     S := D16SymAdd(Name, DSK_TYPE, T);
@@ -58371,7 +58488,7 @@ Begin
 End;
 
 { Lexer un source integre a la suite du pool de tokens }
-Procedure D16LexEmbedded(Sel : Integer; Var StartTok, EndTok : LongInt);
+Procedure D16LexEmbedded(Sel : LongInt; Var StartTok, EndTok : LongInt);
 Var SaveLine : LongInt; SaveFName : TString;
 Begin
   D16EmbSel := Sel;
@@ -58414,8 +58531,8 @@ Begin
   D16ApplySwitches;
 End;
 
-Procedure D16CompileUnit(UnitId : Integer);
-Var U : TString; FirstImpl : LongInt; P : Integer; SaveEnd : LongInt;
+Procedure D16CompileUnit(UnitId : LongInt);
+Var U : TString; FirstImpl : LongInt; P : LongInt; SaveEnd : LongInt;
 Begin
   D16CurUnit := UnitId;
   D16Pos := D16UnitStart[UnitId];
@@ -58463,7 +58580,7 @@ End;
 
 { Compiler le programme principal (tokens 0..D16TokLimit) }
 Procedure D16CompileProgram;
-Var U : TString; I : Integer; Found : Boolean; S : LongInt;
+Var U : TString; I : LongInt; Found : Boolean; S : LongInt;
 Begin
   D16CurUnit := 0;
   D16Pos := 0; D16End := D16TokLimit;
@@ -58518,7 +58635,7 @@ End;
 
 Procedure D16Run;
 Var
-  I : Integer; S, E : LongInt; TotalCode, TotalData : LongInt; TotalLinesSrc : LongInt;
+  I : LongInt; S, E : LongInt; TotalCode, TotalData : LongInt; TotalLinesSrc : LongInt;
 Begin
   D16AsmInit;
   If D16MSet Then
@@ -58603,7 +58720,7 @@ End;
 { CALL [IAT] DLL!nom. Les API de la couche du noyau (WriteFile...) }
 { sont stdcall (depilees par l appele), les autres _System.       }
 Procedure EmitOs2DllStubs;
-Var PI, K, N : Integer; U : TString; StdCall : Boolean;
+Var PI, K, N : LongInt; U : TString; StdCall : Boolean;
 Begin
   For PI := 0 To ProcCount - 1 Do
   Begin
@@ -58633,7 +58750,7 @@ End;
 { Thunks d exportation d une bibliotheque : _TPE_nom (_System) ->  }
 { procedure Pascal                                                 }
 Procedure EmitOs2LibExports;
-Var E, PI, K, N : Integer; V : LongInt;
+Var E, PI, K, N : LongInt; V : LongInt;
 Begin
   EmitBlankLine;
   EmitComment('=== Exportations de la bibliotheque ' + LibName + ' (_System) ===');
@@ -58688,7 +58805,7 @@ End;
 { Avant l analyse : Library nom; -> Program nom; et retrait de la    }
 { clause exports a, b Name 'c', ...; (memorisee dans ExpNames)       }
 Procedure Os2PrepareLibrary;
-Var I, J, Start, Removed : Integer; Nm : TString;
+Var I, J, Start, Removed : LongInt; Nm : TString;
 Begin
   IsLibrary := False; LibName := ''; ExpCount := 0;
   If (TokenCount > 1) And (StrUpperCase(TokenPool^[0].Val) = 'LIBRARY') Then
@@ -58780,7 +58897,7 @@ End;
 
 { Apres ParseProcDecls : retrouver la procedure de chaque exportation }
 Procedure Os2ResolveExports;
-Var E, PI : Integer;
+Var E, PI : LongInt;
 Begin
   For E := 0 To ExpCount - 1 Do
   Begin
@@ -58813,8 +58930,8 @@ End;
 { pour les programmes OS/2-0 (CMD.EXE...) charges par le noyau.  }
 { ============================================================ }
 
-Function Os2FindProc(Const UName : TString) : Integer;
-Var I : Integer;
+Function Os2FindProc(Const UName : TString) : LongInt;
+Var I : LongInt;
 Begin
   Os2FindProc := -1;
   For I := 0 To ProcCount - 1 Do
@@ -58828,7 +58945,7 @@ End;
 
 Procedure EmitOs2KrnlThunks;
 Var
-  I, K, PI, N, Missing, Found : Integer;
+  I, K, PI, N, Missing, Found : LongInt;
   U, Nm : TString;
   Cdecl : Boolean;
 Begin
@@ -58894,7 +59011,7 @@ End;
 
 Procedure Run;
 Var
-  I : Integer;
+  I : LongInt;
 Begin
   ShowBanner;
 
