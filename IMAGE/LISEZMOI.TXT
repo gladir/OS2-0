@@ -614,6 +614,14 @@ suit le curseur). Bouton 2 ou Maj+F10 : Marquer (glisser avec le
 bouton 1), Copier, Tout copier (presse-papiers de PM), Coller (texte
 envoye au programme), Plein ecran, Fermer (confirmation, fin des
 programmes de la session : KrnSesCtl 20).
+Historique : les lignes qui sortent en haut de l'ecran de la session
+sont gardees par le noyau (1000 par defaut, jusqu'a 10000 ; KrnSesCtl
+22 et 23) ; barre de defilement verticale, Maj+Pg.prec., Maj+Pg.suiv.,
+Maj+fleches, Ctrl+Maj+Debut et Fin pour les revoir ; une touche frappee
+ramene a l'ecran. Parametres... (menu systeme de la fenetre ou bouton
+2) : nombre de lignes gardees et fichier d'historique facultatif (les
+lignes y sont ajoutees, puis l'ecran a la fermeture) ; retenus dans
+OS2.INI (application PMVIOP, cles LIGNES et FICHIER).
   WinCreateConsole(hwndOwner, pszTitre, fl, phcon) : fl 1 visible,
   2 session (numero dans les bits 8 a 15), 4 clavier ouvert ; handle
   56430001h + rang (16 consoles). WinSyncWithPS : tampon d'une console

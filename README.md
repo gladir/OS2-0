@@ -642,6 +642,15 @@ Le fichier <b>DLL/PMVIOP.PAS</b> est la bibliothèque OS/2 <b>PMVIOP.DLL</b> (ba
 
 <img width="640" height="480" alt="OS/2-0 : une fenêtre OS/2 (CMD.EXE dans une fenêtre du bureau, PMVIOP.DLL)" src="IMAGE/FENETREOS2.png" />
 
+<b>Historique et barre de défilement.</b> Une fenêtre OS/2 garde les lignes qui sortent en haut de l'écran de sa session (1000 par défaut, jusqu'à 10 000) : la barre de défilement verticale, <b>Maj+Pg.préc.</b>, <b>Maj+Pg.suiv.</b>, <b>Maj+↑</b>, <b>Maj+↓</b>, <b>Ctrl+Maj+Début</b> et <b>Ctrl+Maj+Fin</b> parcourent cet historique ; Marquer et Copier prennent les lignes affichées, et une touche frappée pour le programme ramène à l'écran de la session. Les lignes sont gardées par le noyau, dans un tampon circulaire par session (<code>KrnSesCtl</code> 22 : taille ; 23 : lecture), au moment où elles quittent l'écran : aucune n'est perdue, même quand la sortie défile plus vite que la fenêtre ne se redessine. L'article <b>Paramètres...</b> du menu système (icône de la fenêtre) et du menu du bouton 2 ouvre une boîte où l'on choisit le nombre de lignes gardées et un <b>fichier d'historique</b> facultatif (par exemple <code>C:\HISTO.TXT</code>) : chaque ligne qui sort de l'écran y est ajoutée, puis le contenu de l'écran à la fermeture de la fenêtre. Ces choix sont retenus dans OS2.INI (application <code>PMVIOP</code>, clés <code>LIGNES</code> et <code>FICHIER</code>).
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/FENETREOS2_HISTORIQUE.png" width="400" alt="Fenêtre OS/2 : historique et barre de défilement"><br><i>Maj+Pg.préc. : les lignes de HELP sorties de l'écran, barre de défilement à droite</i></td>
+		<td align="center"><img src="IMAGE/FENETREOS2_PARAMETRES.png" width="400" alt="Fenêtre OS/2 : boîte Paramètres"><br><i>Paramètres : lignes gardées et fichier d'historique</i></td>
+	</tr>
+</table>
+
 <table>
 	<tr><th>Fonctions</th><th>Rôle</th></tr>
 	<tr><td>WinCreateConsole, WinDestroyConsole, QueryConsole, HFrameWindowFromConsole, MakeVisible (1, 2, 41, 122, 42)</td><td>Console : fenêtre à titre, menu système et bouton de réduction (zone client de la classe PMVIOP_SHIELD, procédure VioShieldWindowProc ; cadre sous-classé par ShieldFrameProc) ; fl : 1 visible, 2 session (numéro dans les bits 8 à 15), 4 clavier ouvert. La fenêtre est bornée par l'écran (en 640 x 480 : 79 colonnes visibles, la zone visible suit le curseur). Handle 56430001h + rang (16 consoles).</td></tr>
