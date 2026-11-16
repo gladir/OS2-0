@@ -653,6 +653,11 @@ Var
   ExcPtrs   : Array[0..1] Of LongInt;    { EXCEPTION_POINTERS }
   FilterAdr : LongInt;
   FilterArg : LongInt;
+  { derniere exception d'un processus (KrnTaskCtl 21 : le bureau l'affiche
+    dans une boite SYS3175, l'ecran texte du noyau etant cache par PM) }
+  TrapSeq   : LongInt;
+  TrapMsg   : String;
+  TrapProc  : LongInt;    { processus de la derniere exception }
 
 Const
   ExcNames : Array[0..19] Of String[40] = (
@@ -688,6 +693,14 @@ Begin
     Eip := MemL[0:F + 36];
   End;
   If Vec <= 19 Then Nm := ExcNames[Vec] Else Nm := 'Exception';
+  If CurProc >= 0 Then
+  Begin
+    Inc(TrapSeq);
+    TrapProc := CurProc;
+    TrapMsg := 'SYS3175 : ' + Procs[CurProc].Name + ' a provoque une exception et a ete arrete. TRAP ' +
+               HexStr(Vec, 4) + ' (' + Nm + ')  EIP=' + HexStr(Eip, 8) + '  CR2=' + HexStr(FaultAdr, 8) +
+               '  EBP=' + HexStr(MemL[0:F], 8);
+  End;
   { un programme OS2PC installe un filtre (SetUnhandledExceptionFilter) qui
     affiche "Runtime error N at ..." et termine le processus }
   If (CurProc >= 0) And (Procs[CurProc].Filter <> 0) Then
@@ -7036,7 +7049,31 @@ Begin
 End;
 
 Procedure ExitProcess(Code : LongInt);
+Var Nm : String;
 Begin
+  { programme de la session de PM arrete sur une erreur d'execution
+    Pascal (Runtime error 200 a 217, ecrite sur une sortie que personne
+    ne voit) : le bureau l'affiche (KrnTaskCtl 21) }
+  If (CurProc >= 0) And (Code >= 200) And (Code <= 217) And (Procs[CurProc].Sess = PmSess) And
+     (TrapProc <> CurProc) Then
+  Begin
+    Case Code Of
+      200 : Nm := 'division par zero';
+      201 : Nm := 'hors limites';
+      202 : Nm := 'debordement de pile';
+      203 : Nm := 'memoire insuffisante (tas)';
+      204 : Nm := 'pointeur non valable';
+      205 : Nm := 'debordement flottant';
+      207 : Nm := 'operation flottante non valable';
+      215 : Nm := 'debordement entier';
+      216 : Nm := 'acces memoire non valable';
+    Else
+      Nm := 'erreur d''execution';
+    End;
+    Inc(TrapSeq);
+    TrapMsg := 'SYS3175 : ' + Procs[CurProc].Name + ' s''est arrete : Runtime error ' + IntStr(Code) + ' (' + Nm + ').';
+  End;
+  If (CurProc >= 0) And (TrapProc = CurProc) Then TrapProc := -1;
   If CurProc >= 0 Then KillCurrentProcess(Code);
   ConPutLn('OS2KRNL: fin du noyau.');
   asm
@@ -7327,6 +7364,12 @@ Begin
               KrnTaskCtl := S;
             End;
           End;
+        End;
+   { 21 : derniere exception d'un processus : rend son numero (0 : aucune) ;
+     P1 : texte ASCIIZ (P2 octets au plus) }
+   21 : Begin
+          KrnTaskCtl := TrapSeq;
+          If (P1 <> 0) And (P2 > 0) Then PutPStr(P1, TrapMsg, P2);
         End;
    { 19 : bloc permanent de P1 octets (sans proprietaire : jamais libere ;
      ecran fantome du VGA de PMWIN, vu par tous les processus) }
@@ -18264,6 +18307,7 @@ BEGIN
   NDisk := 0;
   HdBoot := MemW[0:BootInfo + $34] = $4448;
   BootPartLba := 0; BootIfsBuf := 0; BootIfsSize := 0; FmtIfs := -1;
+  TrapSeq := 0; TrapMsg := ''; TrapProc := -1;
   BootIfsName := 'HPFS.IFS';
   If HdBoot Then
   Begin

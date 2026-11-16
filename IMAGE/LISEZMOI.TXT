@@ -987,7 +987,10 @@ du bureau, objet Pascal Developer (PASDEV fichier.pas le lance aussi).
     cause). Destination (menu Compiler) : OS/2 Presentation Manager par
     defaut (symbole OS2PM), ou OS/2 Console (symbole OS2CONSOLE). Le
     compilateur tourne en arriere-plan : l'EDI et le bureau restent
-    utilisables pendant la compilation ;
+    utilisables pendant la compilation ; une boite Compilation (comme
+    celle de Borland Pascal) montre l'etape, la ligne en cours, les
+    erreurs et la duree, et se ferme a la fin (OS2PC -PRG : progression
+    dans la memoire partagee \SHAREMEM\OS2PC.PRG) ;
   - Executer (Ctrl+F9) : compile si besoin, puis lance le programme (PM :
     directement ; Console : dans une fenetre OS/2, pause a la fin ; un
     programme compile pour PM sans fenetre, un simple WriteLn, est aussi
@@ -1001,7 +1004,12 @@ du bureau, objet Pascal Developer (PASDEV fichier.pas le lance aussi).
 Alt+F9 (reduire) et F10 (menu) sont des touches du systeme : la
 compilation est sur F9. Exemples : BONJOUR.PAS (PM), HELLO.PAS (console).
 Sur le CD-ROM, les nouveaux fichiers et les .EXE vont sur D:.
-OS2PC.EXE (compilateur natif) occupe environ 40 Mo de tables ; avec 64 Mo
+OS2PC ecrit le .EXE par un tampon de 64 Ko (octet par octet, chaque
+ecriture allait au disque : plus de 60 millions d'acces au controleur
+IDE pour un petit programme). Un programme arrete sur une exception, ou
+un programme de PM arrete sur une erreur d'execution (Runtime error 200
+a 217), est signale par une boite SYS3175 du bureau (programme, TRAP,
+adresse). OS2PC.EXE (compilateur natif) occupe environ 40 Mo de tables ; avec 64 Mo
 de memoire, il compile un source d'environ 3 000 lignes ; au-dela (par
 exemple PASDEV.PAS lui-meme, 4 000 lignes), donner 128 Mo a la machine.
 
