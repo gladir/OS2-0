@@ -256,6 +256,7 @@ Function DosDelete(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function DosOpen(PName, PHf, PAct, Cb, Attr, Fl, Mode, PEa : LongInt) : LongInt; External 'DOSCALLS';
 Function DosRead(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS';
 Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
+Function DosSetFilePtr(H, Ib, Method, PActual : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetCurrentDir(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetDefaultDisk(Disk : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSleep(Ms : LongInt) : LongInt; External 'DOSCALLS';
@@ -1967,6 +1968,115 @@ Begin
   BaseName := Copy(S, K + 1, 255);
 End;
 
+{ programme de Presentation Manager ? En-tete LX/LE (indicateurs du
+  module : 300h, application PM), NE (type d'application 300h) ou PE
+  (table d'importation : PMWIN, PMGPI ou PMMERGE). Un tel programme est
+  lance dans la session de PM, comme les objets du bureau : une nouvelle
+  session plein ecran passerait l'ecran en mode texte puis le rendrait a
+  PM aussitot (affichage perdu en 1024 x 768 x 32 bits). }
+Var
+  PmH, PmNSec, PmOptEnd : LongInt;
+  PmB : Array[0..255] Of Byte;
+
+Function PmReadAt(Pos, N : LongInt) : Boolean;
+Var A : LongInt;
+Begin
+  A := 0;
+  PmReadAt := False;
+  If DosSetFilePtr(PmH, Pos, 0, LongInt(@A)) <> 0 Then Exit;
+  A := 0;
+  If DosRead(PmH, LongInt(@PmB), N, LongInt(@A)) <> 0 Then Exit;
+  PmReadAt := A = N;
+End;
+
+Function PmW(I : LongInt) : LongInt;
+Begin
+  PmW := PmB[I] Or (PmB[I + 1] Shl 8);
+End;
+
+Function PmD(I : LongInt) : LongInt;
+Begin
+  PmD := PmW(I) Or (PmW(I + 2) Shl 16);
+End;
+
+{ deplacement dans le fichier d'une adresse virtuelle relative (PE) }
+Function PmFileOfs(R : LongInt) : LongInt;
+Var I, VS, VA, Raw, RS : LongInt;
+Begin
+  PmFileOfs := -1;
+  For I := 0 To PmNSec - 1 Do
+    If PmReadAt(PmOptEnd + I * 40, 40) Then
+    Begin
+      VS := PmD(8); VA := PmD(12); RS := PmD(16); Raw := PmD(20);
+      If VS < RS Then VS := RS;
+      If (R >= VA) And (R < VA + VS) Then
+      Begin
+        PmFileOfs := R - VA + Raw;
+        Exit;
+      End;
+    End;
+End;
+
+Function IsPmProgram(Path : String) : Boolean;
+Var A, Ne, Imp, Off, K, J, Rva, NmOff, Opt : LongInt; S : String; R : Boolean;
+Begin
+  IsPmProgram := False;
+  R := False;
+  PmH := 0; A := 0;
+  If DosOpen(Z(Path), LongInt(@PmH), LongInt(@A), 0, 0, 1, $40, 0) <> 0 Then Exit;
+  If PmReadAt(0, 64) And (PmB[0] = Ord('M')) And (PmB[1] = Ord('Z')) Then
+  Begin
+    Ne := PmD($3C);
+    If (Ne > 0) And PmReadAt(Ne, 248) Then
+    Begin
+      If (PmB[0] = Ord('L')) And ((PmB[1] = Ord('X')) Or (PmB[1] = Ord('E'))) Then
+        R := (PmD($10) And $700) = $300
+      Else If (PmB[0] = Ord('N')) And (PmB[1] = Ord('E')) Then
+        R := (PmW($0C) And $300) = $300
+      Else If (PmB[0] = Ord('P')) And (PmB[1] = Ord('E')) And (PmB[2] = 0) And (PmB[3] = 0) Then
+      Begin
+        PmNSec := PmW(6); Opt := Ne + 24; PmOptEnd := Opt + PmW(20);
+        If PmW(24) = $20B Then Imp := PmD(24 + 120) Else Imp := PmD(24 + 104);
+        Off := -1;
+        If (Imp <> 0) And (PmNSec > 0) And (PmNSec < 64) Then Off := PmFileOfs(Imp);
+        K := 0;
+        While (Off > 0) And (K < 64) Do
+        Begin
+          If Not PmReadAt(Off + K * 20, 20) Then K := 64
+          Else
+          Begin
+            Rva := PmD(12);
+            If Rva = 0 Then K := 64
+            Else
+            Begin
+              NmOff := PmFileOfs(Rva);
+              S := '';
+              If (NmOff > 0) And PmReadAt(NmOff, 16) Then
+              Begin
+                J := 0;
+                While (J < 16) And (PmB[J] <> 0) Do
+                Begin
+                  S := S + UpCase(Chr(PmB[J]));
+                  Inc(J);
+                End;
+              End;
+              If (Copy(S, 1, 5) = 'PMWIN') Or (Copy(S, 1, 5) = 'PMGPI') Or (Copy(S, 1, 7) = 'PMMERGE') Then
+              Begin
+                R := True;
+                K := 64;
+              End;
+              Inc(K);
+            End;
+          End;
+        End;
+      End;
+    End;
+  End;
+  Dummy := DosClose(PmH);
+  IsPmProgram := R;
+End;
+
+
 Procedure RunProgram(Prog, Params, Dir : String; Pause : Boolean);
 Var Res : Array[0..1] Of LongInt; Rc, Act, K, S : LongInt; D, T : String;
 Begin
@@ -2314,7 +2424,17 @@ Begin
     OB_INFO : SysInfo;
     OB_HELP : Help;
     OB_DIR : OpenFolder(VK_DIR, It(K)^.Path, It(K)^.Path);
-    OB_EXE : RunProgram(It(K)^.Path, '', DirOf(It(K)^.Path), True);
+    OB_EXE :
+      If IsPmProgram(It(K)^.Path) Then
+      Begin
+        { programme de PM : dans la session de Presentation Manager }
+        P := DirOf(It(K)^.Path);
+        If (Length(P) >= 2) And (P[2] = ':') Then Dummy := DosSetDefaultDisk(Ord(UpCase(P[1])) - 64);
+        If (Length(P) > 3) And (P[Length(P)] = '\') Then P := Copy(P, 1, Length(P) - 1);
+        Dummy := DosSetCurrentDir(Z(P));
+        RunPm(It(K)^.Path, '');
+      End
+      Else RunProgram(It(K)^.Path, '', DirOf(It(K)^.Path), True);
     OB_BATCH : RunProgram(Comspec, '/C ' + It(K)^.Path, DirOf(It(K)^.Path), True);
     OB_DATA : OpenViewer(It(K)^.Path);
     OB_TEMPLATES : OpenFolder(VK_TEMPL, '', 'Modeles');

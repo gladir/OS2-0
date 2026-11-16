@@ -108,14 +108,24 @@ Const
   WM_BUTTON1UP = $0072; WM_BUTTON1DBLCLK = $0073; WM_BUTTON2DOWN = $0074; WM_BUTTON2UP = $0075;
   WM_BUTTON3DOWN = $0077; WM_BUTTON3UP = $0078; WM_CHAR = $007A; WM_BUTTON2CLICK = $0416; WM_CONTEXTMENU = $0424;
   KC_CHAR = 1; KC_VIRTUALKEY = 2; KC_SHIFT = 8; KC_CTRL = $10; KC_ALT = $20; KC_KEYUP = $40;
-  VK_BACKSPACE = 5; VK_TAB = 6; VK_NEWLINE = 8; VK_ESC = $0F; VK_ENTER = $1E;
+  VK_BACKSPACE = 5; VK_TAB = 6; VK_BACKTAB = 7; VK_NEWLINE = 8; VK_ESC = $0F; VK_ENTER = $1E;
   HWND_DESKTOP = 1; HWND_TOP = 3;
   SWP_SIZE = 1; SWP_MOVE = 2; SWP_ZORDER = 4; SWP_SHOW = 8; SWP_ACTIVATE = $80; SWP_RESTORE = $1000;
   FCF_TITLEBAR = 1; FCF_SYSMENU = 2; FCF_MINBUTTON = $10; FCF_DLGBORDER = $200;
   MB_YESNO = 4; MB_WARNING = $20; MB_MOVEABLE = $4000; MBID_YES = 6;
   CF_TEXT = 1; CFI_POINTER = $400;
   { menu de la fenetre }
-  CM_MARK = 1; CM_COPY = 2; CM_COPYALL = 3; CM_PASTE = 4; CM_FULL = 5; CM_CLOSE = 6;
+  CM_MARK = 1; CM_COPY = 2; CM_COPYALL = 3; CM_PASTE = 4; CM_FULL = 5; CM_CLOSE = 6; CM_PARAMS = 7;
+  { historique (barre de defilement) et boite Parametres }
+  WM_VSCROLL = $0031; FCF_VERTSCROLL = $40; FID_SYSMENU = $8002; FID_VERTSCROLL = $8006; SC_SYSMENU = $8007;
+  MM_INSERTITEM = $0180; MM_QUERYITEM = $0182; MIS_TEXT = 1; MIS_SEPARATOR = 4;
+  SBM_SETSCROLLBAR = $01A0; SBM_SETTHUMBSIZE = $01A6;
+  SB_LINEUP = 1; SB_LINEDOWN = 2; SB_PAGEUP = 3; SB_PAGEDOWN = 4; SB_SLIDERTRACK = 5; SB_SLIDERPOSITION = 6;
+  VK_PAGEUP = $11; VK_PAGEDOWN = $12; VK_END = $13; VK_HOME = $14; VK_UP = $16; VK_DOWN = $18;
+  WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005; WC_ENTRYFIELD = $FFFF0006;
+  WS_VISIBLE = $80000000; WS_TABSTOP = $00020000; BS_DEFAULT = $0400; SS_TEXT = 1; ES_AUTOSCROLL = 4;
+  ES_MARGIN = 8; EM_SETTEXTLIMIT = $0143; MB_OK = 0; MB_ERROR = $40; MB_INFORMATION = $30;
+  HistMax = 10000;
   { couleurs du VGA -> couleurs de PM }
   VgaClr : Array[0..15] Of LongInt = (-1, 9, 12, 13, 10, 11, 14, 15, 8, 1, 4, 5, 2, 3, 6, -2);
 
@@ -129,6 +139,14 @@ Var
   CBuf, CSnap : Array[0..MaxCon * ConCells - 1] Of Byte;      { cellules, image affichee }
   CPaste : Array[0..MaxCon * 256 - 1] Of Byte;
   CTitle : Array[0..MaxCon - 1] Of String[60];
+  { historique : lignes remontees (0 : ecran de la session), lignes
+    gardees par le noyau, lignes poussees vues, lignes ecrites dans le
+    fichier ; lignes de l'historique montrees dans la fenetre }
+  CBack, CHCnt, CHTot, CFTot : Array[0..MaxCon - 1] Of LongInt;
+  CView : Array[0..MaxCon * ConCells - 1] Of Byte;
+  HistLines : LongInt;           { Parametres : lignes gardees }
+  HistFile : String;             { fichier d'historique ('' : aucun) }
+  ParFrame, ParClient, ParCon, ParClassOk : LongInt;
   Creating, ClassesOk, ShieldHab, TaskHmq, SwapBtn, ClipDirty, MenuH, MenuCon, Dummy, InitI : LongInt;
   HookFn, HookPid : Array[0..7] Of LongInt;
   SeamH, SeamObj, SeamAssoc : Array[0..15] Of LongInt;
@@ -186,6 +204,16 @@ Function WinQueryWindowDC(H : LongInt) : LongInt; External 'PMWIN';
 
 { --- VIOCALLS.DLL --- }
 Function VioGetPSAddress(PPBuf, Hvps : LongInt) : LongInt; External 'VIOCALLS';
+Function WinCreateWindow(HPar, PCls, PName, Style, X, Y, Cx, Cy, HOwn, HBehind, Id, PCtl, PPres : LongInt) : LongInt; External 'PMWIN';
+Function WinSendMsg(H, Msg, Mp1, Mp2 : LongInt) : LongInt; External 'PMWIN';
+Function WinWindowFromID(H, Id : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryWindowText(H, Cch, P : LongInt) : LongInt; External 'PMWIN';
+Function PrfQueryProfileString(H, A, K, Df, B, M : LongInt) : LongInt; External 'PMMERGE';
+Function PrfWriteProfileString(H, A, K, D : LongInt) : LongInt; External 'PMMERGE';
+Function DosOpen(PName, PHf, PAct, Cb, Attr, Fl, Mode, PEa : LongInt) : LongInt; External 'DOSCALLS';
+Function DosWrite(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS';
+Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
+Function DosSetFilePtr(H, Ib, Method, PActual : LongInt) : LongInt; External 'DOSCALLS';
 Function VioQueryVbe(P : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOQUERYVBE';
 Function VioGetMode(PMode, Hvio : LongInt) : LongInt; External 'VIOCALLS';
 Function VioAvioSize(Hdc, Cx, Cy : LongInt) : LongInt; External 'VIOCALLS' Name 'VIOAVIOSIZE';
@@ -425,6 +453,180 @@ Begin
 End;
 
 { ==================================================================== }
+{ Historique : lignes sorties en haut de l'ecran de la session          }
+{ ==================================================================== }
+{ Le noyau garde les lignes qui quittent l'ecran de la session dans un  }
+{ tampon circulaire (KrnSesCtl 22 : taille ; 23 : lecture). La barre de }
+{ defilement verticale, Maj+Pg.prec./Pg.suiv. et Maj+fleches remontent }
+{ dans cet historique ; une touche frappee ramene a l'ecran. Parametres }
+{ (menu systeme ou bouton 2) : nombre de lignes gardees et fichier ou   }
+{ elles sont aussi ecrites (OS2.INI, application PMVIOP).               }
+
+Function IStr(V : LongInt) : String;
+Var S : String;
+Begin
+  Str(V, S);
+  IStr := S;
+End;
+
+Procedure LoadPrefs;
+Var B : Array[0..299] Of Byte; S : String; V, E : LongInt;
+Begin
+  HistLines := 1000; HistFile := '';
+  B[0] := 0;
+  Dummy := PrfQueryProfileString(-1, Z('PMVIOP'), Z2('LIGNES'), 0, LongInt(@B), 32);
+  S := GetZ(LongInt(@B));
+  If S <> '' Then
+  Begin
+    Val(S, V, E);
+    If (E = 0) And (V >= 0) And (V <= HistMax) Then HistLines := V;
+  End;
+  B[0] := 0;
+  Dummy := PrfQueryProfileString(-1, Z('PMVIOP'), Z2('FICHIER'), 0, LongInt(@B), 260);
+  HistFile := GetZ(LongInt(@B));
+End;
+
+Procedure SavePrefs;
+Begin
+  PutZ(LongInt(@TextBuf), IStr(HistLines));
+  Dummy := PrfWriteProfileString(-1, Z('PMVIOP'), Z2('LIGNES'), LongInt(@TextBuf));
+  PutZ(LongInt(@TextBuf), HistFile);
+  Dummy := PrfWriteProfileString(-1, Z('PMVIOP'), Z2('FICHIER'), LongInt(@TextBuf));
+End;
+
+{ historique de la session : lignes gardees, lignes poussees (Tot) ;
+  N lignes a partir de First copiees en Dst }
+Function HistRead(I, First, N, Dst : LongInt; Var Tot : LongInt) : LongInt;
+Var Blk : Array[0..4] Of LongInt;
+Begin
+  Blk[0] := First; Blk[1] := N; Blk[2] := Dst; Blk[3] := 0; Blk[4] := 0;
+  HistRead := 0; Tot := 0;
+  If CSess[I] < 0 Then Exit;
+  HistRead := KSes(23, CSess[I], LongInt(@Blk));
+  Tot := Blk[3];
+End;
+
+{ adresse de la ligne R (0 a CRows-1) de la vue : historique ou ecran }
+Function RowAddr(I, R, Src : LongInt) : LongInt;
+Var Idx : LongInt;
+Begin
+  If CBack[I] <= 0 Then RowAddr := Src + R * CCols[I] * 2
+  Else
+  Begin
+    Idx := CHCnt[I] - CBack[I] + R;
+    If Idx >= CHCnt[I] Then RowAddr := Src + (Idx - CHCnt[I]) * CCols[I] * 2
+    Else RowAddr := LongInt(@CView) + I * ConCells + R * CCols[I] * 2;
+  End;
+End;
+
+{ lignes de l'historique visibles dans la vue }
+Procedure LoadView(I : LongInt);
+Var Top, N, Tot : LongInt;
+Begin
+  If CBack[I] <= 0 Then Exit;
+  Top := CHCnt[I] - CBack[I];
+  N := MinI(CRows[I], CHCnt[I] - Top);
+  If N > 0 Then Dummy := HistRead(I, Top, N, LongInt(@CView) + I * ConCells, Tot);
+End;
+
+Procedure UpdScroll(I : LongInt);
+Var Sb : LongInt;
+Begin
+  If CFrame[I] = 0 Then Exit;
+  Sb := WinWindowFromID(CFrame[I], FID_VERTSCROLL);
+  If Sb = 0 Then Exit;
+  Dummy := WinSendMsg(Sb, SBM_SETSCROLLBAR, CHCnt[I] - CBack[I], (CHCnt[I] Shl 16) And $FFFF0000);
+  Dummy := WinSendMsg(Sb, SBM_SETTHUMBSIZE, (CRows[I] And $FFFF) Or ((CHCnt[I] + CRows[I]) Shl 16), 0);
+End;
+
+{ remonter de B lignes dans l'historique (0 : ecran de la session) }
+Procedure ScrollBack(I, B : LongInt);
+Begin
+  If B > CHCnt[I] Then B := CHCnt[I];
+  If B < 0 Then B := 0;
+  If B = CBack[I] Then Exit;
+  CBack[I] := B;
+  LoadView(I);
+  UpdScroll(I);
+  If CClient[I] <> 0 Then Dummy := WinInvalidateRect(CClient[I], 0, 0);
+End;
+
+{ ligne de cellules -> texte (espaces de fin retires), CR LF ; ajoute
+  en Buf a partir de N }
+Procedure CellLine(A, Cols : LongInt; Var N : LongInt);
+Var C, L, Ch : LongInt;
+Begin
+  L := N;
+  For C := 0 To Cols - 1 Do
+  Begin
+    Ch := RdB(A + C * 2);
+    If Ch = 0 Then Ch := 32;
+    TextBuf[N] := Ch;
+    Inc(N);
+    If Ch <> 32 Then L := N;
+  End;
+  N := L;
+  TextBuf[N] := 13; TextBuf[N + 1] := 10; N := N + 2;
+End;
+
+{ ajouter TextBuf[0..N-1] au fichier d'historique }
+Procedure FileAppend(N : LongInt);
+Var H, A : LongInt;
+Begin
+  If (HistFile = '') Or (N <= 0) Then Exit;
+  H := 0; A := 0;
+  { ouvrir ou creer, ecriture seule, refus d'ecriture aux autres }
+  If DosOpen(Z(HistFile), LongInt(@H), LongInt(@A), 0, 0, $11, $21, 0) <> 0 Then Exit;
+  Dummy := DosSetFilePtr(H, 0, 2, LongInt(@A));
+  Dummy := DosWrite(H, LongInt(@TextBuf), N, LongInt(@A));
+  Dummy := DosClose(H);
+End;
+
+{ nouvelles lignes de l'historique vers le fichier (par groupes) }
+Procedure HistToFile(I : LongInt);
+Var New, First, K, N, Tot : LongInt; Line : Array[0..319] Of Byte;
+Begin
+  New := CHTot[I] - CFTot[I];
+  CFTot[I] := CHTot[I];
+  If (HistFile = '') Or (New <= 0) Then Exit;
+  If New > CHCnt[I] Then New := CHCnt[I];
+  First := CHCnt[I] - New;
+  N := 0;
+  For K := 0 To New - 1 Do
+  Begin
+    If HistRead(I, First + K, 1, LongInt(@Line), Tot) > 0 Then CellLine(LongInt(@Line), CCols[I], N);
+    If N > 3600 Then
+    Begin
+      FileAppend(N);
+      N := 0;
+    End;
+  End;
+  FileAppend(N);
+End;
+
+{ fermeture : l'ecran (jusqu'a la ligne du curseur) va aussi au fichier }
+Procedure ScreenToFile(I : LongInt);
+Var R, N, Src, Last : LongInt;
+Begin
+  If (HistFile = '') Or (CSess[I] < 0) Then Exit;
+  HistToFile(I);
+  Src := SrcOf(I);
+  Last := CSnapR[I];
+  If (Last < 0) Or (Last >= CRows[I]) Then Last := CRows[I] - 1;
+  N := 0;
+  For R := 0 To Last Do CellLine(Src + R * CCols[I] * 2, CCols[I], N);
+  FileAppend(N);
+End;
+
+{ nouvel historique (taille des Parametres) pour la console I }
+Procedure HistSetup(I : LongInt);
+Begin
+  CBack[I] := 0; CHCnt[I] := 0; CHTot[I] := 0; CFTot[I] := 0;
+  If CSess[I] >= 0 Then Dummy := KSes(22, CSess[I], HistLines);
+  UpdScroll(I);
+End;
+
+{ ==================================================================== }
 { Evenements du clavier et de la souris                                 }
 { ==================================================================== }
 
@@ -485,13 +687,13 @@ Begin
     C := COrgC[I];
     While C < CE Do
     Begin
-      C0 := C; A0 := RdB(Src + (R * CCols[I] + C) * 2 + 1); S0 := InSel(I, R, C);
+      C0 := C; A0 := RdB(RowAddr(I, R, Src) + C * 2 + 1); S0 := InSel(I, R, C);
       N := 0;
       While C < CE Do
       Begin
-        A := RdB(Src + (R * CCols[I] + C) * 2 + 1); S := InSel(I, R, C);
+        A := RdB(RowAddr(I, R, Src) + C * 2 + 1); S := InSel(I, R, C);
         If (A <> A0) Or (S <> S0) Then Break;
-        Ch := RdB(Src + (R * CCols[I] + C) * 2);
+        Ch := RdB(RowAddr(I, R, Src) + C * 2);
         If Ch = 0 Then Ch := 32;
         B[N] := Ch;
         Inc(N); Inc(C);
@@ -506,7 +708,8 @@ Begin
     End;
   End;
   { curseur (session) : trait sous la cellule }
-  If (CSess[I] >= 0) And (CSnapR[I] >= COrgR[I]) And (CSnapR[I] < RE) And (CSnapC[I] >= COrgC[I]) And (CSnapC[I] < CE) Then
+  If (CSess[I] >= 0) And (CBack[I] = 0) And (CSnapR[I] >= COrgR[I]) And (CSnapR[I] < RE) And (CSnapC[I] >= COrgC[I]) And
+     (CSnapC[I] < CE) Then
   Begin
     Rc[0] := XOf(I, CSnapC[I]); Rc[2] := Rc[0] + 8; Rc[1] := YOf(I, CSnapR[I]) + 1; Rc[3] := Rc[1] + 2;
     Dummy := WinFillRect(Hps, LongInt(@Rc), -2);
@@ -517,7 +720,7 @@ End;
 { session : lignes changees et curseur redessines ; fermeture quand la
   session n'existe plus (programme termine) }
 Procedure RefreshCon(I : LongInt);
-Var Inf : Array[0..7] Of LongInt; R, K, Src, Base : LongInt; Diff : Boolean; Kv : Array[0..1] Of LongInt;
+Var Inf : Array[0..7] Of LongInt; R, K, Src, Base, Cnt, Tot : LongInt; Diff : Boolean; Kv : Array[0..1] Of LongInt;
 Begin
   If CSess[I] < 0 Then Exit;
   If KSes(18, CSess[I], LongInt(@Inf)) = 0 Then
@@ -539,6 +742,18 @@ Begin
   End;
   If (CStatus[I] And CS_FROZEN) <> 0 Then Exit;
   If CLock[I] > 0 Then Exit;
+  { historique : nouvelles lignes (la vue remontee reste sur les memes
+    lignes ; fichier d'historique) }
+  Cnt := HistRead(I, 0, 0, 0, Tot);
+  If (Tot <> CHTot[I]) Or (Cnt <> CHCnt[I]) Then
+  Begin
+    If CBack[I] > 0 Then CBack[I] := MinI(Cnt, CBack[I] + (Tot - CHTot[I]));
+    CHCnt[I] := Cnt; CHTot[I] := Tot;
+    HistToFile(I);
+    LoadView(I);
+    UpdScroll(I);
+    If CBack[I] > 0 Then Dummy := WinInvalidateRect(CClient[I], 0, 0);
+  End;
   Src := Inf[0]; Base := I * ConCells;
   For R := 0 To CRows[I] - 1 Do
   Begin
@@ -552,7 +767,9 @@ Begin
     If Diff Then
     Begin
       For K := 0 To CCols[I] * 2 - 1 Do CSnap[Base + R * CCols[I] * 2 + K] := RdB(Src + R * CCols[I] * 2 + K);
-      InvalRow(I, R);
+      { vue remontee : la ligne R de l'ecran est plus bas dans la fenetre }
+      If CBack[I] = 0 Then InvalRow(I, R)
+      Else If R + CBack[I] < CRows[I] Then InvalRow(I, R + CBack[I]);
     End;
   End;
   CFull[I] := 0;
@@ -588,7 +805,7 @@ Begin
     L := N;
     For C := C1 To C2 Do
     Begin
-      Ch := RdB(Src + (R * CCols[I] + C) * 2);
+      Ch := RdB(RowAddr(I, R, Src) + C * 2);
       If Ch = 0 Then Ch := 32;
       TextBuf[N] := Ch;
       Inc(N);
@@ -660,6 +877,7 @@ Begin
   MenuAdd(CM_PASTE, 'C~oller');
   MenuAdd(0, '');
   If CSess[I] >= 0 Then MenuAdd(CM_FULL, '~Plein ecran');
+  If CSess[I] >= 0 Then MenuAdd(CM_PARAMS, 'P~aram'#138'tres...');
   MenuAdd(CM_CLOSE, '~Fermer');
   WrW(LongInt(@MenuTpl), MenuLen); WrW(LongInt(@MenuTpl) + 2, 0); WrW(LongInt(@MenuTpl) + 4, MenuCnt);
   If MenuH <> 0 Then Dummy := WinDestroyWindow(MenuH);
@@ -673,7 +891,9 @@ Var F : LongInt;
 Begin
   If (I < 0) Or (I >= MaxCon) Or (CUse[I] = 0) Then Exit;
   F := CFrame[I];
+  ScreenToFile(I);
   CUse[I] := 0;
+  If ParCon = I Then ParCon := -1;
   If CClient[I] <> 0 Then Dummy := WinStopTimer(ShieldHab, CClient[I], 1);
   CClient[I] := 0; CFrame[I] := 0;
   CommonList[I] := 0;
@@ -693,6 +913,172 @@ Begin
     Dummy := KSes(20, CSess[I], 0);
   End;
   DestroyCon(I);
+End;
+
+{ ==================================================================== }
+{ Parametres de la fenetre OS/2 : historique                            }
+{ ==================================================================== }
+
+{ article Parametres... a la fin du menu systeme du cadre }
+Procedure SysMenuAdd(I : LongInt);
+Var Sm, Sub : LongInt; Mi : Array[0..3] Of LongInt;
+Begin
+  Sm := WinWindowFromID(CFrame[I], FID_SYSMENU);
+  If Sm = 0 Then Exit;
+  Mi[0] := 0; Mi[1] := 0; Mi[2] := 0; Mi[3] := 0;
+  If WinSendMsg(Sm, MM_QUERYITEM, SC_SYSMENU, LongInt(@Mi)) = 0 Then Exit;
+  Sub := Mi[2];
+  If Sub = 0 Then Exit;
+  Mi[0] := $FFFF Or (MIS_SEPARATOR Shl 16); Mi[1] := 0; Mi[2] := 0; Mi[3] := 0;
+  Dummy := WinSendMsg(Sub, MM_INSERTITEM, LongInt(@Mi), Z(''));
+  Mi[0] := $FFFF Or (MIS_TEXT Shl 16); Mi[1] := CM_PARAMS Shl 16; Mi[2] := 0; Mi[3] := 0;
+  Dummy := WinSendMsg(Sub, MM_INSERTITEM, LongInt(@Mi), Z('~Param'#138'tres...'));
+End;
+
+Function ParCtl(Cls, Text, Style, X, Y, Cx, Cy, Id : LongInt) : LongInt;
+Begin
+  ParCtl := WinCreateWindow(ParClient, Cls, Text, Style Or WS_VISIBLE, X, Y, Cx, Cy, ParClient, HWND_TOP, Id, 0, 0);
+End;
+
+{ boite Parametres (une a la fois) pour la console I }
+Procedure OpenParams(I : LongInt);
+Var Fl, Cl, Sw, Sh, E : LongInt;
+Begin
+  If ParFrame <> 0 Then
+  Begin
+    Dummy := WinSetActiveWindow(HWND_DESKTOP, ParFrame);
+    Exit;
+  End;
+  LoadPrefs;
+  If ParClassOk = 0 Then
+  Begin
+    Dummy := WinRegisterClass(ShieldHab, Z('PMVIOP_PARAMS'), ExpAddr(200), 0, 0);
+    ParClassOk := 1;
+  End;
+  ParCon := I;
+  Fl := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER;
+  Cl := 0;
+  ParFrame := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Fl), Z('PMVIOP_PARAMS'),
+                                 Z2('Param'#138'tres - ' + CTitle[I]), 0, 0, 0, LongInt(@Cl));
+  If ParFrame = 0 Then Exit;
+  ParClient := Cl;
+  Sw := WinQuerySysValue(HWND_DESKTOP, 20); Sh := WinQuerySysValue(HWND_DESKTOP, 21);
+  Dummy := WinSetWindowPos(ParFrame, HWND_TOP, MaxI(0, (Sw - 440) Div 2), MaxI(0, (Sh - 200) Div 2), 440, 200,
+                           SWP_SIZE Or SWP_MOVE);
+  E := ParCtl(WC_ENTRYFIELD, Z(IStr(HistLines)), ES_MARGIN Or ES_AUTOSCROLL Or WS_TABSTOP, 352, 126, 64, 20, 11);
+  Dummy := WinSendMsg(E, EM_SETTEXTLIMIT, 5, 0);
+  E := ParCtl(WC_ENTRYFIELD, Z(HistFile), ES_MARGIN Or ES_AUTOSCROLL Or WS_TABSTOP, 12, 74, 404, 20, 13);
+  Dummy := WinSendMsg(E, EM_SETTEXTLIMIT, 250, 0);
+  Dummy := ParCtl(WC_BUTTON, Z('OK'), BS_DEFAULT Or WS_TABSTOP, 110, 10, 96, 28, 1);
+  Dummy := ParCtl(WC_BUTTON, Z('Annuler'), WS_TABSTOP, 230, 10, 96, 28, 2);
+  Dummy := WinSetWindowPos(ParFrame, HWND_TOP, 0, 0, 0, 0, SWP_SHOW Or SWP_ZORDER Or SWP_ACTIVATE);
+  Dummy := WinSetFocus(HWND_DESKTOP, WinWindowFromID(ParClient, 11));
+End;
+
+Procedure CloseParams;
+Var F : LongInt;
+Begin
+  F := ParFrame;
+  ParFrame := 0; ParClient := 0;
+  If F <> 0 Then Dummy := WinDestroyWindow(F);
+  If (ParCon >= 0) And (ParCon < MaxCon) And (CUse[ParCon] <> 0) And (CClient[ParCon] <> 0) Then
+    Dummy := WinSetFocus(HWND_DESKTOP, CClient[ParCon]);
+End;
+
+{ OK : nombre de lignes et fichier retenus (OS2.INI) ; l'historique de
+  la console est refait a la nouvelle taille }
+Procedure ApplyParams;
+Var B : Array[0..299] Of Byte; S : String; V, E, K, Old : LongInt; F : String;
+Begin
+  B[0] := 0;
+  Dummy := WinQueryWindowText(WinWindowFromID(ParClient, 11), 16, LongInt(@B));
+  S := GetZ(LongInt(@B));
+  While (S <> '') And (S[1] = ' ') Do Delete(S, 1, 1);
+  While (S <> '') And (S[Length(S)] = ' ') Do Delete(S, Length(S), 1);
+  Val(S, V, E);
+  If (E <> 0) Or (V < 0) Or (V > HistMax) Then
+  Begin
+    Dummy := WinMessageBox(HWND_DESKTOP, ParFrame, Z('Le nombre de lignes doit '#136'tre compris entre 0 et 10000.'),
+                           Z2('Param'#138'tres'), 0, MB_OK Or MB_ERROR Or MB_MOVEABLE);
+    Exit;
+  End;
+  B[0] := 0;
+  Dummy := WinQueryWindowText(WinWindowFromID(ParClient, 13), 255, LongInt(@B));
+  F := GetZ(LongInt(@B));
+  While (F <> '') And (F[1] = ' ') Do Delete(F, 1, 1);
+  While (F <> '') And (F[Length(F)] = ' ') Do Delete(F, Length(F), 1);
+  Old := HistLines;
+  HistLines := V; HistFile := F;
+  SavePrefs;
+  { nouvelle taille : l'historique des fenetres OS/2 ouvertes est refait }
+  If V <> Old Then
+    For K := 0 To MaxCon - 1 Do
+      If (CUse[K] <> 0) And (CSess[K] >= 0) Then
+      Begin
+        HistSetup(K);
+        If CClient[K] <> 0 Then Dummy := WinInvalidateRect(CClient[K], 0, 0);
+      End;
+  { le fichier recoit les lignes a partir de maintenant }
+  For K := 0 To MaxCon - 1 Do
+    If (CUse[K] <> 0) And (CSess[K] >= 0) Then CFTot[K] := CHTot[K];
+  CloseParams;
+End;
+
+{ texte de la boite sur son fond gris (sans controle statique) }
+Procedure ParText(Hps, X, Y : LongInt; S : String);
+Var Rc : Array[0..3] Of LongInt;
+Begin
+  PutZ(LongInt(@TextBuf), S);
+  Rc[0] := X; Rc[1] := Y; Rc[2] := X + Length(S) * 8; Rc[3] := Y + 16;
+  Dummy := WinDrawText(Hps, Length(S), LongInt(@TextBuf), LongInt(@Rc), -1, 15, 0);
+End;
+
+{ Tab, Maj+Tab : controle suivant ou precedent (lignes, fichier, OK,
+  Annuler) }
+Procedure ParTab(Back : Boolean);
+Var Ids : Array[0..3] Of LongInt; F, K, N : LongInt;
+Begin
+  Ids[0] := 11; Ids[1] := 13; Ids[2] := 1; Ids[3] := 2;
+  F := WinQueryFocus(HWND_DESKTOP);
+  N := 0;
+  For K := 0 To 3 Do
+    If WinWindowFromID(ParClient, Ids[K]) = F Then N := K;
+  If Back Then N := (N + 3) Mod 4 Else N := (N + 1) Mod 4;
+  Dummy := WinSetFocus(HWND_DESKTOP, WinWindowFromID(ParClient, Ids[N]));
+End;
+
+Function ParamsWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Hps : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  ParamsWindowProc := 0;
+  Case Msg Of
+    WM_PAINT :
+      Begin
+        Hps := WinBeginPaint(H, 0, 0);
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        Dummy := WinFillRect(Hps, LongInt(@Rc), 15);
+        ParText(Hps, 12, 128, 'Historique : lignes gard'#130'es (0 '#133' 10000) :');
+        ParText(Hps, 12, 98, 'Fichier o'#151' conserver l''historique (facultatif) :');
+        ParText(Hps, 12, 52, '(exemple : C:\HISTO.TXT ; vide : aucun fichier)');
+        Dummy := WinEndPaint(Hps);
+      End;
+    WM_COMMAND :
+      Case Lo16(Mp1) Of
+        1 : ApplyParams;
+        2 : CloseParams;
+      End;
+    WM_CHAR :
+      If ((Lo16(Mp1) And KC_KEYUP) = 0) And ((Lo16(Mp1) And KC_VIRTUALKEY) <> 0) And
+         ((Hi16(Mp2) = VK_TAB) Or (Hi16(Mp2) = VK_BACKTAB)) Then ParTab(Hi16(Mp2) = VK_BACKTAB)
+      Else If ((Lo16(Mp1) And KC_KEYUP) = 0) And ((Lo16(Mp1) And KC_VIRTUALKEY) <> 0) And
+         ((Hi16(Mp2) = VK_NEWLINE) Or (Hi16(Mp2) = VK_ENTER)) Then ApplyParams
+      Else If ((Lo16(Mp1) And KC_KEYUP) = 0) And ((Lo16(Mp1) And KC_VIRTUALKEY) <> 0) And (Hi16(Mp2) = VK_ESC) Then
+        CloseParams
+      Else ParamsWindowProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+    WM_CLOSE : CloseParams;
+  Else
+    ParamsWindowProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
 End;
 
 Function VioShieldWindowProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt; Forward;
@@ -780,6 +1166,24 @@ Begin
         If (Fl And KC_KEYUP) <> 0 Then Exit;
         Sc := (Mp1 Shr 24) And 255; Ch := Lo16(Mp2) And 255; Vk := Hi16(Mp2);
         If (Fl And KC_CHAR) = 0 Then Ch := 0;
+        { Maj+Pg.prec., Pg.suiv., fleches, Debut, Fin : historique }
+        If ((Fl And KC_SHIFT) <> 0) And ((Fl And KC_VIRTUALKEY) <> 0) And (CSess[I] >= 0) And
+           ((Vk = VK_PAGEUP) Or (Vk = VK_PAGEDOWN) Or (Vk = VK_UP) Or (Vk = VK_DOWN) Or
+            (((Vk = VK_HOME) Or (Vk = VK_END)) And ((Fl And KC_CTRL) <> 0))) Then
+        Begin
+          Case Vk Of
+            VK_PAGEUP : ScrollBack(I, CBack[I] + CRows[I] - 1);
+            VK_PAGEDOWN : ScrollBack(I, CBack[I] - CRows[I] + 1);
+            VK_UP : ScrollBack(I, CBack[I] + 1);
+            VK_DOWN : ScrollBack(I, CBack[I] - 1);
+            VK_HOME : ScrollBack(I, CHCnt[I]);
+            VK_END : ScrollBack(I, 0);
+          End;
+          Exit;
+        End;
+        { une touche pour le programme ramene a l'ecran de la session }
+        If (CBack[I] > 0) And (((Fl And KC_CHAR) <> 0) Or ((Fl And KC_VIRTUALKEY) <> 0)) And
+           ((Fl And KC_SHIFT) = 0) Or ((Ch <> 0) And (CBack[I] > 0)) Then ScrollBack(I, 0);
         If (Fl And KC_VIRTUALKEY) <> 0 Then
           Case Vk Of
             VK_NEWLINE, VK_ENTER : Ch := 13;
@@ -852,8 +1256,20 @@ Begin
         ConMenu(I, CVisC[I] * 4, CVisR[I] * 8);
         VioShieldWindowProc := 1;
       End;
+    WM_VSCROLL :
+      Begin
+        Case Hi16(Mp2) Of
+          SB_LINEUP : ScrollBack(I, CBack[I] + 1);
+          SB_LINEDOWN : ScrollBack(I, CBack[I] - 1);
+          SB_PAGEUP : ScrollBack(I, CBack[I] + CRows[I] - 1);
+          SB_PAGEDOWN : ScrollBack(I, CBack[I] - CRows[I] + 1);
+          SB_SLIDERTRACK, SB_SLIDERPOSITION : ScrollBack(I, CHCnt[I] - S16(Mp2));
+        End;
+        VioShieldWindowProc := 1;
+      End;
     WM_COMMAND :
       Case Lo16(Mp1) Of
+        CM_PARAMS : OpenParams(I);
         CM_MARK : CStatus[I] := CStatus[I] Or CS_MARKING;
         CM_COPY : CopyCells(I, False);
         CM_COPYALL : CopyCells(I, True);
@@ -883,6 +1299,13 @@ Begin
   If (I >= 0) And (Msg = WM_CLOSE) Then
   Begin
     CloseCon(I, Mp2 = 0);
+    ShieldFrameProc := 0;
+    Exit;
+  End;
+  { Parametres... du menu systeme (icone de la fenetre) }
+  If (I >= 0) And (Msg = WM_COMMAND) And (Lo16(Mp1) = CM_PARAMS) Then
+  Begin
+    OpenParams(I);
     ShieldFrameProc := 0;
     Exit;
   End;
@@ -936,6 +1359,9 @@ Begin
     If (K And 1) = 0 Then CBuf[F * ConCells + K] := 32 Else CBuf[F * ConCells + K] := 7;
   If PTitle <> 0 Then CTitle[F] := GetZ(PTitle) Else CTitle[F] := 'Fenetre OS/2';
   Flags := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON Or FCF_DLGBORDER;
+  { session : barre de defilement de l'historique }
+  If S >= 0 Then Flags := Flags Or FCF_VERTSCROLL;
+  CBack[F] := 0; CHCnt[F] := 0; CHTot[F] := 0; CFTot[F] := 0;
   Cl := 0;
   Creating := F;
   CFrame[F] := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Flags), Z('PMVIOP_SHIELD'), Z2(CTitle[F]), 0, 0, 0,
@@ -958,6 +1384,27 @@ Begin
   COrgR[F] := 0; COrgC[F] := 0;
   X := MaxI(0, MinI(WinQuerySysValue(HWND_DESKTOP, 20) - W, 24 + F * 20));
   Y := MaxI(0, WinQuerySysValue(HWND_DESKTOP, 21) - Hh - 24 - F * 20);
+  If S >= 0 Then
+  Begin
+    { largeur de la barre de defilement : la zone client garde ses
+      colonnes }
+    Dummy := WinSetWindowPos(CFrame[F], HWND_TOP, X, Y, W, Hh, SWP_SIZE Or SWP_MOVE);
+    Dummy := WinQueryWindowRect(Cl, LongInt(@Inf));
+    If (Inf[2] > 0) And (Inf[2] < CVisC[F] * 8) Then
+    Begin
+      W := W + CVisC[F] * 8 - Inf[2];
+      If W > WinQuerySysValue(HWND_DESKTOP, 20) Then
+      Begin
+        W := WinQuerySysValue(HWND_DESKTOP, 20);
+        CVisC[F] := MaxI(1, CVisC[F] - (CVisC[F] * 8 - Inf[2]) Div 8 - 1);
+      End;
+      X := MaxI(0, MinI(WinQuerySysValue(HWND_DESKTOP, 20) - W, X));
+    End;
+    { Parametres... dans le menu systeme }
+    SysMenuAdd(F);
+    LoadPrefs;
+    HistSetup(F);
+  End;
   If (Fl And CON_VISIBLE) <> 0 Then
     Dummy := WinSetWindowPos(CFrame[F], HWND_TOP, X, Y, W, Hh, SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW Or SWP_ACTIVATE)
   Else Dummy := WinSetWindowPos(CFrame[F], HWND_TOP, X, Y, W, Hh, SWP_SIZE Or SWP_MOVE);
@@ -1889,7 +2336,8 @@ Exports
   SelCommonList Index 119 Name 'SELCOMMONLIST',
   usCommonSegSize Index 120 Name 'USCOMMONSEGSIZE',
   HMODSeamless Index 121 Name 'HMODSEAMLESS',
-  HFrameWindowFromConsole Index 122 Name 'HFRAMEWINDOWFROMCONSOLE';
+  HFrameWindowFromConsole Index 122 Name 'HFRAMEWINDOWFROMCONSOLE',
+  ParamsWindowProc Index 200 Name 'PARAMSWINDOWPROC';
 
 Var
   SK : LongInt;
@@ -1897,6 +2345,7 @@ Var
 
 BEGIN
   Creating := -1; ClassesOk := 0; ShieldHab := 0; TaskHmq := 0; SwapBtn := 0; ClipDirty := 0; MenuH := 0;
+  ParFrame := 0; ParClient := 0; ParCon := -1; ParClassOk := 0; HistLines := 1000; HistFile := '';
   For InitI := 0 To MaxCon - 1 Do
   Begin
     CUse[InitI] := 0; CommonList[InitI] := 0;

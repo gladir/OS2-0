@@ -375,6 +375,10 @@ Var
     console et sa file du clavier }
   SUsed, SNew, SPause, SPrompt : Array[0..MaxSess - 1] Of Boolean;
   SPT, SLvb, SMode, SRet : Array[0..MaxSess - 1] Of LongInt;
+  { historique des lignes sorties en haut de l'ecran (fenetres OS/2) :
+    tampon circulaire, capacite (lignes), prochaine ligne, lignes gardees,
+    lignes poussees depuis le debut }
+  SHist, SHistCap, SHistHead, SHistCnt, SHistTot : Array[0..MaxSess - 1] Of LongInt;
   SCurRow, SCurCol, SAttr, SConRows, SConOwn, SKbdMode, SKbdHead, SKbdTail, SLinePos : Array[0..MaxSess - 1] Of LongInt;
   SLineReady       : Array[0..MaxSess - 1] Of Boolean;
   SLineBuf         : Array[0..MaxSess - 1] Of String;
@@ -552,6 +556,14 @@ End;
 Procedure ScrollUp;
 Var I : LongInt;
 Begin
+  { la ligne qui sort de l'ecran va dans l'historique de la session }
+  If (CurSess >= 0) And (CurSess < MaxSess) And (SHist[CurSess] <> 0) And (SHistCap[CurSess] > 0) Then
+  Begin
+    MoveMem(VideoBase, SHist[CurSess] + SHistHead[CurSess] * ScrCols * 2, ScrCols * 2);
+    SHistHead[CurSess] := (SHistHead[CurSess] + 1) Mod SHistCap[CurSess];
+    If SHistCnt[CurSess] < SHistCap[CurSess] Then Inc(SHistCnt[CurSess]);
+    Inc(SHistTot[CurSess]);
+  End;
   MoveMem(VideoBase + ScrCols * 2, VideoBase, ScrCols * (ConRows - 1) * 2);
   For I := 0 To ScrCols - 1 Do
     MemW[0:VideoBase + ((ConRows - 1) * ScrCols + I) * 2] := (TextAttr Shl 8) Or $20;
@@ -6598,6 +6610,8 @@ End;
 Procedure FreeSess(S : LongInt);
 Begin
   PFree(SPT[S]); PFree(SLvb[S]);
+  If SHist[S] <> 0 Then PFree(SHist[S]);
+  SHist[S] := 0; SHistCap[S] := 0; SHistCnt[S] := 0; SHistHead[S] := 0; SHistTot[S] := 0;
   SUsed[S] := False;
   If PmSess = S Then PmSess := -1;
   SyncFlags;
@@ -6732,6 +6746,7 @@ Begin
   For I := 0 To MaxSess - 1 Do
   Begin
     SUsed[I] := False; SNew[I] := False;
+    SHist[I] := 0; SHistCap[I] := 0; SHistHead[I] := 0; SHistCnt[I] := 0; SHistTot[I] := 0;
   End;
   KernPT := PAlloc(4096);
   For I := 0 To 1023 Do MemL[0:KernPT + I * 4] := (I Shl 12) Or 3;
@@ -7750,7 +7765,13 @@ End;
       curseur, lignes, colonnes, processus (PMVIOP.DLL)
    19 touche p2 (caractere + code Shl 8, etat) pour la session p1
    20 terminer les processus de la session p1 (fenetre OS/2 fermee)
-   21 souris de la fenetre DOS p1 : p2 = ligne, colonne, boutons }
+   21 souris de la fenetre DOS p1 : p2 = ligne, colonne, boutons
+   22 historique de la session p1 : p2 lignes gardees (0 a 10000 ; 0 :
+      aucun) ; les lignes qui sortent en haut de son ecran y vont
+   23 lire l'historique de la session p1 : p2 = premiere ligne (0 : la
+      plus ancienne gardee), nombre de lignes, adresse (160 octets par
+      ligne) ; en retour p2+12 lignes poussees depuis le debut, p2+16
+      lignes gardees ; rend le nombre de lignes gardees }
 Function KrnSesCtl(Op, P1, P2 : LongInt) : LongInt;
 Var S, Old, KsSave : LongInt;
 Begin
@@ -7901,6 +7922,41 @@ Begin
              (1 gauche, 2 droit, 4 milieu) }
            DosMouAbs(MemL[0:P2], MemL[0:P2 + 4], MemL[0:P2 + 8]);
            KrnSesCtl := 1;
+         End;
+    22 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] Then
+         Begin
+           If P2 < 0 Then P2 := 0;
+           If P2 > 10000 Then P2 := 10000;
+           asm
+             cli
+           end;
+           If SHist[P1] <> 0 Then PFree(SHist[P1]);
+           SHist[P1] := 0; SHistCap[P1] := 0; SHistHead[P1] := 0; SHistCnt[P1] := 0; SHistTot[P1] := 0;
+           If P2 > 0 Then
+           Begin
+             SHist[P1] := PAlloc(P2 * ScrCols * 2);
+             If SHist[P1] <> 0 Then SHistCap[P1] := P2;
+           End;
+           asm
+             sti
+           end;
+           KrnSesCtl := SHistCap[P1];
+         End;
+    23 : If (P1 >= 0) And (P1 < MaxSess) And SUsed[P1] And (P2 <> 0) Then
+         Begin
+           S := MemL[0:P2]; Old := MemL[0:P2 + 4];
+           If S < 0 Then S := 0;
+           While (Old > 0) And (S < SHistCnt[P1]) And (MemL[0:P2 + 8] <> 0) Do
+           Begin
+             { ligne S (depuis la plus ancienne gardee) }
+             KsSave := (SHistHead[P1] - SHistCnt[P1] + S + SHistCap[P1]) Mod SHistCap[P1];
+             MoveMem(SHist[P1] + KsSave * ScrCols * 2, MemL[0:P2 + 8], ScrCols * 2);
+             MemL[0:P2 + 8] := MemL[0:P2 + 8] + ScrCols * 2;
+             Inc(S); Dec(Old);
+           End;
+           MemL[0:P2 + 12] := SHistTot[P1];
+           MemL[0:P2 + 16] := SHistCnt[P1];
+           KrnSesCtl := SHistCnt[P1];
          End;
   End;
 End;
