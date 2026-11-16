@@ -47,7 +47,7 @@ SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
 
 Essai :  qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d
          (VirtualBox, Bochs ou un vrai PC : graver ou monter l'ISO ;
-         lecteur de CD-ROM IDE/ATAPI, au moins 28 Mo de memoire ;
+         lecteur de CD-ROM IDE/ATAPI, au moins 20 Mo de memoire ;
          32 Mo pour le disque virtuel HPFS)
          Avec un disque dur HPFS (partition de type 07h) :
          qemu-system-i386 -m 64 -cdrom OS2CD.ISO -boot d -hda disque.img
@@ -178,7 +178,7 @@ Carte memoire
   00100000h          OS2KRNL (image PE)
   fin de l'image..4 Mo tas du noyau
   00400000h-007FFFFFh fenetre du processus courant (pagination)
-  00800000h-017FFFFFh DLL partagees, a leur base preferee (RMINFO.DLL a
+  00800000h-00FFFFFFh DLL partagees, a leur base preferee (RMINFO.DLL a
                      00800000h, OS2SM.DLL a 00850000h, HELPMGR.DLL a
                      00880000h, DOSCALLS.DLL a 00C00000h,
                      KBDCALLS.DLL a 00C80000h, MONCALLS.DLL a
