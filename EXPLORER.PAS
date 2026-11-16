@@ -1302,7 +1302,7 @@ Begin
 End;
 
 Procedure PaintContents;
-Var CX, CY, X, Y, I, R, C, N, NC, VR, W1, W2, W3, XR, Fg, Bg : LongInt; S : String; Sb : Boolean;
+Var CX, CY, X, Y, I, R, C, N, NC, VR, W1, W2, W3, W4, XR, Fg, Bg : LongInt; S : String; Sb : Boolean;
 Begin
   Sunken(PX1, PY1, PX2, PY2, cWhite);
   CX := PX1; CY := PY1;
@@ -1314,8 +1314,13 @@ Begin
   If View = 1 Then
   Begin
     { Details : en-tetes de colonnes, une ligne par objet }
-    W2 := 88; W3 := 150;
-    W1 := MaxI(120, XR - CX - 2 - W2 - W3 - 136);
+    { colonnes selon la largeur : Nom et Taille, puis Type, puis Modifie ;
+      le nom prend le reste }
+    W2 := 88; W3 := 0; W4 := 0;
+    If XR - CX - 4 >= 136 + W2 + 104 Then W3 := 104;
+    If XR - CX - 4 >= 150 + W2 + 170 + 136 Then W3 := 170;
+    If XR - CX - 4 >= 150 + W2 + W3 + 136 Then W4 := 136;
+    W1 := MaxI(120, XR - CX - 4 - W2 - W3 - W4);
     Raised(CX + 2, CY + 2, CX + 2 + W1 - 1, CY + 19, True);
     OutTxt(CX + 6, CY + 3, Fit(L('Nom', 'Name', 'Name', 'Nome', 'Nombre'), W1 - 8), cBlack, cSilver);
     If CX + 2 + W1 + W2 <= XR Then
@@ -1323,12 +1328,12 @@ Begin
       Raised(CX + 2 + W1, CY + 2, CX + 1 + W1 + W2, CY + 19, True);
       OutRight(CX + W1 + W2 - 4, CY + 3, L('Taille', 'Size', 'Gr'#148#225'e', 'Dim.', 'Tama'#164'o'), cBlack, cSilver);
     End;
-    If CX + 2 + W1 + W2 + W3 <= XR Then
+    If W3 > 0 Then
     Begin
       Raised(CX + 2 + W1 + W2, CY + 2, CX + 1 + W1 + W2 + W3, CY + 19, True);
       OutTxt(CX + 6 + W1 + W2, CY + 3, L('Type', 'Type', 'Typ', 'Tipo', 'Tipo'), cBlack, cSilver);
     End;
-    If CX + 2 + W1 + W2 + W3 + 136 <= XR Then
+    If W4 > 0 Then
     Begin
       Raised(CX + 2 + W1 + W2 + W3, CY + 2, XR, CY + 19, True);
       OutTxt(CX + 6 + W1 + W2 + W3, CY + 3, L('Modifi'#130, 'Modified', 'Ge'#132'ndert', 'Modificato', 'Modificado'),
@@ -1352,9 +1357,9 @@ Begin
         End;
         OutTxt(CX + 26, Y, S, Fg, Bg);
         If CX + 2 + W1 + W2 <= XR Then OutRight(CX + W1 + W2 - 4, Y, SizeCol(I), cBlack, cWhite);
-        If CX + 2 + W1 + W2 + W3 <= XR Then
+        If W3 > 0 Then
           OutTxt(CX + 6 + W1 + W2, Y, Fit(TypeName(E(I)^.Nm, E(I)^.Kind), W3 - 8), cBlack, cWhite);
-        If CX + 2 + W1 + W2 + W3 + 136 <= XR Then
+        If W4 > 0 Then
           OutTxt(CX + 6 + W1 + W2 + W3, Y, DateStr(E(I)^.FDate, E(I)^.FTime), cBlack, cWhite);
       End;
     End;
