@@ -13,7 +13,11 @@
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), TASKMGR.PAS
 #     (Gestionnaire des taches, dossier Systeme OS/2) et BROWSER.PAS
 #     (Navigateur Web : HTML, CSS, JavaScript, codes QR, outils F12 ;
-#     bureau et dossier Systeme OS/2) ;
+#     bureau et dossier Systeme OS/2) et PASDEV.PAS (Pascal Developer,
+#     environnement de developpement du dossier Developer Kit) ;
+#  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
+#     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
+#     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS) sont copies sur le CD-ROM ;
 #  4. compile les bibliotheques DLL/DOSCALLS.PAS (DOSCALLS.DLL),
 #     DLL/FKA.PAS (FKA.DLL), DLL/HPFS.PAS (HPFS.IFS, systeme de
 #     fichiers installable), DLL/VIOCALLS.PAS (VIOCALLS.DLL, video) et
@@ -92,6 +96,9 @@ for F in "$ROOT"/*.PAS; do
     rm -f "$W/cd/$O.EXE"
   fi
 done
+echo "== OS2PC.EXE (compilateur natif : OS2PC.PAS compile par OS2PC) et exemples de Pascal Developer"
+"$W/os2pc" -Q "$ROOT/TOOLS/OS2PC.PAS" "$W/cd/OS2PC.EXE"
+cp "$ROOT"/IMAGE/EXEMPLES/*.PAS "$W/cd/"
 echo "== Bibliotheques DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL et PMCTLS.DLL (OS2PC, Library)"
 "$W/os2pc" -Q "$ROOT/DLL/DOSCALLS.PAS" "$W/cd/DOSCALLS.DLL"
 "$W/os2pc" -Q "$ROOT/DLL/TESTDOS.PAS" "$W/cd/TESTDOS.EXE"

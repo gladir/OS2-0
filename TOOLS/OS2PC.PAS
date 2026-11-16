@@ -365,9 +365,13 @@ End;
 { FatalError / WarnMsg                                         }
 { ------------------------------------------------------------ }
 
+{ MsgLinePfx : 'ligne N : ' (jeton en cours d'analyse ou ligne lue par le }
+{ lexeur) devant un message qui ne donne pas deja sa ligne (EDI)          }
+Function MsgLinePfx(Const Msg : TString) : TString; Forward;
+
 Procedure FatalError(Const Msg : TString);
 Begin
-  WriteLn('OS2PC: FATAL: ', Msg);
+  WriteLn('OS2PC: FATAL: ', MsgLinePfx(Msg), Msg);
   If OutFOpen Then
   Begin
     Close(OutF);
@@ -379,7 +383,7 @@ End;
 Procedure WarnMsg(Const Msg : TString);
 Begin
   If Not Opts.Warnings Then Exit;
-  WriteLn('OS2PC: warning: ', Msg);
+  WriteLn('OS2PC: warning: ', MsgLinePfx(Msg), Msg);
   Inc(WarnCount);
 End;
 
@@ -1728,6 +1732,19 @@ End;
 { Gere le doublement de quote : 'l''echo' -> l'echo            }
 { ------------------------------------------------------------ }
 
+
+{ AddCh : ajouter le caractere C a S (octet de longueur et caractere ecrits
+  directement : un caractere #0 reste dans la chaine, meme dans OS2PC
+  compile par lui-meme, ou la concatenation passe par des chaines ASCIIZ) }
+Procedure AddCh(Var S : TString; C : Char);
+Var N : LongInt;
+Begin
+  N := Length(S);
+  If N >= 255 Then Exit;
+  S[0] := Chr(N + 1);
+  S[N + 1] := C;
+End;
+
 Procedure LexScanString;
 Var
   S  : TString;
@@ -1785,7 +1802,7 @@ Begin
       End;
     End;
     If Length(S) < MAX_STR Then
-      S := S + Chr(V And $FF);
+      AddCh(S, Chr(V And $FF));
 
     { Si encore suivi d une chaine 'xxx', concatener aussi }
     If (LexColNo <= Length(LexLine)) And (LexLine[LexColNo] = '''') Then
@@ -1860,7 +1877,7 @@ Begin
       End;
     End;
     If Length(S) < MAX_STR Then
-      S := S + Chr(V And $FF);
+      AddCh(S, Chr(V And $FF));
   End;
 
   { Si suivi d une chaine 'xxx', concatener }
@@ -1912,7 +1929,7 @@ Begin
         End;
       End;
       If Length(S) < MAX_STR Then
-        S := S + Chr(V And $FF);
+        AddCh(S, Chr(V And $FF));
     End;
   End;
 
@@ -2701,7 +2718,7 @@ End;
 { ---- DataAddStr : ajouter une chaine avec label auto-genere ---- }
 { Retourne le label (ex: _TPK_1) }
 Function DataAddStr(Const S : TString) : TString;
-Var Lbl : TString; K : LongInt;
+Var Lbl, T : TString; K, J : LongInt;
 Begin
   Inc(LabelGenSeq);
   Lbl := TP_STR_PFX + IntToStr_(LabelGenSeq);
@@ -2709,7 +2726,10 @@ Begin
   { Pascal (octet de longueur puis caracteres) et charge comme une chaine Pascal.         }
   If (Pos(#0, S) > 0) And (Length(S) < 255) And ((Opts.DestTarget = DEST_WIN32) Or (Opts.DestTarget = DEST_W32) Or (Opts.DestTarget = DEST_OS2) Or (Opts.DestTarget = DEST_OS2KRNL)) And (Not Opts.Dos16Mode) Then
   Begin
-    K := DataAdd(Lbl, DK_STR, 0, Chr(Length(S)) + S, 0, 0);
+    T := '';
+    AddCh(T, Chr(Length(S)));
+    For J := 1 To Length(S) Do AddCh(T, S[J]);
+    K := DataAdd(Lbl, DK_STR, 0, T, 0, 0);
     If K >= 0 Then DataTab^[K].IsPStr := True;
   End
   Else
@@ -4589,7 +4609,9 @@ Begin
     TypeTab^[TI].Fields[5].Name    := 'SEC';
     TypeTab^[TI].Fields[5].TypeIdx := TY_IDX_WORD;
     TypeTab^[TI].Fields[5].Offset  := 10;
-    SI := SymAdd('DATETIME', SK_TYPE, TI);
+    { deja enregistre par RegType : meme effet que SymAdd, sans l'avertissement }
+    SI := SymFind('DATETIME');
+    If SI < 0 Then SI := SymAdd('DATETIME', SK_TYPE, TI);
     If SI >= 0 Then SymTab^[SI].IsGlobal := True;
   End;
 End;
@@ -10041,6 +10063,19 @@ Var
   LoopContLbl  : Array[0..31] Of TString;
   LoopTop      : LongInt;
 
+{ MsgLinePfx (voir FatalError) : pendant l'analyse du corps, ligne du jeton }
+{ courant ; pendant la lecture du source, ligne du lexeur                }
+Function MsgLinePfx(Const Msg : TString) : TString;
+Var N : LongInt;
+Begin
+  MsgLinePfx := '';
+  If Pos('ligne ', Msg) > 0 Then Exit;
+  N := 0;
+  If (TokenPool <> Nil) And (EP > 0) And (EP < TokenCount) Then N := TokenPool^[EP].Line
+  Else If (EP = 0) And LexOpened And (LexLineNo > 0) Then N := LexLineNo;
+  If N > 0 Then MsgLinePfx := 'ligne ' + IntToStr_(N) + ' : ';
+End;
+
 { ------------------------------------------------------------ }
 { EPAtEnd : le curseur est-il a la fin ?                       }
 { ------------------------------------------------------------ }
@@ -12765,8 +12800,7 @@ Begin
             EmitInstr('MOV ECX,EAX');
             EmitInstr('POP EDI');   { dest }
             EmitInstr('POP ESI');   { source }
-            EmitInstr('CLD');
-            EmitInstr('REP MOVSB');
+            EmitInstr('CALL ' + TP_RT_PFX + 'MOVEMEM');   { chevauchement : comme FPC }
           End;
         End; { Case }
         EPMatch(')');
@@ -23230,6 +23264,22 @@ Begin
       Exit;
     End;
 
+    { Une procedure declaree par le programme masque la procedure predefinie }
+    { du meme nom (InsLine, DelLine, Window... de Crt) : appel de la sienne  }
+    SI := SymFind(Up);
+    If (SI >= 0) And (SymTab^[SI].Kind = SK_PROC) And (Not SymTab^[SI].IsExternal) And
+       (SymTab^[SI].UnitName = '') And
+       Not ((EP + 1 < EPEnd) And (TokenPool^[EP + 1].Kind = TK_OP) And (TokenPool^[EP + 1].Val = ':=')) And
+       (Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) Then
+    Begin
+      Inc(EP);
+      ParseFuncCall(PI, Up);
+      If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_PUNCT) And
+         (TokIsP(EP, ';')) Then
+        Inc(EP);
+      Exit;
+    End;
+
     { INC/DEC/NEW/DISPOSE/GETMEM/FREEMEM/MOVE/FILLCHAR/MARK/RELEASE/SETTEXTBUF/CHDIR/MKDIR/RMDIR/GETDIR/INCLUDE/EXCLUDE }
     If (Up = 'INC') Or (Up = 'DEC') Or (Up = 'NEW') Or
        (Up = 'DISPOSE') Or (Up = 'GETMEM') Or (Up = 'FREEMEM') Or
@@ -31969,6 +32019,31 @@ Begin
   EmitInstr('POP EDX');
   EmitInstr('POP ECX');
   EmitInstr('POP EBX');
+  EmitInstr('RET');
+
+  { ------ _TPRT_MOVEMEM : Move(Src, Dst, Count) --------------- }
+  { Entree : ESI = source, EDI = destination, ECX = nombre        }
+  { Destination au-dessus de la source et recouvrante : copie a   }
+  { rebours (comme le Move de FPC et de Turbo Pascal)            }
+  EmitBlankLine;
+  EmitLabel(TP_RT_PFX + 'MOVEMEM');
+  EmitInstr('CMP EDI,ESI');
+  EmitInstr('JBE ' + TP_RT_PFX + 'MVM_F');
+  EmitInstr('MOV EAX,ESI');
+  EmitInstr('ADD EAX,ECX');
+  EmitInstr('CMP EDI,EAX');
+  EmitInstr('JAE ' + TP_RT_PFX + 'MVM_F');
+  EmitInstr('ADD ESI,ECX');
+  EmitInstr('DEC ESI');
+  EmitInstr('ADD EDI,ECX');
+  EmitInstr('DEC EDI');
+  EmitInstr('STD');
+  EmitInstr('REP MOVSB');
+  EmitInstr('CLD');
+  EmitInstr('RET');
+  EmitLabel(TP_RT_PFX + 'MVM_F');
+  EmitInstr('CLD');
+  EmitInstr('REP MOVSB');
   EmitInstr('RET');
 
   { ------ _TPRT_PPOS : Pos(SubStr, S) sur chaines Pascal ----- }
