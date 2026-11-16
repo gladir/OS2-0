@@ -1587,93 +1587,108 @@ End;
   lance dans la session de PM, comme les objets du bureau : une nouvelle
   session plein ecran passerait l'ecran en mode texte puis le rendrait a
   PM aussitot (affichage perdu en 1024 x 768 x 32 bits). }
-Function PmReadAt(H, Pos, Buf, N : LongInt) : Boolean;
+Var
+  PmH, PmNSec, PmOptEnd : LongInt;
+  PmB : Array[0..255] Of Byte;
+
+Function PmReadAt(Pos, N : LongInt) : Boolean;
 Var A : LongInt;
 Begin
   A := 0;
-  PmReadAt := (DosSetFilePtr(H, Pos, 0, LongInt(@A)) = 0) And (DosRead(H, Buf, N, LongInt(@A)) = 0) And (A = N);
+  PmReadAt := False;
+  If DosSetFilePtr(PmH, Pos, 0, LongInt(@A)) <> 0 Then Exit;
+  A := 0;
+  If DosRead(PmH, LongInt(@PmB), N, LongInt(@A)) <> 0 Then Exit;
+  PmReadAt := A = N;
+End;
+
+Function PmW(I : LongInt) : LongInt;
+Begin
+  PmW := PmB[I] Or (PmB[I + 1] Shl 8);
+End;
+
+Function PmD(I : LongInt) : LongInt;
+Begin
+  PmD := PmW(I) Or (PmW(I + 2) Shl 16);
+End;
+
+{ deplacement dans le fichier d'une adresse virtuelle relative (PE) }
+Function PmFileOfs(R : LongInt) : LongInt;
+Var I, VS, VA, Raw, RS : LongInt;
+Begin
+  PmFileOfs := -1;
+  For I := 0 To PmNSec - 1 Do
+    If PmReadAt(PmOptEnd + I * 40, 40) Then
+    Begin
+      VS := PmD(8); VA := PmD(12); RS := PmD(16); Raw := PmD(20);
+      If VS < RS Then VS := RS;
+      If (R >= VA) And (R < VA + VS) Then
+      Begin
+        PmFileOfs := R - VA + Raw;
+        Exit;
+      End;
+    End;
 End;
 
 Function IsPmProgram(Path : String) : Boolean;
-Var H, A, Ne, Opt, NSec, OptSz, Imp, Off, K, J, Rva, VA, VS, Raw, NmOff : LongInt; S : String;
-    B : Array[0..255] Of Byte; Sh : Array[0..39] Of Byte;
-
-  Function W(I : LongInt) : LongInt;
-  Begin
-    W := B[I] Or (B[I + 1] Shl 8);
-  End;
-
-  Function D(I : LongInt) : LongInt;
-  Begin
-    D := W(I) Or (W(I + 2) Shl 16);
-  End;
-
-  { deplacement dans le fichier d'une adresse virtuelle relative }
-  Function FileOfs(R : LongInt) : LongInt;
-  Var I : LongInt;
-  Begin
-    FileOfs := -1;
-    For I := 0 To NSec - 1 Do
-      If PmReadAt(H, Opt + OptSz + I * 40, LongInt(@Sh), 40) Then
-      Begin
-        VS := Sh[8] Or (Sh[9] Shl 8) Or (Sh[10] Shl 16) Or (Sh[11] Shl 24);
-        VA := Sh[12] Or (Sh[13] Shl 8) Or (Sh[14] Shl 16) Or (Sh[15] Shl 24);
-        Raw := Sh[20] Or (Sh[21] Shl 8) Or (Sh[22] Shl 16) Or (Sh[23] Shl 24);
-        If VS < Sh[16] Or (Sh[17] Shl 8) Or (Sh[18] Shl 16) Then
-          VS := Sh[16] Or (Sh[17] Shl 8) Or (Sh[18] Shl 16);
-        If (R >= VA) And (R < VA + VS) Then
-        Begin
-          FileOfs := R - VA + Raw;
-          Exit;
-        End;
-      End;
-  End;
-
+Var A, Ne, Imp, Off, K, J, Rva, NmOff, Opt : LongInt; S : String; R : Boolean;
 Begin
   IsPmProgram := False;
-  H := 0; A := 0;
-  If DosOpen(Z(Path), LongInt(@H), LongInt(@A), 0, 0, 1, $40, 0) <> 0 Then Exit;
-  If PmReadAt(H, 0, LongInt(@B), 64) And (B[0] = Ord('M')) And (B[1] = Ord('Z')) Then
+  R := False;
+  PmH := 0; A := 0;
+  If DosOpen(Z(Path), LongInt(@PmH), LongInt(@A), 0, 0, 1, $40, 0) <> 0 Then Exit;
+  If PmReadAt(0, 64) And (PmB[0] = Ord('M')) And (PmB[1] = Ord('Z')) Then
   Begin
-    Ne := D($3C);
-    If (Ne > 0) And PmReadAt(H, Ne, LongInt(@B), 128) Then
+    Ne := PmD($3C);
+    If (Ne > 0) And PmReadAt(Ne, 248) Then
     Begin
-      If ((B[0] = Ord('L')) And ((B[1] = Ord('X')) Or (B[1] = Ord('E')))) Then
-        IsPmProgram := (D($10) And $700) = $300
-      Else If (B[0] = Ord('N')) And (B[1] = Ord('E')) Then
-        IsPmProgram := (W($0C) And $300) = $300
-      Else If (B[0] = Ord('P')) And (B[1] = Ord('E')) And (B[2] = 0) And (B[3] = 0) Then
+      If (PmB[0] = Ord('L')) And ((PmB[1] = Ord('X')) Or (PmB[1] = Ord('E'))) Then
+        R := (PmD($10) And $700) = $300
+      Else If (PmB[0] = Ord('N')) And (PmB[1] = Ord('E')) Then
+        R := (PmW($0C) And $300) = $300
+      Else If (PmB[0] = Ord('P')) And (PmB[1] = Ord('E')) And (PmB[2] = 0) And (PmB[3] = 0) Then
       Begin
-        NSec := W(6); OptSz := W(20); Opt := Ne + 24;
-        Imp := D(24 + 104);
-        If W(24) = $20B Then Imp := D(24 + 120);
+        PmNSec := PmW(6); Opt := Ne + 24; PmOptEnd := Opt + PmW(20);
+        If PmW(24) = $20B Then Imp := PmD(24 + 120) Else Imp := PmD(24 + 104);
         Off := -1;
-        If (Imp <> 0) And (NSec > 0) And (NSec < 64) Then Off := FileOfs(Imp);
+        If (Imp <> 0) And (PmNSec > 0) And (PmNSec < 64) Then Off := PmFileOfs(Imp);
         K := 0;
-        While (Off > 0) And (K < 64) And PmReadAt(H, Off + K * 20, LongInt(@B), 20) Do
+        While (Off > 0) And (K < 64) Do
         Begin
-          Rva := D(12);
-          If Rva = 0 Then K := 64
+          If Not PmReadAt(Off + K * 20, 20) Then K := 64
           Else
           Begin
-            NmOff := FileOfs(Rva);
-            S := '';
-            If (NmOff > 0) And PmReadAt(H, NmOff, LongInt(@Sh), 16) Then
-              For J := 0 To 15 Do
-                If (Sh[J] <> 0) And (Length(S) = J) Then S := S + UpCase(Chr(Sh[J]));
-            If (Copy(S, 1, 5) = 'PMWIN') Or (Copy(S, 1, 5) = 'PMGPI') Or (Copy(S, 1, 7) = 'PMMERGE') Then
+            Rva := PmD(12);
+            If Rva = 0 Then K := 64
+            Else
             Begin
-              IsPmProgram := True;
-              K := 64;
+              NmOff := PmFileOfs(Rva);
+              S := '';
+              If (NmOff > 0) And PmReadAt(NmOff, 16) Then
+              Begin
+                J := 0;
+                While (J < 16) And (PmB[J] <> 0) Do
+                Begin
+                  S := S + UpCase(Chr(PmB[J]));
+                  Inc(J);
+                End;
+              End;
+              If (Copy(S, 1, 5) = 'PMWIN') Or (Copy(S, 1, 5) = 'PMGPI') Or (Copy(S, 1, 7) = 'PMMERGE') Then
+              Begin
+                R := True;
+                K := 64;
+              End;
+              Inc(K);
             End;
-            Inc(K);
           End;
         End;
       End;
     End;
   End;
-  Dummy := DosClose(H);
+  Dummy := DosClose(PmH);
+  IsPmProgram := R;
 End;
+
 
 Procedure OpenFile(P : String);
 Var X, A : String;
