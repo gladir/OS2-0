@@ -1155,6 +1155,26 @@ Démarrage du disque dur : le secteur d'amorce principal (<b>KERNEL/HDBOOT.ASM</
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2INST.ISO -hda disque.img -boot d
 qemu-system-i386 -m 64 -hda disque.img</pre>
 
+<h3>Écran de démarrage graphique</h3>
+
+Au démarrage du disque dur, les messages du noyau ne défilent plus à la console : OS2KRNL passe aussitôt en 640 × 480 × 16 couleurs (mode 12h du BIOS) et montre la boîte <b>Démarrage d'OS/2-0</b>, avec le logo d'OS/2 Zero, la liste des étapes et une progression faite de cercles. Chaque étape terminée est cochée en vert, une flèche et le gras désignent l'étape en cours, et les cercles se remplissent d'une étape à l'autre, ainsi qu'à chaque module (DLL, pilote IFS) chargé. La boîte reste à l'écran jusqu'à ce que Presentation Manager le prenne.
+
+<img width="640" height="480" alt="OS/2-0 : l'écran de démarrage (logo, étapes cochées, progression en cercles)" src="IMAGE/DEMARRAGE.png" />
+
+<table>
+	<tr><th>Étape</th><th>Travail du noyau</th></tr>
+	<tr><td>Mémoire, processeur et vidéo</td><td>Relevé des modes VESA (INT 10h, 4F00h/4F01h).</td></tr>
+	<tr><td>Disques durs et lecteur de CD-ROM</td><td>Contrôleurs IDE et lecteur ATAPI.</td></tr>
+	<tr><td>Partition d'amorçage (HPFS ou NTFS)</td><td>Pilote IFS chargé par OS2LDR, partitions, montage de C:.</td></tr>
+	<tr><td>Configuration (CONFIG.SYS)</td><td>Lecture de C:\CONFIG.SYS.</td></tr>
+	<tr><td>Bibliothèques du système</td><td>DOSCALLS.DLL.</td></tr>
+	<tr><td>Systèmes de fichiers installés</td><td>Lignes <code>IFS=</code>, autres volumes, disque virtuel.</td></tr>
+	<tr><td>Presentation Manager</td><td>Chargement du processeur de commandes (PMSHELL.EXE) et de ses DLL : un cercle par module.</td></tr>
+	<tr><td>Bureau (Workplace Shell)</td><td>Démarrage du bureau, jusqu'à la première file de messages de PM.</td></tr>
+</table>
+
+Le journal reste complet : les messages vont toujours au port série et dans l'écran texte de la session 0, dont les pages B8000h sont redirigées vers son tampon pendant que la carte est en mode graphique. <b>Échap</b> ramène la console texte avec tout le journal ; une erreur du noyau (<code>SYS…</code>, <code>OS2KRNL:</code>), une exception, un programme en mode texte qui lit le clavier (PROTSHELL=C:\CMD.EXE) ou un processeur de commandes qui se termine avant PM font de même. <code>SET BOOTSCREEN=TEXTE</code> dans CONFIG.SYS garde la console. Le dessin se fait dans un tampon d'un octet par point, recopié plan par plan dans la mémoire de la carte VGA, zones modifiées seulement. Le logo (128 × 172 points, palette de 16 couleurs programmée dans le DAC) est dans <b>KERNEL/LOGO.INC</b>, produit par <b>TOOLS/MKLOGO.PY</b> à partir de <b>IMAGE/LOGO_OS2ZERO.png</b>. VIOCALLS.DLL, chargée pendant l'écran de démarrage, ne lit plus l'état d'origine du VGA (police, palette, registres) sur la carte, alors en mode graphique, mais dans l'état du mode texte que le noyau a relevé juste avant (<code>KrnVideo</code> 6) : le bureau garde sa police et les sessions plein écran leurs couleurs.
+
 Langue : la variable <code>LANGUAGE</code> de CONFIG.SYS (convention commune avec MSDOS-0, Pasdows95...) vaut <code>FR</code> (français, par défaut), <code>EN</code> (anglais), <code>GR</code> (allemand), <code>SP</code> (espagnol), <code>IT</code> (italien), <code>ALB</code> ou <code>SQ</code> (albanais, shqip), <code>PT</code> ou <code>PRT</code> (portugais), <code>SE</code> ou <code>SWE</code> (suédois), <code>DK</code> ou <code>DNK</code> (danois), <code>JP</code> ou <code>JPN</code> (japonais en romaji) ; <code>ES</code> est aussi accepté pour l'espagnol. Après l'installation, elle se change dans <b>Système OS/2 → Configuration du système → Langue</b> (onglet Langue du carnet Système - Paramètres) : la ligne <code>SET LANGUAGE=</code> de C:\CONFIG.SYS est modifiée et l'environnement du système aussi (les programmes lancés ensuite, comme CMD.EXE et les commandes, utilisent la nouvelle langue).
 
 <img width="640" height="480" alt="OS/2-0 : onglet Langue du carnet Système - Paramètres" src="IMAGE/LANGUE.png" />

@@ -7,6 +7,8 @@
 #        OS2PC -COS2BOOT OS2BOOT.PAS   -> OS2BOOT  (secteur d'amorce El Torito)
 #        OS2PC -COS2LDR  OS2LDR.PAS    -> OS2LDR   (chargeur 16 -> 32 bits)
 #        OS2PC -COS2KRNL OS2KRNL.PAS   -> OS2KRNL  (noyau 32 bits)
+#     (OS2KRNL.PAS inclut LOGO.INC, le logo de l'ecran de demarrage,
+#     produit par TOOLS/MKLOGO.PY depuis IMAGE/LOGO_OS2ZERO.png) ;
 #  3. compile CMD.PAS et les commandes de la racine du depot (OS2PC -COS2) ;
 #     dont les jeux du dossier Jeux du bureau : KLONDIKE.PAS (Solitaire -
 #     Klondike), ECHECS.PAS (Echecs) et MAHJONGG.PAS (Mahjongg Solitaire), et

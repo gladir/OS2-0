@@ -497,6 +497,16 @@ Begin
   Trim := S;
 End;
 
+{ ecran de demarrage graphique (partie 25) : actif, console de la
+  session 0 redirigee dans son tampon, Echap demande la console }
+Var
+  SplOn, SplRedir, SplWantText : Boolean;
+  SplSnap : LongInt;          { etat du VGA en mode texte avant l'ecran }
+
+Procedure SplToText; Forward;
+Procedure SplPmEnd; Forward;
+Procedure SplTick; Forward;
+
 { ==================================================================== }
 { Partie 3 - Console VGA texte et port serie COM1                      }
 { ==================================================================== }
@@ -607,6 +617,8 @@ End;
 { Journal du noyau : console et port serie }
 Procedure KLog(S : String);
 Begin
+  { une erreur : la console texte revient (ecran de demarrage) }
+  If SplOn And ((Copy(S, 1, 3) = 'SYS') Or (Copy(S, 1, 8) = 'OS2KRNL:')) Then SplToText;
   ConPutLn(S);
 End;
 
@@ -694,6 +706,7 @@ Begin
     Eip := MemL[0:F + 36];
   End;
   If Vec <= 19 Then Nm := ExcNames[Vec] Else Nm := 'Exception';
+  If SplOn And (CurProc < 0) Then SplToText;
   If CurProc >= 0 Then
   Begin
     Inc(TrapSeq);
@@ -1178,6 +1191,7 @@ Procedure IrqKeyboard;
 Var Sc, Ch, Up, Old, Ext, B : LongInt; Toggle : Boolean;
 Begin
   Sc := Port[$60];
+  If SplOn And (Sc = 1) Then SplWantText := True;
   If Sc = $E0 Then
   Begin
     KbdE0 := True;
@@ -1414,6 +1428,7 @@ Var
   End;
 
 Begin
+  If SplOn Then SplToText;
   S := ''; Pos := 0; OldLen := 0;
   StartRow := CurRow; StartCol := CurCol;
   HistIdx := HistCount;
@@ -1678,6 +1693,8 @@ End;
 Function KrnKbdRead(P, Flags : LongInt) : LongInt;
 Begin
   KrnKbdRead := 0;
+  { un programme en mode texte lit le clavier : la console revient }
+  If SplOn Then SplToText;
   If (Flags And 2) <> 0 Then
     While KbdHead = KbdTail Do Idle;
   If KbdHead <> KbdTail Then
@@ -6128,6 +6145,7 @@ Begin
   LoadModule := M;
   If M >= 0 Then Exit;
   LoadModule := -1;
+  SplTick;
   LastError := 126;                        { ERROR_MOD_NOT_FOUND }
   Buf := 0;
   If HdBoot And (Not IfsVols[2].Mounted) And (BootIfsSize > 0) And (UpStr(BaseName(Trim(Name))) = BootIfsName) Then
@@ -6658,7 +6676,9 @@ Begin
   MemL[0:PageDir] := KernPT Or 7;
   FlushTlb;
   If VmOn And (From = VmSess) Then VmSwitchOut;
-  If SUsed[From] And (SMode[From] = 0) Then MoveMem($B8000, SLvb[From], 32768);
+  { (ecran de demarrage : la session 0 ecrit deja dans son tampon) }
+  If SUsed[From] And (SMode[From] = 0) And Not (SplRedir And (From = 0)) Then MoveMem($B8000, SLvb[From], 32768);
+  If From = 0 Then SplRedir := False;
   If SUsed[From] Then SessMap(From, False);
   SessMap(T, True);
   FgSess := T;
@@ -7649,7 +7669,11 @@ End;
         position et taille des champs rouge, vert, bleu
     3 : passer au mode VESA p1 (memoire lineaire) ; 0 si reussi
     4 : passer au mode p1 du BIOS (INT 10h, AH = 0 ; 03h : texte)
-    5 : informations : version, memoire (Ko), constructeur (ASCIIZ) en p2 }
+    5 : informations : version, memoire (Ko), constructeur (ASCIIZ) en p2
+    6 : etat du VGA en mode texte avant l'ecran de demarrage graphique
+        (5120 octets en p2 : DAC 768, registres 0-15 de l'attribut, 10h,
+        11h, CRTC 14h, 09h, 0Ah, 0Bh, police 8 x 16 en 1024) ; 0 s'il n'y
+        a pas eu d'ecran de demarrage }
 Function KrnVideo(Op, P1, P2 : LongInt) : LongInt;
 Begin
   KrnVideo := 0;
@@ -7676,12 +7700,14 @@ Begin
           End;
         End;
     3 : Begin
+          SplToText;
           VbeScan;
           BiosRegs($4F02, (P1 And $1FF) Or $4000, 0, 0, 0, 0, 0);
           BiosInt($10);
           If (MemL[0:BiosParm] And $FFFF) <> $004F Then KrnVideo := 1;
         End;
     4 : Begin
+          SplToText;
           BiosRegs(P1 And $FF, 0, 0, 0, 0, 0, 0);
           BiosInt($10);
         End;
@@ -7691,6 +7717,13 @@ Begin
           MemL[0:P2] := VbeVer; MemL[0:P2 + 4] := VbeMemKb;
           PutPStr(P2 + 8, VbeOem, 80);
           KrnVideo := VbeVer;
+        End;
+    6 : If (P2 <> 0) And (SplSnap <> 0) Then
+        Begin
+          { etat du VGA en mode texte releve avant l'ecran de demarrage
+            (5120 octets) : la carte est alors en mode graphique }
+          MoveMem(SplSnap, P2, 5120);
+          KrnVideo := 1;
         End;
   End;
 End;
@@ -7735,6 +7768,8 @@ Begin
     5 : If CurProc < 0 Then KrnSesCtl := -1
         Else
         Begin
+          { Presentation Manager prend l'ecran (ecran de demarrage) }
+          SplPmEnd;
           If PmSess < 0 Then
           Begin
             PmSess := NewSess('Presentation Manager', 1);
@@ -18252,6 +18287,420 @@ Begin
 End;
 { NE-FIN }
 
+{ ==================================================================== }
+{ Partie 25 - Ecran de demarrage graphique                             }
+{ ==================================================================== }
+{ Demarrage du disque dur : au lieu des messages de la console, une    }
+{ boite de dialogue en 640 x 480 x 16 couleurs (mode 12h du BIOS) avec }
+{ le logo d'OS/2-0, la liste des etapes (case cochee en vert une fois  }
+{ terminee, fleche devant l'etape en cours) et une progression faite   }
+{ de cercles qui se remplissent. Les messages continuent d'aller au   }
+{ port serie et dans l'ecran texte de la session 0 (pages B8000h       }
+{ redirigees vers son tampon) : Echap, une erreur du noyau (SYS...,    }
+{ OS2KRNL:), une exception ou un programme en mode texte qui lit le    }
+{ clavier ramenent la console texte avec tout le journal. L'ecran      }
+{ reste jusqu'a ce que Presentation Manager prenne la main (KrnSesCtl  }
+{ 5). SET BOOTSCREEN=TEXTE dans CONFIG.SYS : console seulement. Le     }
+{ dessin se fait dans un tampon d'un octet par point, recopie par      }
+{ plans dans la memoire de la carte VGA (zones modifiees seulement).   }
+{ ==================================================================== }
+
+{$I LOGO.INC}
+
+Const
+  SplN = 8;                  { etapes }
+  SplW = 500;                { boite }
+  SplH = 300;
+  SplDots = 16;              { cercles de la progression }
+  SplSubMax = 16;            { sous-etapes (modules charges) par etape }
+
+Var
+  SplBuf, SplCur, SplSub, SplX, SplY : LongInt;
+
+{ registre du DAC du mode 12h pour la couleur I (palette de l'attribut
+  par defaut : 0-5, 14h, 7, 38h-3Fh) }
+Function SplDac(I : LongInt) : LongInt;
+Begin
+  If I = 6 Then SplDac := $14
+  Else If I < 8 Then SplDac := I
+  Else SplDac := $38 + I - 8;
+End;
+
+Procedure SPix(X, Y, C : LongInt);
+Begin
+  If (X >= 0) And (X < 640) And (Y >= 0) And (Y < 480) Then Mem[0:SplBuf + Y * 640 + X] := C;
+End;
+
+Procedure SBar(X1, Y1, X2, Y2, C : LongInt);
+Var X, Y, A : LongInt;
+Begin
+  If X1 < 0 Then X1 := 0;
+  If Y1 < 0 Then Y1 := 0;
+  If X2 > 639 Then X2 := 639;
+  If Y2 > 479 Then Y2 := 479;
+  For Y := Y1 To Y2 Do
+  Begin
+    A := SplBuf + Y * 640;
+    For X := X1 To X2 Do Mem[0:A + X] := C;
+  End;
+End;
+
+{ cadre d'un point : haut et gauche Lt, bas et droite Dk }
+Procedure SEdge(X1, Y1, X2, Y2, Lt, Dk : LongInt);
+Begin
+  SBar(X1, Y1, X2, Y1, Lt); SBar(X1, Y1, X1, Y2, Lt);
+  SBar(X1, Y2, X2, Y2, Dk); SBar(X2, Y1, X2, Y2, Dk);
+End;
+
+{ texte (police 8 x 16 de la carte VGA) ; Bold : deux fois decale }
+Procedure SText(X, Y : LongInt; S : String; C : LongInt; Bold : Boolean);
+Var I, R, K, B : LongInt;
+Begin
+  If VmFontBuf = 0 Then Exit;
+  For I := 1 To Length(S) Do
+    For R := 0 To 15 Do
+    Begin
+      B := Mem[0:VmFontBuf + Ord(S[I]) * 16 + R];
+      If B <> 0 Then
+        For K := 0 To 7 Do
+          If (B And ($80 Shr K)) <> 0 Then
+          Begin
+            SPix(X + (I - 1) * 8 + K, Y + R, C);
+            If Bold Then SPix(X + (I - 1) * 8 + K + 1, Y + R, C);
+          End;
+    End;
+End;
+
+{ disque plein (rayon R) et cercle (contour) }
+Procedure SDisc(CX, CY, R, C : LongInt);
+Var Dy, W : LongInt;
+Begin
+  For Dy := -R To R Do
+  Begin
+    W := 0;
+    While (W + 1) * (W + 1) + Dy * Dy <= R * R Do Inc(W);
+    SBar(CX - W, CY + Dy, CX + W, CY + Dy, C);
+  End;
+End;
+
+Procedure SRing(CX, CY, R, C : LongInt);
+Var A, X, Y, Px, Py : LongInt;
+Begin
+  { huit octants (algorithme du point milieu) }
+  X := R; Y := 0; A := 1 - R;
+  While X >= Y Do
+  Begin
+    For Px := -1 To 1 Do
+      If Px <> 0 Then
+        For Py := -1 To 1 Do
+          If Py <> 0 Then
+          Begin
+            SPix(CX + Px * X, CY + Py * Y, C); SPix(CX + Px * Y, CY + Py * X, C);
+          End;
+    Inc(Y);
+    If A < 0 Then A := A + 2 * Y + 1
+    Else
+    Begin
+      Dec(X);
+      A := A + 2 * (Y - X) + 1;
+    End;
+  End;
+End;
+
+{ recopie de la zone (X1, Y1)-(X2, Y2) dans les quatre plans de la VGA }
+Procedure SFlush(X1, Y1, X2, Y2 : LongInt);
+Var P, Y, BX, K, B, A, M : LongInt;
+Begin
+  If X1 < 0 Then X1 := 0;
+  If Y1 < 0 Then Y1 := 0;
+  If X2 > 639 Then X2 := 639;
+  If Y2 > 479 Then Y2 := 479;
+  For P := 0 To 3 Do
+  Begin
+    M := 1 Shl P;
+    Port[$3C4] := 2; Port[$3C5] := M;
+    For Y := Y1 To Y2 Do
+      For BX := X1 Div 8 To X2 Div 8 Do
+      Begin
+        A := SplBuf + Y * 640 + BX * 8;
+        B := 0;
+        For K := 0 To 7 Do
+          If (Mem[0:A + K] And M) <> 0 Then B := B Or ($80 Shr K);
+        Mem[0:$A0000 + Y * 80 + BX] := B;
+      End;
+  End;
+  Port[$3C4] := 2; Port[$3C5] := $0F;
+End;
+
+Function SplTitle : String;
+Begin
+  SplTitle := 'D'#130'marrage d''OS/2-0';
+End;
+
+Function SplLabel(I : LongInt) : String;
+Begin
+  Case I Of
+    0 : SplLabel := 'M'#130'moire, processeur et vid'#130'o';
+    1 : SplLabel := 'Disques durs et lecteur de CD-ROM';
+    2 : SplLabel := 'Partition d''amor'#135'age (' + Copy(BootIfsName, 1, Pos('.', BootIfsName) - 1) + ')';
+    3 : SplLabel := 'Configuration (CONFIG.SYS)';
+    4 : SplLabel := 'Biblioth'#138'ques du syst'#138'me';
+    5 : SplLabel := 'Syst'#138'mes de fichiers install'#130's';
+    6 : SplLabel := 'Presentation Manager';
+  Else
+    SplLabel := 'Bureau (Workplace Shell)';
+  End;
+End;
+
+{ cercles de la progression : etapes finies, plus les modules charges
+  pendant l'etape en cours }
+Procedure SplDotsPaint;
+Var I, N, CX, CY, Sub : LongInt;
+Begin
+  Sub := SplSub;
+  If Sub > SplSubMax - 1 Then Sub := SplSubMax - 1;
+  N := ((SplCur * SplSubMax + Sub) * SplDots) Div (SplN * SplSubMax);
+  CY := SplY + SplH - 30;
+  SBar(SplX + 8, CY - 11, SplX + SplW - 9, CY + 11, 3);
+  For I := 0 To SplDots - 1 Do
+  Begin
+    CX := SplX + 26 + ((SplW - 52) * I) Div (SplDots - 1);
+    If I < N Then
+    Begin
+      SDisc(CX, CY, 8, 13);
+      SRing(CX, CY, 8, 10);
+      SDisc(CX - 2, CY - 2, 2, 14);
+    End
+    Else If I = N Then
+    Begin
+      SDisc(CX, CY, 8, 15);
+      SRing(CX, CY, 8, 11);
+      SRing(CX, CY, 9, 13);
+    End
+    Else
+    Begin
+      SDisc(CX, CY, 8, 5);
+      SRing(CX, CY, 8, 4);
+    End;
+  End;
+End;
+
+{ coche verte dans la case (X, Y) de 12 x 12 points }
+Procedure SplCheck(X, Y : LongInt);
+Var K : LongInt;
+Begin
+  For K := 0 To 1 Do
+  Begin
+    SPix(X + 2, Y + 5 + K, 2); SPix(X + 3, Y + 6 + K, 2); SPix(X + 4, Y + 7 + K, 2);
+    SPix(X + 5, Y + 6 + K, 2); SPix(X + 6, Y + 5 + K, 2); SPix(X + 7, Y + 4 + K, 2);
+    SPix(X + 8, Y + 3 + K, 2); SPix(X + 9, Y + 2 + K, 2);
+  End;
+End;
+
+Procedure SplList;
+Var I, Y, TX, C, K : LongInt;
+Begin
+  TX := SplX + 164;
+  For I := 0 To SplN - 1 Do
+  Begin
+    Y := SplY + 80 + I * 18;
+    SBar(TX - 12, Y, SplX + SplW - 8, Y + 16, 3);
+    SBar(TX, Y + 2, TX + 11, Y + 13, 5);
+    SEdge(TX, Y + 2, TX + 11, Y + 13, 4, 5);
+    SEdge(TX + 1, Y + 3, TX + 10, Y + 12, 0, 3);
+    If I < SplCur Then SplCheck(TX + 1, Y + 2);
+    If I = SplCur Then
+    Begin
+      For K := 0 To 3 Do SBar(TX - 10 + K, Y + 4 + K, TX - 10 + K, Y + 10 - K, 0);
+      SText(TX + 18, Y, SplLabel(I), 0, True);
+    End
+    Else
+    Begin
+      If I < SplCur Then C := 0 Else C := 4;
+      SText(TX + 18, Y, SplLabel(I), C, False);
+    End;
+  End;
+End;
+
+Procedure SplPaint(Full : Boolean);
+Var X, Y, X1, Y1, X2, Y2, B : LongInt;
+Begin
+  X1 := SplX; Y1 := SplY; X2 := SplX + SplW - 1; Y2 := SplY + SplH - 1;
+  If Full Then
+  Begin
+    SBar(0, 0, 639, 479, 6);
+    { boite de dialogue : cadre, barre de titre }
+    SBar(X1, Y1, X2, Y2, 3);
+    SEdge(X1, Y1, X2, Y2, 3, 0);
+    SEdge(X1 + 1, Y1 + 1, X2 - 1, Y2 - 1, 5, 4);
+    SBar(X1 + 3, Y1 + 3, X2 - 3, Y1 + 22, 1);
+    SText(X1 + (SplW - Length(SplTitle) * 8) Div 2, Y1 + 5, SplTitle, 5, True);
+    { logo sur son fond sombre, dans un cadre en creux }
+    SBar(X1 + 10, Y1 + 32, X1 + 149, Y1 + 219, 6);
+    SEdge(X1 + 9, Y1 + 31, X1 + 150, Y1 + 220, 4, 5);
+    For Y := 0 To SplLogoH - 1 Do
+      For X := 0 To SplLogoW - 1 Do
+      Begin
+        B := SplLogo[Y * (SplLogoW Div 2) + X Div 2];
+        If (X And 1) = 0 Then B := B Shr 4 Else B := B And 15;
+        SPix(X1 + 16 + X, Y1 + 40 + Y, B);
+      End;
+    SText(X1 + 164, Y1 + 38, 'Veuillez patienter pendant la', 0, False);
+    SText(X1 + 164, Y1 + 54, 'pr'#130'paration d''OS/2-0.', 0, False);
+  End;
+  SplList;
+  SplDotsPaint;
+  If Full Then SFlush(0, 0, 639, 479)
+  Else
+  Begin
+    SFlush(X1 + 150, Y1 + 78, X2 - 8, Y1 + 80 + SplN * 18);
+    SFlush(X1 + 8, Y2 - 42, X2 - 8, Y2 - 18);
+  End;
+End;
+
+Procedure SplStart;
+Var I : LongInt;
+Begin
+  If SplOn Or (VmFontBuf = 0) Or Not SUsed[0] Then Exit;
+  SplBuf := PAlloc(307200);
+  If SplBuf = 0 Then Exit;
+  { etat du VGA en mode texte, pour VIOCALLS.DLL (KrnVideo 6) : il est
+    charge pendant que la carte est en mode graphique }
+  SplSnap := KAlloc(5120);
+  If SplSnap <> 0 Then
+  Begin
+    For I := 0 To 255 Do
+    Begin
+      Port[$3C7] := I;
+      Mem[0:SplSnap + I * 3] := Port[$3C9]; Mem[0:SplSnap + I * 3 + 1] := Port[$3C9];
+      Mem[0:SplSnap + I * 3 + 2] := Port[$3C9];
+    End;
+    For I := 0 To 17 Do
+    Begin
+      If Port[$3DA] = 0 Then ;
+      Port[$3C0] := I;
+      If I < 16 Then Mem[0:SplSnap + 768 + I] := Port[$3C1]
+      Else Mem[0:SplSnap + 768 + I] := Port[$3C1];
+      If Port[$3DA] = 0 Then ;
+      Port[$3C0] := $20;
+    End;
+    Port[$3D4] := $14; Mem[0:SplSnap + 786] := Port[$3D5];
+    Port[$3D4] := $09; Mem[0:SplSnap + 787] := Port[$3D5];
+    Port[$3D4] := $0A; Mem[0:SplSnap + 788] := Port[$3D5];
+    Port[$3D4] := $0B; Mem[0:SplSnap + 789] := Port[$3D5];
+    MoveMem(VmFontBuf, SplSnap + 1024, 4096);
+  End;
+  { l'ecran texte (messages d'OS2LDR et du noyau) passe dans le tampon
+    de la session 0, ou la console continue d'ecrire }
+  MoveMem($B8000, SLvb[0], ScrCols * ScrRows * 2);
+  For I := 0 To 7 Do MemL[0:SPT[0] + ($B8 + I) * 4] := (SLvb[0] + I * 4096) Or 7;
+  FlushTlb;
+  SplRedir := True;
+  BiosRegs($0012, 0, 0, 0, 0, 0, 0);
+  BiosInt($10);
+  For I := 0 To 15 Do
+  Begin
+    Port[$3C8] := SplDac(I);
+    Port[$3C9] := SplPal[I * 3] Shr 2; Port[$3C9] := SplPal[I * 3 + 1] Shr 2; Port[$3C9] := SplPal[I * 3 + 2] Shr 2;
+  End;
+  SplX := (640 - SplW) Div 2; SplY := (480 - SplH) Div 2;
+  SplCur := 0; SplSub := 0; SplWantText := False;
+  SplOn := True;
+  SplPaint(True);
+End;
+
+{ retour a la console texte : mode 03h, journal de la session 0 }
+Procedure SplToText;
+Var P : LongInt;
+Begin
+  If Not SplOn Then Exit;
+  SplOn := False;
+  BiosRegs($0003, 0, 0, 0, 0, 0, 0);
+  BiosInt($10);
+  If SplRedir Then
+  Begin
+    SplRedir := False;
+    If FgSess = 0 Then
+    Begin
+      asm
+        cli
+      end;
+      MemL[0:PageDir] := KernPT Or 7;
+      FlushTlb;
+      SessMap(0, True);
+      MoveMem(SLvb[0], $B8000, ScrCols * ScrRows * 2);
+      MemL[0:PageDir] := CurPde;
+      FlushTlb;
+      asm
+        sti
+      end;
+      P := CurRow * ScrCols + CurCol;
+      If CurSess <> 0 Then P := SCurRow[0] * ScrCols + SCurCol[0];
+      Port[$3D4] := $0F; Port[$3D5] := P And $FF;
+      Port[$3D4] := $0E; Port[$3D5] := (P Shr 8) And $FF;
+    End;
+  End;
+  If SplBuf <> 0 Then PFree(SplBuf);
+  SplBuf := 0;
+End;
+
+{ Presentation Manager prend l'ecran : la boite reste affichee jusqu'a
+  son changement de mode ; la session 0 garde son tampon (SplRedir :
+  DoSwitch ne le remplace pas par la memoire de la carte) }
+Procedure SplPmEnd;
+Begin
+  If Not SplOn Then Exit;
+  SplCur := SplN;
+  SplPaint(False);
+  SplOn := False;
+  If SplBuf <> 0 Then PFree(SplBuf);
+  SplBuf := 0;
+End;
+
+{ Echap : pendant le demarrage, les interruptions sont souvent masquees ;
+  le controleur du clavier est donc aussi lu ici (octets de la souris
+  laisses a leur place) }
+Procedure SplPoll;
+Var N, Sc : LongInt;
+Begin
+  N := 0;
+  While (N < 16) And ((Port[$64] And $21) = 1) Do
+  Begin
+    Sc := Port[$60];
+    If Sc = 1 Then SplWantText := True;
+    Inc(N);
+  End;
+End;
+
+{ etape K en cours (les precedentes sont cochees) }
+Procedure SplStep(K : LongInt);
+Begin
+  If Not SplOn Then Exit;
+  SplPoll;
+  If SplWantText Then
+  Begin
+    SplToText;
+    Exit;
+  End;
+  SplCur := K; SplSub := 0;
+  SplPaint(False);
+End;
+
+{ un module (DLL, IFS) de plus : un pas de la progression }
+Procedure SplTick;
+Begin
+  If Not SplOn Then Exit;
+  SplPoll;
+  If SplWantText Then
+  Begin
+    SplToText;
+    Exit;
+  End;
+  Inc(SplSub);
+  SplDotsPaint;
+  SFlush(SplX + 8, SplY + SplH - 42, SplX + SplW - 9, SplY + SplH - 18);
+End;
+
 Procedure Banner;
 Begin
   TextAttr := $1F;
@@ -18345,7 +18794,11 @@ BEGIN
     CacheLba[I] := -1;
     CacheData[I] := 0;
   End;
+  { ecran de demarrage graphique (disque dur) : etapes cochees }
+  SplOn := False; SplRedir := False; SplWantText := False; SplBuf := 0; SplSnap := 0;
+  If HdBoot Then SplStart;
   Banner;
+  SplStep(1);
   If PhysTop < PhysProcBase + $00400000 Then
     KLog('OS2KRNL: au moins 20 Mo de memoire sont necessaires.');
   AtaInit;
@@ -18365,6 +18818,7 @@ BEGIN
   Begin
     { C: : partition HPFS du disque dur, montee avant la lecture de
       CONFIG.SYS par le pilote charge en memoire par OS2LDR }
+    SplStep(2);
     LoadIfs('C:\' + BootIfsName + ' /CACHE:64 /AUTOCHECK:C');
     HdInit;
     MountIfsVolumes;
@@ -18374,7 +18828,14 @@ BEGIN
       ExitProcess(1);
     End;
   End;
+  SplStep(3);
   ReadConfigSys;
+  { SET BOOTSCREEN=TEXTE : la console plutot que l'ecran de demarrage }
+  If SplOn And (EnvFind('BOOTSCREEN') <> 0) Then
+    If (UpStr(Copy(PStr(EnvFind('BOOTSCREEN')), 1, 4)) = 'TEXT') Or
+       (UpStr(Copy(PStr(EnvFind('BOOTSCREEN')), 1, 3)) = 'NON') Or
+       (UpStr(Copy(PStr(EnvFind('BOOTSCREEN')), 1, 3)) = 'OFF') Then SplToText;
+  SplStep(4);
   { COMSPEC : celui de CONFIG.SYS (SET COMSPEC=), sinon le PROTSHELL }
   If EnvFind('COMSPEC') = 0 Then EnvSet('COMSPEC', ShellPath);
   { bibliotheque DOSCALLS.DLL (API Dos* d'OS/2), si elle est presente }
@@ -18386,6 +18847,7 @@ BEGIN
            IntStr(Mods^[I].NExp) + ' fonctions).');
   End;
   { systemes de fichiers installables (IFS=) et leurs volumes }
+  SplStep(5);
   For I := 0 To NIfsLines - 1 Do LoadIfs(IfsLines[I]);
   If NIfs > 0 Then
   Begin
@@ -18407,6 +18869,7 @@ BEGIN
       ExitProcess(1);
     End;
     ShellCmd := '"' + P2 + '"';
+    SplStep(6);
     Pid := LoadProgram(P2, ShellCmd);
     If Pid < 0 Then
     Begin
@@ -18415,12 +18878,15 @@ BEGIN
     End;
     Procs[Pid].HandleOpen := True;
     Procs[Pid].Parent := -1;
+    SplStep(7);
     If Not StartProcess(Pid) Then
     Begin
       KLog('SYS1041: Impossible de demarrer ' + P2 + '.');
       ExitProcess(1);
     End;
     While Procs[Pid].Running Do Idle;
+    { termine avant que PM ait pris l'ecran : la console revient }
+    SplToText;
     Code := Procs[Pid].ExitCode;
     Procs[Pid].HandleOpen := False;
     Yield;

@@ -166,6 +166,18 @@ Demarrage
    C:\CMD.EXE par defaut). S'il se termine, il est relance.
    Ctrl+Alt+Suppr redemarre l'ordinateur a tout moment.
 
+Ecran de demarrage graphique (disque dur) : au lieu des messages de la
+console, OS2KRNL affiche en 640 x 480 x 16 couleurs la boite "Demarrage
+d'OS/2-0" : logo d'OS/2 Zero, etapes cochees en vert (memoire et video,
+disques, partition d'amorcage, CONFIG.SYS, bibliotheques, systemes de
+fichiers, Presentation Manager, bureau) et progression en cercles (un
+cercle de plus par etape et par module charge). Elle reste jusqu'a ce que
+PM prenne l'ecran. Echap, une erreur du noyau, une exception ou un
+programme en mode texte qui lit le clavier ramenent la console avec tout
+le journal (qui va aussi au port serie). SET BOOTSCREEN=TEXTE dans
+CONFIG.SYS : console seulement. Logo : KERNEL\LOGO.INC (TOOLS\MKLOGO.PY,
+IMAGE\LOGO_OS2ZERO.png).
+
 Carte memoire
 -------------
   00000500h          bloc d'information d'amorcage (OS2BOOT, OS2LDR)
