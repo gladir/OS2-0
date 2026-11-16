@@ -3,14 +3,14 @@ IMAGE - CD-ROM amorcable de OS/2-0
 
 OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL,
-              FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
+              FKA.DLL, HPFS.IFS, NTFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL,
               KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL,
               SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL,
               OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL,
               PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL,
               PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL,
               PMCTLS.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL,
-              ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL,
+              ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, TLS32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
               DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
@@ -34,7 +34,7 @@ INSTALL\      CONFIG.SYS du CD-ROM d'installation.
 SONS\         Sons du systeme (DEMARRE.WAV, CLOCHE.WAV), copies sur le
               CD-ROM par KERNEL\BUILD.sh.
 SYSTEM\       Fichiers systeme : OS2BOOT, OS2LDR, OS2KRNL, CMD.EXE,
-              DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL,
+              DOSCALLS.DLL, FKA.DLL, HPFS.IFS, NTFS.IFS, VIOCALLS.DLL,
               MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL,
               NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL,
               RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL,
@@ -83,6 +83,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\VBOXGST.PAS                     -> VBOXGST.DLL (Additions VirtualBox)
   OS2PC DLL\VMWTOOLS.PAS                    -> VMWTOOLS.DLL (VMware Tools)
   OS2PC DLL\TCPIP32.PAS                     -> TCPIP32.DLL (pile TCP/IP, sockets)
+  OS2PC DLL\TLS32.PAS                       -> TLS32.DLL (TLS 1.3 et 1.2, https://)
   OS2PC DLL\E1000.PAS                       -> E1000.DLL (pilote Intel PRO/1000)
   OS2PC DLL\PCNET.PAS                       -> PCNET.DLL (pilote AMD PCnet)
   OS2PC DEVMGR.PAS                          -> DEVMGR.EXE (Gestionnaire de peripheriques)
@@ -93,6 +94,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\FKA.PAS                         -> FKA.DLL (touches de fonction)
   OS2PC DLL\TESTFKA.PAS                     -> TESTFKA.EXE (essai de FKA.DLL)
   OS2PC DLL\HPFS.PAS HPFS.IFS               -> HPFS.IFS (systeme de fichiers HPFS)
+  OS2PC DLL\NTFS.PAS NTFS.IFS               -> NTFS.IFS (systeme de fichiers NTFS)
+  OS2PC DLL\TESTNTFS.PAS                    -> TESTNTFS.EXE (essai de NTFS.IFS)
   OS2PC DLL\TESTHPFS.PAS                    -> TESTHPFS.EXE (essai de HPFS.IFS)
   OS2PC DLL\VIOCALLS.PAS                    -> VIOCALLS.DLL (sous-systeme video VIO)
   OS2PC DLL\TESTVIOR.PAS                    -> TESTVIOR.DLL (remplacement VIO d'essai)
@@ -240,6 +243,23 @@ d'unite, 3 = D:) ; HPFS.IFS lit et ecrit les secteurs par le service
 FSH_DOVOLIO du noyau. Les noms longs (254 caracteres) gardent leur casse
 et se comparent sans en tenir compte. TESTHPFS [unite] [GARDER] verifie
 les 43 points d'entree du pilote.
+
+NTFS.IFS
+--------
+Pilote NTFS (DLL\NTFS.PAS, porte de Pasdows 95) : lecture et ecriture
+des partitions 07h en NTFS 3.x (MFT, attributs residents et non
+residents, listes d'attributs, index $I30 en arbre B+, $UpCase, bitmaps,
+extension de la MFT, $MFTMirr ; $LogFile vide comme ntfs-3g), formatage
+(FS_FSCTL 8000h, ou KrnDiskCtl 11 avec 'NTFS'), verification (8001h).
+CONFIG.SYS : IFS=C:\NTFS.IFS /CACHE:64. OS/2-0 peut s'installer et
+demarrer sur une partition NTFS : choix NTFS de la page Formatage
+d'INSTALL (HPFS reste le choix par defaut ; SET INSTALL_FS=NTFS dans le
+CONFIG.SYS du CD d'installation le rend initial) ; NTFS.IFS va alors
+dans la zone d'amorcage et OS2LDR le charge. Limites : fichiers
+compresses ou chiffres non lus, attributs etendus d'OS/2 non
+enregistres, fichiers a liste d'attributs en lecture seule, fichiers de
+2 Go et plus en lecture seule, pas de noms 8.3 generes. TESTNTFS
+[unite] [GARDER | FORMATER [GRAND] | NOYAU] verifie le pilote.
 
 VIOCALLS.DLL
 ------------
@@ -638,7 +658,13 @@ KERNEL\BIOSCALL.ASM) : il affiche au demarrage la version du VBE, la
 memoire video et le nombre de modes utilisables. VIOCALLS.DLL passe
 dans ces modes (VioSetMode : 800 x 600, 1024 x 768, 1280 x 1024... en
 256 couleurs ou 15, 16, 24, 32 bits par pel, memoire lineaire) et PMWIN
-et PMGPI y dessinent. Resolution du bureau :
+et PMGPI y dessinent. Sans autre reglage, le bureau est en 640 x 480
+en memoire lineaire (32, sinon 16 bits par pel, couleurs du VGA) ; le
+mode a plans du VGA (640 x 480 x 16, SET PMRESOLUTION=640x480x4) ne sert
+que sans BIOS VESA : il demande une lecture et une ecriture de la
+fenetre A0000h par octet et des ecritures dans les ports du VGA, tres
+lentes sous VirtualBox au-dessus de Hyper-V (chaque acces est une
+sortie de la machine virtuelle). Resolution du bureau :
   SET PMRESOLUTION=1024x768x32   dans CONFIG.SYS (largeur x hauteur x
                                  bits par pel), ou
   carnet "Systeme - Parametres" (Systeme OS/2, Configuration du
@@ -803,8 +829,21 @@ gethostbyname...). Commandes :
   IFCONFIG [/RENEW]   etat de lan0 (carte, MAC, adresse, passerelle, DNS)
   PING hote [n]       echo ICMP
   HOST nom            adresse d'un nom (DNS)
-  WGET http://hote[:port]/chemin [fichier]
+  WGET http[s]://hote[:port]/chemin [fichier]
 QEMU : -nic user,model=e1000 (ou pcnet).
+
+Connexions chiffrees (TLS32.DLL, https://)
+------------------------------------------
+TLS 1.3 (suite TLS_AES_128_GCM_SHA256) et, pour les serveurs plus
+anciens, TLS 1.2 (ECDHE-RSA et ECDHE-ECDSA-AES128-GCM-SHA256) ; echange
+de cles X25519 ; SHA-256, HMAC, HKDF, AES-128, GCM et X25519 sont ecrits
+en Pascal dans DLL\TLS32.PAS. Le Navigateur Web et WGET s'en servent
+pour les adresses https:// (avec un proxy HTTP : tunnel CONNECT).
+Limite : la chaine de certificats du serveur n'est pas verifiee (pas de
+magasin d'autorites) ; la connexion est chiffree et le message Finished
+du serveur est verifie, mais un intermediaire actif pourrait se faire
+passer pour le serveur. Un serveur qui n'accepte pas X25519 (seulement
+P-256) refuse la connexion.
 
 Gestionnaire de peripheriques (DEVMGR.EXE)
 ------------------------------------------
@@ -911,8 +950,10 @@ QEMU : -nic user,model=e1000) ; about:home est la page d'accueil.
                  Reseau (etat, methode, domaine, fichier, type, taille,
                  duree de chaque requete).
 Presse-papiers des champs de saisie de PM : Maj+Inser, Ctrl+Inser,
-Maj+Suppr (et Ctrl+V, Ctrl+C, Ctrl+X). HTTPS demande un proxy HTTP
-(Options - Proxy, ou SET HTTP_PROXY=hote:port). SET BROWSER_TRACE=1
+Maj+Suppr (et Ctrl+V, Ctrl+C, Ctrl+X). HTTPS : TLS 1.3 ou 1.2 par
+TLS32.DLL, la barre d'etat l'indique ("connexion chiffree (TLS 1.3,
+certificat non verifie)") ; proxy HTTP facultatif (Options - Proxy, ou
+SET HTTP_PROXY=hote:port : tunnel CONNECT). SET BROWSER_TRACE=1
 copie la console et les etapes du chargement sur la sortie standard.
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)

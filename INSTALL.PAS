@@ -33,9 +33,10 @@ Program INSTALL;
     3. Partitionnement du disque dur (comme FDISK) : disques IDE,
        partitions principales et espace libre, creation d'une partition
        HPFS (taille en Mo), suppression, choix de la partition ;
-    4. Formatage : HPFS (FS_FSCTL 8000h de HPFS.IFS, par le noyau :
-       KrnDiskCtl), nom du volume, ou conservation des fichiers d'une
-       partition HPFS existante ;
+    4. Formatage : HPFS (par defaut ; FS_FSCTL 8000h de HPFS.IFS, par le
+       noyau : KrnDiskCtl 5) ou NTFS (NTFS.IFS : KrnDiskCtl 11), nom du
+       volume, ou conservation des fichiers d'une partition HPFS ou NTFS
+       existante ;
     5. Composants : bureau et LaunchPad, utilitaires, programmes
        d'essai, disque virtuel, jeux (Solitaire - Klondike, Echecs,
        Mahjongg : dossier Jeux de Systeme OS/2), multimedia (Audio
@@ -45,14 +46,16 @@ Program INSTALL;
     6. Transfert des fichiers (barre de progression aux logos OS/2) :
        copie des fichiers du CD-ROM, CONFIG.SYS du disque dur, zone
        d'amorcage (secteurs 1 et suivants du disque : repertoire
-       'OS20BOOT', OS2LDR, OS2KRNL, HPFS.IFS) et secteur d'amorce
+       'OS20BOOT', OS2LDR, OS2KRNL, HPFS.IFS ou NTFS.IFS) et secteur d'amorce
        principal (KERNEL/HDBOOT.ASM : tableau MbrCode) avec la partition
        active ;
     7. Fin : retirer le CD-ROM et redemarrer ; OS/2-0 demarre alors du
-       disque dur (C: = la partition HPFS).
+       disque dur (C: = la partition HPFS ou NTFS).
 
   Parametres : /AUTO (installation facile sans question, pour les
-  essais), /LANG:xx (langue de l'assistant). }
+  essais), /NTFS (formater en NTFS plutot qu'en HPFS, avec /AUTO ou
+  comme choix initial ; aussi SET INSTALL_FS=NTFS dans CONFIG.SYS),
+  /LANG:xx (langue de l'assistant). }
 
 Const
   { messages }
@@ -85,7 +88,7 @@ Const
   ID_EASY = 101; ID_ADV = 102; ID_QUIT = 103; ID_OK = 110; ID_HELP = 111; ID_BACK = 112;
   ID_PLIST = 200; ID_PSIZE = 201; ID_PCREATE = 202; ID_PDELETE = 203; ID_PINSTALL = 205; ID_PPREV = 207;
   ID_PNEXT = 208;
-  ID_FHPFS = 300; ID_FFAT = 301; ID_FKEEP = 302; ID_FLABEL = 303; ID_FGO = 310;
+  ID_FHPFS = 300; ID_FNTFS = 301; ID_FKEEP = 302; ID_FLABEL = 303; ID_FGO = 310;
   ID_CBASE = 400; ID_CDESK = 401; ID_CUTIL = 402; ID_CTEST = 403; ID_CRAM = 404; ID_CGAMES = 405; ID_CMM = 406; ID_CNET = 407; ID_CGO = 410;
   ID_REBOOT = 600;
   ID_CHLIST = 700; ID_CHOK = 701; ID_CHCANCEL = 702;
@@ -163,7 +166,8 @@ Var
   CurName, CopyErr, ShownName : String;
   ShownFill : LongInt;
   CopyBuf : Array[0..ChunkSize - 1] Of Byte;
-  Prm : Array[0..3] Of LongInt;
+  Prm : Array[0..4] Of LongInt;
+  TgtNtfs : Boolean;             { partition cible en NTFS (sinon HPFS) }
   BootLbaT, BootSizeT : Array[0..2] Of LongInt;
 
 { --- DOSCALLS.DLL et noyau --- }
@@ -845,7 +849,7 @@ Begin
     $01 : PartTypeName := 'FAT12';
     $04, $06, $0E : PartTypeName := 'FAT16';
     $05, $0F : PartTypeName := L('Etendue', 'Extended', 'Erweitert', 'Extendida', 'Estesa', 'E zgjeruar');
-    $07 : PartTypeName := 'HPFS (07h)';
+    $07 : PartTypeName := 'HPFS/NTFS (07h)';
     $0B, $0C : PartTypeName := 'FAT32';
     $0A : PartTypeName := 'Boot Manager';
     $82 : PartTypeName := 'Linux swap';
@@ -1078,6 +1082,12 @@ Begin
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 
+{ systeme de fichiers de la partition cible (textes) }
+Function FsTxt : String;
+Begin
+  If TgtNtfs Then FsTxt := 'NTFS' Else FsTxt := 'HPFS';
+End;
+
 Procedure ListFiles;
 Var H, N, Rc, Off, A, K : LongInt; S : String; Fb : Array[0..4095] Of Byte;
 Begin
@@ -1161,14 +1171,14 @@ Begin
         Hw := Check(30, 110, ID_FHPFS, L('HPFS - syst'#138'me de fichiers haute performance (recommand'#130')',
                     'HPFS - High Performance File System (recommended)', 'HPFS - High Performance File System (empfohlen)',
                     'HPFS - sistema de archivos de alto rendimiento', 'HPFS - file system ad alte prestazioni',
-                    'HPFS - sistem skedar'#137'sh me performanc'#137' t'#137' lart'#137), True,
+                    'HPFS - sistem skedar'#137'sh me performanc'#137' t'#137' lart'#137), Not TgtNtfs,
                     BS_AUTORADIOBUTTON Or WS_GROUP);
-        Hw := Check(30, 134, ID_FFAT, L('FAT (non disponible dans OS/2-0)', 'FAT (not available in OS/2-0)',
-                    'FAT (in OS/2-0 nicht verf'#129'gbar)', 'FAT (no disponible en OS/2-0)', 'FAT (non disponibile in OS/2-0)',
-                    'FAT (nuk ofrohet n'#137' OS/2-0)'), False, BS_AUTORADIOBUTTON);
-        Dummy := WinEnableWindow(Hw, 0);
-        Hw := Check(30, 170, ID_FKEEP, L('Ne pas formater : conserver les fichiers de la partition HPFS',
-                    'Do not format: keep the files of the HPFS partition', 'Nicht formatieren: Dateien behalten',
+        Hw := Check(30, 134, ID_FNTFS, L('NTFS - syst'#138'me de fichiers de Windows NT (NTFS.IFS)',
+                    'NTFS - Windows NT file system (NTFS.IFS)', 'NTFS - Dateisystem von Windows NT (NTFS.IFS)',
+                    'NTFS - sistema de archivos de Windows NT (NTFS.IFS)', 'NTFS - file system di Windows NT (NTFS.IFS)',
+                    'NTFS - sistemi i skedar'#137've i Windows NT (NTFS.IFS)'), TgtNtfs, BS_AUTORADIOBUTTON);
+        Hw := Check(30, 170, ID_FKEEP, L('Ne pas formater : conserver les fichiers de la partition (HPFS ou NTFS)',
+                    'Do not format: keep the files of the partition (HPFS or NTFS)', 'Nicht formatieren: Dateien behalten',
                     'No formatear: conservar los archivos', 'Non formattare: conservare i file',
                     'Mos e formato: ruaj skedar'#137't'), False, BS_AUTOCHECKBOX);
         If TgtDrive < 2 Then Dummy := WinEnableWindow(Hw, 0);
@@ -1465,12 +1475,12 @@ Begin
              'L''installazione di OS/2-0 '#138' completata.', 'Instalimi i OS/2-0 p'#137'rfundoi.'), CLR_DARKBLUE);
   H := WrapAt(Hps, 30, 80, (CW - 60) Div 8, IStr(CopiedFiles) + L(' fichiers copi'#130's (', ' files copied (',
        ' Dateien kopiert (', ' archivos copiados (', ' file copiati (', ' skedar'#137' u kopjuan (') + IStr(TotBytes Div 1024) +
-       ' Ko). ' + L('Le disque dur d'#130'marre maintenant OS/2-0 : la partition HPFS sera l''unit'#130' C:.',
-       'The hard disk now starts OS/2-0: the HPFS partition will be drive C:.',
-       'Die Festplatte startet jetzt OS/2-0: die HPFS-Partition wird Laufwerk C:.',
-       'El disco duro arranca ahora OS/2-0: la partici'#162'n HPFS ser'#160' la unidad C:.',
-       'Il disco fisso avvia ora OS/2-0: la partizione HPFS sar'#133' l''unit'#133' C:.',
-       'Disku nis tani OS/2-0: ndarja HPFS do t'#137' jet'#137' nj'#137'sia C:.'), CLR_BLACK);
+       ' Ko). ' + L('Le disque dur d'#130'marre maintenant OS/2-0 : la partition ' + FsTxt + ' sera l''unit'#130' C:.',
+       'The hard disk now starts OS/2-0: the ' + FsTxt + ' partition will be drive C:.',
+       'Die Festplatte startet jetzt OS/2-0: die ' + FsTxt + '-Partition wird Laufwerk C:.',
+       'El disco duro arranca ahora OS/2-0: la partici'#162'n ' + FsTxt + ' ser'#160' la unidad C:.',
+       'Il disco fisso avvia ora OS/2-0: la partizione ' + FsTxt + ' sar'#133' l''unit'#133' C:.',
+       'Disku nis tani OS/2-0: ndarja ' + FsTxt + ' do t'#137' jet'#137' nj'#137'sia C:.'), CLR_BLACK);
   H := WrapAt(Hps, 30, 170, (CW - 60) Div 8, L(
     'Retirez le CD-ROM du lecteur, puis s'#130'lectionnez Red'#130'marrer. La langue (' + LangName(Lang) + ') et les '
     + 'autres r'#130'glages pourront '#136'tre modifi'#130's dans la Configuration du syst'#138'me.',
@@ -1724,17 +1734,30 @@ End;
 
 { formatage (ou montage si les fichiers sont conserves) de la partition }
 Function DoFormat(Keep : Boolean; Lbl : String) : Boolean;
-Var R : LongInt;
+Var R : LongInt; Fs : Array[0..7] Of Byte;
 Begin
   DoFormat := False;
   If Keep And (TgtDrive >= 2) Then
   Begin
+    { fichiers conserves : le systeme de fichiers est celui de la
+      partition (signature "NTFS    " du secteur d'amorce) }
+    TgtNtfs := False;
+    If DiskRW(DiskCur, TgtStart, 1, LongInt(@CopyBuf), False) = 0 Then
+      TgtNtfs := (CopyBuf[3] = Ord('N')) And (CopyBuf[4] = Ord('T')) And (CopyBuf[5] = Ord('F')) And
+                 (CopyBuf[6] = Ord('S'));
     DoFormat := True;
     Exit;
   End;
   PutZ(LongInt(@TxtBuf), Copy(Lbl, 1, 11));
-  Prm[0] := TgtStart; Prm[1] := TgtCount; Prm[2] := LongInt(@TxtBuf); Prm[3] := -1;
-  R := KDisk(5, DiskCur, LongInt(@Prm));
+  Prm[0] := TgtStart; Prm[1] := TgtCount; Prm[2] := LongInt(@TxtBuf); Prm[3] := -1; Prm[4] := 0;
+  If TgtNtfs Then
+  Begin
+    { KrnDiskCtl 11 : formatage par le pilote dont le FS_NAME est NTFS }
+    Fs[0] := Ord('N'); Fs[1] := Ord('T'); Fs[2] := Ord('F'); Fs[3] := Ord('S'); Fs[4] := 0;
+    Prm[4] := LongInt(@Fs);
+    R := KDisk(11, DiskCur, LongInt(@Prm));
+  End
+  Else R := KDisk(5, DiskCur, LongInt(@Prm));
   If (R = 0) And (Prm[3] >= 3) Then
   Begin
     TgtDrive := Prm[3];
@@ -1840,9 +1863,18 @@ Begin
   WLine(H, 'REM CONFIG.SYS de OS/2-0 (installe sur le disque dur par INSTALL.EXE)');
   If OptDesk <> 0 Then WLine(H, 'PROTSHELL=C:\PMSHELL.EXE') Else WLine(H, 'PROTSHELL=C:\CMD.EXE');
   WLine(H, 'LIBPATH=.;C:\;');
-  S := 'IFS=C:\HPFS.IFS /CACHE:64 /AUTOCHECK:C';
+  { pilote de C: en premier (/AUTOCHECK:C), puis l'autre : HPFS.IFS et
+    NTFS.IFS lisent et ecrivent les partitions 07h de l'un et l'autre
+    systeme ; le disque virtuel est en HPFS }
+  If TgtNtfs Then
+  Begin
+    WLine(H, 'IFS=C:\NTFS.IFS /AUTOCHECK:C');
+    S := 'IFS=C:\HPFS.IFS /CACHE:64';
+  End
+  Else S := 'IFS=C:\HPFS.IFS /CACHE:64 /AUTOCHECK:C';
   If OptRam <> 0 Then S := S + ' /RAMDISK:4096';
   WLine(H, S);
+  If Not TgtNtfs Then WLine(H, 'IFS=C:\NTFS.IFS');
   WLine(H, 'SET COMSPEC=C:\CMD.EXE');
   WLine(H, 'SET PATH=C:\;');
   WLine(H, 'SET LANGUAGE=' + LangCode(Lang));
@@ -1887,7 +1919,7 @@ Begin
       0 : Nm := 'OS2LDR';
       1 : Nm := 'OS2KRNL';
     Else
-      Nm := 'HPFS.IFS';
+      If TgtNtfs Then Nm := 'NTFS.IFS' Else Nm := 'HPFS.IFS';
     End;
     BootSizeT[K] := -1;
     For J := 0 To NFiles - 1 Do
@@ -1918,7 +1950,7 @@ Begin
       0 : Nm := 'OS2LDR';
       1 : Nm := 'OS2KRNL';
     Else
-      Nm := 'HPFS.IFS';
+      If TgtNtfs Then Nm := 'NTFS.IFS' Else Nm := 'HPFS.IFS';
     End;
     PutZ(LongInt(@CopyBuf) + 16 + K * 32, Nm);
     WrL(LongInt(@CopyBuf) + 16 + K * 32 + 16, BootLbaT[K]);
@@ -1936,7 +1968,7 @@ Begin
       0 : Nm := 'OS2LDR';
       1 : Nm := 'OS2KRNL';
     Else
-      Nm := 'HPFS.IFS';
+      If TgtNtfs Then Nm := 'NTFS.IFS' Else Nm := 'HPFS.IFS';
     End;
     H := OpenRead('C:\' + Nm);
     If H = 0 Then
@@ -2117,10 +2149,10 @@ Begin
                      'OS/2-0 se instala en una partici'#162'n primaria HPFS. Los primeros 4 MB quedan libres (arranque).',
                      'OS/2-0 si installa su una partizione primaria HPFS. I primi 4 MB restano liberi (avvio).',
                      'OS/2-0 instalohet n'#137' nj'#137' ndarje kryesore HPFS. 4 MB e para mbeten t'#137' lira (nisja).');
-    PG_FORMAT : S := L('Le formatage HPFS est fait par le pilote HPFS.IFS. Choisissez Ne pas formater pour r'#130'installer '
-                       + 'OS/2-0 sur une partition HPFS en gardant ses fichiers.',
-                       'HPFS formatting is done by the HPFS.IFS driver. Select Do not format to reinstall OS/2-0 on an HPFS '
-                       + 'partition and keep its files.', 'HPFS.IFS formatiert die Partition.', 'HPFS.IFS formatea la partici'#162'n.',
+    PG_FORMAT : S := L('HPFS (choix par d'#130'faut) est format'#130' par HPFS.IFS, NTFS par NTFS.IFS ; OS/2-0 d'#130'marre '
+                       + 'de l''un comme de l''autre. Ne pas formater : r'#130'installer en gardant les fichiers.',
+                       'HPFS (the default) is formatted by HPFS.IFS, NTFS by NTFS.IFS; OS/2-0 starts from either. Do not '
+                       + 'format: reinstall and keep the files.', 'HPFS.IFS formatiert die Partition.', 'HPFS.IFS formatea la partici'#162'n.',
                        'HPFS.IFS formatta la partizione.', 'HPFS.IFS formaton ndarjen.');
   Else
     S := L('Utilisez la souris ou la touche Tab et Entr'#130'e pour choisir.', 'Use the mouse, or Tab and Enter.',
@@ -2182,6 +2214,8 @@ Begin
         Keep := False;
         For K := 0 To NCtl - 1 Do
           If (K = 2) And Checked(Ctl[K]) Then Keep := True;
+        { HPFS (par defaut) ou NTFS }
+        TgtNtfs := Checked(Ctl[1]);
         If Not Keep Then
           If Not AskYes(L('Formater la partition ? Toutes ses donn'#130'es seront perdues.',
                           'Format the partition? All its data will be lost.', 'Partition formatieren? Alle Daten gehen verloren.',
@@ -2346,8 +2380,14 @@ BEGIN
   Begin
     P := UpStr(ParamStr(I));
     If P = '/AUTO' Then AutoMode := 1;
+    If P = '/NTFS' Then TgtNtfs := True;
     If Copy(P, 1, 6) = '/LANG:' Then Lang := LangOfCode(Copy(P, 7, 5));
   End;
+  { SET INSTALL_FS=NTFS dans CONFIG.SYS (le PROTSHELL ne recoit pas de
+    parametres) : NTFS par defaut }
+  I := 0;
+  If DosScanEnv(Z('INSTALL_FS'), LongInt(@I)) = 0 Then
+    If UpStr(GetZ(I)) = 'NTFS' Then TgtNtfs := True;
   InitConfig;
   ScanDisks;
   Hab := WinInitialize(0);
