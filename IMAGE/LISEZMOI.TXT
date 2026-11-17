@@ -13,6 +13,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, TLS32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, SUDOKU.EXE,
+              OTHELLO.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
@@ -74,6 +75,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC ECHECS.PAS                          -> ECHECS.EXE (Echecs)
   OS2PC MAHJONGG.PAS                        -> MAHJONGG.EXE (Mahjongg Solitaire)
   OS2PC SUDOKU.PAS                          -> SUDOKU.EXE (Sudoku)
+  OS2PC OTHELLO.PAS                         -> OTHELLO.EXE (Othello)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -797,7 +799,12 @@ traditionnels, composant Jeux de l'installation) :
   pave ou taper 1 a 9 ; bouton 2, Suppr ou Espace : effacer ; chiffres
   en conflit en rouge ; I indice, V verifier, Ctrl+Z annuler, Solution,
   chronometre. Porte du prototype SODOKU.PAS de 7iles.
-Parametre /SEED:n (Klondike, Mahjongg, Sudoku) : donne reproductible.
+  Othello (OTHELLO.EXE) : encadrer les pions adverses pour les
+  retourner ; contre l'ordinateur (Facile, Moyen, Difficile : alpha-beta)
+  ou a deux joueurs ; cliquer une case ou fleches et Entree ; H indices,
+  Ctrl+Z annuler, F2 nouvelle partie ; passe automatique. Porte du
+  prototype OTHELLO.PAS de 7iles. /AUTO : l'ordinateur joue seul.
+Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------

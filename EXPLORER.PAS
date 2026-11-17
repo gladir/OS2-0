@@ -1713,6 +1713,12 @@ Begin
     If (X = 'TXT') Or (X = 'PAS') Or (X = 'INI') Or (X = 'SYS') Or (X = 'LOG') Or (X = 'CFG') Or (X = 'ME') Or
        (X = 'INC') Or (X = 'ASM') Or (X = 'DOC') Or (X = '') Then A := AppPath('PASDEV.EXE')
     Else If X = 'WAV' Then A := AppPath('DIGAUDIO.EXE')
+    Else If (X = 'SON') Or (X = 'MID') Then
+    Begin
+      { Notator : ses boites Charger et Sauver montrent ce dossier }
+      A := AppPath('NOTATOR.EXE');
+      If A <> '' Then SetDir(CurPath);
+    End
     Else If (X = 'HTM') Or (X = 'HTML') Then A := AppPath('BROWSER.EXE');
     If A <> '' Then RunPm(A, P)
     Else

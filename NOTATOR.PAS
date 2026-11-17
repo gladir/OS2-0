@@ -2378,33 +2378,39 @@ Begin
 End;
 
 { remplit les tampons libres ; appele par le moteur a chaque passage }
+Var
+ LastPump : LongInt;
+
 Procedure SynthPump;
-Var Pos,PlayF,Target,K,V,Keep: LongInt;
+Var Pos,PlayF,Target,K,V,Keep,Now1: LongInt;
 Begin
  If Not WaveOpened Then Exit;
+ { la position du flux au plus toutes les 8 ms }
+ Now1:=KTicks;
+ If (Now1-LastPump>=0) And (Now1-LastPump<8) Then Exit;
+ LastPump:=Now1;
  Pos:=MdmPosition;
  If Pos<0 Then Begin
-  { flux arrete (fin du tampon ou erreur) : le relancer }
+  { flux arrete (fin du tampon apres une longue pause, ou erreur) }
   FillChar(StrBuf^,StrFrames*4,0);
   If Not StreamBegin(0) Then Begin WaveOpened:=False;Exit;End;
   Pos:=0;
  End;
  PlayF:=Pos Div 4;
+ If PlayF>StrFrames Then PlayF:=StrFrames;
+ If RendF>StrFrames Then RendF:=StrFrames;
+ If RendF<PlayF Then RendF:=PlayF;
+ If PlayF+LeadF+2*BlkFrames>StrFrames Then Begin
+  { bout du tampon : ramener ce qui reste a jouer au debut et relancer }
+  Keep:=RendF-PlayF;
+  If Keep>0 Then Move(StrBuf^[PlayF],StrBuf^[0],Keep*4);
+  FillChar(StrBuf^[Keep],(StrFrames-Keep)*4,0);
+  If Not StreamBegin(Keep) Then Begin WaveOpened:=False;Exit;End;
+  PlayF:=0;
+ End;
  If RendF<PlayF+LeadF Then RendF:=PlayF+LeadF;
  Target:=PlayF+LeadF+BlkFrames;
- While RendF<Target Do Begin
-  If RendF+BlkFrames>StrFrames Then Begin
-   { bout du tampon : ramener ce qui reste a jouer au debut }
-   PlayF:=MdmPosition Div 4;
-   If PlayF<0 Then PlayF:=0;
-   If PlayF>RendF Then PlayF:=RendF;
-   Keep:=RendF-PlayF;
-   Move(StrBuf^[PlayF],StrBuf^[0],Keep*4);
-   FillChar(StrBuf^[Keep],(StrFrames-Keep)*4,0);
-   If Not StreamBegin(Keep) Then Begin WaveOpened:=False;Exit;End;
-   Target:=LeadF+BlkFrames;
-   If RendF>=Target Then Exit;
-  End;
+ While (RendF<Target) And (RendF+BlkFrames<=StrFrames) Do Begin
   SynthRender(@SynBlk,SynthBlock Div 2);
   For K:=0 To SynthBlock Div 2-1 Do Begin
    V:=(LongInt(SynBlk[K]) And $FFFF) Or (LongInt(SynBlk[K]) Shl 16);
@@ -7487,7 +7493,7 @@ BEGIN
  If OutDev=1 Then OutDev:=0;
  InitBmi;
  EvHead:=0;EvTail:=0;HFrame:=0;Client:=0;LastTitle:='';MenuLang:=-1;
- StrBuf:=Nil;WaveOpened:=False;
+ StrBuf:=Nil;WaveOpened:=False;LastPump:=0;
  OpenWindow;
  If OutDev=0 Then
   If Not SynthStart Then OutDev:=2;

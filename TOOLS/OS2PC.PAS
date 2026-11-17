@@ -39053,6 +39053,14 @@ Begin { BcAssemble }
     Reg1 := BcParseReg8(Op1); Reg2 := BcParseReg8(Op2);
     If (Reg1 >= 0) And (Reg2 >= 0) Then
     Begin BcEmitB($86); BcEmitB($C0 + Reg1 * 8 + Reg2); Exit; End;
+    { XCHG reg32,[mem] et XCHG [mem],reg32 : 87 /r (echange atomique, sert
+      de verrou entre fils d'execution ; autrefois omis sans message) }
+    Reg1 := BcParseReg32(Op1); Tmp := StripSizePrefix(Op2);
+    If (Reg1 >= 0) And StartsWithBracket(Tmp) Then
+    Begin BcEmitB($87); BcEmitMemRM(Tmp, Reg1, DataLbl, DataAdd); Exit; End;
+    Reg1 := BcParseReg32(Op2); Tmp := StripSizePrefix(Op1);
+    If (Reg1 >= 0) And StartsWithBracket(Tmp) Then
+    Begin BcEmitB($87); BcEmitMemRM(Tmp, Reg1, DataLbl, DataAdd); Exit; End;
     Exit;
   End;
 
