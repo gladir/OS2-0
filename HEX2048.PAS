@@ -730,17 +730,17 @@ End;
 { ==================================================================== }
 
 { direction du secteur (six secteurs de 60 degres) ou se trouve (Dx, Dy) }
-Function Sector(Dx, Dy : LongInt) : LongInt;
+Function DirSector(Dx, Dy : LongInt) : LongInt;
 Begin
   If Dy < 0 Then
   Begin
-    If Abs(Dy) * 1000 > Abs(Dx) * 1732 Then Sector := 1
-    Else If Dx > 0 Then Sector := 2 Else Sector := 0;
+    If Abs(Dy) * 1000 > Abs(Dx) * 1732 Then DirSector := 1
+    Else If Dx > 0 Then DirSector := 2 Else DirSector := 0;
   End
   Else
   Begin
-    If Abs(Dy) * 1000 > Abs(Dx) * 1732 Then Sector := 4
-    Else If Dx > 0 Then Sector := 5 Else Sector := 3;
+    If Abs(Dy) * 1000 > Abs(Dx) * 1732 Then DirSector := 4
+    Else If Dx > 0 Then DirSector := 5 Else DirSector := 3;
   End;
 End;
 
@@ -750,7 +750,7 @@ Begin
   X := Mx; Y := CH - 1 - My;
   If (X >= GXLeft) And (X < GXLeft + 320) And (Y >= GYTop) And (Y < GYTop + 342) Then
   Begin
-    If Abs(X - BX) + Abs(Y - BY) > 12 Then Play(Sector(X - BX, Y - BY));
+    If Abs(X - BX) + Abs(Y - BY) > 12 Then Play(DirSector(X - BX, Y - BY));
     Exit;
   End;
   For D := 0 To 5 Do

@@ -7348,7 +7348,7 @@ Begin
  Tool:=2;HeadSty:=0;ShowHyper:=True;HyperKind:=1;
  FltOn:=False;FltTop:=1;Catch:=False;
  For I:=1 To NFLT Do Flt[I]:=True;
- Oct:=4;ArrTop:=1;View:=V_ARR;
+ Oct:=4;ArrTop:=1;View:=V_SCORE;
  UndoBuf:=Nil;ClipBuf:=Nil;MBuf:=Nil;Msg:=Nil;
  Playing:=False;Recording:=False;CountInOn:=False;
  SoloAny:=False;SpkFreq:=0;ClickUntil:=0;InSt:=0;InN:=0;
@@ -7426,7 +7426,7 @@ Begin
  End Else Begin
   Name:=AddExt(Name,'SON');
   If FileExists(Name) Then
-   If LoadSong(Name) Then Begin ResetView;View:=V_ARR;Loaded:=True;End;
+   If LoadSong(Name) Then Begin ResetView;View:=V_SCORE;Loaded:=True;End;
  End;
  If PlayNow And Loaded Then CmdStart;
 End;
