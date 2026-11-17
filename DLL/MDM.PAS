@@ -537,14 +537,42 @@ Begin
   NotHwnd := 0;
 End;
 
+{ le flux est alimente par deux fils : le fil du flux (AudioThread) et
+  celui du programme qui demande la position (Service). PollPlay et
+  PollRecord ne doivent jamais s'executer en meme temps (WritePos, Filled,
+  SrcIdx : ecriture hors de l'anneau de la carte) : verrou par XCHG }
+Var
+  PollLock : LongInt;
+
+Function PollTry : Boolean;
+Var P, R : LongInt;
+Begin
+  P := LongInt(@PollLock);
+  asm
+    push edx
+    mov edx,P
+    mov eax,1
+    xchg eax,[edx]
+    mov R,eax
+    pop edx
+  end;
+  PollTry := R = 0;
+End;
+
+Procedure PollStep;
+Begin
+  If PollTry Then
+  Begin
+    If State = 1 Then PollPlay Else If State = 2 Then PollRecord;
+    PollLock := 0;
+  End;
+End;
+
 Function AudioThread(Param : LongInt) : LongInt;
 Begin
   While (StopReq = 0) And (Done = 0) Do
   Begin
-    If Paused = 0 Then
-    Begin
-      If State = 1 Then PollPlay Else If State = 2 Then PollRecord;
-    End;
+    If Paused = 0 Then PollStep;
     If Done = 0 Then Dummy := DosSleep(10);
   End;
   Dummy := CallDrv(5);
@@ -713,10 +741,7 @@ End;
   du processeur }
 Procedure Service;
 Begin
-  If (ThreadOn <> 0) And (Paused = 0) And (Done = 0) And (StopReq = 0) Then
-  Begin
-    If State = 1 Then PollPlay Else If State = 2 Then PollRecord;
-  End;
+  If (ThreadOn <> 0) And (Paused = 0) And (Done = 0) And (StopReq = 0) Then PollStep;
 End;
 
 { position (octets du son) : lecture, enregistrement }
@@ -1405,7 +1430,7 @@ Var
 
 BEGIN
   DrvTried := 0; DrvFn := 0; DrvH := 0; DrvCaps := 0; DrvName := ''; CardName := '';
-  State := 0; Paused := 0; StopReq := 0; ThreadOn := 0; Done := 0;
+  State := 0; Paused := 0; StopReq := 0; ThreadOn := 0; Done := 0; PollLock := 0;
   Volume := 80; NotHwnd := 0; PostFn := 0;
   For InitK := 0 To MAXDEV - 1 Do
   Begin

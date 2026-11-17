@@ -12,7 +12,7 @@
 #  3. compile CMD.PAS et les commandes de la racine du depot (OS2PC -COS2) ;
 #     dont les jeux du dossier Jeux du bureau : KLONDIKE.PAS (Solitaire -
 #     Klondike), ECHECS.PAS (Echecs), MAHJONGG.PAS (Mahjongg Solitaire) et
-#     SUDOKU.PAS (Sudoku), et
+#     SUDOKU.PAS (Sudoku), OTHELLO.PAS (Othello), et
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), NOTATOR.PAS
 #     (Notator for OS2-Zero, sequenceur et editeur de partition porte de
 #     NOTATOR.PAS du depot OFFICE-0, dossier Multimedia ; ses exemples de

@@ -150,7 +150,7 @@ Const
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
   OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
   OB_DEVKIT = 30; IC_PASDEV = 29;
-  OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33;
+  OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -835,6 +835,11 @@ Begin
     { son numerique : ouvert par Audio numerique }
     Icon := IC_WAVE; Obj := OB_SOUND;
   End
+  Else If ((E = 'SON') Or (E = 'MID')) And FileExists('C:\NOTATOR.EXE') Then
+  Begin
+    { morceau de Notator ou fichier MIDI : ouvert par Notator for OS2-Zero }
+    Icon := IC_NOTATOR; Obj := OB_SONG;
+  End
   Else
   Begin
     Icon := IC_FILE; Obj := OB_DATA;
@@ -1132,6 +1137,7 @@ Begin
         If FileExists('C:\KLONDIKE.EXE') Then
           Dummy := NewItem(V, IC_CARDS, OB_GAME, 'Solitaire - Klondike', 'C:\KLONDIKE.EXE');
         If FileExists('C:\SUDOKU.EXE') Then Dummy := NewItem(V, IC_SUDOKU, OB_GAME, 'Sudoku', 'C:\SUDOKU.EXE');
+        If FileExists('C:\OTHELLO.EXE') Then Dummy := NewItem(V, IC_OTHELLO, OB_GAME, 'Othello', 'C:\OTHELLO.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1209,6 +1215,18 @@ Begin
   Dummy := GpiMove(Hps, LongInt(@P));
   P[0] := X2; P[1] := Y2;
   Dummy := GpiLine(Hps, LongInt(@P));
+End;
+
+{ disque plein (pions d'Othello) : une ligne par rangee }
+Procedure GDisc(Hps, X, Y, R, C : LongInt);
+Var Dy, W : LongInt;
+Begin
+  For Dy := -R To R Do
+  Begin
+    W := 0;
+    While (W + 1) * (W + 1) + Dy * Dy <= R * R + R Do Inc(W);
+    GLn(Hps, X - W, Y + Dy, X + W, Y + Dy, C);
+  End;
 End;
 
 Procedure GText(Hps, X, Y : LongInt; S : String; Fg, Bg : LongInt);
@@ -1368,6 +1386,19 @@ Begin
         FBox(Hps, X + 12, Y + 8, X + 20, Y + 19, CLR_BLACK, CLR_BLACK);
         FBox(Hps, X + 8, Y + 17, X + 19, Y + 24, CLR_BLACK, CLR_BLACK);
         FBox(Hps, X + 15, Y + 24, X + 19, Y + 27, CLR_BLACK, CLR_BLACK);
+      End;
+    IC_OTHELLO :
+      Begin
+        { plateau vert, un pion noir et un pion blanc }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_DARKGREEN, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 2, X + 15, Y + 29, CLR_BLACK);
+        GLn(Hps, X + 2, Y + 15, X + 29, Y + 15, CLR_BLACK);
+        GDisc(Hps, X + 9, Y + 22, 5, CLR_BLACK);
+        GDisc(Hps, X + 22, Y + 9, 5, CLR_BLACK);
+        GDisc(Hps, X + 22, Y + 9, 4, CLR_WHITE);
+        GDisc(Hps, X + 9, Y + 9, 5, CLR_BLACK);
+        GDisc(Hps, X + 22, Y + 22, 5, CLR_BLACK);
+        GDisc(Hps, X + 22, Y + 22, 4, CLR_WHITE);
       End;
     IC_NOTATOR :
       Begin
@@ -2500,6 +2531,7 @@ Begin
     OB_MMFOLDER : OpenFolder(VK_MM, '', 'Multimedia');
     OB_SOUND :
       If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', It(K)^.Path) Else OpenViewer(It(K)^.Path);
+    OB_SONG : RunPm('C:\NOTATOR.EXE', It(K)^.Path);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
