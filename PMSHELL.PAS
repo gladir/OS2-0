@@ -150,7 +150,7 @@ Const
   OB_MMFOLDER = 26; OB_SOUND = 27; IC_AUDIO = 24; IC_WAVE = 25; IC_HARDWARE = 26;
   OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
   OB_DEVKIT = 30; IC_PASDEV = 29;
-  OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32;
+  OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1118,6 +1118,10 @@ Begin
           Dummy := NewItem(V, IC_AUDIO, OB_GAME, 'Audio numerique', 'C:\DIGAUDIO.EXE');
         If FileExists('C:\DEMARRE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'DEMARRE.WAV', 'C:\DEMARRE.WAV');
         If FileExists('C:\CLOCHE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'CLOCHE.WAV', 'C:\CLOCHE.WAV');
+        { sequenceur et editeur de partition (NOTATOR.PAS d'OFFICE-0) ; ses
+          exemples (.SON, .MID) sont dans le repertoire racine }
+        If FileExists('C:\NOTATOR.EXE') Then
+          Dummy := NewItem(V, IC_NOTATOR, OB_GAME, 'Notator for OS2-Zero', 'C:\NOTATOR.EXE');
       End;
     VK_GAMES :
       Begin
@@ -1364,6 +1368,21 @@ Begin
         FBox(Hps, X + 12, Y + 8, X + 20, Y + 19, CLR_BLACK, CLR_BLACK);
         FBox(Hps, X + 8, Y + 17, X + 19, Y + 24, CLR_BLACK, CLR_BLACK);
         FBox(Hps, X + 15, Y + 24, X + 19, Y + 27, CLR_BLACK, CLR_BLACK);
+      End;
+    IC_NOTATOR :
+      Begin
+        { portee de cinq lignes et deux croches liees }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 3, Y + 8, X + 28, Y + 8, CLR_DARKGRAY);
+        GLn(Hps, X + 3, Y + 12, X + 28, Y + 12, CLR_DARKGRAY);
+        GLn(Hps, X + 3, Y + 16, X + 28, Y + 16, CLR_DARKGRAY);
+        GLn(Hps, X + 3, Y + 20, X + 28, Y + 20, CLR_DARKGRAY);
+        GLn(Hps, X + 3, Y + 24, X + 28, Y + 24, CLR_DARKGRAY);
+        GBox(Hps, X + 6, Y + 9, X + 11, Y + 13, CLR_BLACK, DRO_FILL);
+        GBox(Hps, X + 18, Y + 13, X + 23, Y + 17, CLR_BLACK, DRO_FILL);
+        GLn(Hps, X + 11, Y + 11, X + 11, Y + 27, CLR_BLACK);
+        GLn(Hps, X + 23, Y + 15, X + 23, Y + 27, CLR_BLACK);
+        GBox(Hps, X + 11, Y + 25, X + 23, Y + 27, CLR_DARKBLUE, DRO_FILL);
       End;
     IC_SUDOKU :
       Begin

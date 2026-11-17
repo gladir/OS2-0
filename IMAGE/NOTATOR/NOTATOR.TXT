@@ -1,0 +1,33 @@
+Exemples de musique pour Notator for OS2-Zero (clone de Notator SL)
+==================================================================
+
+Repris du depot OFFICE-0 (SAMPLES/NOTATOR). Sur OS/2-0 ils sont dans le
+repertoire racine (C:\), a cote de NOTATOR.EXE (dossier Multimedia du
+bureau, objet "Notator for OS2-Zero").
+
+Chaque morceau existe en deux formats :
+  .SON  morceau natif de NOTATOR      (Fichier > Charger morceau, ou NOTATOR FICHIER.SON)
+  .MID  fichier MIDI standard (format 1) (Fichier > Charger fichier MIDI)
+
+ODE_JOIE         Ode a la joie (Beethoven, domaine public) : melodie avec paroles,
+                 cordes, basse et batterie, 16 mesures, 108 bpm.
+FREREJAC         Frere Jacques en canon a 3 voix (traditionnel), 480 PPQ
+                 (FRERE_JACQUES dans OFFICE-0 : nom 8.3 sur OS/2-0).
+TWINKLE          Ah ! vous dirai-je, maman (theme de Mozart, domaine public)
+                 avec basse d'Alberti a la main gauche.
+CANON_RE         Grille harmonique du Canon en Re (Pachelbel) : cordes, orgue,
+                 violoncelle ; armure de deux dieses, 60 bpm.
+BLUES_C          Blues en Do sur 12 mesures, jeu "humain" (swing et decalages
+                 volontaires) : essayez Quantifier > Valeur de quantification
+                 puis Quantifier > Quantifier, ou le groove adaptatif.
+GROOVES          Grooves de batterie (rock, funk, shuffle, breaks) : ouvrez la
+                 vue Matrice (F3).
+
+Touches utiles : F1 arrangement, F2 partition, F3 matrice, F4 liste, Espace
+lecture/arret, * enregistrement, F5 a F10 valeur de note, F12 (ou Alt + la
+lettre soulignee) barre de menus d'OS/2. Les compositions "originales"
+(BLUES_C, GROOVES) sont libres de droits.
+
+Le son est joue par la carte son (MDM.DLL : Sound Blaster 16, AC'97, ES1370).
+Depuis le CD-ROM (lecture seule), enregistrez vos morceaux sur D: (disque
+virtuel) ou sur le disque dur.

@@ -18,7 +18,8 @@ REM (OS2KRNL.PAS inclut LOGO.INC : logo de l'ecran de demarrage, TOOLS\MKLOGO.PY
 IF ERRORLEVEL 1 GOTO ERREUR
 ECHO == Commandes (OS2PC -COS2)
 REM (dont les jeux KLONDIKE.PAS, ECHECS.PAS, MAHJONGG.PAS et SUDOKU.PAS du dossier Jeux,
-REM DIGAUDIO.PAS, Audio numerique, du dossier Multimedia, TASKMGR.PAS,
+REM DIGAUDIO.PAS, Audio numerique, et NOTATOR.PAS, Notator for OS2-Zero (porte
+REM d'OFFICE-0, exemples .SON et .MID de IMAGE\NOTATOR), du dossier Multimedia, TASKMGR.PAS,
 REM Gestionnaire des taches, du dossier Systeme OS/2, BROWSER.PAS,
 REM Navigateur Web, du bureau et du dossier Systeme OS/2, PASDEV.PAS,
 REM Pascal Developer, du dossier Developer Kit, CALC.PAS, Calculatrice, et
@@ -120,6 +121,9 @@ FOR %%B IN (MDM SBAUDIO ICHAUDIO ESAUDIO) DO ..\BUILD\OS2PC -Q ..\DLL\%%B.PAS ..
 ECHO == Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)
 ..\BUILD\OS2PC -Q -CD ..\DLL\TESTVDM.PAS ..\BUILD\CD\TESTVDM.EXE
 COPY ..\IMAGE\SONS\*.WAV ..\BUILD\CD > NUL
+COPY ..\IMAGE\NOTATOR\*.SON ..\BUILD\CD > NUL
+COPY ..\IMAGE\NOTATOR\*.MID ..\BUILD\CD > NUL
+COPY ..\IMAGE\NOTATOR\NOTATOR.TXT ..\BUILD\CD > NUL
 COPY ..\IMAGE\SYSTEM\CONFIG.SYS ..\BUILD\CD\CONFIG.SYS > NUL
 ECHO == CD-ROM amorcable
 ..\BUILD\MAKEISO ..\IMAGE\OS2CD.ISO /BOOT:..\BUILD\CD\OS2BOOT /LABEL:OS2_0 ..\BUILD\CD\*.*

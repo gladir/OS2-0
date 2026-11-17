@@ -13,7 +13,10 @@
 #     dont les jeux du dossier Jeux du bureau : KLONDIKE.PAS (Solitaire -
 #     Klondike), ECHECS.PAS (Echecs), MAHJONGG.PAS (Mahjongg Solitaire) et
 #     SUDOKU.PAS (Sudoku), et
-#     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), TASKMGR.PAS
+#     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), NOTATOR.PAS
+#     (Notator for OS2-Zero, sequenceur et editeur de partition porte de
+#     NOTATOR.PAS du depot OFFICE-0, dossier Multimedia ; ses exemples de
+#     IMAGE/NOTATOR, .SON et .MID, sont copies sur le CD-ROM), TASKMGR.PAS
 #     (Gestionnaire des taches, dossier Systeme OS/2) et BROWSER.PAS
 #     (Navigateur Web : HTML, CSS, JavaScript, codes QR, outils F12 ;
 #     bureau et dossier Systeme OS/2), PASDEV.PAS (Pascal Developer,
@@ -171,6 +174,7 @@ for B in MDM SBAUDIO ICHAUDIO ESAUDIO; do "$W/os2pc" -Q "$ROOT/DLL/$B.PAS" "$W/c
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"
 "$W/os2pc" -Q -CD "$ROOT/DLL/TESTVDM.PAS" "$W/cd/TESTVDM.EXE"
 cp "$ROOT"/IMAGE/SONS/*.WAV "$W/cd/"
+cp "$ROOT"/IMAGE/NOTATOR/*.SON "$ROOT"/IMAGE/NOTATOR/*.MID "$ROOT"/IMAGE/NOTATOR/NOTATOR.TXT "$W/cd/"
 cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 
 echo "== CD-ROM amorcable"
