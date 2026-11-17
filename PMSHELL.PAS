@@ -132,7 +132,7 @@ Const
   VK_HOME = $14; VK_LEFT = $15; VK_UP = $16; VK_RIGHT = $17; VK_DOWN = $18; VK_DELETE = $1B;
   VK_ENTER = $1E; VK_F1 = $20; VK_F5 = $24; VK_F10 = $29;
   { couleurs }
-  CLR_WHITE = -2; CLR_BLACK = -1; CLR_BLUE = 1; CLR_RED = 2; CLR_GREEN = 4; CLR_CYAN = 5;
+  CLR_WHITE = -2; CLR_BLACK = -1; CLR_BLUE = 1; CLR_RED = 2; CLR_PINK = 3; CLR_GREEN = 4; CLR_CYAN = 5;
   CLR_YELLOW = 6; CLR_DARKGRAY = 8; CLR_DARKBLUE = 9; CLR_DARKRED = 10; CLR_DARKGREEN = 12;
   CLR_DARKCYAN = 13; CLR_BROWN = 14; CLR_PALEGRAY = 15;
   DRO_FILL = 1; DRO_OUTLINE = 2;
@@ -151,6 +151,7 @@ Const
   OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
   OB_DEVKIT = 30; IC_PASDEV = 29;
   OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
+  IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1138,6 +1139,9 @@ Begin
           Dummy := NewItem(V, IC_CARDS, OB_GAME, 'Solitaire - Klondike', 'C:\KLONDIKE.EXE');
         If FileExists('C:\SUDOKU.EXE') Then Dummy := NewItem(V, IC_SUDOKU, OB_GAME, 'Sudoku', 'C:\SUDOKU.EXE');
         If FileExists('C:\OTHELLO.EXE') Then Dummy := NewItem(V, IC_OTHELLO, OB_GAME, 'Othello', 'C:\OTHELLO.EXE');
+        If FileExists('C:\TILEMAN.EXE') Then Dummy := NewItem(V, IC_TILEMAN, OB_GAME, 'TileMan', 'C:\TILEMAN.EXE');
+        If FileExists('C:\HEX2048.EXE') Then Dummy := NewItem(V, IC_HEX2048, OB_GAME, 'Hex 2048', 'C:\HEX2048.EXE');
+        If FileExists('C:\BACKGAM.EXE') Then Dummy := NewItem(V, IC_BACKGAM, OB_GAME, 'Backgammon', 'C:\BACKGAM.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1226,6 +1230,28 @@ Begin
     W := 0;
     While (W + 1) * (W + 1) + Dy * Dy <= R * R + R Do Inc(W);
     GLn(Hps, X - W, Y + Dy, X + W, Y + Dy, C);
+  End;
+End;
+
+{ hexagone (sommets a gauche et a droite) de rayon R, demi-hauteur H }
+Procedure GHex(Hps, X, Y, R, H, C : LongInt);
+Var Dy, W : LongInt;
+Begin
+  For Dy := -H To H Do
+  Begin
+    W := R - Abs(Dy) * R Div (2 * H);
+    GLn(Hps, X - W, Y + Dy, X + W, Y + Dy, C);
+  End;
+End;
+
+{ fleche (case de backgammon) de base Yb, pointe vers le haut (Dir 1) ou le bas }
+Procedure GPoint(Hps, X, Yb, Dir, C : LongInt);
+Var I, W : LongInt;
+Begin
+  For I := 0 To 10 Do
+  Begin
+    W := 3 * (11 - I) Div 11;
+    GLn(Hps, X - W, Yb + I * Dir, X + W, Yb + I * Dir, C);
   End;
 End;
 
@@ -1399,6 +1425,55 @@ Begin
         GDisc(Hps, X + 9, Y + 9, 5, CLR_BLACK);
         GDisc(Hps, X + 22, Y + 22, 5, CLR_BLACK);
         GDisc(Hps, X + 22, Y + 22, 4, CLR_WHITE);
+      End;
+    IC_TILEMAN :
+      Begin
+        { territoire bleu, trace cyan, joueur jaune et ennemi rouge }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_DARKGRAY, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 3, X + 12, Y + 28, CLR_BLUE, DRO_FILL);
+        GBox(Hps, X + 3, Y + 3, X + 28, Y + 10, CLR_BLUE, DRO_FILL);
+        GBox(Hps, X + 13, Y + 18, X + 24, Y + 20, CLR_CYAN, DRO_FILL);
+        GBox(Hps, X + 22, Y + 11, X + 24, Y + 20, CLR_CYAN, DRO_FILL);
+        GLn(Hps, X + 7, Y + 3, X + 7, Y + 28, CLR_DARKBLUE);
+        GLn(Hps, X + 3, Y + 6, X + 28, Y + 6, CLR_DARKBLUE);
+        GDisc(Hps, X + 23, Y + 13, 3, CLR_BLACK);
+        GDisc(Hps, X + 23, Y + 13, 2, CLR_YELLOW);
+        GDisc(Hps, X + 19, Y + 25, 3, CLR_BLACK);
+        GDisc(Hps, X + 19, Y + 25, 2, CLR_RED);
+      End;
+    IC_HEX2048 :
+      Begin
+        { trois tuiles hexagonales }
+        GHex(Hps, X + 9, Y + 16, 9, 8, CLR_BLACK);
+        GHex(Hps, X + 9, Y + 16, 7, 6, CLR_YELLOW);
+        GHex(Hps, X + 22, Y + 24, 9, 8, CLR_BLACK);
+        GHex(Hps, X + 22, Y + 24, 7, 6, CLR_CYAN);
+        GHex(Hps, X + 22, Y + 8, 9, 8, CLR_BLACK);
+        GHex(Hps, X + 22, Y + 8, 7, 6, CLR_PINK);
+        GLn(Hps, X + 8, Y + 19, X + 10, Y + 19, CLR_BLACK);
+        GLn(Hps, X + 10, Y + 19, X + 10, Y + 16, CLR_BLACK);
+        GLn(Hps, X + 8, Y + 16, X + 10, Y + 16, CLR_BLACK);
+        GLn(Hps, X + 8, Y + 16, X + 8, Y + 13, CLR_BLACK);
+        GLn(Hps, X + 8, Y + 13, X + 10, Y + 13, CLR_BLACK);
+      End;
+    IC_BACKGAM :
+      Begin
+        { plateau en bois, fleches, un pion blanc et un noir }
+        FBox(Hps, X + 1, Y + 2, X + 30, Y + 29, CLR_BROWN, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 4, X + 28, Y + 27, CLR_DARKGREEN, DRO_FILL);
+        GBox(Hps, X + 15, Y + 4, X + 16, Y + 27, CLR_BROWN, DRO_FILL);
+        GPoint(Hps, X + 6, Y + 4, 1, CLR_DARKRED);
+        GPoint(Hps, X + 12, Y + 4, 1, CLR_PALEGRAY);
+        GPoint(Hps, X + 19, Y + 4, 1, CLR_DARKRED);
+        GPoint(Hps, X + 25, Y + 4, 1, CLR_PALEGRAY);
+        GPoint(Hps, X + 6, Y + 27, -1, CLR_PALEGRAY);
+        GPoint(Hps, X + 12, Y + 27, -1, CLR_DARKRED);
+        GPoint(Hps, X + 19, Y + 27, -1, CLR_PALEGRAY);
+        GPoint(Hps, X + 25, Y + 27, -1, CLR_DARKRED);
+        GDisc(Hps, X + 6, Y + 8, 3, CLR_BLACK);
+        GDisc(Hps, X + 6, Y + 8, 2, CLR_WHITE);
+        GDisc(Hps, X + 25, Y + 23, 3, CLR_BLACK);
+        GDisc(Hps, X + 25, Y + 23, 2, CLR_DARKGRAY);
       End;
     IC_NOTATOR :
       Begin
