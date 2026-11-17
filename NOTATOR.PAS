@@ -596,10 +596,17 @@ Begin
  End;
 End;
 
+{ pendant un long dessin (partition), le synthetiseur continue d'etre
+  alimente : PumpHook est appele tous les 512 points ou segments dessines }
+Var PumpCnt : LongInt;
+Procedure PumpHook; Forward;
+
 { point (X, Y) de couleur C (mode d'ecriture : copie ou ou exclusif) }
 Procedure Plot(X, Y, C : LongInt);
 Var A : LongInt;
 Begin
+ Inc(PumpCnt);
+ If (PumpCnt And 511) = 0 Then PumpHook;
  If (X < 0) Or (Y < 0) Or (X >= ScrW) Or (Y >= ScrH) Then Exit;
  A := (ScrH - 1 - Y) * ScrW + X;
  If GWrite = XORPut Then Fb[A] := (Fb[A] Xor C) And 15 Else Fb[A] := C And 15;
@@ -608,6 +615,8 @@ End;
 Procedure HSpan(X1, X2, Y, C : LongInt);
 Var A, X : LongInt;
 Begin
+ Inc(PumpCnt);
+ If (PumpCnt And 511) = 0 Then PumpHook;
  If (Y < 0) Or (Y >= ScrH) Then Exit;
  If X1 < 0 Then X1 := 0;
  If X2 > ScrW - 1 Then X2 := ScrW - 1;
@@ -2146,7 +2155,8 @@ End;
   MDM.DLL (MMPM/2 d'OS/2-0) joue un tampon en memoire et le lit au fur et a
   mesure : le flux est un tampon de 20 s (44100 Hz, 16 bits, stereo) que
   SynthPump remplit juste devant la position de lecture de la carte (avance
-  = anneau du pilote + 50 ms). Au bout du tampon, ce qui reste a jouer est
+  = anneau du pilote + 200 ms ; aussi pendant les longs dessins, par
+  PumpHook). Au bout du tampon, ce qui reste a jouer est
   ramene au debut et le flux est relance. }
 {$Q-}{$R-}
 Const
@@ -2222,7 +2232,7 @@ Begin
  Fb1:=(B Div 8)*C;
  If (R<=0) Or (Fb1<=0) Then Begin R:=StrRate;Fb1:=4;End;
  { le pilote lit d'avance un anneau de 64 Ko au format de la carte }
- LeadF:=(65536 Div Fb1)*(StrRate Div 100) Div (R Div 100)+2205;
+ LeadF:=(65536 Div Fb1)*(StrRate Div 100) Div (R Div 100)+8820;
  If Keep<LeadF Then Keep:=LeadF;
  RendF:=Keep;
  StreamBegin:=True;
@@ -2419,6 +2429,11 @@ Begin
   End;
   RendF:=RendF+BlkFrames;
  End;
+End;
+
+Procedure PumpHook;
+Begin
+ If Playing And (OutDev=0) Then SynthPump;
 End;
 
 Procedure SpeakerSet(F: Word);
@@ -4419,8 +4434,13 @@ Begin
   End;
  End;
  HideMouse;
+ { les cases de position (en haut) et la tete de lecture (une colonne de
+   la vue) sont envoyees a l'ecran separement : reunies, elles feraient
+   recopier presque tout l'ecran a chaque double croche }
  DrawPosCells;
+ FlushScreen;
  DrawPlayhead;
+ FlushScreen;
  ShowMouse;
 End;
 
