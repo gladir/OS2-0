@@ -13,7 +13,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, TLS32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, SUDOKU.EXE,
-              OTHELLO.EXE,
+              OTHELLO.EXE, TILEMAN.EXE, HEX2048.EXE, BACKGAM.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
@@ -76,6 +76,9 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC MAHJONGG.PAS                        -> MAHJONGG.EXE (Mahjongg Solitaire)
   OS2PC SUDOKU.PAS                          -> SUDOKU.EXE (Sudoku)
   OS2PC OTHELLO.PAS                         -> OTHELLO.EXE (Othello)
+  OS2PC TILEMAN.PAS                         -> TILEMAN.EXE (TileMan)
+  OS2PC HEX2048.PAS                         -> HEX2048.EXE (Hex 2048)
+  OS2PC BACKGAM.PAS                         -> BACKGAM.EXE (Backgammon)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -804,7 +807,25 @@ traditionnels, composant Jeux de l'installation) :
   ou a deux joueurs ; cliquer une case ou fleches et Entree ; H indices,
   Ctrl+Z annuler, F2 nouvelle partie ; passe automatique. Porte du
   prototype OTHELLO.PAS de 7iles. /AUTO : l'ordinateur joue seul.
-Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello) : donne reproductible.
+  TileMan (TILEMAN.EXE) : conquete de terrain ; sortir de son
+  territoire (bleu) en laissant une trace (cyan) et y revenir : les
+  zones fermees sans ennemi sont conquises ; eviter les ennemis rouges ;
+  75 % du terrain pour passer au niveau suivant ; trois vies ; fleches,
+  Espace (s'arreter), P pause, vitesse ; F2 nouvelle partie. Porte du
+  prototype TILEMAN.PAS de 7iles. /AUTO : pilote automatique.
+  Hex 2048 (HEX2048.EXE) : le 2048 sur une grille hexagonale de 19
+  cases ; Q W E A S D (ou 7 8 9 1 2 3, ou clic sur le plateau ou la rose
+  des directions) font glisser les tuiles dans une des six directions ;
+  Ctrl+Z annuler. Porte du prototype HEX2048.PAS de 7iles. /AUTO :
+  l'ordinateur joue seul.
+  Backgammon (BACKGAM.EXE) : regles completes (barre, pions frappes,
+  sortie, des obligatoires, doubles, gammon et backgammon) contre
+  l'ordinateur (Facile, Normal) ; Espace lance les des, cliquer un pion
+  blanc puis sa case d'arrivee (point jaune) ; Ctrl+Z annule le tour.
+  Porte du prototype BACKGAM.PAS de 7iles. /AUTO : l'ordinateur joue
+  les deux couleurs.
+Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
+Backgammon) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------

@@ -17,7 +17,8 @@ REM (OS2KRNL.PAS inclut LOGO.INC : logo de l'ecran de demarrage, TOOLS\MKLOGO.PY
 ..\BUILD\OS2PC -COS2KRNL OS2KRNL.PAS ..\BUILD\CD\OS2KRNL
 IF ERRORLEVEL 1 GOTO ERREUR
 ECHO == Commandes (OS2PC -COS2)
-REM (dont les jeux KLONDIKE.PAS, ECHECS.PAS, MAHJONGG.PAS, SUDOKU.PAS et OTHELLO.PAS du dossier Jeux,
+REM (dont les jeux KLONDIKE.PAS, ECHECS.PAS, MAHJONGG.PAS, SUDOKU.PAS, OTHELLO.PAS, TILEMAN.PAS,
+REM HEX2048.PAS et BACKGAM.PAS du dossier Jeux,
 REM DIGAUDIO.PAS, Audio numerique, et NOTATOR.PAS, Notator for OS2-Zero (porte
 REM d'OFFICE-0, exemples .SON et .MID de IMAGE\NOTATOR), du dossier Multimedia, TASKMGR.PAS,
 REM Gestionnaire des taches, du dossier Systeme OS/2, BROWSER.PAS,
