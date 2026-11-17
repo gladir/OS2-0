@@ -2245,9 +2245,27 @@ Begin
   Until False;
 End;
 
+Procedure RunPm(P, Params : String); Forward;
+
 Procedure Props(K : LongInt);
-Var T : String;
+Var T, P, X : String; Drv : Boolean;
 Begin
+  { lecteur (dossier Lecteurs) : boite Proprietes de l'Explorateur OS2-0,
+    avec l'espace utilise et libre en camembert (EXPLORER /PROPS:C:) }
+  P := It(K)^.Path;
+  Drv := False;
+  If It(K)^.Obj = OB_DIR Then
+    If Length(P) = 3 Then
+      If (P[2] = ':') And (P[3] = '\') Then Drv := True;
+  If Drv Then
+  Begin
+    X := ExplorerPath;
+    If X <> '' Then
+    Begin
+      RunPm(X, '/PROPS:' + UpCase(P[1]) + ':');
+      Exit;
+    End;
+  End;
   T := It(K)^.Name;
   Case It(K)^.Obj Of
     OB_DIR : T := T + ' : dossier ' + It(K)^.Path + '.';
@@ -2417,7 +2435,6 @@ End;
 
 Procedure OpenNotebook(Tab : LongInt); Forward;
 Procedure OpenNb(Kind, Tab : LongInt); Forward;
-Procedure RunPm(P, Params : String); Forward;
 
 Procedure OpenItem(K : LongInt);
 Var V : LongInt; P : String;

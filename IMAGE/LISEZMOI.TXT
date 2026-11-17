@@ -1048,6 +1048,12 @@ EXPLORER [dossier] a l'invite.
   - Retour arriere : dossier parent ; F5 : actualiser ; Tab : arbre ou
     contenu ; Alt+Entree : Proprietes ; bouton 2 : Ouvrir, Proprietes ;
   - menus Fichier, Affichage, Aller a, ?.
+  - Proprietes d'un lecteur : boite "Proprietes de (C:)" de Pasdows 95,
+    onglets General (nom du volume modifiable, type, espace utilise en
+    bleu et libre en magenta, en octets et en Ko/Mo/Go, capacite,
+    camembert en relief), Outils (Verifier maintenant : CHKDSK) et
+    Partage ; OK, Annuler, Appliquer. Aussi par le menu contextuel d'un
+    lecteur du dossier Lecteurs du bureau (EXPLORER /PROPS:C:).
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------

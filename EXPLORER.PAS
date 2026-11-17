@@ -21,9 +21,14 @@
   numerique ; .HTM : Navigateur Web). Retour arriere : dossier parent ; F5 :
   actualiser ; Tab : passe de l'arbre au contenu ; fleches, Debut, Fin,
   Pg.prec., Pg.suiv. ; bouton 2 : menu contextuel (Ouvrir, Proprietes).
+  Proprietes d'un lecteur : boite "Proprietes de (C:)" de Pasdows 95
+  (onglets General, Outils, Partage ; nom du volume modifiable ; espace
+  utilise et libre ; camembert en relief) ; EXPLORER /PROPS:C: ouvre cette
+  boite seule (dossier Lecteurs du bureau).
 
   API d'OS/2 : DosFindFirst/DosFindNext (FILEFINDBUF3), DosQueryCurrentDisk,
-  DosQueryFSInfo (etiquette, espace libre), DosQueryFSAttach (CDFS, HPFS,
+  DosQueryFSInfo (etiquette, espace libre), DosSetFSInfo (nom du volume),
+  DosQueryFSAttach (CDFS, HPFS,
   NTFS...), DosExecPgm, WinCreateStdWindow, gabarit de menu et
   WinPopupMenu, WinFillRect, GpiLine, WinDrawText, WinMessageBox.
   Langue : variable LANGUAGE (FR, EN, GR, IT, SP). }
@@ -35,7 +40,7 @@ Const
   WM_BUTTON1DOWN = $0071; WM_BUTTON1DBLCLK = $0073; WM_BUTTON2DOWN = $0074;
   WM_CHAR = $007A;
   FCF_TITLEBAR = 1; FCF_SYSMENU = 2; FCF_SIZEBORDER = 8; FCF_MINBUTTON = $10; FCF_MAXBUTTON = $20;
-  FCF_TASKLIST = $800;
+  FCF_DLGBORDER = $100; FCF_TASKLIST = $800;
   HWND_DESKTOP = 1; HWND_TOP = 3;
   SWP_SIZE = 1; SWP_MOVE = 2; SWP_ZORDER = 4; SWP_SHOW = 8; SWP_ACTIVATE = $80;
   MIS_TEXT = 1; MIS_SEPARATOR = 4; MIS_SUBMENU = $10;
@@ -103,6 +108,7 @@ Function WinSetFocus(HD, H : LongInt) : LongInt; External 'PMWIN';
 Function WinSetActiveWindow(HD, H : LongInt) : LongInt; External 'PMWIN';
 Function WinWindowFromID(H, Id : LongInt) : LongInt; External 'PMWIN';
 Function WinAlarm(HD, Typ : LongInt) : LongInt; External 'PMWIN';
+Function WinCalcFrameRect(H, P, FClient : LongInt) : LongInt; External 'PMWIN';
 Function GpiSetColor(Hps, C : LongInt) : LongInt; External 'PMGPI';
 Function GpiMove(Hps, P : LongInt) : LongInt; External 'PMGPI';
 Function GpiLine(Hps, P : LongInt) : LongInt; External 'PMGPI';
@@ -1723,6 +1729,645 @@ Begin
   Else Navigate(EntPath(I));
 End;
 
+{ ==================================================================== }
+{ Proprietes d'un lecteur : comme la boite de Pasdows 95, onglets      }
+{ General (nom du volume, type, espace utilise et libre, capacite,      }
+{ camembert en relief), Outils et Partage ; OK, Annuler, Appliquer.    }
+{ La fenetre est independante (l'Explorateur reste utilisable) ;       }
+{ EXPLORER /PROPS:C: l'ouvre seule (dossier Lecteurs du bureau).       }
+{ ==================================================================== }
+
+Const
+  PW = 440; PH = 408;            { zone client }
+  cFuchsia = 3; cPurple = 11;    { CLR_PINK, CLR_DARKPINK }
+  PropTop = 27; PropBot = 364;   { cadre des onglets }
+  ID_PROPS = 1;
+
+Function DosSetFSInfo(Disk, Level, PBuf, Cb : LongInt) : LongInt; External 'DOSCALLS';
+
+Var
+  PFrame, PClient, PCH, PTab, PCaretOn : LongInt;
+  PDrive : Char;
+  PLabel, PLabel0 : String;
+  PFree, PTot : Double;
+  PEdit, PDirty, PAlone : Boolean;
+
+{ nombre (Double) avec separateur des milliers }
+Function ThousandsD(V : Double) : String;
+Var R, T, Sep : String; I, D : LongInt; Q : Double;
+Begin
+  If V < 0 Then V := 0;
+  V := Int(V + 0.5);
+  R := '';
+  Repeat
+    Q := Int(V / 10);
+    D := Round(V - Q * 10);
+    If D < 0 Then D := 0;
+    If D > 9 Then D := 9;
+    R := Chr(48 + D) + R;
+    V := Q;
+  Until V < 1;
+  Sep := L(' ', ',', '.', '.', '.');
+  T := '';
+  For I := 1 To Length(R) Do
+  Begin
+    T := T + R[I];
+    If ((Length(R) - I) Mod 3 = 0) And (I < Length(R)) Then T := T + Sep;
+  End;
+  ThousandsD := T;
+End;
+
+{ taille courte : Ko, Mo (une decimale), Go (deux decimales) }
+Function ShortSize(Kb : Double) : String;
+Var V : LongInt; S, Dc : String;
+Begin
+  Dc := L(',', '.', ',', ',', ',');
+  If Kb < 1024 Then S := IStr(Round(Kb)) + L(' Ko', ' KB', ' KB', ' KB', ' KB')
+  Else If Kb < 1048576 Then
+  Begin
+    V := Round(Kb / 102.4);
+    S := IStr(V Div 10) + Dc + IStr(V Mod 10) + L(' Mo', ' MB', ' MB', ' MB', ' MB');
+  End
+  Else
+  Begin
+    V := Round(Kb / 10485.76);
+    S := IStr(V Mod 100);
+    If Length(S) < 2 Then S := '0' + S;
+    S := IStr(V Div 100) + Dc + S + L(' Go', ' GB', ' GB', ' GB', ' GB');
+  End;
+  ShortSize := S;
+End;
+
+Function PropDisk : LongInt;
+Begin
+  PropDisk := Ord(UpCase(PDrive)) - 64;
+End;
+
+{ nom du volume modifiable : disque dur ou disque virtuel }
+Function PropWritable : Boolean;
+Var K : LongInt;
+Begin
+  K := PropDisk - 1;
+  PropWritable := (K >= 2) And (K <= 25) And (DrvKind[K] = ekHdd);
+End;
+
+Function PropTypeText : String;
+Var K : LongInt; S : String;
+Begin
+  K := PropDisk - 1;
+  If DrvKind[K] = ekCd Then S := L('Disque CD-ROM', 'CD-ROM Disc', 'CD-ROM', 'Disco CD-ROM', 'Disco CD-ROM')
+  Else If DrvKind[K] = ekFloppy Then S := L('Disquette', 'Floppy Disk', 'Diskette', 'Dischetto', 'Disquete')
+  Else If UpStr(DrvLbl[K]) = 'RAMDISK' Then
+    S := L('Disque virtuel', 'RAM Disk', 'RAM-Laufwerk', 'Disco virtuale', 'Disco virtual')
+  Else S := L('Disque local', 'Local Disk', 'Lokaler Datentr'#132'ger', 'Disco locale', 'Disco local');
+  If DrvFs[K] <> '' Then S := S + ' (' + DrvFs[K] + ')';
+  PropTypeText := S;
+End;
+
+Function PropTabName(I : LongInt) : String;
+Begin
+  Case I Of
+    0 : PropTabName := L('G'#130'n'#130'ral', 'General', 'Allgemein', 'Generale', 'General');
+    1 : PropTabName := L('Outils', 'Tools', 'Extras', 'Strumenti', 'Herramientas');
+  Else
+    PropTabName := L('Partage', 'Sharing', 'Freigabe', 'Condivisione', 'Compartir');
+  End;
+End;
+
+{ onglet I : X1..X2 }
+Procedure PropTabRect(I : LongInt; Var X1, X2 : LongInt);
+Var K : LongInt;
+Begin
+  X1 := 8;
+  For K := 0 To I - 1 Do X1 := X1 + TextW(PropTabName(K)) + 20;
+  X2 := X1 + TextW(PropTabName(I)) + 19;
+End;
+
+{ boutons du bas : 0 OK, 1 Annuler, 2 Appliquer }
+Procedure PropBtnRect(I : LongInt; Var X1, Y1, X2, Y2 : LongInt);
+Begin
+  X2 := PW - 10 - (2 - I) * 90; X1 := X2 - 82;
+  Y1 := PH - 36; Y2 := PH - 12;
+End;
+
+{ bouton "Verifier maintenant..." etc. de l'onglet Outils }
+Procedure PropToolRect(I : LongInt; Var X1, Y1, X2, Y2 : LongInt);
+Begin
+  X2 := PW - 30; X1 := X2 - 224;
+  Y1 := 106 + I * 106; Y2 := Y1 + 22;
+End;
+
+Function PropBtnText(I : LongInt) : String;
+Begin
+  Case I Of
+    0 : PropBtnText := 'OK';
+    1 : PropBtnText := L('Annuler', 'Cancel', 'Abbrechen', 'Annulla', 'Cancelar');
+  Else
+    PropBtnText := L('Appliquer', 'Apply', #154'bernehmen', 'Applica', 'Aplicar');
+  End;
+End;
+
+{ texte grise en relief (element inactif) }
+Procedure GrayTxt(X, Y : LongInt; S : String);
+Begin
+  OutTxt(X, Y, S, cGray, cSilver);
+End;
+
+{ bouton en relief, texte centre (Def : cadre noir du bouton par defaut) }
+Procedure PButton(X1, Y1, X2, Y2 : LongInt; S : String; En, Def : Boolean);
+Var X : LongInt;
+Begin
+  Raised(X1, Y1, X2, Y2, True);
+  If Def Then Box(X1 - 1, Y1 - 1, X2 + 1, Y2 + 1, cBlack);
+  X := (X1 + X2 + 1 - TextW(S)) Div 2;
+  If En Then OutTxt(X, Y1 + 4, S, cBlack, cSilver) Else GrayTxt(X, Y1 + 4, S);
+End;
+
+{ cadre grave (trait gris et trait blanc) avec titre }
+Procedure GroupBox(X1, Y1, X2, Y2 : LongInt; T : String);
+Begin
+  Box(X1, Y1, X2 - 1, Y2 - 1, cGray);
+  Box(X1 + 1, Y1 + 1, X2, Y2, cWhite);
+  OutTxt(X1 + 8, Y1 - 8, ' ' + T + ' ', cBlack, cSilver);
+End;
+
+{ texte coupe aux espaces dans une largeur de W points }
+Procedure WrapText(X, Y, W : LongInt; S : String; C : LongInt; Gray : Boolean);
+Var Ln, Wd : String; P : LongInt;
+Begin
+  Ln := '';
+  While S <> '' Do
+  Begin
+    P := Pos(' ', S);
+    If P = 0 Then
+    Begin
+      Wd := S; S := '';
+    End
+    Else
+    Begin
+      Wd := Copy(S, 1, P - 1); Delete(S, 1, P);
+    End;
+    If (Ln <> '') And (TextW(Ln + ' ' + Wd) > W) Then
+    Begin
+      If Gray Then GrayTxt(X, Y, Ln) Else OutTxt(X, Y, Ln, C, cSilver);
+      Y := Y + 17;
+      Ln := Wd;
+    End
+    Else If Ln = '' Then Ln := Wd
+    Else Ln := Ln + ' ' + Wd;
+  End;
+  If Ln <> '' Then
+    If Gray Then GrayTxt(X, Y, Ln) Else OutTxt(X, Y, Ln, C, cSilver);
+End;
+
+{ case d'option ronde }
+Procedure Radio(X, Y : LongInt; T : String; On, En : Boolean);
+Var Dy, W, Cx, Cy : LongInt;
+Begin
+  Cx := X + 6; Cy := Y + 8;
+  For Dy := -6 To 6 Do
+  Begin
+    W := ISqrt(36 - Dy * Dy);
+    If Dy < 0 Then HLine(Cx - W, Cx + W, Cy + Dy, cGray) Else HLine(Cx - W, Cx + W, Cy + Dy, cWhite);
+  End;
+  For Dy := -5 To 5 Do
+  Begin
+    W := ISqrt(25 - Dy * Dy) - 1;
+    If W >= 0 Then HLine(Cx - W, Cx + W, Cy + Dy, cWhite);
+  End;
+  If On Then
+    For Dy := -2 To 2 Do
+    Begin
+      W := ISqrt(4 - Dy * Dy);
+      HLine(Cx - W, Cx + W, Cy + Dy, cBlack);
+    End;
+  If En Then OutTxt(X + 20, Y, T, cBlack, cSilver) Else GrayTxt(X + 20, Y, T);
+End;
+
+{ angle de (X, Y) dans [0, 2 pi[, sens trigonometrique (arc tangente
+  approchee a 0,005 radian pres, comme VpAng de Pasdows 95) }
+Function VpAng(X, Y : Double) : Double;
+Var AX, AY, Zz, T : Double;
+Begin
+  AX := Abs(X); AY := Abs(Y);
+  If AX + AY < 0.000001 Then
+  Begin
+    VpAng := 0;
+    Exit;
+  End;
+  If AX >= AY Then
+  Begin
+    Zz := AY / AX;
+    T := Zz * (0.7853981634 + 0.273 * (1 - Zz));
+  End
+  Else
+  Begin
+    Zz := AX / AY;
+    T := 1.5707963268 - Zz * (0.7853981634 + 0.273 * (1 - Zz));
+  End;
+  If X < 0 Then T := 3.1415926536 - T;
+  If Y < 0 Then T := 6.2831853072 - T;
+  VpAng := T;
+End;
+
+{ camembert en relief : ellipse de rayons A et B, epaisseur Dp ; part
+  libre (Pm pour mille, magenta) a partir de 0 degre dans le sens
+  trigonometrique, puis part utilisee (bleu) ; dessin par segments }
+Procedure VpPie(CX, CY, A, B, Dp, Pm : LongInt);
+Var X, Y, H, C, Run, RunC : LongInt; Th : Double;
+Begin
+  Th := Pm * 0.0062831853072;
+  { flanc : de gauche a droite, une colonne par point }
+  For X := -A To A Do
+  Begin
+    H := (B * ISqrt(A * A - X * X)) Div A;
+    If VpAng(X, -H * A / B) < Th Then C := cPurple Else C := cNavy;
+    VLine(CX + X, CY + H + 1, CY + H + Dp, C);
+    Pix(CX + X, CY + H + Dp + 1, cBlack);
+  End;
+  VLine(CX - A - 1, CY, CY + Dp, cBlack);
+  VLine(CX + A + 1, CY, CY + Dp, cBlack);
+  { dessus : chaque ligne en segments de meme couleur }
+  For Y := -B To B Do
+  Begin
+    H := (A * ISqrt(B * B - Y * Y)) Div B;
+    Run := -H; RunC := -1;
+    For X := -H To H + 1 Do
+    Begin
+      If X > H Then C := -100
+      Else If VpAng(X, -Y * A / B) < Th Then C := cFuchsia Else C := cBlue;
+      If C <> RunC Then
+      Begin
+        If RunC <> -1 Then HLine(CX + Run, CX + X - 1, CY + Y, RunC);
+        Run := X; RunC := C;
+      End;
+    End;
+    Pix(CX - H - 1, CY + Y, cBlack);
+    Pix(CX + H + 1, CY + Y, cBlack);
+  End;
+End;
+
+{ ligne d'espace : carre de couleur, libelle, octets, taille courte }
+Procedure SpaceRow(Y, C : LongInt; T : String; Kb : Double);
+Var B : String;
+Begin
+  If C <> -100 Then
+  Begin
+    FBar(24, Y + 2, 36, Y + 14, C);
+    Box(24, Y + 2, 36, Y + 14, cBlack);
+  End;
+  OutTxt(44, Y, T, cBlack, cSilver);
+  B := ThousandsD(Kb * 1024.0) + L(' octets', ' bytes', ' Byte', ' byte', ' bytes');
+  OutRight(PW - 96, Y, B, cBlack, cSilver);
+  OutRight(PW - 26, Y, ShortSize(Kb), cBlack, cSilver);
+End;
+
+Procedure PropPaintGeneral;
+Var Pm, X : LongInt; S : String;
+Begin
+  PaintIcon(NodeIcon(PDrive + ':'), 24, 42, 32);
+  OutTxt(76, 50, L('Nom :', 'Label:', 'Bezeichnung:', 'Etichetta:', 'Etiqueta:'), cBlack, cSilver);
+  If PropWritable Then Sunken(176, 46, PW - 24, 68, cWhite) Else Sunken(176, 46, PW - 24, 68, cSilver);
+  If PropWritable Then OutTxt(180, 49, PLabel, cBlack, cWhite) Else OutTxt(180, 49, PLabel, cBlack, cSilver);
+  If PEdit And (PCaretOn <> 0) Then
+  Begin
+    X := 181 + TextW(PLabel);
+    VLine(X, 50, 64, cBlack);
+  End;
+  OutTxt(76, 80, L('Type :', 'Type:', 'Typ:', 'Tipo:', 'Tipo:'), cBlack, cSilver);
+  OutTxt(176, 80, PropTypeText, cBlack, cSilver);
+  HLine(16, PW - 17, 106, cGray); HLine(16, PW - 17, 107, cWhite);
+  SpaceRow(116, cBlue, L('Espace utilis'#130' :', 'Used space:', 'Belegt:', 'Spazio usato:', 'Espacio usado:'),
+           PTot - PFree);
+  SpaceRow(140, cFuchsia, L('Espace libre :', 'Free space:', 'Frei:', 'Spazio libero:', 'Espacio libre:'), PFree);
+  HLine(16, PW - 17, 164, cGray); HLine(16, PW - 17, 165, cWhite);
+  SpaceRow(174, -100, L('Capacit'#130' :', 'Capacity:', 'Kapazit'#132't:', 'Capacit'#133':', 'Capacidad:'), PTot);
+  If PTot > 0 Then Pm := Round(PFree / PTot * 1000) Else Pm := 0;
+  VpPie(PW Div 2, 252, 96, 38, 14, Pm);
+  S := L('Lecteur ', 'Drive ', 'Laufwerk ', 'Unit'#133' ', 'Unidad ') + UpCase(PDrive);
+  OutTxt((PW - TextW(S)) Div 2, 312, S, cBlack, cSilver);
+End;
+
+{ textes de l'onglet Outils : groupe I, partie P (0 titre, 1 texte, 2 bouton) }
+Function ToolText(I, P : LongInt) : String;
+Var S : String;
+Begin
+  S := '';
+  If (I = 0) And (P = 0) Then
+    S := L('V'#130'rification des erreurs', 'Error-checking status', 'Fehler'#129'berpr'#129'fung',
+           'Controllo errori', 'Comprobaci'#162'n de errores');
+  If (I = 0) And (P = 1) Then
+    S := L('CHKDSK v'#130'rifie le syst'#138'me de fichiers de ce lecteur et signale les erreurs.',
+           'CHKDSK checks the file system of this drive and reports errors.',
+           'CHKDSK pr'#129'ft das Dateisystem dieses Laufwerks.',
+           'CHKDSK controlla il file system di questa unit'#133'.',
+           'CHKDSK comprueba el sistema de archivos de esta unidad.');
+  If (I = 0) And (P = 2) Then
+    S := L('V'#130'rifier maintenant...', 'Check Now...', 'Jetzt pr'#129'fen...', 'Controlla ora...',
+           'Comprobar ahora...');
+  If (I = 1) And (P = 0) Then
+    S := L(''#144'tat de la sauvegarde', 'Backup status', 'Sicherung', 'Backup', 'Copia de seguridad');
+  If (I = 1) And (P = 1) Then
+    S := L('Aucune sauvegarde n''a encore '#130't'#130' faite sur ce lecteur.',
+           'OS/2-0 has no record of when you last backed up this drive.', 'Keine Sicherung vorhanden.',
+           'Nessun backup.', 'No hay copia de seguridad.');
+  If (I = 1) And (P = 2) Then
+    S := L('Sauvegarder maintenant...', 'Backup Now...', 'Jetzt sichern...', 'Backup ora...',
+           'Copiar ahora...');
+  If (I = 2) And (P = 0) Then
+    S := L(''#144'tat de la d'#130'fragmentation', 'Defragmentation status', 'Defragmentierung',
+           'Deframmentazione', 'Desfragmentaci'#162'n');
+  If (I = 2) And (P = 1) Then
+    S := L('HPFS et NTFS r'#130'partissent les fichiers sans les fragmenter : aucune d'#130'fragmentation.',
+           'HPFS and NTFS allocate files without fragmenting them: no defragmentation needed.',
+           'HPFS und NTFS brauchen keine Defragmentierung.', 'HPFS e NTFS non richiedono deframmentazione.',
+           'HPFS y NTFS no necesitan desfragmentaci'#162'n.');
+  If (I = 2) And (P = 2) Then
+    S := L('D'#130'fragmenter maintenant...', 'Defragment Now...', 'Jetzt defragmentieren...',
+           'Deframmenta ora...', 'Desfragmentar ahora...');
+  ToolText := S;
+End;
+
+Procedure PropPaintTools;
+Var I, X1, Y1, X2, Y2 : LongInt; T : String; En : Boolean;
+Begin
+  For I := 0 To 2 Do
+  Begin
+    T := ToolText(I, 0);
+    GroupBox(16, 44 + I * 106, PW - 17, 138 + I * 106, T);
+    T := ToolText(I, 1);
+    WrapText(28, 58 + I * 106, PW - 56, T, cBlack, False);
+    PropToolRect(I, X1, Y1, X2, Y2);
+    T := ToolText(I, 2);
+    En := (I = 0) And (DrvKind[PropDisk - 1] <> ekFloppy);
+    PButton(X1, Y1, X2, Y2, T, En, False);
+  End;
+End;
+
+Procedure PropPaintSharing;
+Begin
+  Radio(24, 46, L('Non partag'#130, 'Not Shared', 'Nicht freigegeben', 'Non condiviso', 'No compartido'),
+        True, True);
+  Radio(24, 70, L('Partag'#130' en tant que :', 'Shared As:', 'Freigegeben als:', 'Condiviso come:',
+                  'Compartido como:'), False, False);
+  WrapText(24, 104, PW - 48, L('Le partage de fichiers et d''imprimantes n''est pas install'#130' : ce lecteur ' +
+           'ne peut pas '#136'tre partag'#130' sur le r'#130'seau.', 'File and printer sharing is not ' +
+           'installed: this drive cannot be shared on the network.',
+           'Datei- und Druckerfreigabe ist nicht installiert.', 'Condivisione file non installata.',
+           'Compartir archivos no est'#160' instalado.'), cGray, True);
+End;
+
+Procedure PropPaint(H : LongInt);
+Var SvH, SvC, I, X1, X2, Y1, Y2 : LongInt;
+Begin
+  SvH := Hps; SvC := CH;
+  Hps := WinBeginPaint(H, 0, 0);
+  CH := PCH;
+  FBar(0, 0, PW + 40, PCH, cSilver);
+  { cadre et onglets (l'onglet choisi est plus haut et ouvert en bas) }
+  Edge(6, PropTop, PW - 7, PropBot, cWhite, cBlack);
+  HLine(7, PW - 8, PropBot - 1, cGray); VLine(PW - 8, PropTop + 1, PropBot - 1, cGray);
+  For I := 0 To 2 Do
+  Begin
+    PropTabRect(I, X1, X2);
+    If I = PTab Then
+    Begin
+      X1 := X1 - 2; X2 := X2 + 2;
+      FBar(X1, 4, X2, PropTop + 1, cSilver);
+      HLine(X1 + 1, X2 - 1, 4, cWhite); VLine(X1, 5, PropTop, cWhite);
+      VLine(X2, 5, PropTop, cBlack); VLine(X2 - 1, 5, PropTop, cGray);
+      OutTxt(X1 + 12, 8, PropTabName(I), cBlack, cSilver);
+    End
+    Else
+    Begin
+      HLine(X1 + 1, X2 - 1, 7, cWhite); VLine(X1, 8, PropTop - 1, cWhite);
+      VLine(X2, 8, PropTop - 1, cBlack); VLine(X2 - 1, 8, PropTop - 1, cGray);
+      OutTxt(X1 + 10, 10, PropTabName(I), cBlack, cSilver);
+    End;
+  End;
+  Case PTab Of
+    0 : PropPaintGeneral;
+    1 : PropPaintTools;
+  Else
+    PropPaintSharing;
+  End;
+  For I := 0 To 2 Do
+  Begin
+    PropBtnRect(I, X1, Y1, X2, Y2);
+    PButton(X1, Y1, X2, Y2, PropBtnText(I), (I < 2) Or PDirty, I = 0);
+  End;
+  Dummy := WinEndPaint(Hps);
+  Hps := SvH; CH := SvC;
+End;
+
+{ ecrire le nom du volume (VOLUMELABEL : longueur puis texte) }
+Function PropApply : Boolean;
+Var B : Array[0..15] Of Byte; K, Rc : LongInt;
+Begin
+  PropApply := True;
+  If Not PDirty Then Exit;
+  FillChar(B, SizeOf(B), 0);
+  B[0] := Length(PLabel);
+  For K := 1 To Length(PLabel) Do B[K] := Ord(UpCase(PLabel[K]));
+  Rc := DosSetFSInfo(PropDisk, 2, LongInt(@B), Length(PLabel) + 2);
+  If Rc <> 0 Then
+  Begin
+    Dummy := WinMessageBox(HWND_DESKTOP, PFrame, Z(L('Impossible de changer le nom du volume (erreur ', 'Cannot ' +
+             'change the volume label (error ', 'Bezeichnung nicht ge'#132'ndert (Fehler ', 'Impossibile cambiare ' +
+             'l''etichetta (errore ', 'No se puede cambiar la etiqueta (error ') + IStr(Rc) + ').'), Z2(AppName),
+             0, MB_OK Or MB_ERROR Or MB_MOVEABLE);
+    PropApply := False;
+    Exit;
+  End;
+  PLabel := UpStr(PLabel); PLabel0 := PLabel; PDirty := False;
+  ScanDrives;
+  If (Client <> 0) And Not PAlone Then
+  Begin
+    TreeSync;
+    SetTitle;
+    Redraw;
+  End;
+End;
+
+Procedure PropClose;
+Var F : LongInt;
+Begin
+  F := PFrame;
+  PFrame := 0; PClient := 0;
+  { l'Explorateur redevient la fenetre active (avant la destruction de la
+    boite, sinon PM active une autre fenetre) }
+  If (Not PAlone) And (Frame <> 0) Then
+  Begin
+    Dummy := WinSetActiveWindow(HWND_DESKTOP, Frame);
+    Dummy := WinSetFocus(HWND_DESKTOP, Client);
+  End;
+  If F <> 0 Then Dummy := WinDestroyWindow(F);
+  If PAlone Then Dummy := WinPostMsg(0, WM_QUIT, 0, 0)
+  Else If Frame <> 0 Then
+  Begin
+    Dummy := WinSetActiveWindow(HWND_DESKTOP, Frame);
+    Dummy := WinSetFocus(HWND_DESKTOP, Client);
+  End;
+End;
+
+Procedure PropInval;
+Begin
+  If PClient <> 0 Then Dummy := WinInvalidateRect(PClient, 0, 0);
+End;
+
+{ verification du lecteur par CHKDSK, dans une session plein ecran }
+Procedure PropCheck;
+Begin
+  RunProgram(Comspec, '/K CHKDSK ' + UpCase(PDrive) + ':', UpCase(PDrive) + ':\');
+End;
+
+Procedure PropClick(X, Y : LongInt);
+Var I, X1, X2, Y1, Y2 : LongInt;
+Begin
+  If Y < PropTop Then
+  Begin
+    For I := 0 To 2 Do
+    Begin
+      PropTabRect(I, X1, X2);
+      If (X >= X1) And (X <= X2) And (PTab <> I) Then
+      Begin
+        PTab := I; PEdit := (I = 0) And PropWritable;
+        PropInval;
+      End;
+    End;
+    Exit;
+  End;
+  For I := 0 To 2 Do
+  Begin
+    PropBtnRect(I, X1, Y1, X2, Y2);
+    If (X >= X1) And (X <= X2) And (Y >= Y1) And (Y <= Y2) Then
+    Begin
+      Case I Of
+        0 : If PropApply Then PropClose;
+        1 : PropClose;
+      Else
+        If PDirty Then
+        Begin
+          Dummy := PropApply;
+          PropInval;
+        End;
+      End;
+      Exit;
+    End;
+  End;
+  If PTab = 0 Then
+  Begin
+    PEdit := PropWritable And (X >= 176) And (X <= PW - 24) And (Y >= 46) And (Y <= 68);
+    PCaretOn := 1;
+    PropInval;
+  End
+  Else If PTab = 1 Then
+  Begin
+    PropToolRect(0, X1, Y1, X2, Y2);
+    If (X >= X1) And (X <= X2) And (Y >= Y1) And (Y <= Y2) And (DrvKind[PropDisk - 1] <> ekFloppy) Then PropCheck;
+  End;
+End;
+
+Function PropKey(Mp1, Mp2 : LongInt) : Boolean;
+Var Fl, Ch, Vk, Act : LongInt; Done : Boolean;
+Begin
+  Fl := Lo16(Mp1); Ch := Lo16(Mp2); Vk := Hi16(Mp2);
+  Done := True; Act := 0;
+  If (Fl And KC_KEYUP) <> 0 Then Act := 0
+  Else If ((Fl And KC_VIRTUALKEY) <> 0) And (Vk = VK_ESC) Then Act := 1
+  Else If ((Fl And KC_VIRTUALKEY) <> 0) And ((Vk = VK_NEWLINE) Or (Vk = VK_ENTER)) Then Act := 2
+  Else If ((Fl And KC_VIRTUALKEY) <> 0) And (Vk = VK_TAB) Then Act := 3
+  Else If ((Fl And KC_VIRTUALKEY) <> 0) And (Vk = VK_BACKTAB) Then Act := 4
+  Else If ((Fl And KC_VIRTUALKEY) <> 0) And (Vk = VK_BACKSPACE) Then Act := 5
+  Else If PEdit And ((Fl And KC_CHAR) <> 0) And (Ch > 32) And (Ch < 127) Then Act := 6
+  Else Done := False;
+  If Act = 1 Then PropClose
+  Else If Act = 2 Then
+  Begin
+    If PropApply Then PropClose;
+  End
+  Else If (Act = 3) Or (Act = 4) Then
+  Begin
+    If Act = 3 Then PTab := (PTab + 1) Mod 3 Else PTab := (PTab + 2) Mod 3;
+    PEdit := (PTab = 0) And PropWritable;
+    PropInval;
+  End
+  Else If (Act = 5) And PEdit And (PLabel <> '') Then
+  Begin
+    Delete(PLabel, Length(PLabel), 1);
+    PDirty := PLabel <> PLabel0;
+    PropInval;
+  End
+  Else If (Act = 6) And (Length(PLabel) < 11) And (Pos(Chr(Ch), '*?/\|.,;:+=<>[]"') = 0) Then
+  Begin
+    PLabel := PLabel + UpCase(Chr(Ch));
+    PDirty := PLabel <> PLabel0;
+    PropInval;
+  End;
+  PropKey := Done;
+End;
+
+Function PropProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Rc : Array[0..3] Of LongInt;
+Begin
+  PropProc := 0;
+  Case Msg Of
+    WM_SIZE :
+    Begin
+      Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+      PCH := Rc[3];
+    End;
+    WM_PAINT : PropPaint(H);
+    WM_BUTTON1DOWN :
+    Begin
+      Dummy := WinSetFocus(HWND_DESKTOP, H);
+      PropClick(S16(Mp1), PCH - 1 - S16(Mp1 Shr 16));
+      PropProc := 1;
+    End;
+    WM_CHAR :
+      If PropKey(Mp1, Mp2) Then PropProc := 1
+      Else PropProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+    WM_CLOSE : PropClose;
+  Else
+    PropProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+{ ouvrir la boite des proprietes du lecteur C (une seule a la fois) }
+Procedure DriveProps(C : Char);
+Var Fl, Fw, Fh, Sw, Sh, K : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  If PFrame <> 0 Then PropClose;
+  PAlone := PAlone And (Client = 0);
+  PDrive := UpCase(C);
+  K := PropDisk - 1;
+  If (K < 0) Or (K > 25) Then Exit;
+  PLabel := DrvLbl[K]; PLabel0 := PLabel;
+  If Not DriveSpace(PDrive, PFree, PTot) Then
+  Begin
+    PFree := 0; PTot := 0;
+  End;
+  PTab := 0; PDirty := False; PCaretOn := 1; PCH := PH;
+  PEdit := PropWritable;   { le champ du nom a le focus, comme sous Windows 95 }
+  Dummy := WinRegisterClass(Hab, Z('EXPPROPS'), LongInt(@PropProc), 0, 0);
+  Fl := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER;
+  If PAlone Then Fl := Fl Or FCF_TASKLIST;
+  PClient := 0;
+  PFrame := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Fl), Z('EXPPROPS'),
+                               Z2(L('Propri'#130't'#130's de (', 'Properties of (', 'Eigenschaften von (',
+                                    'Propriet'#133' di (', 'Propiedades de (') + PDrive + ':)'), 0, 0, ID_PROPS,
+                               LongInt(@PClient));
+  If PFrame = 0 Then Exit;
+  Rc[0] := 0; Rc[1] := 0; Rc[2] := PW; Rc[3] := PH;
+  Dummy := WinCalcFrameRect(PFrame, LongInt(@Rc), 0);
+  Fw := Rc[2] - Rc[0]; Fh := Rc[3] - Rc[1];
+  Sw := WinQuerySysValue(HWND_DESKTOP, 20); Sh := WinQuerySysValue(HWND_DESKTOP, 21);
+  Dummy := WinSetWindowPos(PFrame, HWND_TOP, MaxI(0, (Sw - Fw) Div 2), MaxI(0, (Sh - Fh) Div 2), Fw, Fh,
+                           SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW Or SWP_ACTIVATE);
+  Dummy := WinSetActiveWindow(HWND_DESKTOP, PFrame);
+  Dummy := WinSetFocus(HWND_DESKTOP, PClient);
+End;
+
 { boite Proprietes (objet choisi, sinon le dossier affiche) }
 Procedure Props;
 Var S, P, A : String; Fr, Tot : Double; K, Kd : LongInt;
@@ -1741,6 +2386,9 @@ Begin
   Else If (CurPath = '') Or ((Sel < 0) And (Length(CurPath) = 2)) Then
   Begin
     If CurPath = '' Then P := E(Sel)^.Nm Else P := CurPath;
+    { lecteur : boite Proprietes de Pasdows 95 avec le camembert }
+    DriveProps(P[1]);
+    Exit;
     K := Ord(UpCase(P[1])) - 65;
     Kd := DrvKind[K];
     S := DriveName(P[1]) + Chr(10) + TypeName('', Kd);
@@ -2208,7 +2856,18 @@ BEGIN
   ScanDrives;
   { dossier de depart : parametre, sinon C: }
   Start := '';
+  PFrame := 0; PClient := 0; PAlone := False;
   If ParamCount > 0 Then Start := UpStr(ParamStr(1));
+  { EXPLORER /PROPS:C: : seulement la boite des proprietes du lecteur }
+  If (Copy(Start, 1, 7) = '/PROPS:') And (Length(Start) >= 8) Then
+  Begin
+    Hab := WinInitialize(0);
+    Hmq := WinCreateMsgQueue(Hab, 0);
+    Client := 0; Frame := 0; PAlone := True;
+    DriveProps(Start[8]);
+    While WinGetMsg(Hab, LongInt(@Qmsg), 0, 0, 0) <> 0 Do Dummy := WinDispatchMsg(Hab, LongInt(@Qmsg));
+    Halt(0);
+  End;
   While (Length(Start) > 2) And (Start[Length(Start)] = '\') Do Delete(Start, Length(Start), 1);
   If Start = '' Then
   Begin
