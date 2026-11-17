@@ -39,7 +39,7 @@ Program INSTALL;
        existante ;
     5. Composants : bureau et LaunchPad, utilitaires, programmes
        d'essai, disque virtuel, jeux (Solitaire - Klondike, Echecs,
-       Mahjongg : dossier Jeux de Systeme OS/2), multimedia (Audio
+       Mahjongg, Sudoku : dossier Jeux de Systeme OS/2), multimedia (Audio
        numerique, MDM.DLL, pilotes des cartes son, sons), reseau TCP/IP
        (TCPIP32.DLL, pilotes E1000 et PCNET, IFCONFIG, PING, HOST,
        WGET) ;
@@ -1072,9 +1072,11 @@ Begin
   If (U = 'CONFIG.SYS') Or (U = 'OS2BOOT') Or (U = 'INSTALL.EXE') Then Wanted := False
   Else If Copy(U, 1, 4) = 'TEST' Then Wanted := OptTest <> 0
   Else If (U = 'PMSHELL.EXE') Or (U = 'LAUNCHPD.EXE') Then Wanted := OptDesk <> 0
-  Else If (U = 'KLONDIKE.EXE') Or (U = 'ECHECS.EXE') Or (U = 'MAHJONGG.EXE') Then Wanted := OptGames <> 0
+  Else If (U = 'KLONDIKE.EXE') Or (U = 'ECHECS.EXE') Or (U = 'MAHJONGG.EXE') Or (U = 'SUDOKU.EXE') Then
+    Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
-          (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Then Wanted := OptMM <> 0
+          (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or
+          (Pos('.SON', U) > 0) Or (Pos('.MID', U) > 0) Then Wanted := OptMM <> 0
   Else If (U = 'TCPIP32.DLL') Or (U = 'E1000.DLL') Or (U = 'PCNET.DLL') Or (U = 'IFCONFIG.EXE') Or (U = 'PING.EXE') Or
           (U = 'HOST.EXE') Or (U = 'WGET.EXE') Then Wanted := OptNet <> 0
   Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or
@@ -1210,14 +1212,16 @@ Begin
                     'Virtuelle Platte im Speicher (4 MB)', 'Disco virtual en memoria (4 MB)',
                     'Disco virtuale in memoria (4 MB)', 'Disk virtual n'#137' kujtes'#137' (4 MB)'), OptRam <> 0,
                     BS_AUTOCHECKBOX);
-        Hw := Check(30, Y + 130, ID_CGAMES, L('Jeux (Solitaire - Klondike, Echecs, Mahjongg)',
-                    'Games (Klondike Solitaire, Chess, Mahjongg)', 'Spiele (Klondike, Schach, Mahjongg)',
-                    'Juegos (Klondike, Ajedrez, Mahjongg)', 'Giochi (Klondike, Scacchi, Mahjongg)',
-                    'Loj'#137'ra (Klondike, Shah, Mahjongg)'), OptGames <> 0, BS_AUTOCHECKBOX);
-        Hw := Check(30, Y + 156, ID_CMM, L('Multim'#130'dia (Audio num'#130'rique, pilotes des cartes son)',
-                    'Multimedia (Digital Audio, sound card drivers)', 'Multimedia (Digital Audio, Soundkarten)',
-                    'Multimedia (Audio digital, tarjetas de sonido)', 'Multimedia (Audio digitale, schede audio)',
-                    'Multimedia (Audio dixhital, kartat e z'#137'rit)'), OptMM <> 0, BS_AUTOCHECKBOX);
+        Hw := Check(30, Y + 130, ID_CGAMES, L('Jeux (Klondike, Echecs, Mahjongg, Sudoku)',
+                    'Games (Klondike, Chess, Mahjongg, Sudoku)', 'Spiele (Klondike, Schach, Mahjongg, Sudoku)',
+                    'Juegos (Klondike, Ajedrez, Mahjongg, Sudoku)', 'Giochi (Klondike, Scacchi, Mahjongg, Sudoku)',
+                    'Loj'#137'ra (Klondike, Shah, Mahjongg, Sudoku)'), OptGames <> 0, BS_AUTOCHECKBOX);
+        Hw := Check(30, Y + 156, ID_CMM, L('Multim'#130'dia (Audio num'#130'rique, Notator, pilotes des cartes son)',
+                    'Multimedia (Digital Audio, Notator, sound card drivers)',
+                    'Multimedia (Digital Audio, Notator, Soundkarten)',
+                    'Multimedia (Audio digital, Notator, tarjetas de sonido)',
+                    'Multimedia (Audio digitale, Notator, schede audio)',
+                    'Multimedia (Audio dixhital, Notator, kartat e z'#137'rit)'), OptMM <> 0, BS_AUTOCHECKBOX);
         Hw := Check(30, Y + 182, ID_CNET, L('R'#130'seau TCP/IP (Intel PRO/1000, AMD PCnet ; IFCONFIG, PING, WGET)',
                     'TCP/IP networking (Intel PRO/1000, AMD PCnet ; IFCONFIG, PING, WGET)',
                     'TCP/IP-Netzwerk (Intel PRO/1000, AMD PCnet)', 'Red TCP/IP (Intel PRO/1000, AMD PCnet)',

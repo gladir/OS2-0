@@ -12,8 +12,9 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               PMCTLS.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL,
               ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, TLS32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
-              INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE,
-              DIGAUDIO.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
+              INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, SUDOKU.EXE,
+              DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
+              NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
@@ -72,7 +73,9 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC KLONDIKE.PAS                        -> KLONDIKE.EXE (Solitaire - Klondike)
   OS2PC ECHECS.PAS                          -> ECHECS.EXE (Echecs)
   OS2PC MAHJONGG.PAS                        -> MAHJONGG.EXE (Mahjongg Solitaire)
+  OS2PC SUDOKU.PAS                          -> SUDOKU.EXE (Sudoku)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
+  OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
   OS2PC DLL\SBAUDIO.PAS                     -> SBAUDIO.DLL (pilote Sound Blaster)
   OS2PC DLL\ICHAUDIO.PAS                    -> ICHAUDIO.DLL (pilote AC'97 Intel ICH)
@@ -789,7 +792,12 @@ traditionnels, composant Jeux de l'installation) :
   Mahjongg Solitaire (MAHJONGG.EXE) : 144 tuiles, disposition de la
   tortue (5 etages) ; retirer les paires de tuiles libres ; donnes
   toujours faisables ; I indice, Ctrl+Z annuler, recommencer.
-Parametre /SEED:n (Klondike, Mahjongg) : donne reproductible.
+  Sudoku (SUDOKU.EXE) : grille de 9 x 9 a solution unique, construite au
+  hasard (Facile, Moyen, Difficile) ; cliquer une case puis un chiffre du
+  pave ou taper 1 a 9 ; bouton 2, Suppr ou Espace : effacer ; chiffres
+  en conflit en rouge ; I indice, V verifier, Ctrl+Z annuler, Solution,
+  chronometre. Porte du prototype SODOKU.PAS de 7iles.
+Parametre /SEED:n (Klondike, Mahjongg, Sudoku) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------
@@ -811,6 +819,25 @@ CONFIG.SYS : SET AUDIODRIVER=SBAUDIO, ICHAUDIO, ESAUDIO ou NONE (sans
 elle : detection, dans cet ordre : ICHAUDIO, ESAUDIO, SBAUDIO).
 QEMU : -audiodev pa,id=son -device sb16,audiodev=son (ou AC97, ES1370) ;
 -audiodev wav,id=son,path=sortie.wav enregistre le son produit.
+
+Notator for OS2-Zero (NOTATOR.EXE, dossier Multimedia) : portage de
+NOTATOR.PAS du depot OFFICE-0, clone du sequenceur MIDI et editeur de
+partition Notator SL. Syntaxe : NOTATOR [fichier.SON | fichier.MID]
+[/PLAY]. Toutes les fonctions de la version DOS : arrangement (4 chaines
+de 99 patterns de 16 pistes), partition (F2), matrice (F3), liste
+d'evenements (F4), palette de symboles, hyper-editeur, quantification et
+groove, transposition, copies de pistes, patterns et mesures,
+enregistrement au clavier (Z..M, Q..P ; * enregistre), metronome,
+boucle, punch, fichiers .SON et MIDI, impression, options (NOTATOR.OPT),
+langues (LANGUAGE=EN, FR, GR). Pour OS/2 : fenetre de PM, barre de menus
+de PM faite des menus d'origine (F12 l'ouvre, F5 a F10 : valeur de
+note), boites de dialogue dans le style d'OS/2, dessin du BGI dans une
+image de 640 x 480 montree par GpiDrawBits, son du synthetiseur logiciel
+par MDM.DLL sur la carte son (MPU-401 : version DOS seulement). Les
+fichiers .SON gardent la disposition de la version DOS (identiques octet
+par octet). Exemples d'OFFICE-0 (IMAGE\NOTATOR, a la racine) : BLUES_C,
+CANON_RE, FREREJAC (FRERE_JACQUES), GROOVES, ODE_JOIE, TWINKLE, en .SON et
+.MID ; voir NOTATOR.TXT.
 
 VirtualBox (VBOXGST.DLL)
 ------------------------
@@ -1021,6 +1048,12 @@ EXPLORER [dossier] a l'invite.
   - Retour arriere : dossier parent ; F5 : actualiser ; Tab : arbre ou
     contenu ; Alt+Entree : Proprietes ; bouton 2 : Ouvrir, Proprietes ;
   - menus Fichier, Affichage, Aller a, ?.
+  - Proprietes d'un lecteur : boite "Proprietes de (C:)" de Pasdows 95,
+    onglets General (nom du volume modifiable, type, espace utilise en
+    bleu et libre en magenta, en octets et en Ko/Mo/Go, capacite,
+    camembert en relief), Outils (Verifier maintenant : CHKDSK) et
+    Partage ; OK, Annuler, Appliquer. Aussi par le menu contextuel d'un
+    lecteur du dossier Lecteurs du bureau (EXPLORER /PROPS:C:).
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------
