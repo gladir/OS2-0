@@ -152,7 +152,7 @@ Const
   OB_DEVKIT = 30; IC_PASDEV = 29;
   OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
   IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
-  IC_YAHTZEE = 41;
+  IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1147,6 +1147,8 @@ Begin
         If FileExists('C:\BILLARD.EXE') Then Dummy := NewItem(V, IC_BILLARD, OB_GAME, 'Billard', 'C:\BILLARD.EXE');
         If FileExists('C:\CHECKERS.EXE') Then Dummy := NewItem(V, IC_CHECKERS, OB_GAME, 'Checkers', 'C:\CHECKERS.EXE');
         If FileExists('C:\YATHZEE.EXE') Then Dummy := NewItem(V, IC_YAHTZEE, OB_GAME, 'Yahtzee', 'C:\YATHZEE.EXE');
+        If FileExists('C:\BATTLE.EXE') Then Dummy := NewItem(V, IC_BATTLE, OB_GAME, 'Bataille navale', 'C:\BATTLE.EXE');
+        If FileExists('C:\POWER4.EXE') Then Dummy := NewItem(V, IC_POWER4, OB_GAME, 'Puissance 4', 'C:\POWER4.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1509,6 +1511,39 @@ Begin
         GDisc(Hps, X + 6, Y + 6, 2, CLR_WHITE);
         GDisc(Hps, X + 19, Y + 13, 3, CLR_BLACK);
         GDisc(Hps, X + 19, Y + 13, 2, CLR_WHITE);
+      End;
+    IC_BATTLE :
+      Begin
+        { mer quadrillee, navire, coup au but et coup dans l'eau }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_DARKBLUE, CLR_BLACK);
+        GLn(Hps, X + 9, Y + 3, X + 9, Y + 28, CLR_BLUE);
+        GLn(Hps, X + 16, Y + 3, X + 16, Y + 28, CLR_BLUE);
+        GLn(Hps, X + 23, Y + 3, X + 23, Y + 28, CLR_BLUE);
+        GLn(Hps, X + 3, Y + 9, X + 28, Y + 9, CLR_BLUE);
+        GLn(Hps, X + 3, Y + 16, X + 28, Y + 16, CLR_BLUE);
+        GLn(Hps, X + 3, Y + 23, X + 28, Y + 23, CLR_BLUE);
+        GBox(Hps, X + 4, Y + 18, X + 21, Y + 22, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 22, Y + 19, X + 25, Y + 20, CLR_PALEGRAY);
+        GLn(Hps, X + 22, Y + 21, X + 25, Y + 20, CLR_PALEGRAY);
+        GLn(Hps, X + 4, Y + 18, X + 21, Y + 18, CLR_BLACK);
+        GDisc(Hps, X + 12, Y + 20, 2, CLR_RED);
+        GDisc(Hps, X + 12, Y + 20, 1, CLR_YELLOW);
+        GDisc(Hps, X + 20, Y + 8, 2, CLR_WHITE);
+        GDisc(Hps, X + 8, Y + 6, 1, CLR_WHITE);
+      End;
+    IC_POWER4 :
+      Begin
+        { grille bleue, jetons rouges et jaunes }
+        FBox(Hps, X + 2, Y + 3, X + 29, Y + 28, CLR_BLUE, CLR_DARKBLUE);
+        GDisc(Hps, X + 8, Y + 9, 3, CLR_RED);
+        GDisc(Hps, X + 16, Y + 9, 3, CLR_YELLOW);
+        GDisc(Hps, X + 24, Y + 9, 3, CLR_RED);
+        GDisc(Hps, X + 8, Y + 16, 3, CLR_WHITE);
+        GDisc(Hps, X + 16, Y + 16, 3, CLR_RED);
+        GDisc(Hps, X + 24, Y + 16, 3, CLR_YELLOW);
+        GDisc(Hps, X + 8, Y + 23, 3, CLR_WHITE);
+        GDisc(Hps, X + 16, Y + 23, 3, CLR_WHITE);
+        GDisc(Hps, X + 24, Y + 23, 3, CLR_RED);
       End;
     IC_YAHTZEE :
       Begin

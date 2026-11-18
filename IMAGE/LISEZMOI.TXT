@@ -14,7 +14,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, SUDOKU.EXE,
               OTHELLO.EXE, TILEMAN.EXE, HEX2048.EXE, BACKGAM.EXE, POKER.EXE,
-              BILLARD.EXE, CHECKERS.EXE, YATHZEE.EXE,
+              BILLARD.EXE, CHECKERS.EXE, YATHZEE.EXE, BATTLE.EXE, POWER4.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
@@ -84,6 +84,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC BILLARD.PAS                         -> BILLARD.EXE (Billard)
   OS2PC CHECKERS.PAS                        -> CHECKERS.EXE (Checkers)
   OS2PC YATHZEE.PAS                         -> YATHZEE.EXE (Yahtzee)
+  OS2PC BATTLE.PAS                          -> BATTLE.EXE (Bataille navale)
+  OS2PC POWER4.PAS                          -> POWER4.EXE (Puissance 4)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -845,8 +847,18 @@ traditionnels, composant Jeux de l'installation) :
   garder des des d'un clic (ou 1 a 5), inscrire le resultat dans une case
   de la feuille (points possibles affiches) ; seul, contre l'ordinateur
   ou a deux. Porte du prototype YATHZEE.PAS de 7iles. /AUTO.
+  Bataille navale (BATTLE.EXE) : placer sa flotte (5 navires, chacun sa
+  silhouette) a la souris ou au hasard (A), R pivote ; puis tirer sur la
+  grille adverse ; tir en salve ; humain contre ordinateur, deux joueurs
+  (rideau entre les tours) ou ordinateur contre ordinateur ; en francais,
+  anglais, espagnol, italien et allemand (menu Langue, SET LANGUAGE= ou
+  /LANG:FR, EN, ES, IT, DE). /AUTO.
+  Puissance 4 (POWER4.EXE) : aligner quatre jetons ; cliquer une colonne
+  ou fleches et Entree ; contre l'ordinateur (alpha-beta, trois niveaux)
+  ou a deux ; Ctrl+Z annuler. Porte du prototype POWER4.PAS de 7iles.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
-Backgammon, Poker, Billard, Checkers, Yahtzee) : donne reproductible.
+Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
+Puissance 4) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------
