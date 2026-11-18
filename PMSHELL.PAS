@@ -151,7 +151,8 @@ Const
   OB_DOSFS = 28; OB_DOSWIN = 29; IC_TASKMGR = 27; IC_WEB = 28;
   OB_DEVKIT = 30; IC_PASDEV = 29;
   OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
-  IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37;
+  IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
+  IC_YAHTZEE = 41;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1142,6 +1143,10 @@ Begin
         If FileExists('C:\TILEMAN.EXE') Then Dummy := NewItem(V, IC_TILEMAN, OB_GAME, 'TileMan', 'C:\TILEMAN.EXE');
         If FileExists('C:\HEX2048.EXE') Then Dummy := NewItem(V, IC_HEX2048, OB_GAME, 'Hex 2048', 'C:\HEX2048.EXE');
         If FileExists('C:\BACKGAM.EXE') Then Dummy := NewItem(V, IC_BACKGAM, OB_GAME, 'Backgammon', 'C:\BACKGAM.EXE');
+        If FileExists('C:\POKER.EXE') Then Dummy := NewItem(V, IC_POKER, OB_GAME, 'Poker', 'C:\POKER.EXE');
+        If FileExists('C:\BILLARD.EXE') Then Dummy := NewItem(V, IC_BILLARD, OB_GAME, 'Billard', 'C:\BILLARD.EXE');
+        If FileExists('C:\CHECKERS.EXE') Then Dummy := NewItem(V, IC_CHECKERS, OB_GAME, 'Checkers', 'C:\CHECKERS.EXE');
+        If FileExists('C:\YATHZEE.EXE') Then Dummy := NewItem(V, IC_YAHTZEE, OB_GAME, 'Yahtzee', 'C:\YATHZEE.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1455,6 +1460,69 @@ Begin
         GLn(Hps, X + 8, Y + 16, X + 10, Y + 16, CLR_BLACK);
         GLn(Hps, X + 8, Y + 16, X + 8, Y + 13, CLR_BLACK);
         GLn(Hps, X + 8, Y + 13, X + 10, Y + 13, CLR_BLACK);
+      End;
+    IC_POKER :
+      Begin
+        { deux cartes en eventail et un jeton }
+        FBox(Hps, X + 3, Y + 7, X + 17, Y + 28, CLR_WHITE, CLR_BLACK);
+        GText(Hps, X + 5, Y + 12, Chr(3), CLR_RED, CLR_WHITE);
+        FBox(Hps, X + 12, Y + 3, X + 26, Y + 24, CLR_WHITE, CLR_BLACK);
+        GText(Hps, X + 15, Y + 7, Chr(6), CLR_BLACK, CLR_WHITE);
+        GDisc(Hps, X + 25, Y + 6, 5, CLR_BLACK);
+        GDisc(Hps, X + 25, Y + 6, 4, CLR_RED);
+        GDisc(Hps, X + 25, Y + 6, 1, CLR_WHITE);
+      End;
+    IC_BILLARD :
+      Begin
+        { table verte, bandes, poches, queue et boules }
+        FBox(Hps, X + 1, Y + 5, X + 30, Y + 26, CLR_BROWN, CLR_BLACK);
+        GBox(Hps, X + 4, Y + 8, X + 27, Y + 23, CLR_DARKGREEN, DRO_FILL);
+        GDisc(Hps, X + 4, Y + 8, 2, CLR_BLACK);
+        GDisc(Hps, X + 27, Y + 8, 2, CLR_BLACK);
+        GDisc(Hps, X + 4, Y + 23, 2, CLR_BLACK);
+        GDisc(Hps, X + 27, Y + 23, 2, CLR_BLACK);
+        GDisc(Hps, X + 15, Y + 8, 2, CLR_BLACK);
+        GDisc(Hps, X + 15, Y + 23, 2, CLR_BLACK);
+        GDisc(Hps, X + 19, Y + 17, 2, CLR_YELLOW);
+        GDisc(Hps, X + 23, Y + 15, 2, CLR_RED);
+        GDisc(Hps, X + 22, Y + 19, 2, CLR_BLACK);
+        GDisc(Hps, X + 10, Y + 14, 2, CLR_WHITE);
+        GLn(Hps, X + 1, Y + 9, X + 7, Y + 13, CLR_YELLOW);
+      End;
+    IC_CHECKERS :
+      Begin
+        { damier de 4 x 4, pions rouges et blancs }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 3, X + 9, Y + 9, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 17, Y + 3, X + 22, Y + 9, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 10, Y + 10, X + 16, Y + 16, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 23, Y + 10, X + 28, Y + 16, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 3, Y + 17, X + 9, Y + 22, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 17, Y + 17, X + 22, Y + 22, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 10, Y + 23, X + 16, Y + 28, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 23, Y + 23, X + 28, Y + 28, CLR_DARKGRAY, DRO_FILL);
+        GDisc(Hps, X + 13, Y + 25, 3, CLR_BLACK);
+        GDisc(Hps, X + 13, Y + 25, 2, CLR_RED);
+        GDisc(Hps, X + 26, Y + 25, 3, CLR_BLACK);
+        GDisc(Hps, X + 26, Y + 25, 2, CLR_RED);
+        GDisc(Hps, X + 6, Y + 6, 3, CLR_BLACK);
+        GDisc(Hps, X + 6, Y + 6, 2, CLR_WHITE);
+        GDisc(Hps, X + 19, Y + 13, 3, CLR_BLACK);
+        GDisc(Hps, X + 19, Y + 13, 2, CLR_WHITE);
+      End;
+    IC_YAHTZEE :
+      Begin
+        { deux des }
+        FBox(Hps, X + 2, Y + 12, X + 17, Y + 27, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 6, Y + 23, 1, CLR_BLACK);
+        GDisc(Hps, X + 10, Y + 19, 1, CLR_BLACK);
+        GDisc(Hps, X + 14, Y + 16, 1, CLR_BLACK);
+        FBox(Hps, X + 13, Y + 2, X + 28, Y + 17, CLR_RED, CLR_BLACK);
+        GDisc(Hps, X + 17, Y + 13, 1, CLR_WHITE);
+        GDisc(Hps, X + 24, Y + 13, 1, CLR_WHITE);
+        GDisc(Hps, X + 17, Y + 6, 1, CLR_WHITE);
+        GDisc(Hps, X + 24, Y + 6, 1, CLR_WHITE);
+        GDisc(Hps, X + 20, Y + 9, 1, CLR_WHITE);
       End;
     IC_BACKGAM :
       Begin
@@ -1906,8 +1974,14 @@ Begin
     Exit;
   End;
   N := NViews Mod 6;
-  If OpenFrame(V, 'WPFolder', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON Or FCF_MAXBUTTON Or FCF_SIZEBORDER Or
-               FCF_VERTSCROLL, 130 + N * 24, ScrH - 330 - N * 24, 420, 300) Then
+  { le dossier Jeux (douze jeux) s'ouvre plus grand : quatre colonnes }
+  If Kind = VK_GAMES Then
+  Begin
+    If Not OpenFrame(V, 'WPFolder', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON Or FCF_MAXBUTTON Or
+                     FCF_SIZEBORDER Or FCF_VERTSCROLL, 24 + N * 20, MaxI(0, ScrH - 420 - N * 20), 520, 370) Then Exit;
+  End
+  Else If Not OpenFrame(V, 'WPFolder', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON Or FCF_MAXBUTTON Or FCF_SIZEBORDER Or
+               FCF_VERTSCROLL, 130 + N * 24, ScrH - 330 - N * 24, 420, 300) Then Exit;
   Begin
     Populate(V);
     { premier objet choisi (clavier) }

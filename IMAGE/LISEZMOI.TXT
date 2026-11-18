@@ -13,7 +13,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, TLS32.DLL,
               E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE,
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, SUDOKU.EXE,
-              OTHELLO.EXE, TILEMAN.EXE, HEX2048.EXE, BACKGAM.EXE,
+              OTHELLO.EXE, TILEMAN.EXE, HEX2048.EXE, BACKGAM.EXE, POKER.EXE,
+              BILLARD.EXE, CHECKERS.EXE, YATHZEE.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
@@ -79,6 +80,10 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC TILEMAN.PAS                         -> TILEMAN.EXE (TileMan)
   OS2PC HEX2048.PAS                         -> HEX2048.EXE (Hex 2048)
   OS2PC BACKGAM.PAS                         -> BACKGAM.EXE (Backgammon)
+  OS2PC POKER.PAS                           -> POKER.EXE (Poker)
+  OS2PC BILLARD.PAS                         -> BILLARD.EXE (Billard)
+  OS2PC CHECKERS.PAS                        -> CHECKERS.EXE (Checkers)
+  OS2PC YATHZEE.PAS                         -> YATHZEE.EXE (Yahtzee)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -824,8 +829,24 @@ traditionnels, composant Jeux de l'installation) :
   blanc puis sa case d'arrivee (point jaune) ; Ctrl+Z annule le tour.
   Porte du prototype BACKGAM.PAS de 7iles. /AUTO : l'ordinateur joue
   les deux couleurs.
+  Poker (POKER.EXE) : poker a cinq cartes contre l'ordinateur ; mise
+  (10 a 100 $), cartes a echanger (clic ou 1 a 5), puis Abattre,
+  Relancer ou Se coucher ; mains nommees, hauteurs departagent. Porte du
+  prototype POKER.PAS de 7iles.
+  Billard (BILLARD.EXE) : billard americain a 8 boules contre
+  l'ordinateur ou a deux ; viser a la souris, maintenir le bouton pour la
+  puissance, relacher pour tirer (ou fleches, Espace, Entree) ; ligne de
+  visee ; fautes. Porte du prototype BILLARD.PAS de 7iles. /AUTO.
+  Checkers (CHECKERS.EXE) : dames anglaises contre l'ordinateur (Facile,
+  Moyen, Difficile : alpha-beta) ou a deux ; prise obligatoire, rafles,
+  dames ; cliquer un pion puis une case marquee ; Ctrl+Z annuler. Porte du
+  prototype CHECKERS.PAS de 7iles. /AUTO.
+  Yahtzee (YATHZEE.EXE) : treize tours de trois lancers de cinq des ;
+  garder des des d'un clic (ou 1 a 5), inscrire le resultat dans une case
+  de la feuille (points possibles affiches) ; seul, contre l'ordinateur
+  ou a deux. Porte du prototype YATHZEE.PAS de 7iles. /AUTO.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
-Backgammon) : donne reproductible.
+Backgammon, Poker, Billard, Checkers, Yahtzee) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------
@@ -851,7 +872,8 @@ QEMU : -audiodev pa,id=son -device sb16,audiodev=son (ou AC97, ES1370) ;
 Notator for OS2-Zero (NOTATOR.EXE, dossier Multimedia) : portage de
 NOTATOR.PAS du depot OFFICE-0, clone du sequenceur MIDI et editeur de
 partition Notator SL. Syntaxe : NOTATOR [fichier.SON | fichier.MID]
-[/PLAY]. Toutes les fonctions de la version DOS : arrangement (4 chaines
+[/PLAY] ; il s'ouvre sur l'edition de partition (F1 : arrangement).
+Toutes les fonctions de la version DOS : arrangement (4 chaines
 de 99 patterns de 16 pistes), partition (F2), matrice (F3), liste
 d'evenements (F4), palette de symboles, hyper-editeur, quantification et
 groove, transposition, copies de pistes, patterns et mesures,
