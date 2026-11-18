@@ -1076,7 +1076,7 @@ Begin
           (U = 'OTHELLO.EXE') Or (U = 'TILEMAN.EXE') Or (U = 'HEX2048.EXE') Or (U = 'BACKGAM.EXE') Or
           (U = 'POKER.EXE') Or (U = 'BILLARD.EXE') Or (U = 'CHECKERS.EXE') Or (U = 'YATHZEE.EXE') Or
           (U = 'BATTLE.EXE') Or (U = 'POWER4.EXE') Or (U = 'SOKOBAN.EXE') Or (U = 'BACCARAT.EXE') Or
-          (U = 'HANOIS.EXE') Or (U = 'BABY.EXE') Or (U = '421.EXE') Then
+          (U = 'HANOIS.EXE') Or (U = 'BABY.EXE') Or (U = '421.EXE') Or (U = 'CENTIPED.EXE') Then
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or
@@ -1216,12 +1216,12 @@ Begin
                     'Virtuelle Platte im Speicher (4 MB)', 'Disco virtual en memoria (4 MB)',
                     'Disco virtuale in memoria (4 MB)', 'Disk virtual n'#137' kujtes'#137' (4 MB)'), OptRam <> 0,
                     BS_AUTOCHECKBOX);
-        Hw := Check(30, Y + 130, ID_CGAMES, L('Dix-neuf jeux (Klondike, Echecs, Backgammon, Billard...)',
-                    'Nineteen games (Klondike, Chess, Backgammon, Pool...)',
-                    'Neunzehn Spiele (Klondike, Schach, Backgammon...)',
-                    'Diecinueve juegos (Klondike, Ajedrez, Backgammon...)',
-                    'Diciannove giochi (Klondike, Scacchi, Backgammon...)',
-                    'N'#137'nt'#137'mb'#137'dhjet'#137' loj'#137'ra (Klondike, Shah...)'), OptGames <> 0, BS_AUTOCHECKBOX);
+        Hw := Check(30, Y + 130, ID_CGAMES, L('Vingt jeux (Klondike, Echecs, Backgammon, Billard...)',
+                    'Twenty games (Klondike, Chess, Backgammon, Pool...)',
+                    'Zwanzig Spiele (Klondike, Schach, Backgammon...)',
+                    'Veinte juegos (Klondike, Ajedrez, Backgammon...)',
+                    'Venti giochi (Klondike, Scacchi, Backgammon...)',
+                    'Nj'#137'zet loj'#137'ra (Klondike, Shah...)'), OptGames <> 0, BS_AUTOCHECKBOX);
         Hw := Check(30, Y + 156, ID_CMM, L('Multim'#130'dia (Audio num'#130'rique, Notator, pilotes des cartes son)',
                     'Multimedia (Digital Audio, Notator, sound card drivers)',
                     'Multimedia (Digital Audio, Notator, Soundkarten)',
