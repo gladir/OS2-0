@@ -5856,7 +5856,8 @@ End;
   source (Sx1, Sy1)-(Sx2, Sy2) ; HasSrc : la source existe ; MonoBg :
   couleur RVB du fond de la source pour une cible monochrome }
 Procedure BltDo(K, X1, Y1, X2, Y2, Sx1, Sy1, Sx2, Sy2, Rop : LongInt; HasSrc : Boolean; SrcBack : LongInt);
-Var X, Y, Sx, Sy, Rgb, S, D, P, Msk, Fg, Bg, Ifg, Ibg, Tw, Th, Sw, Sh, Row, Px, Py : LongInt; On, UsesD : Boolean;
+Var X, Y, Sx, Sy, Rgb, S, D, P, Msk, Fg, Bg, Ifg, Ibg, Tw, Th, Sw, Sh, Row, Px, Py, I : LongInt; On, UsesD : Boolean;
+  Lut : Array[0..255] Of LongInt;
 Begin
   If (X2 <= X1) Or (Y2 <= Y1) Then Exit;
   Msk := DevMask;
@@ -5867,6 +5868,37 @@ Begin
   If Sw <= 0 Then Sw := Tw;
   If Sh <= 0 Then Sh := Th;
   UsesD := ((Rop Shr 1) And $55) <> (Rop And $55);
+  { chemin rapide (GpiDrawBits d'une image en memoire, SRCCOPY, sans
+    etirement, 1, 4 ou 8 bits par point) : couleurs converties une fois
+    par entree de la palette, et non pour chaque point }
+  If HasSrc And (SrKind = 99) And (SrBpp <= 8) And (Sw = Tw) And (Sh = Th) And (Rop = $CC) And
+     (RMode <> 2) And (Msk <> 1) Then
+  Begin
+    For I := 0 To (1 Shl SrBpp) - 1 Do Lut[I] := DevVal(HdrColor(SrPbmi, I)) And Msk;
+    On := False;
+    For Y := Y1 To Y2 - 1 Do
+    Begin
+      Py := Y + TgOffY;
+      Sy := Sy1 + Y - Y1;
+      If (Sy >= 0) And (Sy < SrH) Then Row := SrBase + Sy * SrStride Else Row := -1;
+      For X := X1 To X2 - 1 Do
+      Begin
+        Px := X + TgOffX;
+        If InClip(Px, Py) Then
+        Begin
+          Sx := Sx1 + X - X1;
+          If (Row <> -1) And (Sx >= 0) And (Sx < SrW) Then S := Lut[RowPix(Row, SrBpp, Sx)] Else S := 0;
+          TgPut(Px, Py, S);
+          On := True;
+        End;
+      End;
+    End;
+    If On Then
+    Begin
+      BndAdd(X1, Y1); BndAdd(X2 - 1, Y2 - 1);
+    End;
+    Exit;
+  End;
   For Y := Y1 To Y2 - 1 Do
   Begin
     Py := Y + TgOffY;

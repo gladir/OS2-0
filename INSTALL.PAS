@@ -42,7 +42,7 @@ Program INSTALL;
        Mahjongg, Sudoku : dossier Jeux de Systeme OS/2), multimedia (Audio
        numerique, MDM.DLL, pilotes des cartes son, sons), reseau TCP/IP
        (TCPIP32.DLL, pilotes E1000 et PCNET, IFCONFIG, PING, HOST,
-       WGET) ;
+       WGET, messagerie Outlink) ;
     6. Transfert des fichiers (barre de progression aux logos OS/2) :
        copie des fichiers du CD-ROM, CONFIG.SYS du disque dur, zone
        d'amorcage (secteurs 1 et suivants du disque : repertoire
@@ -1082,7 +1082,7 @@ Begin
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or
           (Pos('.SON', U) > 0) Or (Pos('.MID', U) > 0) Then Wanted := OptMM <> 0
   Else If (U = 'TCPIP32.DLL') Or (U = 'E1000.DLL') Or (U = 'PCNET.DLL') Or (U = 'IFCONFIG.EXE') Or (U = 'PING.EXE') Or
-          (U = 'HOST.EXE') Or (U = 'WGET.EXE') Then Wanted := OptNet <> 0
+          (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Then Wanted := OptNet <> 0
   Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or
           (U = 'PASDEV.EXE') Or (U = 'OS2PC.EXE') Or (U = 'CALC.EXE') Or (U = 'EXPLORER.EXE') Then Wanted := True
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
@@ -1228,10 +1228,10 @@ Begin
                     'Multimedia (Audio digital, Notator, tarjetas de sonido)',
                     'Multimedia (Audio digitale, Notator, schede audio)',
                     'Multimedia (Audio dixhital, Notator, kartat e z'#137'rit)'), OptMM <> 0, BS_AUTOCHECKBOX);
-        Hw := Check(30, Y + 182, ID_CNET, L('R'#130'seau TCP/IP (Intel PRO/1000, AMD PCnet ; IFCONFIG, PING, WGET)',
-                    'TCP/IP networking (Intel PRO/1000, AMD PCnet ; IFCONFIG, PING, WGET)',
-                    'TCP/IP-Netzwerk (Intel PRO/1000, AMD PCnet)', 'Red TCP/IP (Intel PRO/1000, AMD PCnet)',
-                    'Rete TCP/IP (Intel PRO/1000, AMD PCnet)', 'Rrjeti TCP/IP (Intel PRO/1000, AMD PCnet)'), OptNet <> 0,
+        Hw := Check(30, Y + 182, ID_CNET, L('R'#130'seau TCP/IP (PRO/1000, PCnet ; Outlink, IFCONFIG, PING, WGET)',
+                    'TCP/IP networking (PRO/1000, PCnet ; Outlink, IFCONFIG, PING, WGET)',
+                    'TCP/IP-Netzwerk (PRO/1000, PCnet ; Outlink)', 'Red TCP/IP (PRO/1000, PCnet ; Outlink)',
+                    'Rete TCP/IP (PRO/1000, PCnet ; Outlink)', 'Rrjeti TCP/IP (PRO/1000, PCnet ; Outlink)'), OptNet <> 0,
                     BS_AUTOCHECKBOX);
         Hw := Button(40, CH - 40, 0, ID_CGO, L('Installer', 'Install', 'Installieren', 'Instalar', 'Installa', 'Instalo'));
         Dummy := WinSetFocus(HWND_DESKTOP, Hw);

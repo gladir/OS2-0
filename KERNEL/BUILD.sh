@@ -29,7 +29,10 @@
 #     environnement de developpement du dossier Developer Kit), CALC.PAS
 #     (Calculatrice portee de Pasdows 95, dossier Productivite) et
 #     EXPLORER.PAS (Explorateur OS2-0, porte de l'Explorateur Pasdows :
-#     dossier Productivite et menu contextuel du bureau) ;
+#     dossier Productivite et menu contextuel du bureau) et OUTLINK.PAS
+#     (Outlink, client de messagerie porte de OUTLOOK.PAS du depot
+#     OFFICE-0 : IMAP, POP3 et SMTP par TCPIP32.DLL, TLS et STARTTLS par
+#     TLS32.DLL ; dossier Productivite) ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS) sont copies sur le CD-ROM ;
