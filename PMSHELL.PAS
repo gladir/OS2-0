@@ -153,7 +153,7 @@ Const
   OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
   IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
   IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43; IC_SOKOBAN = 44;
-  IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48;
+  IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1156,6 +1156,8 @@ Begin
           Dummy := NewItem(V, IC_HANOIS, OB_GAME, 'Tours de Hanoi', 'C:\HANOIS.EXE');
         If FileExists('C:\BABY.EXE') Then Dummy := NewItem(V, IC_BABY, OB_GAME, 'Baby', 'C:\BABY.EXE');
         If FileExists('C:\421.EXE') Then Dummy := NewItem(V, IC_421, OB_GAME, '421', 'C:\421.EXE');
+        If FileExists('C:\CENTIPED.EXE') Then
+          Dummy := NewItem(V, IC_CENTIPED, OB_GAME, 'Mille-pattes', 'C:\CENTIPED.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1613,6 +1615,23 @@ Begin
         GDisc(Hps, X + 20, Y + 20, 1, CLR_BLACK);
         FBox(Hps, X + 9, Y + 1, X + 22, Y + 14, CLR_WHITE, CLR_BLACK);
         GDisc(Hps, X + 15, Y + 7, 2, CLR_RED);
+      End;
+    IC_CENTIPED :
+      Begin
+        { terre de nuit, champignon, mille-pattes et canon }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_BLACK, CLR_DARKGRAY);
+        GDisc(Hps, X + 8, Y + 22, 3, CLR_GREEN);
+        GDisc(Hps, X + 14, Y + 22, 3, CLR_GREEN);
+        GDisc(Hps, X + 20, Y + 22, 3, CLR_GREEN);
+        GDisc(Hps, X + 26, Y + 22, 3, CLR_YELLOW);
+        GLn(Hps, X + 25, Y + 25, X + 24, Y + 28, CLR_RED);
+        GLn(Hps, X + 27, Y + 25, X + 28, Y + 28, CLR_RED);
+        GDisc(Hps, X + 9, Y + 12, 4, CLR_RED);
+        GBox(Hps, X + 5, Y + 8, X + 13, Y + 11, CLR_BLACK, DRO_FILL);
+        GBox(Hps, X + 8, Y + 6, X + 10, Y + 10, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 21, Y + 3, X + 25, Y + 6, CLR_BLUE, DRO_FILL);
+        GLn(Hps, X + 23, Y + 6, X + 23, Y + 12, CLR_PALEGRAY);
+        GLn(Hps, X + 23, Y + 14, X + 23, Y + 16, CLR_YELLOW);
       End;
     IC_POWER4 :
       Begin
@@ -2092,7 +2111,7 @@ Begin
     Exit;
   End;
   N := NViews Mod 6;
-  { le dossier Jeux (dix-neuf jeux) s'ouvre plus grand : cinq colonnes }
+  { le dossier Jeux (vingt jeux) s'ouvre plus grand : cinq colonnes }
   If Kind = VK_GAMES Then
   Begin
     If Not OpenFrame(V, 'WPFolder', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON Or FCF_MAXBUTTON Or
