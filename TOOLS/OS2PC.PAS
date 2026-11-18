@@ -2361,7 +2361,7 @@ End;
 
 { Etat du commutateur I (verification des E/S) par position dans le pool de jetons (cible Win32) }
 Const
-  MAX_SWITCH = 16384;
+  MAX_SWITCH = {$IFDEF OS2PC}256{$ELSE}16384{$ENDIF};   { OS2PC natif : tables reduites }
 Var
   IoSwitchPos : Array[0..MAX_SWITCH - 1] Of LongInt;
   IoSwitchOn  : Array[0..MAX_SWITCH - 1] Of Boolean;
@@ -6282,9 +6282,11 @@ End;
 { EncodeConstInitAt encode l initialiseur d une constante typee. }
 { ============================================================ }
 
+Const
+  MAX_PENDPTR = {$IFDEF OS2PC}256{$ELSE}4096{$ENDIF};   { pointeurs ^T en attente }
 Var
-  PendPtr2Idx  : Array[0..4095] Of LongInt;   { pointeurs ^T vers types non encore declares }
-  PendPtr2Name : Array[0..4095] Of String[63];
+  PendPtr2Idx  : Array[0..MAX_PENDPTR - 1] Of LongInt;   { pointeurs ^T vers types non encore declares }
+  PendPtr2Name : Array[0..MAX_PENDPTR - 1] Of String[63];
   PendPtr2Cnt  : LongInt;
 
 Procedure ResolvePendingPtrTypes;
@@ -6322,7 +6324,7 @@ Function ConstTokExprAt(Var I : LongInt) : LongInt; Forward;
   avant les sections CONST) : index des declarations NOM = expr ; des
   sections CONST, construit au premier besoin. }
 Const
-  MAX_FWDCONST = 16384;
+  MAX_FWDCONST = {$IFDEF OS2PC}1024{$ELSE}16384{$ENDIF};
 Var
   FwdConstBuilt : Boolean;
   FwdConstCnt   : LongInt;
@@ -6750,7 +6752,7 @@ Begin
     BT := TypeFindByName(BaseTN);
     If BaseTN = 'CHAR' Then Begin ParseTypeExprAt := TypeFindByName('PCHAR'); Exit; End;
     TI := TypeAdd(TYK_POINTER, '', 4, 4, False, BT);
-    If (BT < 0) And (TI >= 0) And (PendPtr2Cnt < 4096) Then
+    If (BT < 0) And (TI >= 0) And (PendPtr2Cnt < MAX_PENDPTR) Then
     Begin
       PendPtr2Idx[PendPtr2Cnt] := TI; PendPtr2Name[PendPtr2Cnt] := BaseTN; Inc(PendPtr2Cnt);
     End;
@@ -9906,8 +9908,8 @@ Var
   DimCount: LongInt;
   DimK    : LongInt;
   { pointeurs vers des types declares plus loin : resolus en fin d analyse }
-  PendPtrIdx  : Array[0..4095] Of LongInt;
-  PendPtrName : Array[0..4095] Of String[63];
+  PendPtrIdx  : Array[0..MAX_PENDPTR - 1] Of LongInt;
+  PendPtrName : Array[0..MAX_PENDPTR - 1] Of String[63];
   PendPtrCnt  : LongInt;
   PK          : LongInt;
 Begin
@@ -10260,7 +10262,7 @@ Begin
             Begin BaseTN := StrUpperCase(TokenPool^[I].Val); Inc(I) End;
             BTIdx := TypeFindByName(BaseTN);
             TIdx := TypeAdd(TYK_POINTER, TName, 4, 4, False, BTIdx);
-            If (BTIdx < 0) And (TIdx >= 0) And (PendPtrCnt < 4096) Then
+            If (BTIdx < 0) And (TIdx >= 0) And (PendPtrCnt < MAX_PENDPTR) Then
             Begin
               PendPtrIdx[PendPtrCnt] := TIdx; PendPtrName[PendPtrCnt] := BaseTN; Inc(PendPtrCnt);
             End;
@@ -11870,6 +11872,30 @@ Begin
     Q := ProcTab^[Q]^.ParentIdx;
     Inc(Guard);
   Until Guard > 64;
+End;
+
+{ Le symbole SI est celui d un sous-programme imbrique dans un autre, hors
+  de portee depuis PI : il ne masque pas la primitive du meme nom (Insert
+  imbrique dans une fonction n est pas visible dans les autres routines) }
+Function SymProcOutOfScope(PI, SI : LongInt) : Boolean;
+Var J, P, Q, Guard : LongInt;
+Begin
+  SymProcOutOfScope := False;
+  If SI < 0 Then Exit;
+  J := -1;
+  For Q := 0 To ProcCount - 1 Do
+    If ProcTab^[Q]^.SymIdx = SI Then Begin J := Q; Break; End;
+  If J < 0 Then Exit;
+  P := ProcTab^[J]^.ParentIdx;
+  If P < 0 Then Exit;
+  Q := PI; Guard := 0;
+  While (Q >= 0) And (Guard < 64) Do
+  Begin
+    If Q = P Then Exit;
+    Q := ProcTab^[Q]^.ParentIdx;
+    Inc(Guard);
+  End;
+  SymProcOutOfScope := True;
 End;
 
 { Signature d une variable procedurale : index ProcTab, ou -1 }
@@ -20688,7 +20714,7 @@ End;
 Function ParseLValueAddrW32(PI : LongInt; Var T : LongInt) : Boolean;
 Var
   Up : TString;
-  WI, K : LongInt;
+  WI, K, J, Depth : LongInt;
   FOfs : LongInt;
   PV : Boolean;
 Begin
@@ -20707,6 +20733,22 @@ Begin
     Inc(EP, 2);
     PV := TypeTab^[TypeResolve(K)].Kind In [TYK_POINTER, TYK_PCHAR, TYK_PROCVAR,
                                             TYK_DYNARR];
+    { la valeur du pointeur n est prise que pour PRec(P)^... ou PChar(P)[I] ;
+      sans suffixe, Pointer(V) designe la variable V elle-meme (parametre
+      VAR : GrowMem(Pointer(Tab), ...) passe l adresse de Tab) }
+    If PV Then
+    Begin
+      J := EP; Depth := 1;
+      While (J < EPEnd) And (Depth > 0) Do
+      Begin
+        If TokIsPunct(J, '(') Then Inc(Depth)
+        Else If TokIsPunct(J, ')') Then Dec(Depth);
+        Inc(J);
+      End;
+      If Not ((J < EPEnd) And (TokIsOp(J, '^') Or TokIsPunct(J, '^') Or
+                               TokIsPunct(J, '['))) Then
+        PV := False;
+    End;
     If PV Then
       ParseExpr(PI)
     Else If Not ParseLValueAddrW32(PI, WI) Then
@@ -24992,7 +25034,7 @@ Begin
     { du meme nom (InsLine, DelLine, Window... de Crt) : appel de la sienne  }
     SI := SymFind(Up);
     If (SI >= 0) And (SymTab^[SI].Kind = SK_PROC) And (Not SymTab^[SI].IsExternal) And
-       (SymTab^[SI].UnitName = '') And
+       (SymTab^[SI].UnitName = '') And Not SymProcOutOfScope(PI, SI) And
        Not ((EP + 1 < EPEnd) And (TokenPool^[EP + 1].Kind = TK_OP) And (TokenPool^[EP + 1].Val = ':=')) And
        (Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) Then
     Begin
@@ -40039,7 +40081,7 @@ End;
 { Tables de hachage des labels (OS2PC) : la premiere definition d un nom
   reste celle trouvee, comme avec la recherche lineaire d origine. }
 Const
-  BC_HASH = 262139;
+  BC_HASH = {$IFDEF OS2PC}16381{$ELSE}262139{$ENDIF};
 Var
   BcLblHead  : Array[0..BC_HASH - 1] Of LongInt;
   BcLblNext  : Array[0..BC_MAX_LABEL - 1] Of LongInt;
