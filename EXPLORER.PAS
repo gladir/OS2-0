@@ -638,6 +638,8 @@ Begin
     Else If (X = 'HTM') Or (X = 'HTML') Then TypeName := L('Document HTML', 'HTML Document', 'HTML-Dokument',
                                                           'Documento HTML', 'Documento HTML')
     Else If X = 'WAV' Then TypeName := L('Son Wave', 'Wave Sound', 'Wave-Klang', 'Suono Wave', 'Sonido Wave')
+    Else If (X = 'BMP') Or (X = 'DIB') Then TypeName := L('Image bitmap', 'Bitmap Image', 'Bitmap-Bild', 'Immagine bitmap',
+                                                          'Imagen de mapa de bits')
     Else If X = '' Then TypeName := L('Fichier', 'File', 'Datei', 'File', 'Archivo')
     Else TypeName := L('Fichier ', '', '', 'File ', 'Archivo ') + X + L('', ' File', '-Datei', '', '');
   End;
@@ -1719,7 +1721,14 @@ Begin
       A := AppPath('NOTATOR.EXE');
       If A <> '' Then SetDir(CurPath);
     End
-    Else If (X = 'HTM') Or (X = 'HTML') Then A := AppPath('BROWSER.EXE');
+    Else If (X = 'HTM') Or (X = 'HTML') Then A := AppPath('BROWSER.EXE')
+    Else If (X = 'BMP') Or (X = 'PCX') Or (X = 'GIF') Or (X = 'PNG') Or (X = 'JPG') Or (X = 'JPE') Or
+            (X = 'TIF') Or (X = 'ICO') Or (X = 'CUR') Or (X = 'PPM') Or (X = 'LBM') Or (X = 'DIB') Then
+    Begin
+      { image : Paint (ses boites Ouvrir et Enregistrer montrent ce dossier) }
+      A := AppPath('PAINT.EXE');
+      If A <> '' Then SetDir(CurPath);
+    End;
     If A <> '' Then RunPm(A, P)
     Else
       Msg(L('Aucune application n''est associ'#130'e '#133' ce fichier :', 'No application is associated with ' +

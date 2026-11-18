@@ -153,7 +153,7 @@ Const
   OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
   IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
   IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43; IC_SOKOBAN = 44;
-  IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49; IC_OUTLINK = 50;
+  IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49; IC_OUTLINK = 50; IC_PAINT = 51; OB_IMAGE = 33;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -560,6 +560,20 @@ Begin
 End;
 
 { Explorateur OS2-0 (EXPLORER.EXE, dossier Productivite et menu du bureau) }
+{ Paint (PAINT.EXE, dossier Productivite) : memes emplacements }
+Function PaintPath : String;
+Var S : String;
+Begin
+  PaintPath := '';
+  If FileExists('C:\PAINT.EXE') Then PaintPath := 'C:\PAINT.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'PAINT.EXE') Then PaintPath := S + 'PAINT.EXE';
+  End;
+End;
+
 Function OutlinkPath : String;
 Var S : String;
 Begin
@@ -856,6 +870,13 @@ Begin
     { morceau de Notator ou fichier MIDI : ouvert par Notator for OS2-Zero }
     Icon := IC_NOTATOR; Obj := OB_SONG;
   End
+  Else If ((E = 'BMP') Or (E = 'PCX') Or (E = 'GIF') Or (E = 'PNG') Or (E = 'JPG') Or (E = 'JPE') Or
+           (E = 'TIF') Or (E = 'ICO') Or (E = 'CUR') Or (E = 'PPM') Or (E = 'LBM') Or (E = 'DIB')) And
+          (PaintPath <> '') Then
+  Begin
+    { image : ouverte par Paint }
+    Icon := IC_PAINT; Obj := OB_IMAGE;
+  End
   Else
   Begin
     Icon := IC_FILE; Obj := OB_DATA;
@@ -1125,7 +1146,7 @@ Begin
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
-        If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Then
+        If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Then
           Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
@@ -1184,6 +1205,8 @@ Begin
         { Outlink : client de messagerie (OUTLOOK.PAS d'OFFICE-0) ; IMAP,
           POP3 et SMTP par TCPIP32.DLL, TLS et STARTTLS par TLS32.DLL }
         If OutlinkPath <> '' Then Dummy := NewItem(V, IC_OUTLINK, OB_GAME, 'Outlink', OutlinkPath);
+        { Paint : dessin bitmap (PAINT.PAS de Pasdows 95, CloneDRAW) }
+        If PaintPath <> '' Then Dummy := NewItem(V, IC_PAINT, OB_GAME, 'Paint', PaintPath);
       End;
     VK_DEVKIT :
       Begin
@@ -1632,6 +1655,20 @@ Begin
         GDisc(Hps, X + 20, Y + 20, 1, CLR_BLACK);
         FBox(Hps, X + 9, Y + 1, X + 22, Y + 14, CLR_WHITE, CLR_BLACK);
         GDisc(Hps, X + 15, Y + 7, 2, CLR_RED);
+      End;
+    IC_PAINT :
+      Begin
+        { palette de peintre (taches de couleur) et pinceau }
+        GDisc(Hps, X + 14, Y + 13, 12, CLR_BLACK);
+        GDisc(Hps, X + 14, Y + 13, 11, CLR_YELLOW);
+        GDisc(Hps, X + 19, Y + 7, 3, CLR_PALEGRAY);
+        GDisc(Hps, X + 7, Y + 15, 3, CLR_RED);
+        GDisc(Hps, X + 12, Y + 21, 3, CLR_BLUE);
+        GDisc(Hps, X + 20, Y + 19, 3, CLR_GREEN);
+        GDisc(Hps, X + 8, Y + 8, 2, CLR_DARKBLUE);
+        GLn(Hps, X + 17, Y + 14, X + 30, Y + 29, CLR_BROWN);
+        GLn(Hps, X + 18, Y + 14, X + 30, Y + 28, CLR_BROWN);
+        GBox(Hps, X + 15, Y + 11, X + 18, Y + 14, CLR_DARKGRAY, DRO_FILL);
       End;
     IC_OUTLINK :
       Begin
@@ -2848,6 +2885,7 @@ Begin
     OB_SOUND :
       If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', It(K)^.Path) Else OpenViewer(It(K)^.Path);
     OB_SONG : RunPm('C:\NOTATOR.EXE', It(K)^.Path);
+    OB_IMAGE : RunPm(PaintPath, It(K)^.Path);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
