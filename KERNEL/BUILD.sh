@@ -14,7 +14,8 @@
 #     Klondike), ECHECS.PAS (Echecs), MAHJONGG.PAS (Mahjongg Solitaire) et
 #     SUDOKU.PAS (Sudoku), OTHELLO.PAS (Othello), TILEMAN.PAS (TileMan),
 #     HEX2048.PAS (Hex 2048), BACKGAM.PAS (Backgammon), POKER.PAS (Poker),
-#     BILLARD.PAS (Billard), CHECKERS.PAS (Checkers), YATHZEE.PAS (Yahtzee), et
+#     BILLARD.PAS (Billard), CHECKERS.PAS (Checkers), YATHZEE.PAS (Yahtzee),
+#     BATTLE.PAS (Bataille navale, en cinq langues), POWER4.PAS (Puissance 4), et
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), NOTATOR.PAS
 #     (Notator for OS2-Zero, sequenceur et editeur de partition porte de
 #     NOTATOR.PAS du depot OFFICE-0, dossier Multimedia ; ses exemples de

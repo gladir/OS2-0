@@ -198,6 +198,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function Idx(X, Y : LongInt) : LongInt;
 Begin
   Idx := Y * GW + X;
@@ -988,16 +1017,18 @@ Begin
     CM_NORMAL : SetSpeed(1);
     CM_FAST : SetSpeed(2);
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Conqu' + Chr(130) + 'rez 75 % du terrain pour passer au niveau suivant. ' +
-                            'Votre disque jaune part de votre territoire (bleu) ; en dehors, il laisse ' +
-                            'une trace (cyan). Revenez dans votre territoire : la trace et toutes les ' +
-                            'zones ferm' + Chr(130) + 'es sans ennemi deviennent ' + Chr(133) + ' vous.' + Chr(10) +
-                            'Une vie de moins si un ennemi (rouge) vous touche ou touche votre trace, ou ' +
-                            'si vous recoupez votre trace. Trois vies ; chaque niveau ajoute un ennemi ' +
-                            'plus rapide.' + Chr(10) + Chr(10) +
-                            'Clavier : fl' + Chr(138) + 'ches (direction), Espace (s''arr' + Chr(136) +
-                            'ter dans son territoire), P ou Pause, F2 (nouvelle partie).',
-                            'TileMan - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Conqu' + Chr(130) + 'rez 75 % du terrain pour passer au niveau suivant. ' +
+           'Votre disque jaune part de votre territoire (bleu) ; en dehors, il laisse ');
+      LAdd('' + 'une trace (cyan). Revenez dans votre territoire : la trace et toutes les ' + 'zones ferm' +
+           Chr(130) + 'es sans ennemi deviennent ' + Chr(133) + ' vous.' + Chr(10) +
+           'Une vie de moins si un ennemi (rouge) vous touche ou touche votre trace, ou ');
+      LAdd('' + 'si vous recoupez votre trace. Trois vies ; chaque niveau ajoute un ennemi ' + 'plus rapide.' +
+           Chr(10) + Chr(10) + 'Clavier : fl' + Chr(138) + 'ches (direction), Espace (s''arr' + Chr(136) +
+           'ter dans son territoire), P ou Pause, F2 (nouvelle partie).');
+      Dummy := LMsgBox('TileMan - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('TileMan pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du prototype ' +
                             'TILEMAN.PAS de 7iles.' + Chr(10) +
                             'Programme ' + Chr(130) + 'crit en Pascal et compil' + Chr(130) + ' par OS2PC.',

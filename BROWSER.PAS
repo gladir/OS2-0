@@ -12506,6 +12506,35 @@ Begin
   Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(T), Z2(C), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 { fin du chargement : "termine", et pour https:// la connexion chiffree }
 Function DoneText : String;
 Begin
@@ -15887,10 +15916,15 @@ Begin
       OpenInput(DM_PROXY, 'Proxy HTTP', 'Proxy (hote:port, vide : connexion directe ; https:// par tunnel CONNECT) :',
                 PrfStr('BROWSER', 'PROXY'));
     CM_HELP :
-      ShowMsg('Tapez une adresse puis Entree. Liens : clic ; Precedent / Suivant : Alt+fleches ; Actualiser : F5 ; ' +
-              'Arreter : Echap ; defilement : fleches, Pg.prec., Pg.suiv., barre d''espacement. Formulaires : cliquez ' +
-              'un champ pour y taper, Entree l''envoie ; listes : clic (suivant), Maj+clic (precedent).',
-              'Navigateur Web - Aide', MB_OK Or MB_INFORMATION);
+      Begin
+        LClr;
+        LAdd('' +
+             'Tapez une adresse puis Entree. Liens : clic ; Precedent / Suivant : Alt+fleches ; Actualiser : F5 ; ');
+        LAdd('' +
+             'Arreter : Echap ; defilement : fleches, Pg.prec., Pg.suiv., barre d''espacement. Formulaires : cliquez ' +
+             'un champ pour y taper, Entree l''envoie ; listes : clic (suivant), Maj+clic (precedent).');
+        Dummy := LMsgBox('Navigateur Web - Aide', MB_OK Or MB_INFORMATION);
+      End;
     CM_ABOUT :
       ShowMsg('Navigateur Web d''OS/2-0 : adaptation pour Presentation Manager du navigateur BROWSER.PAS de ' +
               'DEV-COOLS (HTML, feuilles de style, images GIF, PNG, JPEG et BMP, formulaires, signets). ' +

@@ -186,6 +186,35 @@ Begin
   Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, MB_OK Or MB_INFORMATION Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 { --- dessin --- }
 Procedure GBox(Hps, X1, Y1, X2, Y2, C, Fl, R : LongInt);
 Var P : Array[0..1] Of LongInt;
@@ -836,10 +865,15 @@ Begin
         SetDraw(Id = CM_DRAW3);
         NewGame;
       End;
-    CM_RULES : ShowMsg('Faites monter les quatre couleurs sur les fondations, de l''as au roi. Dans les colonnes, ' +
-                       'posez une carte sur une carte de rang superieur et de couleur opposee ; seul un roi va dans ' +
-                       'une colonne vide. Glissez les cartes, ou cliquez une carte puis sa destination ; double clic : ' +
-                       'vers la fondation. F2 : nouvelle partie, Ctrl+Z : annuler.', 'Klondike - Regles');
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Faites monter les quatre couleurs sur les fondations, de l''as au roi. Dans les colonnes, ' +
+           'posez une carte sur une carte de rang superieur et de couleur opposee ; seul un roi va dans ');
+      LAdd('' +
+           'une colonne vide. Glissez les cartes, ou cliquez une carte puis sa destination ; double clic : ' +
+           'vers la fondation. F2 : nouvelle partie, Ctrl+Z : annuler.');
+      Dummy := LMsgBox('Klondike - Regles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : ShowMsg('Klondike, patience pour OS/2-0 (Presentation Manager). Programme ecrit en Pascal et compile ' +
                        'par OS2PC.', 'A propos de Klondike');
   End;

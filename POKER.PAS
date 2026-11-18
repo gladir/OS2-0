@@ -202,6 +202,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function Dollars(V : LongInt) : String;
 Begin
   Dollars := IStr(V) + ' $';
@@ -942,24 +971,30 @@ Begin
     CM_BET50 : SetBet(50);
     CM_BET100 : SetBet(100);
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Poker ' + Chr(133) + ' cinq cartes contre l''ordinateur. Chacun mise et re' + Chr(135) +
-                            'oit cinq cartes. Choisissez les cartes ' + Chr(133) + ' ' + Chr(130) + 'changer ' +
-                            '(clic ou touches 1 ' + Chr(133) + ' 5) puis ' + Chr(144) + 'changer ; l''ordinateur ' +
-                            Chr(130) + 'change les siennes. Ensuite : Abattre (comparer les mains), Relancer ' +
-                            '(doubler la mise ; l''ordinateur suit ou se couche) ou Se coucher (perdre la mise). ' +
-                            'La meilleure main ramasse le pot ; ' + Chr(133) + ' combinaison ' + Chr(130) + 'gale, ' +
-                            'les hauteurs des cartes d' + Chr(130) + 'partagent.' + Chr(10) + Chr(10) +
-                            'Clavier : Espace ou Entr' + Chr(130) + 'e (action principale), R (relancer), C (se ' +
-                            'coucher), F2 (nouvelle partie).', 'Poker - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
-    CM_HANDS : Dummy := Ask('Du plus faible au plus fort :' + Chr(10) +
-                            'Carte haute' + Chr(10) + 'Paire (deux cartes de m' + Chr(136) + 'me valeur)' + Chr(10) +
-                            'Double paire' + Chr(10) + 'Brelan (trois cartes de m' + Chr(136) + 'me valeur)' +
-                            Chr(10) + 'Quinte (cinq cartes qui se suivent ; l''as compte aussi pour 1)' + Chr(10) +
-                            'Couleur (cinq cartes de la m' + Chr(136) + 'me couleur)' + Chr(10) +
-                            'Full (un brelan et une paire)' + Chr(10) + 'Carr' + Chr(130) + ' (quatre cartes de ' +
-                            'm' + Chr(136) + 'me valeur)' + Chr(10) + 'Quinte flush (quinte dans une couleur)' +
-                            Chr(10) + 'Quinte flush royale (du 10 ' + Chr(133) + ' l''as)', 'Poker - Combinaisons',
-                            MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Poker ' + Chr(133) + ' cinq cartes contre l''ordinateur. Chacun mise et re' + Chr(135) +
+           'oit cinq cartes. Choisissez les cartes ' + Chr(133) + ' ' + Chr(130) + 'changer ' +
+           '(clic ou touches 1 ' + Chr(133) + ' 5) puis ' + Chr(144) + 'changer ; l''ordinateur ' + Chr(130));
+      LAdd('' + 'change les siennes. Ensuite : Abattre (comparer les mains), Relancer ' +
+           '(doubler la mise ; l''ordinateur suit ou se couche) ou Se coucher (perdre la mise). ' +
+           'La meilleure main ramasse le pot ; ' + Chr(133));
+      LAdd('' + ' combinaison ' + Chr(130) + 'gale, ' + 'les hauteurs des cartes d' + Chr(130) + 'partagent.' +
+           Chr(10) + Chr(10) + 'Clavier : Espace ou Entr' + Chr(130) +
+           'e (action principale), R (relancer), C (se ' + 'coucher), F2 (nouvelle partie).');
+      Dummy := LMsgBox('Poker - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
+    CM_HANDS : Begin
+      LClr;
+      LAdd('' + 'Du plus faible au plus fort :' + Chr(10) + 'Carte haute' + Chr(10) + 'Paire (deux cartes de m' +
+           Chr(136) + 'me valeur)' + Chr(10) + 'Double paire' + Chr(10) + 'Brelan (trois cartes de m' + Chr(136) +
+           'me valeur)' + Chr(10) + 'Quinte (cinq cartes qui se suivent ; l''as compte aussi pour 1)' + Chr(10));
+      LAdd('' + 'Couleur (cinq cartes de la m' + Chr(136) + 'me couleur)' + Chr(10) +
+           'Full (un brelan et une paire)' + Chr(10) + 'Carr' + Chr(130) + ' (quatre cartes de ' + 'm' +
+           Chr(136) + 'me valeur)' + Chr(10) + 'Quinte flush (quinte dans une couleur)' + Chr(10) +
+           'Quinte flush royale (du 10 ' + Chr(133) + ' l''as)');
+      Dummy := LMsgBox('Poker - Combinaisons', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('Poker pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du prototype ' +
                             'POKER.PAS de 7iles.' + Chr(10) + 'Programme ' + Chr(130) + 'crit en Pascal et ' +
                             'compil' + Chr(130) + ' par OS2PC.', 'A propos du Poker', MB_OK Or MB_INFORMATION);

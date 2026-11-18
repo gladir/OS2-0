@@ -10714,13 +10714,25 @@ End;
 
 { WinMessageBox(hwndParent, hwndOwner, pszText, pszCaption, idWindow,
   flStyle) : MBID_* (MBID_ERROR FFFFh) }
+{ texte d'une boite de message : la chaine T est remplie au fur et a
+  mesure depuis la memoire (texte de plus de 255 caracteres) }
+Procedure MbRefill(Var T : String; P : LongInt; Var Ps : LongInt);
+Begin
+  If P = 0 Then Exit;
+  While (Length(T) < 250) And (RdB(P + Ps) <> 0) Do
+  Begin
+    T := T + Chr(RdB(P + Ps));
+    Inc(Ps);
+  End;
+End;
+
 Function WinMessageBox(HPar, HOwn, PText, PCap, Id, Fl : LongInt) : LongInt;
-Var Txt, Cap, T, L, Ic : String; W, Lines, NB, K, X, Y, Cx, Cy, H, D, Def, R, BW, Iw, Bx, B, St, Row : LongInt;
+Var Cap, T, L, Ic : String; W, Lines, NB, K, X, Y, Cx, Cy, H, D, Def, R, BW, Iw, Bx, B, St, Row, Ps : LongInt;
     Lab : Array[0..3] Of String[15]; Ids : Array[0..3] Of LongInt;
     Buf : Array[0..259] Of Byte; Fcd : Array[0..11] Of Byte;
 Begin
   WinMessageBox := MBID_ERROR;
-  Txt := GetZ(PText); Cap := GetZ(PCap);
+  Cap := GetZ(PCap);
   If PCap = 0 Then Cap := 'Erreur';
   NB := 0;
   Case Fl And $0F Of
@@ -10764,12 +10776,14 @@ Begin
   For K := 0 To NB - 1 Do BW := BW + VisLen(Lab[K]) + 4;
   BW := BW + (NB - 1) * 2;
   W := MaxI(BW, Length(Cap) + 8);
-  T := Txt; Lines := 0; X := 0;
-  While (T <> '') And (Lines < 15) Do
+  T := ''; Ps := 0; MbRefill(T, PText, Ps);
+  Lines := 0; X := 0;
+  While (T <> '') And (Lines < 22) Do
   Begin
     L := CutLine(T, 60);
     X := MaxI(X, Length(L));
     Inc(Lines);
+    MbRefill(T, PText, Ps);
   End;
   If Lines = 0 Then Lines := 1;
   W := MinI(MaxI(W, X + Iw), 72);
@@ -10796,10 +10810,12 @@ Begin
     Dummy := WinCreateWindow(H, $FFFF0005, LongInt(@Buf), SS_TEXT Or WS_VISIBLE Or $100, 16, Cy - 48, 16, 16, H,
                              HWND_BOTTOM, $FFFF, 0, 0);
   End;
-  T := Txt; Row := 2;
+  T := ''; Ps := 0; MbRefill(T, PText, Ps);
+  Row := 2;
   While (T <> '') And (Row < Lines + 2) Do
   Begin
     L := CutLine(T, 60);
+    MbRefill(T, PText, Ps);
     PutZ(LongInt(@Buf), L);
     If Lines = 1 Then St := SS_TEXT Or WS_VISIBLE Or $100 Else St := SS_TEXT Or WS_VISIBLE;
     Dummy := WinCreateWindow(H, $FFFF0005, LongInt(@Buf), St, 16 + Iw * 8, Cy - 16 * (Row + 1), (W - Iw) * 8, 16, H,

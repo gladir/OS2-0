@@ -495,6 +495,35 @@ Begin
   Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function AskYesNo(Text, Cap : String; Fl : LongInt) : LongInt;
 Begin
   AskYesNo := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
@@ -3610,12 +3639,17 @@ End;
 
 Procedure ShowKeys;
 Begin
-  ShowMsg(Acc('F2 enregistrer, F3 ouvrir, Alt+F3 fermer, F6 fen^etre suivante, Alt+0 liste des fen^etres, ') +
-          Acc('F9 compiler, Ctrl+F9 ex^ecuter, Alt+X quitter. Ins : insertion ou refrappe. ') +
-          Acc('Maj+fl^eches : s^election ; Ctrl+Ins/Ctrl+C copier, Maj+Suppr/Ctrl+X couper, ') +
-          Acc('Maj+Ins/Ctrl+V coller, Ctrl+Suppr effacer, Ctrl+A tout s^electionner, Ctrl+Y supprimer la ligne. ') +
-          Acc('Ctrl+F rechercher, Ctrl+L suivant, Ctrl+G aller ^a la ligne, Ctrl+Entr^ee ouvrir le fichier ') +
-          Acc('au curseur. Bouton 2 de la souris ou Maj+F10 : menu contextuel.'), 'Touches', MB_OK Or MB_INFORMATION);
+  Begin
+    LClr;
+    LAdd('' + Acc('F2 enregistrer, F3 ouvrir, Alt+F3 fermer, F6 fen^etre suivante, Alt+0 liste des fen^etres, ') +
+         Acc('F9 compiler, Ctrl+F9 ex^ecuter, Alt+X quitter. Ins : insertion ou refrappe. '));
+    LAdd('' + Acc('Maj+fl^eches : s^election ; Ctrl+Ins/Ctrl+C copier, Maj+Suppr/Ctrl+X couper, ') +
+         Acc('Maj+Ins/Ctrl+V coller, Ctrl+Suppr effacer, Ctrl+A tout s^electionner, Ctrl+Y supprimer la ligne. '));
+    LAdd('' +
+         Acc('Ctrl+F rechercher, Ctrl+L suivant, Ctrl+G aller ^a la ligne, Ctrl+Entr^ee ouvrir le fichier ') +
+         Acc('au curseur. Bouton 2 de la souris ou Maj+F10 : menu contextuel.'));
+    Dummy := LMsgBox('Touches', MB_OK Or MB_INFORMATION);
+  End;
 End;
 
 Procedure Quit;

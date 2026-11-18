@@ -209,6 +209,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Procedure WrL(A, V : LongInt);
 Begin
   WrW(A, V And $FFFF);
@@ -1268,17 +1297,22 @@ Begin
     CM_NORMAL : Begin Level := 1; SetMarks; End;
     CM_GUIDE : Begin Guide := 1 - Guide; SetMarks; Show(False); End;
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Jeu de la boule 8. Apr' + Chr(138) + 's la casse, le premier qui empoche une boule ' +
-                            'prend les pleines (1 ' + Chr(133) + ' 7) ou les ray' + Chr(130) + 'es (9 ' + Chr(133) +
-                            ' 15). On rejoue tant qu''on empoche une de ses boules sans faute. Empochez toutes ' +
-                            'vos boules, puis la 8 ; empocher la 8 trop t' + Chr(147) + 't ou avec une faute fait ' +
-                            'perdre. Fautes : blanche empoch' + Chr(130) + 'e (elle revient sur son point), ' +
-                            'aucune boule touch' + Chr(130) + 'e, premi' + Chr(138) + 're boule touch' + Chr(130) +
-                            'e qui n''est pas des v' + Chr(147) + 'tres : le tour passe.' + Chr(10) + Chr(10) +
-                            'Souris : la queue suit le pointeur ; maintenez le bouton pour doser la puissance, ' +
-                            'rel' + Chr(131) + 'chez pour tirer. Clavier : fl' + Chr(138) + 'ches (viser), ' +
-                            'Espace (puissance), Entr' + Chr(130) + 'e (tirer), F2 (nouvelle partie).',
-                            'Billard - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Jeu de la boule 8. Apr' + Chr(138) + 's la casse, le premier qui empoche une boule ' +
+           'prend les pleines (1 ' + Chr(133) + ' 7) ou les ray' + Chr(130) + 'es (9 ' + Chr(133) +
+           ' 15). On rejoue tant qu''on empoche une de ses boules sans faute. Empochez toutes ');
+      LAdd('' + 'vos boules, puis la 8 ; empocher la 8 trop t' + Chr(147) + 't ou avec une faute fait ' +
+           'perdre. Fautes : blanche empoch' + Chr(130) + 'e (elle revient sur son point), ' +
+           'aucune boule touch' + Chr(130) + 'e, premi' + Chr(138) + 're boule touch' + Chr(130) +
+           'e qui n''est pas des v' + Chr(147));
+      LAdd('' + 'tres : le tour passe.' + Chr(10) + Chr(10) +
+           'Souris : la queue suit le pointeur ; maintenez le bouton pour doser la puissance, ' + 'rel' +
+           Chr(131) + 'chez pour tirer. Clavier : fl' + Chr(138) + 'ches (viser), ' + 'Espace (puissance), Entr' +
+           Chr(130));
+      LAdd('' + 'e (tirer), F2 (nouvelle partie).');
+      Dummy := LMsgBox('Billard - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('Billard pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du prototype ' +
                             'BILLARD.PAS de 7iles : billard am' + Chr(130) + 'ricain ' + Chr(133) + ' 8 boules, ' +
                             'contre l''ordinateur ou ' + Chr(133) + ' deux.' + Chr(10) + 'Programme ' + Chr(130) +

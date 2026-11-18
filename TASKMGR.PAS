@@ -1316,6 +1316,35 @@ Begin
   Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(T), Z2(C), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function Ask(T, C : String) : Boolean;
 Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(T), Z2(C), 0, MB_YESNO Or MB_WARNING Or MB_MOVEABLE) = MBID_YES;
@@ -1698,10 +1727,14 @@ Begin
         CheckSpeed;
         Redraw;
       End;
-    CM_HELP : ShowMsg('Applications : fen'#136'tres et sessions ; Processus : programmes en cours (cliquez un titre de ' +
-                      'colonne pour trier) ; Performances : processeur et m'#130'moire ; R'#130'seau : interface lan0 ; ' +
-                      'Utilisateurs : sessions. F5 actualise, Suppr termine, Ctrl+Tab change d''onglet.',
-                      'Gestionnaire des t'#131'ches - Aide', MB_OK Or MB_INFORMATION);
+    CM_HELP : Begin
+      LClr;
+      LAdd('' +
+           'Applications : fen'#136'tres et sessions ; Processus : programmes en cours (cliquez un titre de ' +
+           'colonne pour trier) ; Performances : processeur et m'#130'moire ; R'#130'seau : interface lan0 ; ');
+      LAdd('' + 'Utilisateurs : sessions. F5 actualise, Suppr termine, Ctrl+Tab change d''onglet.');
+      Dummy := LMsgBox('Gestionnaire des t'#131'ches - Aide', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : ShowMsg('Gestionnaire des t'#131'ches d''OS/2-0 : applications, processus, performances, r'#130'seau et ' +
                        'utilisateurs, avec l''apparence d''OS/2 Warp 3. Programme '#130'crit en Pascal et compil'#130' par OS2PC.',
                        'A propos du Gestionnaire des t'#131'ches', MB_OK Or MB_INFORMATION);

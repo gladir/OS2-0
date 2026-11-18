@@ -201,6 +201,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 { ==================================================================== }
 { Grille hexagonale (coordonnees axiales q, r ; |q|, |r|, |q+r| <= 2)   }
 { ==================================================================== }
@@ -707,17 +736,19 @@ Begin
     CM_NEW : NewGame;
     CM_UNDO : Undo;
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Faites glisser toutes les tuiles dans une des six directions de la grille ' +
-                            'hexagonale. Deux tuiles de m' + Chr(136) + 'me valeur qui se rencontrent ' +
-                            'fusionnent (2 + 2 = 4, 4 + 4 = 8...) et le pointage augmente de la nouvelle ' +
-                            'valeur. Chaque glissement ajoute une tuile (2, parfois 4). Atteignez 2048 ! ' +
-                            'La partie finit quand plus rien ne peut glisser.' + Chr(10) + Chr(10) +
-                            'Clavier : Q W E (haut gauche, haut, haut droite), A S D (bas gauche, bas, ' +
-                            'bas droite), ou 7 8 9 1 2 3 du pav' + Chr(130) + ' num' + Chr(130) + 'rique. ' +
-                            'Souris : cliquer sur le plateau du c' + Chr(147) + 't' + Chr(130) +
-                            ' o' + Chr(151) + ' glisser, ou sur la rose des directions. ' +
-                            'Ctrl+Z : annuler ; F2 : nouvelle partie.',
-                            'Hex 2048 - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Faites glisser toutes les tuiles dans une des six directions de la grille ' +
+           'hexagonale. Deux tuiles de m' + Chr(136) + 'me valeur qui se rencontrent ');
+      LAdd('' + 'fusionnent (2 + 2 = 4, 4 + 4 = 8...) et le pointage augmente de la nouvelle ' +
+           'valeur. Chaque glissement ajoute une tuile (2, parfois 4). Atteignez 2048 ! ' +
+           'La partie finit quand plus rien ne peut glisser.');
+      LAdd('' + Chr(10) + Chr(10) + 'Clavier : Q W E (haut gauche, haut, haut droite), A S D (bas gauche, bas, ' +
+           'bas droite), ou 7 8 9 1 2 3 du pav' + Chr(130) + ' num' + Chr(130) + 'rique. ' +
+           'Souris : cliquer sur le plateau du c' + Chr(147) + 't' + Chr(130) + ' o' + Chr(151));
+      LAdd('' + ' glisser, ou sur la rose des directions. ' + 'Ctrl+Z : annuler ; F2 : nouvelle partie.');
+      Dummy := LMsgBox('Hex 2048 - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('Hex 2048 pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du prototype ' +
                             'HEX2048.PAS de 7iles : le 2048 sur une grille hexagonale de 19 cases.' + Chr(10) +
                             'Programme ' + Chr(130) + 'crit en Pascal et compil' + Chr(130) + ' par OS2PC.',
