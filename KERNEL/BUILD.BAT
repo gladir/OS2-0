@@ -26,7 +26,8 @@ REM d'OFFICE-0, exemples .SON et .MID de IMAGE\NOTATOR), du dossier Multimedia, 
 REM Gestionnaire des taches, du dossier Systeme OS/2, BROWSER.PAS,
 REM Navigateur Web, du bureau et du dossier Systeme OS/2, PASDEV.PAS,
 REM Pascal Developer, du dossier Developer Kit, CALC.PAS, Calculatrice, et
-REM EXPLORER.PAS, Explorateur OS2-0, du dossier Productivite)
+REM EXPLORER.PAS, Explorateur OS2-0, et OUTLINK.PAS, Outlink (client de messagerie
+REM porte d'OFFICE-0 : IMAP, POP3, SMTP par TCPIP32.DLL et TLS32.DLL), du dossier Productivite)
 FOR %%F IN (..\*.PAS) DO ..\BUILD\OS2PC -Q %%F ..\BUILD\CD\%%~nF.EXE
 REM nom 8.3 sur le CD-ROM (ISO 9660 niveau 1)
 IF EXIST ..\BUILD\CD\LAUNCHPAD.EXE MOVE /Y ..\BUILD\CD\LAUNCHPAD.EXE ..\BUILD\CD\LAUNCHPD.EXE > NUL

@@ -153,7 +153,7 @@ Const
   OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
   IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
   IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43; IC_SOKOBAN = 44;
-  IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49;
+  IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49; IC_OUTLINK = 50;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -560,6 +560,19 @@ Begin
 End;
 
 { Explorateur OS2-0 (EXPLORER.EXE, dossier Productivite et menu du bureau) }
+Function OutlinkPath : String;
+Var S : String;
+Begin
+  OutlinkPath := '';
+  If FileExists('C:\OUTLINK.EXE') Then OutlinkPath := 'C:\OUTLINK.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'OUTLINK.EXE') Then OutlinkPath := S + 'OUTLINK.EXE';
+  End;
+End;
+
 Function ExplorerPath : String;
 Var S : String;
 Begin
@@ -1112,7 +1125,8 @@ Begin
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
-        If (CalcPath <> '') Or (ExplorerPath <> '') Then Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
+        If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Then
+          Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
         Dummy := NewItem(V, IC_CMD, OB_DOSWIN, 'Fenetre DOS', '');
@@ -1167,6 +1181,9 @@ Begin
         { Explorateur OS2-0 : explorateur de fichiers a deux volets dans le
           style de Windows 95 (porte de l'Explorateur Pasdows) }
         If ExplorerPath <> '' Then Dummy := NewItem(V, IC_EXPLORER, OB_GAME, 'Explorateur OS2-0', ExplorerPath);
+        { Outlink : client de messagerie (OUTLOOK.PAS d'OFFICE-0) ; IMAP,
+          POP3 et SMTP par TCPIP32.DLL, TLS et STARTTLS par TLS32.DLL }
+        If OutlinkPath <> '' Then Dummy := NewItem(V, IC_OUTLINK, OB_GAME, 'Outlink', OutlinkPath);
       End;
     VK_DEVKIT :
       Begin
@@ -1615,6 +1632,19 @@ Begin
         GDisc(Hps, X + 20, Y + 20, 1, CLR_BLACK);
         FBox(Hps, X + 9, Y + 1, X + 22, Y + 14, CLR_WHITE, CLR_BLACK);
         GDisc(Hps, X + 15, Y + 7, 2, CLR_RED);
+      End;
+    IC_OUTLINK :
+      Begin
+        { enveloppe fermee, timbre et fleche d'envoi }
+        FBox(Hps, X + 2, Y + 6, X + 29, Y + 25, CLR_WHITE, CLR_DARKBLUE);
+        GLn(Hps, X + 3, Y + 24, X + 15, Y + 14, CLR_DARKBLUE);
+        GLn(Hps, X + 15, Y + 14, X + 28, Y + 24, CLR_DARKBLUE);
+        GLn(Hps, X + 3, Y + 7, X + 12, Y + 15, CLR_PALEGRAY);
+        GLn(Hps, X + 28, Y + 7, X + 19, Y + 15, CLR_PALEGRAY);
+        GBox(Hps, X + 23, Y + 18, X + 27, Y + 23, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 4, Y + 1, X + 13, Y + 3, CLR_DARKGREEN, DRO_FILL);
+        GLn(Hps, X + 13, Y + 0, X + 16, Y + 2, CLR_DARKGREEN);
+        GLn(Hps, X + 13, Y + 4, X + 16, Y + 2, CLR_DARKGREEN);
       End;
     IC_CENTIPED :
       Begin

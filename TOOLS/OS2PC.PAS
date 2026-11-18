@@ -19884,14 +19884,20 @@ Begin
     Begin
       If LeftPascal Then
         EmitInstr('INC EAX');           { sauter l octet de longueur gauche }
-      EmitInstr('PUSH EAX');            { sauver gauche }
+      { copie de la chaine gauche sur la pile : la droite peut utiliser le
+        meme tampon temporaire (Copy(S, 1, N) = T + ' ' etait toujours vrai) }
+      EmitInstr('MOV ESI,EAX');
+      EmitInstr('SUB ESP,512');
+      EmitInstr('MOV EDI,ESP');
+      EmitInstr('CALL ' + TP_RT_PFX + 'STRASSIGN_PCHAR');
       ParseExprPrec(PI, Prec + 1);
       CoerceCharArray;
       EmitInstr('MOV EDI,EAX');         { EDI = droite  }
       If LastExprIsPascalStr Then
         EmitInstr('INC EDI');           { sauter l octet de longueur droite }
-      EmitInstr('POP ESI');             { ESI = gauche  }
+      EmitInstr('MOV ESI,ESP');         { ESI = gauche (copie)  }
       EmitInstr('CALL ' + TP_RT_PFX + 'STRCOMPARE');
+      EmitInstr('ADD ESP,512');
       { EAX = resultat strcompare: <0, 0, >0 }
       LblF := LabelGen;
       LblE := LabelGen;
@@ -24072,27 +24078,32 @@ Begin
       Inc(EP);
       If EPMatch('(') Then
       Begin
-        ParseExpr(PI);            { F = nom fichier (pointeur chaine) }
+        { F = variable fichier : nom ASCIIZ de l enregistrement (Assign) }
+        If ParseLValueAddrW32(PI, TIdx) Then
+          EmitInstr('ADD EAX,' + IntToStr_(TFR_NAME))
+        Else
+          EmitInstr('XOR EAX,EAX');
         EmitInstr('PUSH EAX');
         EPMatch(',');
         ParseLValueAddrW32(PI, TIdx);   { Attr = var Word }
         EmitInstr('PUSH EAX');    { sauver adresse var Attr }
         { Appeler GetFileAttributesA(nom) }
         EmitInstr('MOV EAX,DWORD PTR [ESP+4]');
-        EmitInstr('INC EAX');     { sauter octet longueur Pascal string }
         EmitInstr('PUSH EAX');
         EmitInstr('CALL GetFileAttributesA');
         EmitInstr('POP EBX');     { adresse var Attr }
         GenStoreToAddr(TIdx);
         EmitInstr('ADD ESP,4');   { nettoyer F }
         { DosError = 0 si OK, sinon code erreur }
+        { etiquettes uniques : plusieurs GetFAttr dans un meme programme }
+        Lbl := LabelGen; Lbl2 := LabelGen;
         EmitInstr('CMP EAX,-1');
-        EmitInstr('JNE ' + TP_RT_PFX + 'GFA_OK');
+        EmitInstr('JNE ' + Lbl);
         EmitInstr('MOV DWORD PTR [DOSERROR],5');
-        EmitInstr('JMP ' + TP_RT_PFX + 'GFA_DN');
-        EmitLabel(TP_RT_PFX + 'GFA_OK');
+        EmitInstr('JMP ' + Lbl2);
+        EmitLabel(Lbl);
         EmitInstr('MOV DWORD PTR [DOSERROR],0');
-        EmitLabel(TP_RT_PFX + 'GFA_DN');
+        EmitLabel(Lbl2);
         EPMatch(')');
       End;
       If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_PUNCT) And
@@ -24107,14 +24118,17 @@ Begin
       Inc(EP);
       If EPMatch('(') Then
       Begin
-        ParseExpr(PI);            { F = nom fichier }
+        { F = variable fichier : nom ASCIIZ de l enregistrement (Assign) }
+        If ParseLValueAddrW32(PI, TIdx) Then
+          EmitInstr('ADD EAX,' + IntToStr_(TFR_NAME))
+        Else
+          EmitInstr('XOR EAX,EAX');
         EmitInstr('PUSH EAX');
         EPMatch(',');
         ParseExpr(PI);            { Attr = Word }
         EmitInstr('PUSH EAX');
         { SetFileAttributesA(nom, attr) }
         EmitInstr('MOV EDX,DWORD PTR [ESP+4]');
-        EmitInstr('INC EDX');
         EmitInstr('PUSH DWORD PTR [ESP]');  { attr }
         EmitInstr('PUSH EDX');              { nom }
         EmitInstr('CALL SetFileAttributesA');
@@ -32141,7 +32155,26 @@ Begin
   EmitBlankLine;
   EmitLabel(TP_RT_PFX + 'DELETE');
   EmitInstr('PUSHAD');
+  { Pos < 1, Len <= 0 ou Pos apres la fin : rien ; Len borne a la fin }
+  EmitInstr('TEST ECX,ECX');
+  EmitInstr('JLE ' + TP_RT_PFX + 'DEL_X');
+  EmitInstr('CMP EBX,1');
+  EmitInstr('JL ' + TP_RT_PFX + 'DEL_X');
+  EmitInstr('XOR EDX,EDX');
+  EmitLabel(TP_RT_PFX + 'DEL_N');
+  EmitInstr('CMP BYTE PTR [ESI+EDX],0');
+  EmitInstr('JE ' + TP_RT_PFX + 'DEL_E');
+  EmitInstr('INC EDX');
+  EmitInstr('JMP ' + TP_RT_PFX + 'DEL_N');
+  EmitLabel(TP_RT_PFX + 'DEL_E');
   EmitInstr('DEC EBX');
+  EmitInstr('CMP EBX,EDX');
+  EmitInstr('JGE ' + TP_RT_PFX + 'DEL_X');
+  EmitInstr('SUB EDX,EBX');
+  EmitInstr('CMP ECX,EDX');
+  EmitInstr('JLE ' + TP_RT_PFX + 'DEL_C');
+  EmitInstr('MOV ECX,EDX');
+  EmitLabel(TP_RT_PFX + 'DEL_C');
   { EDI = debut zone a supprimer, ESI = debut zone apres }
   EmitInstr('MOV EDI,ESI');
   EmitInstr('ADD EDI,EBX');
@@ -32152,6 +32185,7 @@ Begin
   EmitInstr('STOSB');
   EmitInstr('TEST AL,AL');
   EmitInstr('JNZ ' + TP_RT_PFX + 'DEL_L');
+  EmitLabel(TP_RT_PFX + 'DEL_X');
   EmitInstr('POPAD');
   EmitInstr('RET');
 
@@ -42278,7 +42312,7 @@ End;
 
 { --- Construction de la section .data binaire --- }
 Procedure BcBuildData;
-Var I, J: LongInt; S: TString;
+Var I, J, Pass: LongInt; S: TString; ZeroKind: Boolean;
 Begin
   BcDataLen := 0; BcDLabelCnt := 0; BcDFixCnt := 0;
   BcHashCheck; BcHashResetData;
@@ -42557,9 +42591,18 @@ Begin
   BcDefineDataLabel('INT_INPREC'); BcDataZeros(32);
   BcDefineDataLabel('INT_INEVCNT');BcDataD(0);
 
-  { Constantes et donnees utilisateur depuis DataTab }
+  { Constantes et donnees utilisateur depuis DataTab ; OS/2-0 : d'abord
+    les donnees initialisees, puis les variables a zero, dont les octets
+    ne sont pas ecrits dans le fichier (voir l'en-tete de .data) }
+  For Pass := 0 To 1 Do
   For I := 0 To DataCount - 1 Do
   Begin
+    ZeroKind := DataTab^[I].Kind In [DK_ARRAY, DK_RES, DK_STRUCT, DK_ZERO];
+    If Opts.DestTarget = DEST_OS2 Then
+    Begin
+      If ZeroKind <> (Pass = 1) Then Continue;
+    End
+    Else If Pass = 1 Then Continue;
     BcDefineDataLabel(DataTab^[I].LblName);
     Case DataTab^[I].Kind Of
       DK_STR:
@@ -45014,7 +45057,7 @@ Type
 Var
   DllGroups: Array[0..MAX_DLL_PE-1] Of TDllGroup;
   DllGrpCnt: LongInt;
-  TextRawSize, DataRawSize, IdataRawSize: LongInt;
+  TextRawSize, DataRawSize, IdataRawSize, DataUsed: LongInt;
   DataRVA, IdataRVA: LongInt;
   DataVA, IdataVA: LongInt;
   ImageSize: LongInt;
@@ -45170,7 +45213,14 @@ Begin
 
   TextRawSize  := AlignUp(BcCodeLen, PE_FILE_ALIGN_);
   If TextRawSize < PE_FILE_ALIGN_ Then TextRawSize := PE_FILE_ALIGN_;
-  DataRawSize  := AlignUp(BcDataLen, PE_FILE_ALIGN_);
+  { programmes et DLL d'OS/2-0 : les zeros de fin des donnees globales
+    (variables non initialisees) ne sont pas ecrits dans le fichier ; le
+    chargeur du noyau met l'image a zero avant d'y copier les sections
+    (VirtualSize > SizeOfRawData) }
+  DataUsed := BcDataLen;
+  If Opts.DestTarget = DEST_OS2 Then
+    While (DataUsed > 0) And (BcData^[DataUsed - 1] = 0) Do Dec(DataUsed);
+  DataRawSize  := AlignUp(DataUsed, PE_FILE_ALIGN_);
   If DataRawSize < PE_FILE_ALIGN_ Then DataRawSize := PE_FILE_ALIGN_;
   IdataRawSize := AlignUp(IdataVirtSize, PE_FILE_ALIGN_);
   If IdataRawSize < PE_FILE_ALIGN_ Then IdataRawSize := PE_FILE_ALIGN_;
@@ -45543,7 +45593,7 @@ Begin
   PEPadTo(HdrSize + TextRawSize);
 
   { ===== Section .data (donnees globales) ===== }
-  For I := 0 To BcDataLen - 1 Do PEWrB(BcData^[I]);
+  For I := 0 To DataUsed - 1 Do PEWrB(BcData^[I]);
   PEPadTo(HdrSize + TextRawSize + DataRawSize);
 
   { ===== Section .idata (Import Table) ===== }
