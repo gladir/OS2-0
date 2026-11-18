@@ -44501,7 +44501,6 @@ Begin
             'Version : ' + InfoMsg + '.' + NewName + #10 +
             'Auteur : Sylvain Maltais' + #10 +
             'Creation du produit : 2024' + #10 +
-            'Copyright (c) 2026 Sylvain Maltais' + #10 +
             'Licence : MIT (voir LICENSE)' + #10 +
             'Contact : support@gladir.com' + #10 +
             'www.gladir.com/clonedraw');
