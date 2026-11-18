@@ -132,7 +132,7 @@ Const
   VK_HOME = $14; VK_LEFT = $15; VK_UP = $16; VK_RIGHT = $17; VK_DOWN = $18; VK_DELETE = $1B;
   VK_ENTER = $1E; VK_F1 = $20; VK_F5 = $24; VK_F10 = $29;
   { couleurs }
-  CLR_WHITE = -2; CLR_BLACK = -1; CLR_BLUE = 1; CLR_RED = 2; CLR_PINK = 3; CLR_GREEN = 4; CLR_CYAN = 5;
+  CLR_WHITE = -2; CLR_BLACK = -1; CLR_BLUE = 1; CLR_RED = 2; CLR_PINK = 3; CLR_DARKPINK = 11; CLR_GREEN = 4; CLR_CYAN = 5;
   CLR_YELLOW = 6; CLR_DARKGRAY = 8; CLR_DARKBLUE = 9; CLR_DARKRED = 10; CLR_DARKGREEN = 12;
   CLR_DARKCYAN = 13; CLR_BROWN = 14; CLR_PALEGRAY = 15;
   DRO_FILL = 1; DRO_OUTLINE = 2;
@@ -152,7 +152,7 @@ Const
   OB_DEVKIT = 30; IC_PASDEV = 29;
   OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
   IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
-  IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43;
+  IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43; IC_SOKOBAN = 44;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1149,6 +1149,7 @@ Begin
         If FileExists('C:\YATHZEE.EXE') Then Dummy := NewItem(V, IC_YAHTZEE, OB_GAME, 'Yahtzee', 'C:\YATHZEE.EXE');
         If FileExists('C:\BATTLE.EXE') Then Dummy := NewItem(V, IC_BATTLE, OB_GAME, 'Bataille navale', 'C:\BATTLE.EXE');
         If FileExists('C:\POWER4.EXE') Then Dummy := NewItem(V, IC_POWER4, OB_GAME, 'Puissance 4', 'C:\POWER4.EXE');
+        If FileExists('C:\SOKOBAN.EXE') Then Dummy := NewItem(V, IC_SOKOBAN, OB_GAME, 'Soko-Ban', 'C:\SOKOBAN.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1530,6 +1531,26 @@ Begin
         GDisc(Hps, X + 12, Y + 20, 1, CLR_YELLOW);
         GDisc(Hps, X + 20, Y + 8, 2, CLR_WHITE);
         GDisc(Hps, X + 8, Y + 6, 1, CLR_WHITE);
+      End;
+    IC_SOKOBAN :
+      Begin
+        { murs de briques, caisse, cible et magasinier }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 22, X + 28, Y + 28, CLR_DARKPINK, DRO_FILL);
+        GBox(Hps, X + 3, Y + 3, X + 8, Y + 21, CLR_DARKPINK, DRO_FILL);
+        GLn(Hps, X + 3, Y + 25, X + 28, Y + 25, CLR_PINK);
+        GLn(Hps, X + 11, Y + 22, X + 11, Y + 25, CLR_BLACK);
+        GLn(Hps, X + 20, Y + 25, X + 20, Y + 28, CLR_BLACK);
+        GLn(Hps, X + 3, Y + 12, X + 8, Y + 12, CLR_PINK);
+        FBox(Hps, X + 11, Y + 5, X + 19, Y + 13, CLR_BROWN, CLR_BLACK);
+        GLn(Hps, X + 11, Y + 5, X + 19, Y + 13, CLR_YELLOW);
+        GLn(Hps, X + 11, Y + 13, X + 19, Y + 5, CLR_YELLOW);
+        GLn(Hps, X + 25, Y + 6, X + 27, Y + 8, CLR_BLUE);
+        GLn(Hps, X + 27, Y + 8, X + 25, Y + 10, CLR_BLUE);
+        GLn(Hps, X + 25, Y + 10, X + 23, Y + 8, CLR_BLUE);
+        GLn(Hps, X + 23, Y + 8, X + 25, Y + 6, CLR_BLUE);
+        GDisc(Hps, X + 24, Y + 18, 2, CLR_YELLOW);
+        GBox(Hps, X + 22, Y + 13, X + 26, Y + 16, CLR_BLUE, DRO_FILL);
       End;
     IC_POWER4 :
       Begin
