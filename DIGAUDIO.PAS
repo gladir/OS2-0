@@ -369,6 +369,35 @@ Begin
   ShowMsg := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function BaseName(S : String) : String;
 Var K : LongInt;
 Begin
@@ -1791,11 +1820,15 @@ Begin
     CM_MONO : Convert(Rate, Bits, 1);
     CM_STEREO : Convert(Rate, Bits, 2);
     CM_HELP :
-      Dummy := ShowMsg('Lecture : la s'#130'lection, sinon de la position '#133' la fin (Espace). Cliquez la forme ' +
-                       'd''onde pour placer la position ; glissez (ou Maj+clic) pour s'#130'lectionner. ' +
-                       'L''enregistrement remplace la s'#130'lection ou s''ins'#138're '#133' la position. Les effets ' +
-                       '(menu Options) et le type (menu Type) s''appliquent '#133' la s'#130'lection ou au son entier.',
-                       'Audio num'#130'rique - Aide', MB_OK Or MB_INFORMATION);
+      Begin
+        LClr;
+        LAdd('' + 'Lecture : la s'#130'lection, sinon de la position '#133' la fin (Espace). Cliquez la forme ' +
+             'd''onde pour placer la position ; glissez (ou Maj+clic) pour s'#130'lectionner. ');
+        LAdd('' +
+             'L''enregistrement remplace la s'#130'lection ou s''ins'#138're '#133' la position. Les effets ' +
+             '(menu Options) et le type (menu Type) s''appliquent '#133' la s'#130'lection ou au son entier.');
+        Dummy := LMsgBox('Audio num'#130'rique - Aide', MB_OK Or MB_INFORMATION);
+      End;
     CM_ABOUT :
       Begin
         S := 'Audio num'#130'rique pour OS/2-0 (multim'#130'dia, MDM.DLL). Carte son : ' + CardName + '. ' +

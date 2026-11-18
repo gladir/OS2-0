@@ -211,6 +211,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function Opp(P : LongInt) : LongInt;
 Begin
   If P = PBlack Then Opp := PWhite Else Opp := PBlack;
@@ -778,15 +807,18 @@ Begin
     CM_MEDIUM : SetLevel(1);
     CM_HARD : SetLevel(2);
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Ayez le plus de pions de votre couleur ' + Chr(133) + ' la fin de la partie. ' +
-                            'Chaque coup doit encadrer, en ligne droite (horizontale, verticale ou diagonale), ' +
-                            'au moins un pion adverse entre le pion pos' + Chr(130) + ' et un de vos pions : ' +
-                            'tous les pions encadr' + Chr(130) + 's sont retourn' + Chr(130) + 's. ' +
-                            'Qui ne peut pas jouer passe son tour ; la partie finit quand personne ne peut ' +
-                            'jouer. Noir commence.' + Chr(10) + Chr(10) +
-                            'Souris : cliquer une case. Clavier : fl' + Chr(138) + 'ches, Entr' + Chr(130) +
-                            'e ou Espace (jouer), H (indices), Ctrl+Z (annuler), F2 (nouvelle partie).',
-                            'Othello - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Ayez le plus de pions de votre couleur ' + Chr(133) + ' la fin de la partie. ' +
+           'Chaque coup doit encadrer, en ligne droite (horizontale, verticale ou diagonale), ' +
+           'au moins un pion adverse entre le pion pos' + Chr(130));
+      LAdd('' + ' et un de vos pions : ' + 'tous les pions encadr' + Chr(130) + 's sont retourn' + Chr(130) +
+           's. ' + 'Qui ne peut pas jouer passe son tour ; la partie finit quand personne ne peut ' +
+           'jouer. Noir commence.' + Chr(10) + Chr(10));
+      LAdd('' + 'Souris : cliquer une case. Clavier : fl' + Chr(138) + 'ches, Entr' + Chr(130) +
+           'e ou Espace (jouer), H (indices), Ctrl+Z (annuler), F2 (nouvelle partie).');
+      Dummy := LMsgBox('Othello - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('Othello pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du prototype ' +
                             'OTHELLO.PAS de 7iles. Contre l''ordinateur (trois niveaux ; Difficile : ' +
                             'recherche alpha-b' + Chr(130) + 'ta) ou ' + Chr(133) + ' deux joueurs.' + Chr(10) +

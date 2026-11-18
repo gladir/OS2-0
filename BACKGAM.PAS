@@ -216,6 +216,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function Opp(S : LongInt) : LongInt;
 Begin
   Opp := 3 - S;
@@ -1285,20 +1314,22 @@ Begin
     CM_EASY : SetLevel(0);
     CM_NORMAL : SetLevel(1);
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Vous avez les pions blancs et les menez de la case 24 vers votre jan ' +
-                            'int' + Chr(130) + 'rieur (cases 1 ' + Chr(133) + ' 6, en bas ' + Chr(133) +
-                            ' droite), puis les sortez. Chaque d' + Chr(130) + ' fait avancer un pion ' +
-                            'd''autant de cases (un double se joue quatre fois) ; il faut jouer le plus de ' +
-                            'd' + Chr(130) + 's possible. On ne peut pas aller sur une case tenue par deux ' +
-                            'pions adverses ou plus ; un pion adverse seul est frapp' + Chr(130) +
-                            ' et va sur la barre, d''o' + Chr(151) + ' il doit rentrer avant tout autre coup. ' +
-                            'On sort ses pions quand ils sont tous dans le jan int' + Chr(130) + 'rieur. ' +
-                            'Le premier ' + Chr(133) + ' tout sortir gagne (gammon, backgammon : 2 ou 3 points).' +
-                            Chr(10) + Chr(10) +
-                            'Souris : Lancer les d' + Chr(130) + 's, puis un pion blanc et sa case ' +
-                            'd''arriv' + Chr(130) + 'e (point jaune). Clavier : Espace (lancer), ' +
-                            'Ctrl+Z (annuler le tour), ' + Chr(144) + 'chap, F2 (nouvelle partie).',
-                            'Backgammon - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Vous avez les pions blancs et les menez de la case 24 vers votre jan ' + 'int' + Chr(130) +
+           'rieur (cases 1 ' + Chr(133) + ' 6, en bas ' + Chr(133) + ' droite), puis les sortez. Chaque d' +
+           Chr(130) + ' fait avancer un pion ');
+      LAdd('' + 'd''autant de cases (un double se joue quatre fois) ; il faut jouer le plus de ' + 'd' +
+           Chr(130) + 's possible. On ne peut pas aller sur une case tenue par deux ' +
+           'pions adverses ou plus ; un pion adverse seul est frapp' + Chr(130));
+      LAdd('' + ' et va sur la barre, d''o' + Chr(151) + ' il doit rentrer avant tout autre coup. ' +
+           'On sort ses pions quand ils sont tous dans le jan int' + Chr(130) + 'rieur. ' + 'Le premier ' +
+           Chr(133) + ' tout sortir gagne (gammon, backgammon : 2 ou 3 points).' + Chr(10) + Chr(10));
+      LAdd('' + 'Souris : Lancer les d' + Chr(130) + 's, puis un pion blanc et sa case ' + 'd''arriv' + Chr(130) +
+           'e (point jaune). Clavier : Espace (lancer), ' + 'Ctrl+Z (annuler le tour), ' + Chr(144) +
+           'chap, F2 (nouvelle partie).');
+      Dummy := LMsgBox('Backgammon - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('Backgammon pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du ' +
                             'prototype BACKGAM.PAS de 7iles, avec les r' + Chr(138) + 'gles compl' + Chr(138) +
                             'tes et un adversaire qui ' + Chr(130) + 'value toutes ses suites de coups.' +

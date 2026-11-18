@@ -209,6 +209,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function Opp(S : LongInt) : LongInt;
 Begin
   Opp := 3 - S;
@@ -887,17 +916,20 @@ Begin
     CM_MEDIUM : Begin Level := 1; SetMarks; Redraw; End;
     CM_HARD : Begin Level := 2; SetMarks; Redraw; End;
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Dames anglaises (checkers) sur les cases fonc' + Chr(130) + 'es. Un pion avance ' +
-                            'd''une case en diagonale ; il prend en sautant par-dessus un pion adverse voisin ' +
-                            '(vers l''avant) et continue tant qu''il peut prendre (rafle). La prise est ' +
-                            'obligatoire. Un pion qui atteint la derni' + Chr(138) + 're rang' + Chr(130) + 'e ' +
-                            'devient une dame (couronne), qui avance et prend dans les quatre directions. On ' +
-                            'perd quand on n''a plus de pion ou plus de coup ; 40 coups de chaque c' + Chr(147) +
-                            't' + Chr(130) + ' sans prise ni pion avanc' + Chr(130) + ' : partie nulle.' + Chr(10) +
-                            Chr(10) + 'Souris : un pion puis une case marqu' + Chr(130) + 'e d''un point (une rafle ' +
-                            'se joue sur sa case d''arriv' + Chr(130) + 'e). Clavier : fl' + Chr(138) + 'ches, ' +
-                            'Entr' + Chr(130) + 'e, ' + Chr(144) + 'chap, Ctrl+Z (annuler), F2 (nouvelle partie).',
-                            'Checkers - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Dames anglaises (checkers) sur les cases fonc' + Chr(130) + 'es. Un pion avance ' +
+           'd''une case en diagonale ; il prend en sautant par-dessus un pion adverse voisin ');
+      LAdd('' + '(vers l''avant) et continue tant qu''il peut prendre (rafle). La prise est ' +
+           'obligatoire. Un pion qui atteint la derni' + Chr(138) + 're rang' + Chr(130) + 'e ');
+      LAdd('' + 'devient une dame (couronne), qui avance et prend dans les quatre directions. On ' +
+           'perd quand on n''a plus de pion ou plus de coup ; 40 coups de chaque c' + Chr(147) + 't' + Chr(130) +
+           ' sans prise ni pion avanc' + Chr(130) + ' : partie nulle.' + Chr(10) + Chr(10));
+      LAdd('' + 'Souris : un pion puis une case marqu' + Chr(130) + 'e d''un point (une rafle ' +
+           'se joue sur sa case d''arriv' + Chr(130) + 'e). Clavier : fl' + Chr(138) + 'ches, ' + 'Entr' +
+           Chr(130) + 'e, ' + Chr(144) + 'chap, Ctrl+Z (annuler), F2 (nouvelle partie).');
+      Dummy := LMsgBox('Checkers - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('Checkers pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du prototype ' +
                             'CHECKERS.PAS de 7iles : dames anglaises contre l''ordinateur (alpha-b' + Chr(130) +
                             'ta) ou ' + Chr(133) + ' deux joueurs.' + Chr(10) + 'Programme ' + Chr(130) + 'crit en ' +

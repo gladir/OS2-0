@@ -192,6 +192,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function LevelName : String;
 Begin
   Case Level Of
@@ -715,14 +744,17 @@ Begin
     CM_MEDIUM : SetLevel(1);
     CM_HARD : SetLevel(2);
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Remplissez la grille : chaque ligne, chaque colonne et chaque carr' + Chr(130) +
-                            ' de 3 x 3 doit contenir une fois chacun des chiffres de 1 ' + Chr(133) + ' 9. ' +
-                            'Les chiffres donn' + Chr(130) + 's (fond gris) ne se changent pas ; un chiffre en ' +
-                            'conflit est en rouge.' + Chr(10) + Chr(10) +
-                            'Souris : cliquer une case puis un chiffre du pav' + Chr(130) + ' ; bouton 2 : effacer. ' +
-                            'Clavier : fl' + Chr(138) + 'ches, 1 ' + Chr(133) + ' 9, Suppr ou Espace (effacer), ' +
-                            'Ctrl+Z (annuler), I (indice), V (v' + Chr(130) + 'rifier), F2 (nouvelle partie).',
-                            'Sudoku - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Remplissez la grille : chaque ligne, chaque colonne et chaque carr' + Chr(130) +
+           ' de 3 x 3 doit contenir une fois chacun des chiffres de 1 ' + Chr(133) + ' 9. ' +
+           'Les chiffres donn' + Chr(130) + 's (fond gris) ne se changent pas ; un chiffre en ');
+      LAdd('' + 'conflit est en rouge.' + Chr(10) + Chr(10) + 'Souris : cliquer une case puis un chiffre du pav' +
+           Chr(130) + ' ; bouton 2 : effacer. ' + 'Clavier : fl' + Chr(138) + 'ches, 1 ' + Chr(133) +
+           ' 9, Suppr ou Espace (effacer), ' + 'Ctrl+Z (annuler), I (indice), V (v' + Chr(130));
+      LAdd('' + 'rifier), F2 (nouvelle partie).');
+      Dummy := LMsgBox('Sudoku - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('Sudoku pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du prototype ' +
                             'SODOKU.PAS de 7iles. Grilles construites au hasard, ' + Chr(133) + ' solution ' +
                             'unique, trois niveaux.' + Chr(10) + 'Programme ' + Chr(130) + 'crit en Pascal et ' +

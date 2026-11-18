@@ -189,6 +189,35 @@ Begin
   Ask := WinMessageBox(HWND_DESKTOP, Frame, Z(Text), Z2(Cap), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ messages de plus de 255 caracteres (limite des chaines) : texte cumule
+  dans LBuf par LAdd, puis affiche par LMsgBox }
+Var
+  LBuf : Array[0..4095] Of Byte;
+  LLen : LongInt;
+
+Procedure LClr;
+Begin
+  LLen := 0;
+  LBuf[0] := 0;
+End;
+
+Procedure LAdd(S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+    If LLen < 4094 Then
+    Begin
+      LBuf[LLen] := Ord(S[K]);
+      Inc(LLen);
+    End;
+  LBuf[LLen] := 0;
+End;
+
+Function LMsgBox(Cap : String; Fl : LongInt) : LongInt;
+Begin
+  LMsgBox := WinMessageBox(HWND_DESKTOP, Frame, LongInt(@LBuf), Z2(Cap), 0, Fl Or MB_MOVEABLE);
+End;
+
 Function CatName(C : LongInt) : String;
 Begin
   Case C Of
@@ -883,18 +912,21 @@ Begin
     CM_VSCPU : SetMode(1);
     CM_TWO : SetMode(2);
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
-    CM_RULES : Dummy := Ask('Treize tours. A chaque tour : jusqu''' + Chr(133) + ' trois lancers ' +
-                            'des cinq d' + Chr(130) + 's ; entre les lancers, cliquez les d' + Chr(130) + 's ' +
-                            Chr(133) + ' garder. Puis cliquez une case libre de votre colonne (les points ' +
-                            'possibles sont en gris sur fond jaune).' + Chr(10) +
-                            'Section sup' + Chr(130) + 'rieure : as ' + Chr(133) + ' six = somme des d' + Chr(130) +
-                            's de cette valeur ; prime de 35 si elle totalise 63 ou plus.' + Chr(10) +
-                            'Brelan, carr' + Chr(130) + ' : somme des d' + Chr(130) + 's (3 ou 4 pareils). Full : ' +
-                            '25 (3 + 2). Petite suite (4 qui se suivent) : 30. Grande suite (5) : 40. ' +
-                            'Yahtzee (5 pareils) : 50, puis 100 de prime par Yahtzee de plus. Chance : somme ' +
-                            'des d' + Chr(130) + 's.' + Chr(10) + Chr(10) + 'Clavier : Espace (lancer), 1 ' +
-                            Chr(133) + ' 5 (garder un d' + Chr(130) + '), F2 (nouvelle partie).',
-                            'Yahtzee - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    CM_RULES : Begin
+      LClr;
+      LAdd('' + 'Treize tours. A chaque tour : jusqu''' + Chr(133) + ' trois lancers ' + 'des cinq d' + Chr(130) +
+           's ; entre les lancers, cliquez les d' + Chr(130) + 's ' + Chr(133) +
+           ' garder. Puis cliquez une case libre de votre colonne (les points ');
+      LAdd('' + 'possibles sont en gris sur fond jaune).' + Chr(10) + 'Section sup' + Chr(130) + 'rieure : as ' +
+           Chr(133) + ' six = somme des d' + Chr(130) +
+           's de cette valeur ; prime de 35 si elle totalise 63 ou plus.' + Chr(10) + 'Brelan, carr' + Chr(130) +
+           ' : somme des d' + Chr(130) + 's (3 ou 4 pareils). Full : ');
+      LAdd('' + '25 (3 + 2). Petite suite (4 qui se suivent) : 30. Grande suite (5) : 40. ' +
+           'Yahtzee (5 pareils) : 50, puis 100 de prime par Yahtzee de plus. Chance : somme ' + 'des d' +
+           Chr(130) + 's.' + Chr(10) + Chr(10) + 'Clavier : Espace (lancer), 1 ' + Chr(133));
+      LAdd('' + ' 5 (garder un d' + Chr(130) + '), F2 (nouvelle partie).');
+      Dummy := LMsgBox('Yahtzee - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+    End;
     CM_ABOUT : Dummy := Ask('Yahtzee pour OS/2-0 (Presentation Manager), port' + Chr(130) + ' du prototype ' +
                             'YATHZEE.PAS de 7iles (mode texte) : seul, contre l''ordinateur ou ' + Chr(133) +
                             ' deux.' + Chr(10) + 'Programme ' + Chr(130) + 'crit en Pascal et compil' + Chr(130) +
