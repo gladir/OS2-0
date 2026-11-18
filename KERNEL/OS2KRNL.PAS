@@ -5675,6 +5675,172 @@ Begin
   lstrcmpiA := CA - CB;
 End;
 
+{ --- sprintf et strtod (msvcrt) : formatage et lecture des reels ---
+  Les runtimes d'OS2PC et de WPC formatent les reels (Str, Write) par
+  sprintf(Buf, "%*.*f", largeur, decimales, valeur) ou
+  sprintf(Buf, "% .*E", decimales, valeur) et les lisent (Val) par
+  strtod ; seuls ces deux formats sont reconnus. Appel cdecl : la valeur
+  (Double) occupe deux mots de 32 bits sur la pile. }
+
+Procedure KrnPutS(Var Dst : LongInt; S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+  Begin
+    Mem[0:Dst] := Ord(S[K]);
+    Inc(Dst);
+  End;
+End;
+
+{ chiffres de V >= 0 (partie entiere, puis Prec decimales), arrondi }
+Function KrnFixStr(V : Double; Prec : LongInt) : String;
+Var S, T : String; IP, F, R : Double; K, Dg : LongInt;
+Begin
+  R := 0.5;
+  For K := 1 To Prec Do R := R / 10;
+  V := V + R;
+  IP := Int(V); F := V - IP;
+  T := '';
+  If IP < 1 Then T := '0'
+  Else
+    While (IP >= 1) And (Length(T) < 250) Do
+    Begin
+      R := Int(IP / 10);
+      Dg := Trunc(IP - R * 10 + 0.5);
+      If Dg > 9 Then Dg := 9;
+      If Dg < 0 Then Dg := 0;
+      T := Chr(48 + Dg) + T;
+      IP := R;
+    End;
+  S := T;
+  If Prec > 0 Then
+  Begin
+    S := S + '.';
+    For K := 1 To Prec Do
+    Begin
+      F := F * 10;
+      Dg := Trunc(F);
+      If Dg > 9 Then Dg := 9;
+      If Dg < 0 Then Dg := 0;
+      F := F - Dg;
+      If Length(S) < 254 Then S := S + Chr(48 + Dg);
+    End;
+  End;
+  KrnFixStr := S;
+End;
+
+Function sprintf(Buf, Fmt, A1, A2, A3, A4 : LongInt) : LongInt;
+Var Q : Array[0..1] Of LongInt; V : Double; S, T, Num : String;
+    W, Prec, E, K, D : LongInt; Neg, Sci : Boolean;
+Begin
+  { "%*.*f" : A1 largeur, A2 decimales, A3:A4 valeur ; "% .*E" : A1
+    decimales, A2:A3 valeur }
+  Sci := (Mem[0:Fmt + 1] = 32);
+  If Sci Then
+  Begin
+    W := 0; Prec := A1; Q[0] := A2; Q[1] := A3;
+  End
+  Else
+  Begin
+    W := A1; Prec := A2; Q[0] := A3; Q[1] := A4;
+  End;
+  If Prec < 0 Then Prec := 6;
+  If Prec > 40 Then Prec := 40;
+  MoveMem(LongInt(@Q), LongInt(@V), 8);
+  Neg := (Q[1] < 0);
+  If Neg Then V := -V;
+  If (Q[1] And $7FF00000) = $7FF00000 Then
+  Begin
+    If ((Q[1] And $000FFFFF) <> 0) Or (Q[0] <> 0) Then S := 'Nan'
+    Else S := 'Inf';
+  End
+  Else If Not Sci Then S := KrnFixStr(V, Prec)
+  Else
+  Begin
+    E := 0;
+    If V <> 0 Then
+    Begin
+      While V >= 10 Do Begin V := V / 10; Inc(E); End;
+      While V < 1 Do Begin V := V * 10; Dec(E); End;
+      { arrondi : 9.99... peut devenir 10.0 }
+      Num := KrnFixStr(V, Prec);
+      If Copy(Num, 1, 2) = '10' Then
+      Begin
+        V := V / 10; Inc(E);
+      End;
+    End;
+    Num := KrnFixStr(V, Prec);
+    If E < 0 Then T := '-' Else T := '+';
+    D := E; If D < 0 Then D := -D;
+    Str(D, S);
+    While Length(S) < 2 Do S := '0' + S;
+    S := Num + 'E' + T + S;
+  End;
+  If Neg Then S := '-' + S
+  Else If Sci Then S := ' ' + S;
+  While Length(S) < W Do S := ' ' + S;
+  K := Buf;
+  KrnPutS(K, S);
+  Mem[0:K] := 0;
+  sprintf := Length(S);
+End;
+
+Function strtod(PS, PEnd : LongInt) : Double;
+Var P, C, E, ES, Dg : LongInt; V, Sc : Double; Neg, Any : Boolean;
+Begin
+  P := PS;
+  While (Mem[0:P] = 32) Or (Mem[0:P] = 9) Do Inc(P);
+  Neg := False;
+  If Mem[0:P] = Ord('-') Then Begin Neg := True; Inc(P); End
+  Else If Mem[0:P] = Ord('+') Then Inc(P);
+  V := 0; Any := False;
+  C := Mem[0:P];
+  While (C >= 48) And (C <= 57) Do
+  Begin
+    V := V * 10 + (C - 48); Any := True;
+    Inc(P); C := Mem[0:P];
+  End;
+  If C = Ord('.') Then
+  Begin
+    Inc(P); C := Mem[0:P]; Sc := 1;
+    While (C >= 48) And (C <= 57) Do
+    Begin
+      Sc := Sc / 10; V := V + (C - 48) * Sc; Any := True;
+      Inc(P); C := Mem[0:P];
+    End;
+  End;
+  If Any And ((C = Ord('E')) Or (C = Ord('e'))) Then
+  Begin
+    E := P; Inc(P); ES := 1;
+    If Mem[0:P] = Ord('-') Then Begin ES := -1; Inc(P); End
+    Else If Mem[0:P] = Ord('+') Then Inc(P);
+    C := Mem[0:P];
+    If (C >= 48) And (C <= 57) Then
+    Begin
+      Dg := 0;
+      While (C >= 48) And (C <= 57) Do
+      Begin
+        If Dg < 10000 Then Dg := Dg * 10 + (C - 48);
+        Inc(P); C := Mem[0:P];
+      End;
+      While Dg > 0 Do
+      Begin
+        If ES > 0 Then V := V * 10 Else V := V / 10;
+        Dec(Dg);
+      End;
+    End
+    Else P := E;
+  End;
+  If Not Any Then Begin P := PS; V := 0; End;
+  If Neg Then V := -V;
+  If PEnd <> 0 Then
+  Begin
+    Mem[0:PEnd] := P And 255; Mem[0:PEnd + 1] := (P Shr 8) And 255;
+    Mem[0:PEnd + 2] := (P Shr 16) And 255; Mem[0:PEnd + 3] := (P Shr 24) And 255;
+  End;
+  strtod := V;
+End;
+
 { --- Fonction absente --- }
 
 Procedure ApiMissing(Name : LongInt);

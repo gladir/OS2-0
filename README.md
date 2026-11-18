@@ -27,7 +27,7 @@ OS2-0 démarre d'un CD-ROM ou d'un disque dur, dans QEMU, VirtualBox (y compris 
 	<li><b>Noyau 32 bits</b> (OS2KRNL) : mode protégé, pagination, tâches préemptives, sessions plein écran et fenêtrées, chargeur de programmes et de DLL 32 bits (PE et LX), programmes 16 bits d'OS/2 1.x (NE) et machine virtuelle DOS en mode V86 (Turbo Pascal 7, BGI, DPMI).</li>
 	<li><b>Systèmes de fichiers</b> : HPFS par défaut, NTFS en lecture, écriture et formatage pour partager ses fichiers avec Windows et Linux, FAT12 sur disquette, ISO 9660 sur CD-ROM, disque virtuel en mémoire ; pilotes IFS chargés par <code>IFS=</code> de CONFIG.SYS.</li>
 	<li><b>Presentation Manager et Workplace Shell</b> : fenêtres, menus, contrôles, GPI, presse-papiers, glisser-déposer, raccourcis, modèles, LaunchPad, carnets Système, Souris, Pays et Langue ; de 640 × 480 en 16 couleurs (VGA) à 1024 × 768 en 16 millions de couleurs (VESA).</li>
-	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Notator for OS2-Zero, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
+	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Notator for OS2-Zero, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
 	<li><b>Matériel</b> : disques IDE et ATAPI, lecteur de disquettes, cartes son (Sound Blaster, AC'97, AudioPCI), réseau (Intel PRO/1000, AMD PCnet) avec pile TCP/IP, DHCP, DNS et TLS ; outils invités de VirtualBox et de VMware (souris absolue, écran redimensionnable).</li>
 	<li><b>Installation</b> graphique dans le style de Warp 3, sur une partition HPFS ou NTFS, en six langues.</li>
 </ul>
@@ -157,6 +157,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Outlink : client de messagerie dans l'esprit d'Outlook, porté de <code>OUTLOOK.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (Système OS/2 → Productivité) ; réception IMAP et POP3, envoi SMTP, TLS et STARTTLS, par les sockets de TCPIP32.DLL et TLS32.DLL.</td>
 		</tr>
 		<tr>
+			<td><b>APPS/PAINT.PAS</b></td>
+			<td>Paint : programme de dessin bitmap dans l'esprit de Paint, porté de Pasdows 95 (CloneDRAW) vers Presentation Manager (Système OS/2 → Productivité) ; compilé par WPC (<code>TOOLS/WPC.PAS</code>).</td>
+		</tr>
+		<tr>
 			<td><b>PASDEV.PAS</b></td>
 			<td>Pascal Developer : environnement de développement intégré Pascal de Presentation Manager (dossier Developer Kit du bureau), dans l'esprit de Borland Pascal mais avec l'apparence d'OS/2 : fenêtres d'édition MDI à coloration syntaxique, compilation par OS2PC.EXE, exécution, boîte Information.</td>
 		</tr>
@@ -204,6 +208,8 @@ Le compilateur <b>OS2PC.PAS</b> (« OS/2 Pascal Compiler », dossier <b>TOOLS</b
 	<tr><td><b>-COS2KRNL</b></td><td>Noyau 32 bits : image PE liée à 1 Mo, assembleur 80386 natif (IN/OUT, INT, LGDT, LIDT, MOV CRn, IRETD...), procédures <i>Interrupt</i>, accès direct à Mem/MemW/MemL/Port/PortW ; les fonctions utilisées par le runtime (WriteFile, CreateFileA...) sont les procédures Pascal du noyau, exportées sous le nom DOSCALLS.DLL.</td></tr>
 	<tr><td><b>-COS2</b></td><td>Destination par défaut : programme 32 bits pour OS/2-0 (CMD.EXE et les commandes), dont les importations sont liées par le noyau. Un source commençant par <code>Library</code> produit une DLL (clause <code>exports nom [Name 'externe'] [Index ordinal]</code>, jusqu'à 4095 exportations, base préférée fixée par <code>{$IMAGEBASE $00D00000}</code>, section <code>.reloc</code> produite pour que le noyau puisse la reloger ; une constante <code>Const NOM = 'texte';</code> ou entière peut aussi être exportée comme donnée) ; une fonction déclarée <code>External 'DLL' [Name 'nom']</code> est importée de cette DLL.</td></tr>
 </table>
+
+Un second compilateur, <b>WPC.PAS</b> (dossier <b>TOOLS</b>), vient de <a href="https://github.com/gladir/Pasdows95">Pasdows 95</a> : c'est un descendant d'OS2PC qui a gardé la cible <code>-COS2</code> et accepte en plus les AnsiString, Int64, QWord, PByte et l'arithmétique des pointeurs de Free Pascal. Il compile <b>APPS/PAINT.PAS</b> (Paint), trop lié à Free Pascal pour OS2PC.
 
 <h3>Multitâche et sessions</h3>
 
@@ -857,6 +863,25 @@ La boîte <b>Propriétés de (C:)</b> d'un lecteur reprend celle de Pasdows 95 :
 <img width="640" height="480" alt="OS/2-0 : Propriétés de (C:) ouvertes depuis le dossier Lecteurs du bureau, avec le camembert de l'espace utilisé et libre" src="IMAGE/EXPLORATEUR_PROPRIETES.png" />
 
 Le portage remplace les services du noyau de Pasdows par l'API d'OS/2 : <code>DosFindFirst</code>/<code>DosFindNext</code> (FILEFINDBUF3 : nom, taille, attributs, date) au lieu du parcours direct des répertoires FAT et ISO 9660 ; <code>DosQueryCurrentDisk</code> pour les lecteurs, <code>DosQueryFSInfo</code> (étiquette de volume, espace libre) et <code>DosQueryFSAttach</code> (nom du système de fichiers) ; <code>DosExecPgm</code> pour ouvrir ; fenêtre standard, gabarit de menu, <code>WinPopupMenu</code> et <code>WinMessageBox</code> de PM. Les icônes de Pasdows 95 (grille de 32 × 32 mise à l'échelle : 32 points dans le contenu, 16 dans l'arbre et les Détails) sont redessinées par <code>WinFillRect</code> et <code>GpiLine</code> ; les reliefs, les en-têtes et la barre d'état gardent l'apparence de Windows 95. Langue : variable <code>LANGUAGE</code> (français, anglais, allemand, italien, espagnol).
+
+<h3>Paint (APPS/PAINT.PAS) : dessin bitmap</h3>
+
+<b>Paint</b> est le programme de dessin d'OS/2-0, dans le dossier <b>Productivité</b> (Système OS/2 → Productivité → Paint ; <code>PAINT [fichier]</code> à l'invite). Une image (<code>.BMP</code>, <code>.PCX</code>, <code>.GIF</code>, <code>.PNG</code>, <code>.JPG</code>…) ouverte depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans Paint. C'est le <code>PAINT.PAS</code> de Pasdows 95 (lui-même issu de CloneDRAW, pour MS-DOS) : tous les outils (sélection, gomme, remplissage, pipette, loupe, crayon, pinceau, aérographe, texte, ligne, courbe, rectangle, polygone, ellipse, rectangle arrondi), les menus Fichier, Modifier, Affichage, Image, Couleurs, Outils et ?, Annuler/Rétablir, une trentaine de formats d'image en lecture et en écriture.
+
+<img width="800" height="600" alt="OS/2-0 : Paint sur un bureau de 800 x 600, avec PAYSAGE.BMP" src="IMAGE/PAINT.png" />
+<img width="800" height="600" alt="OS/2-0 : Paint, menu Image de Presentation Manager" src="IMAGE/PAINT_MENU.png" />
+
+<table>
+	<tr><th>Partie</th><th>Version Pasdows 95 (Win32)</th><th>OS/2-0 (Presentation Manager)</th></tr>
+	<tr><td>Fenêtre</td><td>Fenêtre Win32 (CreateWindowEx), image de 256 couleurs montrée par SetDIBitsToDevice</td><td>Fenêtre de PM (WinCreateStdWindow : barre de titre, menu système, bouton de réduction, liste des fenêtres), image en mémoire (DosAllocMem) montrée par <code>GpiDrawBits</code>, zones modifiées seulement</td></tr>
+	<tr><td>Menus</td><td>Barre de menus dessinée par PAINT</td><td>Barre de menus de PM construite à partir des menus de PAINT : lettres soulignées, raccourcis à droite, éléments grisés ou cochés ; une commande appelle <code>HandleMenuClick</code></td></tr>
+	<tr><td>Souris et clavier</td><td>WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_KEYDOWN, WM_CHAR</td><td>WM_MOUSEMOVE, WM_BUTTON1DOWN…, WM_CHAR de PM (codes de <code>ReadKey</code>) ; fermer la fenêtre ou Alt+F4 : Quitter avec confirmation ; F10 active la barre de menus, comme dans OS/2</td></tr>
+	<tr><td>Fichiers</td><td colspan="2">Boîtes Ouvrir et Enregistrer sous de PAINT (dossiers et fichiers par DosFindFirst) ; le dossier racine vide d'un lecteur (disque virtuel D:) est maintenant accepté comme destination</td></tr>
+</table>
+
+PAINT est dessiné pour un écran de 640 × 480, sa barre de menus comprise. Sur un bureau d'au moins 800 × 600, Paint a une fenêtre complète de 640 × 480 (captures ci-dessus) ; sur un bureau de 640 × 480, comme la version Pasdows 95 qui passait alors en plein écran sans cadre, la fenêtre n'a que la barre de menus de PM, qui prend la place de celle de PAINT, et les boîtes de dialogue sont centrées au-dessus de la ligne d'état. L'exemple <b>PAYSAGE.BMP</b> (<code>IMAGE/EXEMPLES</code>) est copié sur le CD-ROM.
+
+PAINT.PAS (47 000 lignes) est écrit pour Free Pascal : AnsiString, Int64, PByte et l'arithmétique des pointeurs, que le compilateur OS2PC ne connaît pas. Il est compilé par <b>WPC</b> (<code>TOOLS/WPC.PAS</code>), le compilateur de Pasdows 95, qui descend d'OS2PC, a gardé sa cible <code>-COS2</code> (programme OS/2-0 : appels du runtime vers DOSCALLS.DLL, fonctions <code>External 'PMWIN'</code> et <code>'PMGPI'</code>) et y ajoute ces types. Seule la couche de PAINT qui remplaçait Graph, Crt et la souris par Win32 est remplacée, par une couche qui utilise l'API d'OS/2 ; le reste du programme est celui de Pasdows 95. Trois défauts qu'OS2PC avait déjà corrigés ont été corrigés aussi dans WPC (comparaison de chaînes calculées, <code>Delete</code> au-delà de la fin, <code>GetFAttr</code>/<code>SetFAttr</code>). Le noyau fournit maintenant <code>sprintf</code> et <code>strtod</code>, que les runtimes d'OS2PC et de WPC appellent pour écrire et lire les réels (<code>Str</code>, <code>Write</code>, <code>Val</code>) : elles étaient listées dans DOSCALLS.DLL mais absentes, et tout programme qui affichait un réel s'arrêtait (SYS1804).
 
 <h3>Outlink (OUTLINK.PAS) : courrier IMAP, POP3 et SMTP</h3>
 

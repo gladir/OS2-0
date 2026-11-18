@@ -19,7 +19,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               CENTIPED.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
-              OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
+              OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
+              BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -67,6 +68,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
 
   fpc TOOLS\OS2PC.PAS                       OS/2 Pascal Compiler
   fpc TOOLS\MAKEISO.PAS                     fabrication du CD-ROM
+  fpc TOOLS\WPC.PAS                         compilateur de Pasdows 95 (Paint)
   OS2PC -COS2BOOT KERNEL\OS2BOOT.PAS        -> OS2BOOT
   OS2PC -COS2LDR  KERNEL\OS2LDR.PAS         -> OS2LDR
   OS2PC -COS2KRNL KERNEL\OS2KRNL.PAS        -> OS2KRNL
@@ -112,6 +114,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DEVMGR.PAS                          -> DEVMGR.EXE (Gestionnaire de peripheriques)
   OS2PC IFCONFIG.PAS, PING.PAS, HOST.PAS, WGET.PAS -> commandes du reseau
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
+  WPC -COS2 APPS\PAINT.PAS                  -> PAINT.EXE (Paint, dessin bitmap)
   nasm -f bin KERNEL\HDBOOT.ASM             -> MBR du disque dur (deja dans INSTALL.PAS)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
@@ -1148,6 +1151,27 @@ EXPLORER [dossier] a l'invite.
     camembert en relief), Outils (Verifier maintenant : CHKDSK) et
     Partage ; OK, Annuler, Appliquer. Aussi par le menu contextuel d'un
     lecteur du dossier Lecteurs du bureau (EXPLORER /PROPS:C:).
+
+Paint (PAINT.EXE, dossier Productivite)
+---------------------------------------
+Programme de dessin bitmap porte de Pasdows 95 (source APPS\PAINT.PAS,
+issu de CloneDRAW). Systeme OS/2 - Productivite - Paint, ou PAINT
+[fichier] a l'invite ; une image (.BMP, .PCX, .GIF, .PNG, .JPG...)
+ouverte depuis un dossier du bureau ou l'Explorateur OS2-0 s'ouvre aussi
+dans Paint. Exemple : PAINT PAYSAGE.BMP.
+  - outils : selection, gomme, remplissage, pipette, loupe, crayon,
+    pinceau, aerographe, texte, ligne, courbe, rectangle, polygone,
+    ellipse, rectangle arrondi ; Annuler/Retablir ; une trentaine de
+    formats d'image ;
+  - fenetre de Presentation Manager : barre de titre, barre de menus de
+    PM (Fichier, Modifier, Affichage, Image, Couleurs, Outils, ?),
+    image de 256 couleurs montree par GpiDrawBits ;
+  - bureau de 640 x 480 : la fenetre n'a que la barre de menus de PM (la
+    fenetre complete demande un bureau d'au moins 800 x 600) ;
+  - Alt+F4 ou fermer la fenetre : Quitter ; F10 : barre de menus.
+PAINT.PAS est ecrit pour Free Pascal (AnsiString, Int64, PByte) : il est
+compile par WPC (TOOLS\WPC.PAS), le compilateur de Pasdows 95 descendant
+d'OS2PC, avec sa cible -COS2 (programme OS/2-0).
 
 Outlink (OUTLINK.EXE, dossier Productivite)
 -------------------------------------------
