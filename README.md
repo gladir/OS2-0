@@ -158,7 +158,7 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		</tr>
 		<tr>
 			<td><b>APPS/PAINT.PAS</b></td>
-			<td>Paint : programme de dessin bitmap dans l'esprit de Paint, porté de Pasdows 95 (CloneDRAW) vers Presentation Manager (Système OS/2 → Productivité) ; compilé par WPC (<code>TOOLS/WPC.PAS</code>).</td>
+			<td>Paint : programme de dessin bitmap dans l'esprit de Paint, porté de Pasdows 95 (CloneDRAW) vers Presentation Manager (Système OS/2 → Productivité).</td>
 		</tr>
 		<tr>
 			<td><b>PASDEV.PAS</b></td>
@@ -209,7 +209,7 @@ Le compilateur <b>OS2PC.PAS</b> (« OS/2 Pascal Compiler », dossier <b>TOOLS</b
 	<tr><td><b>-COS2</b></td><td>Destination par défaut : programme 32 bits pour OS/2-0 (CMD.EXE et les commandes), dont les importations sont liées par le noyau. Un source commençant par <code>Library</code> produit une DLL (clause <code>exports nom [Name 'externe'] [Index ordinal]</code>, jusqu'à 4095 exportations, base préférée fixée par <code>{$IMAGEBASE $00D00000}</code>, section <code>.reloc</code> produite pour que le noyau puisse la reloger ; une constante <code>Const NOM = 'texte';</code> ou entière peut aussi être exportée comme donnée) ; une fonction déclarée <code>External 'DLL' [Name 'nom']</code> est importée de cette DLL.</td></tr>
 </table>
 
-Un second compilateur, <b>WPC.PAS</b> (dossier <b>TOOLS</b>), vient de <a href="https://github.com/gladir/Pasdows95">Pasdows 95</a> : c'est un descendant d'OS2PC qui a gardé la cible <code>-COS2</code> et accepte en plus les AnsiString, Int64, QWord, PByte et l'arithmétique des pointeurs de Free Pascal. Il compile <b>APPS/PAINT.PAS</b> (Paint), trop lié à Free Pascal pour OS2PC.
+OS2PC accepte aussi la syntaxe de Free Pascal qu'utilisent les programmes écrits pour lui (comme <b>APPS/PAINT.PAS</b>, Paint) : <code>AnsiString</code> à compteur de références (<code>{$H+}</code>), <code>Int64</code> et <code>QWord</code>, <code>PByte</code>, <code>PtrUInt</code> et l'arithmétique des pointeurs, tableaux dynamiques (<code>SetLength</code>) et paramètres tableaux ouverts, types procéduraux, procédures imbriquées appelées par une procédure sœur (lien statique), <code>Try</code> ... <code>Except</code> / <code>Finally</code> et <code>Raise</code>. Ces ajouts viennent du compilateur de <a href="https://github.com/gladir/Pasdows95">Pasdows 95</a>, un descendant d'OS2PC, et y ont été réintégrés. Comme Turbo Pascal, OS2PC signale maintenant un identificateur inconnu (au lieu d'une adresse nulle) et un identificateur déclaré deux fois dans une même portée.
 
 <h3>Multitâche et sessions</h3>
 
@@ -881,7 +881,7 @@ Le portage remplace les services du noyau de Pasdows par l'API d'OS/2 : <code>Do
 
 PAINT est dessiné pour un écran de 640 × 480, sa barre de menus comprise. Sur un bureau d'au moins 800 × 600, Paint a une fenêtre complète de 640 × 480 (captures ci-dessus) ; sur un bureau de 640 × 480, comme la version Pasdows 95 qui passait alors en plein écran sans cadre, la fenêtre n'a que la barre de menus de PM, qui prend la place de celle de PAINT, et les boîtes de dialogue sont centrées au-dessus de la ligne d'état. L'exemple <b>PAYSAGE.BMP</b> (<code>IMAGE/EXEMPLES</code>) est copié sur le CD-ROM.
 
-PAINT.PAS (47 000 lignes) est écrit pour Free Pascal : AnsiString, Int64, PByte et l'arithmétique des pointeurs, que le compilateur OS2PC ne connaît pas. Il est compilé par <b>WPC</b> (<code>TOOLS/WPC.PAS</code>), le compilateur de Pasdows 95, qui descend d'OS2PC, a gardé sa cible <code>-COS2</code> (programme OS/2-0 : appels du runtime vers DOSCALLS.DLL, fonctions <code>External 'PMWIN'</code> et <code>'PMGPI'</code>) et y ajoute ces types. Seule la couche de PAINT qui remplaçait Graph, Crt et la souris par Win32 est remplacée, par une couche qui utilise l'API d'OS/2 ; le reste du programme est celui de Pasdows 95. Trois défauts qu'OS2PC avait déjà corrigés ont été corrigés aussi dans WPC (comparaison de chaînes calculées, <code>Delete</code> au-delà de la fin, <code>GetFAttr</code>/<code>SetFAttr</code>). Le noyau fournit maintenant <code>sprintf</code> et <code>strtod</code>, que les runtimes d'OS2PC et de WPC appellent pour écrire et lire les réels (<code>Str</code>, <code>Write</code>, <code>Val</code>) : elles étaient listées dans DOSCALLS.DLL mais absentes, et tout programme qui affichait un réel s'arrêtait (SYS1804).
+PAINT.PAS (45 000 lignes) est écrit pour Free Pascal : AnsiString, Int64, PByte, l'arithmétique des pointeurs, tableaux dynamiques, Try/Except. Il est compilé par OS2PC comme les autres programmes (fonctions <code>External 'PMWIN'</code> et <code>'PMGPI'</code>) : le compilateur de Pasdows 95, qui descend d'OS2PC et avait ajouté cette syntaxe, a été fusionné dans OS2PC (voir plus haut). Seule la couche de PAINT qui remplaçait Graph, Crt et la souris par Win32 est remplacée, par une couche qui utilise l'API d'OS/2 ; le reste du programme est celui de Pasdows 95. Le noyau fournit maintenant <code>sprintf</code> et <code>strtod</code>, que le runtime d'OS2PC appelle pour écrire et lire les réels (<code>Str</code>, <code>Write</code>, <code>Val</code>) : elles étaient listées dans DOSCALLS.DLL mais absentes, et tout programme qui affichait un réel s'arrêtait (SYS1804).
 
 <h3>Outlink (OUTLINK.PAS) : courrier IMAP, POP3 et SMTP</h3>
 

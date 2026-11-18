@@ -68,7 +68,6 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
 
   fpc TOOLS\OS2PC.PAS                       OS/2 Pascal Compiler
   fpc TOOLS\MAKEISO.PAS                     fabrication du CD-ROM
-  fpc TOOLS\WPC.PAS                         compilateur de Pasdows 95 (Paint)
   OS2PC -COS2BOOT KERNEL\OS2BOOT.PAS        -> OS2BOOT
   OS2PC -COS2LDR  KERNEL\OS2LDR.PAS         -> OS2LDR
   OS2PC -COS2KRNL KERNEL\OS2KRNL.PAS        -> OS2KRNL
@@ -114,7 +113,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DEVMGR.PAS                          -> DEVMGR.EXE (Gestionnaire de peripheriques)
   OS2PC IFCONFIG.PAS, PING.PAS, HOST.PAS, WGET.PAS -> commandes du reseau
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
-  WPC -COS2 APPS\PAINT.PAS                  -> PAINT.EXE (Paint, dessin bitmap)
+  OS2PC APPS\PAINT.PAS                      -> PAINT.EXE (Paint, dessin bitmap)
   nasm -f bin KERNEL\HDBOOT.ASM             -> MBR du disque dur (deja dans INSTALL.PAS)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
@@ -173,6 +172,13 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\PMWP.PAS                        -> PMWP.DLL (objets du Workplace Shell)
   OS2PC DLL\PMCTLS.PAS                      -> PMCTLS.DLL (dialogues standard)
   MAKEISO OS2CD.ISO /BOOT:OS2BOOT OS2BOOT OS2LDR OS2KRNL CMD.EXE CONFIG.SYS ...
+
+OS2PC compile la syntaxe de Turbo Pascal et celle de Free Pascal
+qu'utilisent les programmes ecrits pour lui : AnsiString ({$H+}), Int64,
+QWord, PByte, PtrUInt et arithmetique des pointeurs, tableaux dynamiques
+(SetLength) et tableaux ouverts, types proceduraux, Try ... Except /
+Finally et Raise. Un identificateur inconnu ou declare deux fois dans une
+meme portee est une erreur, comme dans Turbo Pascal.
 
 Demarrage
 ---------
@@ -1169,9 +1175,9 @@ dans Paint. Exemple : PAINT PAYSAGE.BMP.
   - bureau de 640 x 480 : la fenetre n'a que la barre de menus de PM (la
     fenetre complete demande un bureau d'au moins 800 x 600) ;
   - Alt+F4 ou fermer la fenetre : Quitter ; F10 : barre de menus.
-PAINT.PAS est ecrit pour Free Pascal (AnsiString, Int64, PByte) : il est
-compile par WPC (TOOLS\WPC.PAS), le compilateur de Pasdows 95 descendant
-d'OS2PC, avec sa cible -COS2 (programme OS/2-0).
+PAINT.PAS est ecrit pour Free Pascal (AnsiString, Int64, PByte, tableaux
+dynamiques, Try/Except) : OS2PC accepte cette syntaxe, reprise du
+compilateur de Pasdows 95 (un descendant d'OS2PC) et fusionnee dans OS2PC.
 
 Outlink (OUTLINK.EXE, dossier Productivite)
 -------------------------------------------

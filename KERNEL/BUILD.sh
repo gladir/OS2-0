@@ -34,9 +34,9 @@
 #     OFFICE-0 : IMAP, POP3 et SMTP par TCPIP32.DLL, TLS et STARTTLS par
 #     TLS32.DLL ; dossier Productivite) ;
 #  3a. compile APPS/PAINT.PAS (Paint, porte de Pasdows 95, dossier
-#     Productivite) avec WPC (TOOLS/WPC.PAS), le compilateur de Pasdows 95
-#     descendant d'OS2PC, qui accepte les AnsiString, Int64, PByte de Free
-#     Pascal qu'utilise PAINT : WPC -COS2 produit un programme OS/2-0 ;
+#     Productivite) avec OS2PC, qui accepte les AnsiString, Int64, QWord,
+#     PByte, tableaux dynamiques, types proceduraux et Try/Except de Free
+#     Pascal qu'utilise PAINT ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS, et PAYSAGE.BMP pour Paint)
@@ -102,7 +102,6 @@ mkdir -p "$W/obj" "$W/cd"
 echo "== Outils (Free Pascal)"
 "$FPC" -O1 -FU"$W/obj" -o"$W/os2pc" "$ROOT/TOOLS/OS2PC.PAS" > "$W/os2pc.log" || { cat "$W/os2pc.log"; exit 1; }
 "$FPC" -FU"$W/obj" -o"$W/makeiso" "$ROOT/TOOLS/MAKEISO.PAS" > "$W/makeiso.log" || { cat "$W/makeiso.log"; exit 1; }
-"$FPC" -O1 -FU"$W/obj" -o"$W/wpc" "$ROOT/TOOLS/WPC.PAS" > "$W/wpc.log" || { cat "$W/wpc.log"; exit 1; }
 
 echo "== Noyau (OS2PC)"
 "$W/os2pc" -COS2BOOT "$HERE/OS2BOOT.PAS" "$W/cd/OS2BOOT"
@@ -122,8 +121,8 @@ for F in "$ROOT"/*.PAS; do
   fi
 done
 
-echo "== Paint (WPC -COS2 : APPS/PAINT.PAS, porte de Pasdows 95)"
-"$W/wpc" -COS2 -Q "$ROOT/APPS/PAINT.PAS" "$W/cd/PAINT.EXE" > "$W/PAINT.log" 2>&1 || { cat "$W/PAINT.log"; exit 1; }
+echo "== Paint (OS2PC : APPS/PAINT.PAS, porte de Pasdows 95)"
+"$W/os2pc" -Q "$ROOT/APPS/PAINT.PAS" "$W/cd/PAINT.EXE" > "$W/PAINT.log" 2>&1 || { cat "$W/PAINT.log"; exit 1; }
 echo "   PAINT.EXE"
 echo "== OS2PC.EXE (compilateur natif : OS2PC.PAS compile par OS2PC) et exemples de Pascal Developer"
 "$W/os2pc" -Q "$ROOT/TOOLS/OS2PC.PAS" "$W/cd/OS2PC.EXE"

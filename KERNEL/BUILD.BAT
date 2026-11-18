@@ -8,8 +8,6 @@ fpc -O1 -FE..\BUILD ..\TOOLS\OS2PC.PAS
 IF ERRORLEVEL 1 GOTO ERREUR
 fpc -FE..\BUILD ..\TOOLS\MAKEISO.PAS
 IF ERRORLEVEL 1 GOTO ERREUR
-fpc -O1 -FE..\BUILD ..\TOOLS\WPC.PAS
-IF ERRORLEVEL 1 GOTO ERREUR
 ECHO == Noyau (OS2PC)
 ..\BUILD\OS2PC -COS2BOOT OS2BOOT.PAS ..\BUILD\CD\OS2BOOT
 IF ERRORLEVEL 1 GOTO ERREUR
@@ -30,11 +28,11 @@ REM Navigateur Web, du bureau et du dossier Systeme OS/2, PASDEV.PAS,
 REM Pascal Developer, du dossier Developer Kit, CALC.PAS, Calculatrice, et
 REM EXPLORER.PAS, Explorateur OS2-0, et OUTLINK.PAS, Outlink (client de messagerie
 REM porte d'OFFICE-0 : IMAP, POP3, SMTP par TCPIP32.DLL et TLS32.DLL), du dossier Productivite)
-REM (APPS\PAINT.PAS, Paint porte de Pasdows 95, est compile par WPC -COS2 : TOOLS\WPC.PAS,
-REM compilateur de Pasdows 95 descendant d'OS2PC, accepte AnsiString, Int64 et PByte)
+REM (APPS\PAINT.PAS, Paint porte de Pasdows 95, utilise les AnsiString, Int64, PByte,
+REM tableaux dynamiques et Try/Except de Free Pascal, qu'OS2PC accepte)
 FOR %%F IN (..\*.PAS) DO ..\BUILD\OS2PC -Q %%F ..\BUILD\CD\%%~nF.EXE
-ECHO == Paint (WPC -COS2 : APPS\PAINT.PAS, porte de Pasdows 95)
-..\BUILD\WPC -COS2 -Q ..\APPS\PAINT.PAS ..\BUILD\CD\PAINT.EXE
+ECHO == Paint (OS2PC : APPS\PAINT.PAS, porte de Pasdows 95)
+..\BUILD\OS2PC -Q ..\APPS\PAINT.PAS ..\BUILD\CD\PAINT.EXE
 IF ERRORLEVEL 1 GOTO ERREUR
 REM nom 8.3 sur le CD-ROM (ISO 9660 niveau 1)
 IF EXIST ..\BUILD\CD\LAUNCHPAD.EXE MOVE /Y ..\BUILD\CD\LAUNCHPAD.EXE ..\BUILD\CD\LAUNCHPD.EXE > NUL

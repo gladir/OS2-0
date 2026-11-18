@@ -4,14 +4,14 @@
   @abstract(Target: Free Pascal 3.2)
   @description(Clone complet de Microsoft Paint en Turbo Pascal/Free Pascal)
 
-  Pasdows 95 : version Windows 95 (Win32) de PAINT.PAS de CloneDRAW,
-  compilee par WPC (WPC -CW32 APPS\PAINT.PAS PAINT.EXE). Avec WPC, les
-  unites Graph, Crt et PtcMouse sont remplacees par une couche Win32
-  (section "Couche Pasdows 95" ci-dessous) : PAINT s ouvre dans une
-  fenetre du bureau, recoit la souris et le clavier par les messages de
-  la fenetre et s affiche par SetDIBitsToDevice. Toutes les fonctions de
-  la version DOS sont conservees ; Free Pascal et Turbo Pascal utilisent
-  toujours leurs unites d origine.
+  OS/2-0 : version Presentation Manager de PAINT.PAS de CloneDRAW, portee
+  de Pasdows 95 et compilee par OS2PC (OS2PC APPS\PAINT.PAS PAINT.EXE).
+  Les unites Graph, Crt et PtcMouse sont remplacees par une couche qui
+  utilise l API d OS/2 (section "OS/2-0 : PAINT dans une fenetre de
+  Presentation Manager" ci-dessous) : PAINT s ouvre dans une fenetre de
+  Presentation Manager, avec la barre de menus de PM, recoit la souris
+  et le clavier par les messages de la fenetre et s affiche par
+  GpiDrawBits. Toutes les fonctions de la version DOS sont conservees.
 
   TODO Liste des 25 points a implementer:
   ----------------------------------------
