@@ -15,7 +15,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, SUDOKU.EXE,
               OTHELLO.EXE, TILEMAN.EXE, HEX2048.EXE, BACKGAM.EXE, POKER.EXE,
               BILLARD.EXE, CHECKERS.EXE, YATHZEE.EXE, BATTLE.EXE, POWER4.EXE,
-              SOKOBAN.EXE,
+              SOKOBAN.EXE, BACCARAT.EXE, HANOIS.EXE, BABY.EXE, 421.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
@@ -88,6 +88,10 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC BATTLE.PAS                          -> BATTLE.EXE (Bataille navale)
   OS2PC POWER4.PAS                          -> POWER4.EXE (Puissance 4)
   OS2PC SOKOBAN.PAS                         -> SOKOBAN.EXE (Soko-Ban)
+  OS2PC BACCARAT.PAS                        -> BACCARAT.EXE (Baccarat)
+  OS2PC HANOIS.PAS                          -> HANOIS.EXE (Tours de Hanoi)
+  OS2PC BABY.PAS                            -> BABY.EXE (Baby)
+  OS2PC 421.PAS                             -> 421.EXE (421)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -862,9 +866,23 @@ traditionnels, composant Jeux de l'installation) :
   etages ; fleches ou clic (le magasinier y va), Ctrl+Z annuler, F10
   recommencer, F8 et F9 etage precedent et suivant, F2 choisir l'etage,
   F3 demonstration. Porte du prototype SOKOBAN.PAS de 7iles.
+  Baccarat (BACCARAT.EXE) : miser sur le Joueur, le Banquier ou
+  l'Egalite (cases du tapis ou 1 2 3), + et - la mise, Espace
+  distribuer ; naturel, troisieme carte, sabot de six jeux, historique.
+  Porte du prototype BACCARAT.PAS de 7iles.
+  Tours de Hanoi (HANOIS.EXE) : deplacer la pile de la tige 2 vers la
+  tige 1 ou 3 ; clic ou 1 2 3 pour prendre puis poser, Ctrl+Z annuler,
+  F3 solution animee, 3 a 8 disques. Porte du prototype HANOIS.PAS de
+  7iles. /DISKS:n, /SOLVE.
+  Baby (BABY.EXE) : faire rebondir les bebes qui sautent de l'immeuble
+  en feu jusqu'a l'ambulance ; fleches, A B C ou 1 2 3, souris, P pause.
+  Porte du prototype BABY.PAS de 7iles (avec ses images). /AUTO.
+  421 (421.EXE) : trois lancers de trois des par manche, en gardant des
+  des (clic ou 1 2 3) ; 421, brelans, suites ; 21 jetons, 11 manches,
+  contre 1 a 3 ordinateurs. Porte du prototype 421.PAS de 7iles. /AUTO.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
-Puissance 4) : donne reproductible.
+Puissance 4, Baccarat, Baby, 421) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------

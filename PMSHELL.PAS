@@ -153,6 +153,7 @@ Const
   OB_PRODUCT = 31; IC_CALC = 30; IC_EXPLORER = 31; IC_SUDOKU = 32; IC_NOTATOR = 33; OB_SONG = 32; IC_OTHELLO = 34;
   IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
   IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43; IC_SOKOBAN = 44;
+  IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1150,6 +1151,11 @@ Begin
         If FileExists('C:\BATTLE.EXE') Then Dummy := NewItem(V, IC_BATTLE, OB_GAME, 'Bataille navale', 'C:\BATTLE.EXE');
         If FileExists('C:\POWER4.EXE') Then Dummy := NewItem(V, IC_POWER4, OB_GAME, 'Puissance 4', 'C:\POWER4.EXE');
         If FileExists('C:\SOKOBAN.EXE') Then Dummy := NewItem(V, IC_SOKOBAN, OB_GAME, 'Soko-Ban', 'C:\SOKOBAN.EXE');
+        If FileExists('C:\BACCARAT.EXE') Then Dummy := NewItem(V, IC_BACCARAT, OB_GAME, 'Baccarat', 'C:\BACCARAT.EXE');
+        If FileExists('C:\HANOIS.EXE') Then
+          Dummy := NewItem(V, IC_HANOIS, OB_GAME, 'Tours de Hanoi', 'C:\HANOIS.EXE');
+        If FileExists('C:\BABY.EXE') Then Dummy := NewItem(V, IC_BABY, OB_GAME, 'Baby', 'C:\BABY.EXE');
+        If FileExists('C:\421.EXE') Then Dummy := NewItem(V, IC_421, OB_GAME, '421', 'C:\421.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1551,6 +1557,62 @@ Begin
         GLn(Hps, X + 23, Y + 8, X + 25, Y + 6, CLR_BLUE);
         GDisc(Hps, X + 24, Y + 18, 2, CLR_YELLOW);
         GBox(Hps, X + 22, Y + 13, X + 26, Y + 16, CLR_BLUE, DRO_FILL);
+      End;
+    IC_BACCARAT :
+      Begin
+        { tapis vert, deux cartes (9 et 8) et un jeton }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKGREEN, CLR_BLACK);
+        FBox(Hps, X + 3, Y + 11, X + 14, Y + 28, CLR_WHITE, CLR_BLACK);
+        GText(Hps, X + 5, Y + 12, '9', CLR_RED, CLR_WHITE);
+        FBox(Hps, X + 17, Y + 11, X + 28, Y + 28, CLR_WHITE, CLR_BLACK);
+        GText(Hps, X + 19, Y + 12, '8', CLR_BLACK, CLR_WHITE);
+        GDisc(Hps, X + 16, Y + 6, 5, CLR_BLACK);
+        GDisc(Hps, X + 16, Y + 6, 4, CLR_BLUE);
+        GDisc(Hps, X + 16, Y + 6, 2, CLR_WHITE);
+      End;
+    IC_HANOIS :
+      Begin
+        { socle, trois tiges et la pile de disques }
+        GBox(Hps, X + 1, Y + 3, X + 30, Y + 6, CLR_BROWN, DRO_FILL);
+        GLn(Hps, X + 1, Y + 6, X + 30, Y + 6, CLR_YELLOW);
+        GBox(Hps, X + 5, Y + 7, X + 6, Y + 25, CLR_BROWN, DRO_FILL);
+        GBox(Hps, X + 15, Y + 7, X + 16, Y + 25, CLR_BROWN, DRO_FILL);
+        GBox(Hps, X + 25, Y + 7, X + 26, Y + 25, CLR_BROWN, DRO_FILL);
+        FBox(Hps, X + 7, Y + 7, X + 24, Y + 10, CLR_BLUE, CLR_BLACK);
+        FBox(Hps, X + 9, Y + 11, X + 22, Y + 14, CLR_GREEN, CLR_BLACK);
+        FBox(Hps, X + 11, Y + 15, X + 20, Y + 18, CLR_YELLOW, CLR_BLACK);
+        FBox(Hps, X + 22, Y + 7, X + 29, Y + 10, CLR_RED, CLR_BLACK);
+      End;
+    IC_BABY :
+      Begin
+        { nuit, immeuble en feu, bebe dans les airs, toile des pompiers }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKBLUE, CLR_BLACK);
+        GBox(Hps, X + 2, Y + 2, X + 9, Y + 22, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 4, Y + 14, X + 7, Y + 17, CLR_BLACK, DRO_FILL);
+        GBox(Hps, X + 4, Y + 6, X + 7, Y + 9, CLR_BLACK, DRO_FILL);
+        GDisc(Hps, X + 5, Y + 25, 3, CLR_YELLOW);
+        GDisc(Hps, X + 5, Y + 24, 2, CLR_RED);
+        GDisc(Hps, X + 19, Y + 21, 3, CLR_WHITE);
+        GBox(Hps, X + 17, Y + 15, X + 21, Y + 18, CLR_PINK, DRO_FILL);
+        GLn(Hps, X + 13, Y + 5, X + 27, Y + 5, CLR_WHITE);
+        GBox(Hps, X + 12, Y + 2, X + 13, Y + 7, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 27, Y + 2, X + 28, Y + 7, CLR_YELLOW, DRO_FILL);
+        GDisc(Hps, X + 12, Y + 9, 1, CLR_RED);
+        GDisc(Hps, X + 28, Y + 9, 1, CLR_RED);
+      End;
+    IC_421 :
+      Begin
+        { trois des : 4, 2 et 1 }
+        FBox(Hps, X + 2, Y + 17, X + 15, Y + 30, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 5, Y + 27, 1, CLR_BLACK);
+        GDisc(Hps, X + 12, Y + 27, 1, CLR_BLACK);
+        GDisc(Hps, X + 5, Y + 20, 1, CLR_BLACK);
+        GDisc(Hps, X + 12, Y + 20, 1, CLR_BLACK);
+        FBox(Hps, X + 17, Y + 17, X + 30, Y + 30, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 27, Y + 27, 1, CLR_BLACK);
+        GDisc(Hps, X + 20, Y + 20, 1, CLR_BLACK);
+        FBox(Hps, X + 9, Y + 1, X + 22, Y + 14, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 15, Y + 7, 2, CLR_RED);
       End;
     IC_POWER4 :
       Begin
@@ -2030,11 +2092,11 @@ Begin
     Exit;
   End;
   N := NViews Mod 6;
-  { le dossier Jeux (douze jeux) s'ouvre plus grand : quatre colonnes }
+  { le dossier Jeux (dix-neuf jeux) s'ouvre plus grand : cinq colonnes }
   If Kind = VK_GAMES Then
   Begin
     If Not OpenFrame(V, 'WPFolder', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON Or FCF_MAXBUTTON Or
-                     FCF_SIZEBORDER Or FCF_VERTSCROLL, 24 + N * 20, MaxI(0, ScrH - 420 - N * 20), 520, 370) Then Exit;
+                     FCF_SIZEBORDER Or FCF_VERTSCROLL, 8 + N * 12, MaxI(0, ScrH - 420 - N * 20), 612, 390) Then Exit;
   End
   Else If Not OpenFrame(V, 'WPFolder', FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON Or FCF_MAXBUTTON Or FCF_SIZEBORDER Or
                FCF_VERTSCROLL, 130 + N * 24, ScrH - 330 - N * 24, 420, 300) Then Exit;
