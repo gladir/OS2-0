@@ -154,6 +154,7 @@ Const
   IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
   IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43; IC_SOKOBAN = 44;
   IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49; IC_OUTLINK = 50; IC_PAINT = 51; OB_IMAGE = 33;
+  IC_WORDIUM = 52; OB_WORDDOC = 34;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -574,6 +575,20 @@ Begin
   End;
 End;
 
+{ WorDium (WORDIUM.EXE, dossier Productivite) : memes emplacements }
+Function WordiumPath : String;
+Var S : String;
+Begin
+  WordiumPath := '';
+  If FileExists('C:\WORDIUM.EXE') Then WordiumPath := 'C:\WORDIUM.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'WORDIUM.EXE') Then WordiumPath := S + 'WORDIUM.EXE';
+  End;
+End;
+
 Function OutlinkPath : String;
 Var S : String;
 Begin
@@ -877,6 +892,12 @@ Begin
     { image : ouverte par Paint }
     Icon := IC_PAINT; Obj := OB_IMAGE;
   End
+  Else If ((E = 'DOC') Or (E = 'DOCX') Or (E = 'WPD') Or (E = 'GAT') Or (E = 'GPX') Or (E = 'PDF')) And
+          (WordiumPath <> '') Then
+  Begin
+    { document (Word, WorDium, MonsterBook, PDF) : ouvert par WorDium }
+    Icon := IC_WORDIUM; Obj := OB_WORDDOC;
+  End
   Else
   Begin
     Icon := IC_FILE; Obj := OB_DATA;
@@ -1146,7 +1167,8 @@ Begin
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
-        If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Then
+        If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Or
+           (WordiumPath <> '') Then
           Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
@@ -1207,6 +1229,9 @@ Begin
         If OutlinkPath <> '' Then Dummy := NewItem(V, IC_OUTLINK, OB_GAME, 'Outlink', OutlinkPath);
         { Paint : dessin bitmap (PAINT.PAS de Pasdows 95, CloneDRAW) }
         If PaintPath <> '' Then Dummy := NewItem(V, IC_PAINT, OB_GAME, 'Paint', PaintPath);
+        { WorDium : traitement de texte (WORD.PAS d'OFFICE-0) ; DOCX, DOC,
+          PDF, GAT du MonsterBook, WPD }
+        If WordiumPath <> '' Then Dummy := NewItem(V, IC_WORDIUM, OB_GAME, 'WorDium', WordiumPath);
       End;
     VK_DEVKIT :
       Begin
@@ -1669,6 +1694,27 @@ Begin
         GLn(Hps, X + 17, Y + 14, X + 30, Y + 29, CLR_BROWN);
         GLn(Hps, X + 18, Y + 14, X + 30, Y + 28, CLR_BROWN);
         GBox(Hps, X + 15, Y + 11, X + 18, Y + 14, CLR_DARKGRAY, DRO_FILL);
+      End;
+    IC_WORDIUM :
+      Begin
+        { feuille de texte (coin replie), grand W bleu et plume }
+        FBox(Hps, X + 5, Y + 2, X + 24, Y + 29, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 19, Y + 29, X + 24, Y + 24, CLR_BLACK);
+        GBox(Hps, X + 20, Y + 25, X + 23, Y + 28, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 8, Y + 25, X + 10, Y + 18, CLR_BLUE);
+        GLn(Hps, X + 10, Y + 18, X + 12, Y + 23, CLR_BLUE);
+        GLn(Hps, X + 12, Y + 23, X + 14, Y + 18, CLR_BLUE);
+        GLn(Hps, X + 14, Y + 18, X + 16, Y + 25, CLR_BLUE);
+        GLn(Hps, X + 9, Y + 25, X + 11, Y + 18, CLR_BLUE);
+        GLn(Hps, X + 15, Y + 18, X + 17, Y + 25, CLR_BLUE);
+        GLn(Hps, X + 8, Y + 14, X + 21, Y + 14, CLR_DARKGRAY);
+        GLn(Hps, X + 8, Y + 11, X + 21, Y + 11, CLR_DARKGRAY);
+        GLn(Hps, X + 8, Y + 8, X + 18, Y + 8, CLR_DARKGRAY);
+        GLn(Hps, X + 8, Y + 5, X + 20, Y + 5, CLR_DARKGRAY);
+        GLn(Hps, X + 30, Y + 30, X + 20, Y + 4, CLR_BROWN);
+        GLn(Hps, X + 29, Y + 30, X + 19, Y + 5, CLR_BROWN);
+        GLn(Hps, X + 30, Y + 29, X + 25, Y + 20, CLR_BROWN);
+        GLn(Hps, X + 20, Y + 4, X + 19, Y + 2, CLR_BLACK);
       End;
     IC_OUTLINK :
       Begin
@@ -2886,6 +2932,7 @@ Begin
       If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', It(K)^.Path) Else OpenViewer(It(K)^.Path);
     OB_SONG : RunPm('C:\NOTATOR.EXE', It(K)^.Path);
     OB_IMAGE : RunPm(PaintPath, It(K)^.Path);
+    OB_WORDDOC : RunPm(WordiumPath, It(K)^.Path);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :

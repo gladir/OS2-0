@@ -27,7 +27,7 @@ OS2-0 démarre d'un CD-ROM ou d'un disque dur, dans QEMU, VirtualBox (y compris 
 	<li><b>Noyau 32 bits</b> (OS2KRNL) : mode protégé, pagination, tâches préemptives, sessions plein écran et fenêtrées, chargeur de programmes et de DLL 32 bits (PE et LX), programmes 16 bits d'OS/2 1.x (NE) et machine virtuelle DOS en mode V86 (Turbo Pascal 7, BGI, DPMI).</li>
 	<li><b>Systèmes de fichiers</b> : HPFS par défaut, NTFS en lecture, écriture et formatage pour partager ses fichiers avec Windows et Linux, FAT12 sur disquette, ISO 9660 sur CD-ROM, disque virtuel en mémoire ; pilotes IFS chargés par <code>IFS=</code> de CONFIG.SYS.</li>
 	<li><b>Presentation Manager et Workplace Shell</b> : fenêtres, menus, contrôles, GPI, presse-papiers, glisser-déposer, raccourcis, modèles, LaunchPad, carnets Système, Souris, Pays et Langue ; de 640 × 480 en 16 couleurs (VGA) à 1024 × 768 en 16 millions de couleurs (VESA).</li>
-	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Notator for OS2-Zero, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
+	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), WorDium (traitement de texte : DOCX, PDF, GAT du MonsterBook, correcteur d'orthographe), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Notator for OS2-Zero, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
 	<li><b>Matériel</b> : disques IDE et ATAPI, lecteur de disquettes, cartes son (Sound Blaster, AC'97, AudioPCI), réseau (Intel PRO/1000, AMD PCnet) avec pile TCP/IP, DHCP, DNS et TLS ; outils invités de VirtualBox et de VMware (souris absolue, écran redimensionnable).</li>
 	<li><b>Installation</b> graphique dans le style de Warp 3, sur une partition HPFS ou NTFS, en six langues.</li>
 </ul>
@@ -155,6 +155,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		<tr>
 			<td><b>OUTLINK.PAS</b></td>
 			<td>Outlink : client de messagerie dans l'esprit d'Outlook, porté de <code>OUTLOOK.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (Système OS/2 → Productivité) ; réception IMAP et POP3, envoi SMTP, TLS et STARTTLS, par les sockets de TCPIP32.DLL et TLS32.DLL.</td>
+		</tr>
+		<tr>
+			<td><b>WORDIUM.PAS</b></td>
+			<td>WorDium : traitement de texte porté de <code>WORD.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (Système OS/2 → Productivité) ; formats WPD, DOCX, DOC, PDF et GAT du MonsterBook, correcteur d'orthographe en cinq langues, impression par le tampon d'impression d'OS/2.</td>
 		</tr>
 		<tr>
 			<td><b>APPS/PAINT.PAS</b></td>
@@ -882,6 +886,36 @@ Le portage remplace les services du noyau de Pasdows par l'API d'OS/2 : <code>Do
 PAINT est dessiné pour un écran de 640 × 480, sa barre de menus comprise. Sur un bureau d'au moins 800 × 600, Paint a une fenêtre complète de 640 × 480 (captures ci-dessus) ; sur un bureau de 640 × 480, comme la version Pasdows 95 qui passait alors en plein écran sans cadre, la fenêtre n'a que la barre de menus de PM, qui prend la place de celle de PAINT, et les boîtes de dialogue sont centrées au-dessus de la ligne d'état. L'exemple <b>PAYSAGE.BMP</b> (<code>IMAGE/EXEMPLES</code>) est copié sur le CD-ROM.
 
 PAINT.PAS (45 000 lignes) est écrit pour Free Pascal : AnsiString, Int64, PByte, l'arithmétique des pointeurs, tableaux dynamiques, Try/Except. Il est compilé par OS2PC comme les autres programmes (fonctions <code>External 'PMWIN'</code> et <code>'PMGPI'</code>) : le compilateur de Pasdows 95, qui descend d'OS2PC et avait ajouté cette syntaxe, a été fusionné dans OS2PC (voir plus haut). Seule la couche de PAINT qui remplaçait Graph, Crt et la souris par Win32 est remplacée, par une couche qui utilise l'API d'OS/2 ; le reste du programme est celui de Pasdows 95. Le noyau fournit maintenant <code>sprintf</code> et <code>strtod</code>, que le runtime d'OS2PC appelle pour écrire et lire les réels (<code>Str</code>, <code>Write</code>, <code>Val</code>) : elles étaient listées dans DOSCALLS.DLL mais absentes, et tout programme qui affichait un réel s'arrêtait (SYS1804).
+
+<h3>WorDium (WORDIUM.PAS) : traitement de texte</h3>
+
+<b>WorDium</b> est le traitement de texte d'OS/2-0, dans le dossier <b>Productivité</b> (Système OS/2 → Productivité → WorDium ; <code>WORDIUM [/CLASSICMENU | /RUBANMENU] [document]</code> à l'invite, <code>WORDIUM /?</code> : aide). Un document (<code>.DOCX</code>, <code>.DOC</code>, <code>.PDF</code>, <code>.GAT</code>, <code>.GPX</code>, <code>.WPD</code>) ouvert depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans WorDium. C'est le <code>WORD.PAS</code> du dépôt OFFICE-0, écrit pour MS-DOS (BGI en 640 × 480, souris de l'interruption 33h), porté vers Presentation Manager avec toutes ses fonctions :
+
+<ul>
+	<li>saisie et mise en forme : gras, italique, souligné, tailles de 6 à 72 points, 16 couleurs, alignements (gauche, centré, droite, justifié), retraits, filets, sauts de page ; affichage Normal ou Mise en page, règle, zoom ;</li>
+	<li>tableaux (insertion, lignes et colonnes, menu contextuel du bouton droit), images (BMP, PCX, GIF, JPEG, TIFF, XBM, BGX, GPX), symboles ;</li>
+	<li>boîtes Police, Paragraphe, Zoom, Rechercher, Remplacer, Statistiques, Options, Sommaire de l'aide, À propos ; Annuler et Rétablir ;</li>
+	<li>formats : <b>WPD</b> (format natif), <b>DOCX</b> (lecture et écriture : ZIP et Deflate écrits en Pascal, styles, numérotation, en-têtes et pieds de page, images), <b>DOC</b> de Word 97 (lecture), <b>PDF</b> (lecture : texte placé, flux FlateDecode, graphiques), <b>GAT</b> du MonsterBook (lecture et écriture : attributs gras, souligné, italique, double largeur, images <code>[DC:</code>), <b>GPX</b> ;</li>
+	<li><b>correcteur d'orthographe</b> (F7) : français, anglais, allemand, espagnol et italien, suggestions, Remplacer, Ignorer ;</li>
+	<li>cinq langues de l'interface, comme la version DOS : la variable <code>LANGUAGE</code> (réglée par Configuration du système) choisit le français, l'anglais (EN), l'espagnol (ES ou SP), l'italien (IT) ou l'allemand (DE ou GR) ;</li>
+	<li>menus classiques (style Word 2003, par défaut) ou ruban (<code>/RUBANMENU</code>, style Word 2007).</li>
+</ul>
+
+<img width="800" height="600" alt="OS/2-0 : WorDium sur un bureau de 800 x 600, avec le document MONSTER.GAT du MonsterBook" src="IMAGE/WORDIUM.png" />
+<img width="800" height="600" alt="OS/2-0 : WorDium, correcteur d'orthographe en français" src="IMAGE/WORDIUM_ORTHO.png" />
+
+<table>
+	<tr><th>Partie</th><th>Version DOS (OFFICE-0)</th><th>OS/2-0 (Presentation Manager)</th></tr>
+	<tr><td>Fenêtre</td><td>Plein écran BGI 640 × 480, barre de menus dessinée par WorDium</td><td>Fenêtre de PM (barre de titre avec le nom du document, menu système, bouton de réduction, liste des fenêtres) ; l'image de 640 × 480 est gardée en mémoire et montrée par <code>GpiDrawBits</code>, zones modifiées seulement</td></tr>
+	<tr><td>Menus</td><td>Menus déroulants de WorDium, F10, Alt+lettre</td><td>Barre de menus de PM construite à partir des menus de WorDium (lettres soulignées, raccourcis à droite, coches de l'Affichage) ; avec le ruban, les titres de la barre de menus de PM sont les onglets</td></tr>
+	<tr><td>Boîtes</td><td>Cadres gris, barre de titre bleue</td><td>Barre de titre d'OS/2 (case du menu système, titre centré) ; messages et questions par <code>WinMessageBox</code></td></tr>
+	<tr><td>Clavier et souris</td><td><code>ReadKey</code>, interruption 33h ou PtcMouse avec flèche dessinée par WorDium</td><td>WM_CHAR (codes de <code>ReadKey</code>, lettres accentuées de la page de codes 850 acceptées), WM_BUTTON*, pointeur de PM ; fermer la fenêtre : Fichier → Quitter</td></tr>
+	<tr><td>Impression</td><td>Absente (« Impression disponible sous Windows »)</td><td>Tampon d'impression d'OS/2 : chaque page est dessinée par la GPI (<code>DevOpenDC</code> OD_QUEUED, PM_Q_STD) et imprimée par PMSPL et PicPrint en graphique ESC/P, page de 8 × 10,5 pouces</td></tr>
+</table>
+
+<img width="480" height="633" alt="OS/2-0 : page imprimée par WorDium (MONSTER.GAT), sortie ESC/P du port LPT1 décodée" src="IMAGE/WORDIUM_IMPRESSION.png" />
+
+Les exemples <b>MONSTER.GAT</b> (MonsterBook) et <b>LETTRE.PDF</b> (<code>IMAGE/EXEMPLES</code>) sont copiés sur le CD-ROM. WORDIUM.PAS (18 000 lignes) est compilé par OS2PC ; le portage a été vérifié en comparant, fichier par fichier, ce que lisent et écrivent WorDium compilé par Free Pascal sous Linux et WorDium compilé par OS2PC sous OS/2-0 (quatre PDF, un GAT, un DOCX, les enregistrements DOCX, GAT et WPD, les suggestions du correcteur dans les cinq langues) : les résultats sont identiques, et LibreOffice ouvre les DOCX écrits par WorDium. Ce travail a corrigé OS2PC : <code>Assign</code>, <code>Reset</code>, <code>Rewrite</code>, <code>Close</code>… sur une variable fichier qui est un champ d'enregistrement (<code>Z.F</code>), <code>Byte('&lt;')</code> (code du caractère), paramètres <code>Const</code> chaîne recopiés à l'entrée (une chaîne temporaire pouvait être recouverte), types du programme qui masquent les types prédéfinis du même nom (<code>PWord</code>), champs d'un <code>With</code> prioritaires sur les variables, <code>ClrEol</code> qui applique la couleur courante (la ligne de titre de CMD est bleue sur toute la largeur). Le noyau sert les <code>GetMem</code> de 64 Ko et plus par de grands blocs de mémoire physique (le tas du noyau ne compte que quelques Mo) ; PMSPL transmet la taille de page <code>/W:</code> <code>/H:</code> à PicPrint.
 
 <h3>Outlink (OUTLINK.PAS) : courrier IMAP, POP3 et SMTP</h3>
 

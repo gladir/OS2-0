@@ -1338,6 +1338,8 @@ Var
   { Table des types }
   TypeTab   : ^TArr_TypeTab;
   TypeCount : LongInt;
+  TypeBuiltinCount : LongInt;       { types predefinis (avant ceux du programme) ; -1 : pas encore fixe }
+  TypeShadowK : LongInt;
   { tableau ouvert (parametre Array Of T) : adresse + High sur la pile }
   TypeOpen  : Array[0..MAX_TYPE - 1] Of Boolean;
   TyInt64, TyQWord : LongInt;          { index des types Int64 / QWord }
@@ -4457,6 +4459,7 @@ Procedure TypeInit;
 Var I, TI : LongInt;
 Begin
   TypeCount := 0;
+  TypeBuiltinCount := -1;
   WithDepth := 0;
 
   { Initialiser toute la table a zero }
@@ -9978,6 +9981,11 @@ Begin
           End;
           TName := StrUpperCase(TokenPool^[I].Val);
           Inc(I);
+          { un type du programme masque le type predefini du meme nom (comme
+            en Free Pascal : PWord = ^TWord n'est plus ^Word) }
+          If TypeBuiltinCount < 0 Then TypeBuiltinCount := TypeCount;
+          For TypeShadowK := 0 To TypeBuiltinCount - 1 Do
+            If TypeTab^[TypeShadowK].Name = TName Then TypeTab^[TypeShadowK].Name := '';
 
           { Attendre '=' }
           If (I < TokenCount) And (TokenPool^[I].Kind = TK_OP) And
@@ -11847,6 +11855,28 @@ Begin
   FileRecSize := R;
 End;
 
+{ GenFileVarAddr : adresse de la variable fichier qui commence au jeton
+  EP dans EAX (identificateur, ou designateur : champ d'enregistrement
+  Z.F, element de tableau T[I], pointeur P^) ; FileVarT : son type }
+Var FileVarT : LongInt;
+Procedure GenFileVarAddr(PI : LongInt);
+Var Nm : TString;
+Begin
+  Nm := TokenPool^[EP].Val;
+  If (EP + 1 < EPEnd) And (TokIsPunct(EP + 1, '.') Or TokIsPunct(EP + 1, '[') Or
+     TokIsOp(EP + 1, '^') Or TokIsPunct(EP + 1, '^')) Then
+  Begin
+    FileVarT := -1;
+    If Not ParseLValueAddrW32(PI, FileVarT) Then EmitInstr('XOR EAX,EAX');
+  End
+  Else
+  Begin
+    FileVarT := FileVarType(PI, Nm);
+    GenLoadAddr(PI, Nm);
+    Inc(EP);
+  End;
+End;
+
 { ------------------------------------------------------------ }
 { ParseFuncCall : parser un appel de procedure/fonction         }
 { nom(arg1, arg2, ...) -> PUSH args, CALL _TPF_nom             }
@@ -12454,8 +12484,10 @@ Begin
   Begin
     Up := StrUpperCase(TokenPool^[EP].Val);
 
-    { Une variable locale ou un parametre masque les fonctions predefinies (ex: Str, Val, Pos) }
+    { Une variable locale ou un parametre masque les fonctions predefinies (ex: Str, Val, Pos) ;
+      un champ d un WITH actif masque les variables (comme en Pascal) }
     If (TokenPool^[EP].Kind = TK_IDENT) And
+       Not ((WithDepth > 0) And (WithFieldIndex(Up, WFOfs) >= 0)) And
        (((PI >= 0) And
          ((FindLocal(PI, Up) >= 0) Or (FindParam(PI, Up) >= 0) Or IsOuterVarName(PI, Up)) And
          Not (ProcTab^[PI]^.IsFunction And (ProcTab^[PI]^.Name = Up))) Or
@@ -12477,6 +12509,7 @@ Begin
 
     { fonction declaree par le programme : prioritaire sur une primitive }
     If (TokenPool^[EP].Kind = TK_IDENT) And W32Fpu And (W32FindProc(PI, Up) >= 0) And
+       Not ((WithDepth > 0) And (WithFieldIndex(Up, WFOfs) >= 0)) And
        (Not ProcTab^[W32FindProc(PI, Up)]^.IsExternal) And
        ((PI < 0) Or ((FindLocal(PI, Up) < 0) And (FindParam(PI, Up) < 0))) And
        Not IsOuterVarName(PI, Up) Then
@@ -12541,7 +12574,10 @@ Begin
     Begin
       Inc(EP);  { sauter le nom de type }
       Inc(EP);  { sauter '(' }
+      { Byte('<'), Word('A') : litteral d un caractere = son code (comme Ord) }
+      WantCharLit := CharLitArgFollows;
       ParseExpr(PI);
+      WantCharLit := False;
       EPMatch(')');
       { Masquer / etendre selon la taille du type cible }
       If (Up = 'BYTE') Or (Up = 'CHAR') Or (Up = 'BOOLEAN') Then
@@ -13442,8 +13478,7 @@ Begin
           Else
           Begin
             { EOF(f) : f est une variable Text }
-            GenLoadAddr(PI, TokenPool^[EP].Val);
-            Inc(EP);
+            GenFileVarAddr(PI);
             EmitInstr('PUSH EAX');
             EmitInstr('CALL ' + TP_RT_PFX + 'EOF_FILE');
             EmitInstr('ADD ESP,4');
@@ -13470,8 +13505,7 @@ Begin
         Inc(EP);
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
           EmitInstr('PUSH EAX');
           EmitInstr('CALL ' + TP_RT_PFX + 'EOLN_FILE');
           EmitInstr('ADD ESP,4');
@@ -13502,8 +13536,7 @@ Begin
         Inc(EP);
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
           EmitInstr('PUSH EAX');
           EmitInstr('CALL ' + TP_RT_PFX + 'SEEKEOF_FILE');
           EmitInstr('ADD ESP,4');
@@ -13532,8 +13565,7 @@ Begin
         Inc(EP);
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
           EmitInstr('PUSH EAX');
           EmitInstr('CALL ' + TP_RT_PFX + 'SEEKEOLN_FILE');
           EmitInstr('ADD ESP,4');
@@ -13569,8 +13601,7 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EPMatch(')');
       End;
@@ -13590,8 +13621,7 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EPMatch(')');
       End;
@@ -25950,8 +25980,7 @@ Begin
         { f : variable fichier Text, charger son adresse }
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EmitInstr('PUSH EAX');
         EPMatch(',');
@@ -25978,9 +26007,8 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          RecSz := FileRecSize(FileVarType(PI, TokenPool^[EP].Val));
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
+          RecSz := FileRecSize(FileVarT);
         End;
         EmitInstr('PUSH EAX');
         { taille d enregistrement : parametre optionnel, sinon celle du type }
@@ -26013,9 +26041,8 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          RecSz := FileRecSize(FileVarType(PI, TokenPool^[EP].Val));
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
+          RecSz := FileRecSize(FileVarT);
         End;
         EmitInstr('PUSH EAX');
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_PUNCT) And
@@ -26046,8 +26073,7 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EmitInstr('PUSH EAX');
         EPMatch(')');
@@ -26069,8 +26095,7 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EmitInstr('PUSH EAX');
         EPMatch(')');
@@ -26092,8 +26117,7 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EPMatch(')');
       End;
@@ -26122,8 +26146,7 @@ Begin
         { f : variable fichier ; son nom ASCIIZ est a TFR_NAME dans l enregistrement }
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EmitInstr('ADD EAX,' + IntToStr_(TFR_NAME));
         EmitInstr('PUSH EAX');    { ancien nom }
@@ -26154,8 +26177,7 @@ Begin
         { f : variable fichier }
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EmitInstr('PUSH EAX');                  { adresse de la variable fichier }
         EPMatch(',');
@@ -26181,8 +26203,7 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EmitInstr('MOV EAX,DWORD PTR [EAX]');  { handle fichier }
         EPMatch(')');
@@ -26205,8 +26226,7 @@ Begin
         { f : variable fichier }
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EmitInstr('MOV EAX,DWORD PTR [EAX]');  { handle fichier }
         EmitInstr('PUSH EAX');
@@ -26230,8 +26250,7 @@ Begin
       Begin
         If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_IDENT) Then
         Begin
-          GenLoadAddr(PI, TokenPool^[EP].Val);
-          Inc(EP);
+          GenFileVarAddr(PI);
         End;
         EmitInstr('PUSH EAX');        { adresse de la variable fichier }
         EPMatch(',');
@@ -30386,6 +30405,24 @@ Begin
   End;
 End;
 
+{ W32ParamCopied : le parametre PK de FI est-il recopie dans le cadre de
+  la routine a l'entree ? Parametres valeur chaine ou agregat (semantique
+  Pascal), et parametres CONST chaine courte : l'argument est souvent une
+  chaine temporaire de l'anneau (concatenation, resultat de fonction),
+  que les operations de la routine appelee pourraient recouvrir (anneau
+  plein) ; la copie garde la valeur intacte }
+Function W32ParamCopied(FI, PK : LongInt) : Boolean;
+Begin
+  W32ParamCopied := False;
+  If ProcTab^[FI]^.Params^[PK].IsVar Then Exit;
+  If ProcTab^[FI]^.Params^[PK].IsConst Then
+    W32ParamCopied := TypeIsString(ProcTab^[FI]^.Params^[PK].TypeIdx) And
+                      Not TypeIsAnsi(ProcTab^[FI]^.Params^[PK].TypeIdx)
+  Else
+    W32ParamCopied := TypeIsString(ProcTab^[FI]^.Params^[PK].TypeIdx) Or
+                      W32IsAggregate(ProcTab^[FI]^.Params^[PK].TypeIdx);
+End;
+
 Procedure EmitProcedures;
 Var
   FI       : LongInt;
@@ -30420,9 +30457,7 @@ Begin
     Extra := 0;
     If Not Is68kTarget And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) Then
       For PK := 0 To ProcTab^[FI]^.ParamCount - 1 Do
-        If (Not ProcTab^[FI]^.Params^[PK].IsVar) And (Not ProcTab^[FI]^.Params^[PK].IsConst) And
-           (TypeIsString(ProcTab^[FI]^.Params^[PK].TypeIdx) Or
-            W32IsAggregate(ProcTab^[FI]^.Params^[PK].TypeIdx)) Then
+        If W32ParamCopied(FI, PK) Then
           Extra := Extra + ((TypeSizeofIdx(ProcTab^[FI]^.Params^[PK].TypeIdx) + 3) And (Not 3));
     { pointeurs WITH : un emplacement par expression WITH du corps (max 8) }
     ProcWithBase^[FI] := ProcTab^[FI]^.LocalSize + Extra;
@@ -30486,9 +30521,7 @@ Begin
     Begin
       CopyOfs := ProcTab^[FI]^.LocalSize;
       For PK := 0 To ProcTab^[FI]^.ParamCount - 1 Do
-        If (Not ProcTab^[FI]^.Params^[PK].IsVar) And (Not ProcTab^[FI]^.Params^[PK].IsConst) And
-           (TypeIsString(ProcTab^[FI]^.Params^[PK].TypeIdx) Or
-            W32IsAggregate(ProcTab^[FI]^.Params^[PK].TypeIdx)) Then
+        If W32ParamCopied(FI, PK) Then
         Begin
           CopySz := TypeSizeofIdx(ProcTab^[FI]^.Params^[PK].TypeIdx);
           CopyOfs := CopyOfs + ((CopySz + 3) And (Not 3));
@@ -34351,12 +34384,23 @@ Begin
   EmitInstr('MOVZX EDX,WORD PTR [CRT_CSBI+6]');   { dwCursorPosition.Y }
   EmitInstr('SHL EDX,16');
   EmitInstr('OR EDX,ECX');                          { EDX = packed COORD }
+  EmitInstr('PUSH EDX');                            { garder coord. et nombre }
+  EmitInstr('PUSH EAX');
   EmitInstr('PUSH OFFSET CRT_NWRT');
   EmitInstr('PUSH EDX');
   EmitInstr('PUSH EAX');
   EmitInstr('PUSH 32');
   EmitInstr('PUSH DWORD PTR [HSTDOUT]');
   EmitInstr('CALL FillConsoleOutputCharacterA');
+  { couleur courante (TextAttr) sur la fin de la ligne, comme Turbo Pascal }
+  EmitInstr('POP EAX');
+  EmitInstr('POP EDX');
+  EmitInstr('PUSH OFFSET CRT_NWRT');
+  EmitInstr('PUSH EDX');
+  EmitInstr('PUSH EAX');
+  EmitInstr('PUSH DWORD PTR [TEXTATTR]');
+  EmitInstr('PUSH DWORD PTR [HSTDOUT]');
+  EmitInstr('CALL FillConsoleOutputAttribute');
   EmitInstr('POPAD');
   EmitInstr('RET');
 

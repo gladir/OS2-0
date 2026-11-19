@@ -1712,7 +1712,14 @@ Begin
   Else
   Begin
     A := '';
-    If (X = 'TXT') Or (X = 'PAS') Or (X = 'INI') Or (X = 'SYS') Or (X = 'LOG') Or (X = 'CFG') Or (X = 'ME') Or
+    If ((X = 'DOC') Or (X = 'DOCX') Or (X = 'WPD') Or (X = 'GAT') Or (X = 'GPX') Or (X = 'PDF')) And
+       (AppPath('WORDIUM.EXE') <> '') Then
+    Begin
+      { document : WorDium (ses boites Ouvrir et Enregistrer montrent ce dossier) }
+      A := AppPath('WORDIUM.EXE');
+      SetDir(CurPath);
+    End
+    Else If (X = 'TXT') Or (X = 'PAS') Or (X = 'INI') Or (X = 'SYS') Or (X = 'LOG') Or (X = 'CFG') Or (X = 'ME') Or
        (X = 'INC') Or (X = 'ASM') Or (X = 'DOC') Or (X = '') Then A := AppPath('PASDEV.EXE')
     Else If X = 'WAV' Then A := AppPath('DIGAUDIO.EXE')
     Else If (X = 'SON') Or (X = 'MID') Then

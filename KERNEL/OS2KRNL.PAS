@@ -136,7 +136,7 @@ Const
   MaxProcs      = 64;
   MaxTasks      = 128;         { taches (fils d'execution) ; la 0 est le noyau }
   MaxSess       = 16;          { sessions (ecran et clavier) }
-  MaxPBlk       = 192;         { blocs de memoire physique des processus }
+  MaxPBlk       = 512;         { blocs de memoire physique des processus }
   HThreadBase   = $400;        { handles de fils (CreateProcessA) }
   ThreadStackMin = $00010000;  { pile minimale d'un fil (64 Ko) }
   MaxRamFiles   = 128;
@@ -4175,9 +4175,26 @@ Begin
   GetProcessHeap := 1;
 End;
 
+Function XBlkAlloc(Size : LongInt) : LongInt; Forward;
+Function XBlkFree(A : LongInt) : Boolean; Forward;
+Function XBlkSize(A : LongInt) : LongInt; Forward;
+
+{ tas d'un processus (GetMem, New des programmes OS2PC) : les blocs de
+  64 Ko et plus sont de grands blocs du processus (memoire physique
+  au-dela de 16 Mo, comme DosAllocMem), le tas du noyau ne compte que
+  quelques Mo ; les autres viennent du tas du noyau }
 Function HeapAlloc(Heap, Flags, Size : LongInt) : LongInt;
 Var A : LongInt;
 Begin
+  If (Heap = 1) And (Size >= 65536) Then
+  Begin
+    A := XBlkAlloc(Size);
+    If A <> 0 Then
+    Begin
+      HeapAlloc := A;
+      Exit;
+    End;
+  End;
   A := KAlloc(Size);
   If A <> 0 Then
   Begin
@@ -4191,13 +4208,15 @@ End;
 
 Function HeapFree(Heap, Flags, A : LongInt) : LongInt;
 Begin
-  If A <> 0 Then KFree(A);
+  If A <> 0 Then
+    If Not XBlkFree(A) Then KFree(A);
   HeapFree := 1;
 End;
 
 Function HeapSize(Heap, Flags, A : LongInt) : LongInt;
 Begin
-  HeapSize := KBlockSize(A);
+  If XBlkSize(A) > 0 Then HeapSize := XBlkSize(A)
+  Else HeapSize := KBlockSize(A);
 End;
 
 Function SetUnhandledExceptionFilter(F : LongInt) : LongInt;
@@ -6706,7 +6725,7 @@ End;
   DosAllocMem de 64 Ko et plus) : memoire physique au-dela de 16 Mo, vue
   a la meme adresse lineaire, rendue a la fin du processus }
 Const
-  MaxXBlk = 64;
+  MaxXBlk = 256;
 Var
   XBase, XOwner : Array[0..MaxXBlk - 1] Of LongInt;
 
@@ -6723,6 +6742,52 @@ Begin
       Dec(PCount);
       Exit;
     End;
+End;
+
+{ grand bloc du processus courant : Size octets de memoire physique au-dela
+  de 16 Mo (mis a zero), rendu a la fin du processus ; 0 s'il n'y en a pas }
+Function XBlkAlloc(Size : LongInt) : LongInt;
+Var K, Sz, S : LongInt;
+Begin
+  XBlkAlloc := 0;
+  If (CurProc < 0) Or (Size <= 0) Then Exit;
+  K := 0;
+  While (K < MaxXBlk) And (XBase[K] <> 0) Do Inc(K);
+  If K >= MaxXBlk Then Exit;
+  Sz := (Size + 4095) And Not 4095;
+  S := PAlloc(Sz);
+  If S = 0 Then Exit;
+  FillMem(S, Sz, 0);
+  XBase[K] := S; XOwner[K] := CurProc;
+  XBlkAlloc := S;
+End;
+
+{ rendre le grand bloc A ; False si A n'en est pas un }
+Function XBlkFree(A : LongInt) : Boolean;
+Var K : LongInt;
+Begin
+  XBlkFree := False;
+  If A < PhysProcBase Then Exit;
+  For K := 0 To MaxXBlk - 1 Do
+    If XBase[K] = A Then
+    Begin
+      PFree(A);
+      XBase[K] := 0;
+      XBlkFree := True;
+      Exit;
+    End;
+End;
+
+{ taille du grand bloc A (0 si A n'en est pas un) }
+Function XBlkSize(A : LongInt) : LongInt;
+Var K, I : LongInt;
+Begin
+  XBlkSize := 0;
+  If A < PhysProcBase Then Exit;
+  For K := 0 To MaxXBlk - 1 Do
+    If XBase[K] = A Then
+      For I := 0 To PCount - 1 Do
+        If PBase[I] = A Then XBlkSize := PSize[I];
 End;
 
 Function PhysFree : LongInt;
@@ -7559,22 +7624,7 @@ Begin
    18 : If (CurProc >= 0) And Procs[CurProc].IsLx Then KrnTaskCtl := Procs[CurProc].LxTib;
    { grands blocs de memoire du processus : 15 allouer (P1 octets),
      16 liberer (P1 adresse), 17 le bloc P1 existe-t-il ? }
-   15 : If (CurProc >= 0) And (P1 > 0) Then
-        Begin
-          K := 0;
-          While (K < MaxXBlk) And (XBase[K] <> 0) Do Inc(K);
-          If K < MaxXBlk Then
-          Begin
-            Sz := (P1 + 4095) And Not 4095;
-            S := PAlloc(Sz);
-            If S <> 0 Then
-            Begin
-              FillMem(S, Sz, 0);
-              XBase[K] := S; XOwner[K] := CurProc;
-              KrnTaskCtl := S;
-            End;
-          End;
-        End;
+   15 : If (CurProc >= 0) And (P1 > 0) Then KrnTaskCtl := XBlkAlloc(P1);
    { 21 : derniere exception d'un processus : rend son numero (0 : aucune) ;
      P1 : texte ASCIIZ (P2 octets au plus) }
    21 : Begin

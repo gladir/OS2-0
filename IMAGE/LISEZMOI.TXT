@@ -20,6 +20,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
+              WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
@@ -114,6 +115,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC IFCONFIG.PAS, PING.PAS, HOST.PAS, WGET.PAS -> commandes du reseau
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
   OS2PC APPS\PAINT.PAS                      -> PAINT.EXE (Paint, dessin bitmap)
+  OS2PC WORDIUM.PAS                         -> WORDIUM.EXE (WorDium, traitement de texte)
   nasm -f bin KERNEL\HDBOOT.ASM             -> MBR du disque dur (deja dans INSTALL.PAS)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
@@ -1178,6 +1180,33 @@ dans Paint. Exemple : PAINT PAYSAGE.BMP.
 PAINT.PAS est ecrit pour Free Pascal (AnsiString, Int64, PByte, tableaux
 dynamiques, Try/Except) : OS2PC accepte cette syntaxe, reprise du
 compilateur de Pasdows 95 (un descendant d'OS2PC) et fusionnee dans OS2PC.
+
+WorDium (WORDIUM.EXE, dossier Productivite)
+-------------------------------------------
+Traitement de texte porte de WORD.PAS du depot OFFICE-0 (source
+WORDIUM.PAS). Systeme OS/2 - Productivite - WorDium, ou WORDIUM
+[/CLASSICMENU | /RUBANMENU] [document] a l'invite (WORDIUM /? : aide) ;
+un document (.DOCX, .DOC, .PDF, .GAT, .GPX, .WPD) ouvert depuis un
+dossier du bureau ou l'Explorateur OS2-0 s'ouvre aussi dans WorDium.
+Exemples : WORDIUM MONSTER.GAT, WORDIUM LETTRE.PDF.
+  - toutes les fonctions de la version DOS : mise en forme (gras,
+    italique, souligne, tailles, couleurs, alignements, justification,
+    retraits, filets), tableaux, images (BMP, PCX, GIF, JPEG, TIFF, XBM,
+    BGX, GPX), symboles, police, paragraphe, zoom, regle, rechercher et
+    remplacer, annuler et retablir, statistiques, options, aide ;
+  - formats : WPD (natif), DOCX (lecture et ecriture), DOC de Word 97
+    (lecture), PDF (lecture), GAT du MonsterBook (lecture et ecriture),
+    GPX ;
+  - correcteur d'orthographe (F7) : francais, anglais, allemand,
+    espagnol, italien ;
+  - cinq langues de l'interface (SET LANGUAGE= : FR, EN, ES ou SP, IT,
+    DE ou GR) ; menus classiques ou ruban (/RUBANMENU) ;
+  - fenetre de Presentation Manager : barre de titre (nom du document),
+    barre de menus de PM construite a partir des menus de WorDium,
+    boites de dialogue dans le style d'OS/2, messages par WinMessageBox ;
+  - impression (Fichier - Imprimer, Ctrl+P) par le tampon d'impression
+    d'OS/2 (la version DOS ne l'offre pas) ;
+  - fermer la fenetre : Fichier - Quitter (Alt+X).
 
 Outlink (OUTLINK.EXE, dossier Productivite)
 -------------------------------------------
