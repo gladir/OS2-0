@@ -136,7 +136,7 @@ Const
   MaxProcs      = 64;
   MaxTasks      = 128;         { taches (fils d'execution) ; la 0 est le noyau }
   MaxSess       = 16;          { sessions (ecran et clavier) }
-  MaxPBlk       = 512;         { blocs de memoire physique des processus }
+  MaxPBlk       = 2304;        { blocs de memoire physique des processus }
   HThreadBase   = $400;        { handles de fils (CreateProcessA) }
   ThreadStackMin = $00010000;  { pile minimale d'un fil (64 Ko) }
   MaxRamFiles   = 128;
@@ -6524,7 +6524,7 @@ Function LoadProgram(Path, CmdLine : String) : LongInt;
 Var
   Buf, Size, Pe, Opt, NSect, OptSize, Base, ImgSize, HdrSize, Entry : LongInt;
   Total, Phys, PhysSize, Pid, I, Sec, VSize, VAddr, RawSize, RawPtr, N : LongInt;
-  ImpRva, Desc, Thunks, Iat, J, V, Adr : LongInt;
+  ImpRva, Desc, Thunks, Iat, J, V, Adr, StkSz : LongInt;
   Nm : String;
 Begin
   LoadProgram := -1;
@@ -6577,7 +6577,13 @@ Begin
     Exit;
   End;
   Total := (ImgSize + 4095) And Not 4095;
-  PhysSize := Total + ProcStackSize;
+  { pile : 256 Ko, ou la reserve de l'en-tete PE (SizeOfStackReserve)
+    quand le programme en demande plus de 1 Mo ({$M} d'OS2PC ; 1 Mo est
+    la valeur par defaut), jusqu'a 8 Mo }
+  StkSz := MemL[0:Opt + 72];
+  If (StkSz > $100000) And (StkSz <= $800000) Then StkSz := (StkSz + 4095) And Not 4095
+  Else StkSz := ProcStackSize;
+  PhysSize := Total + StkSz;
   If Total > ProcWinSize Then
   Begin
     LastError := ErrNotEnoughMem;
@@ -6725,7 +6731,7 @@ End;
   DosAllocMem de 64 Ko et plus) : memoire physique au-dela de 16 Mo, vue
   a la meme adresse lineaire, rendue a la fin du processus }
 Const
-  MaxXBlk = 256;
+  MaxXBlk = 2048;
 Var
   XBase, XOwner : Array[0..MaxXBlk - 1] Of LongInt;
 

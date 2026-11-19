@@ -27,7 +27,7 @@ OS2-0 démarre d'un CD-ROM ou d'un disque dur, dans QEMU, VirtualBox (y compris 
 	<li><b>Noyau 32 bits</b> (OS2KRNL) : mode protégé, pagination, tâches préemptives, sessions plein écran et fenêtrées, chargeur de programmes et de DLL 32 bits (PE et LX), programmes 16 bits d'OS/2 1.x (NE) et machine virtuelle DOS en mode V86 (Turbo Pascal 7, BGI, DPMI).</li>
 	<li><b>Systèmes de fichiers</b> : HPFS par défaut, NTFS en lecture, écriture et formatage pour partager ses fichiers avec Windows et Linux, FAT12 sur disquette, ISO 9660 sur CD-ROM, disque virtuel en mémoire ; pilotes IFS chargés par <code>IFS=</code> de CONFIG.SYS.</li>
 	<li><b>Presentation Manager et Workplace Shell</b> : fenêtres, menus, contrôles, GPI, presse-papiers, glisser-déposer, raccourcis, modèles, LaunchPad, carnets Système, Souris, Pays et Langue ; de 640 × 480 en 16 couleurs (VGA) à 1024 × 768 en 16 millions de couleurs (VESA).</li>
-	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), WorDium (traitement de texte : DOCX, PDF, GAT du MonsterBook, correcteur d'orthographe), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Notator for OS2-Zero, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
+	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), WorDium (traitement de texte : DOCX, PDF, GAT du MonsterBook, correcteur d'orthographe), Excelsior (tableur : XLC, XLS, XLSX, formules, graphiques), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Notator for OS2-Zero, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
 	<li><b>Matériel</b> : disques IDE et ATAPI, lecteur de disquettes, cartes son (Sound Blaster, AC'97, AudioPCI), réseau (Intel PRO/1000, AMD PCnet) avec pile TCP/IP, DHCP, DNS et TLS ; outils invités de VirtualBox et de VMware (souris absolue, écran redimensionnable).</li>
 	<li><b>Installation</b> graphique dans le style de Warp 3, sur une partition HPFS ou NTFS, en six langues.</li>
 </ul>
@@ -159,6 +159,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		<tr>
 			<td><b>WORDIUM.PAS</b></td>
 			<td>WorDium : traitement de texte porté de <code>WORD.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (Système OS/2 → Productivité) ; formats WPD, DOCX, DOC, PDF et GAT du MonsterBook, correcteur d'orthographe en cinq langues, impression par le tampon d'impression d'OS/2.</td>
+		</tr>
+		<tr>
+			<td><b>EXCELSIO.PAS</b></td>
+			<td>Excelsior : tableur porté de <code>EXCEL.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (Système OS/2 → Productivité) ; 16 feuilles de 4096 lignes sur 256 colonnes, formules, graphiques, formats XLC, XLS (BIFF8) et XLSX.</td>
 		</tr>
 		<tr>
 			<td><b>APPS/PAINT.PAS</b></td>
@@ -916,6 +920,33 @@ PAINT.PAS (45 000 lignes) est écrit pour Free Pascal : AnsiString, Int64, PByte
 <img width="480" height="633" alt="OS/2-0 : page imprimée par WorDium (MONSTER.GAT), sortie ESC/P du port LPT1 décodée" src="IMAGE/WORDIUM_IMPRESSION.png" />
 
 Les exemples <b>MONSTER.GAT</b> (MonsterBook) et <b>LETTRE.PDF</b> (<code>IMAGE/EXEMPLES</code>) sont copiés sur le CD-ROM. WORDIUM.PAS (18 000 lignes) est compilé par OS2PC ; le portage a été vérifié en comparant, fichier par fichier, ce que lisent et écrivent WorDium compilé par Free Pascal sous Linux et WorDium compilé par OS2PC sous OS/2-0 (quatre PDF, un GAT, un DOCX, les enregistrements DOCX, GAT et WPD, les suggestions du correcteur dans les cinq langues) : les résultats sont identiques, et LibreOffice ouvre les DOCX écrits par WorDium. Ce travail a corrigé OS2PC : <code>Assign</code>, <code>Reset</code>, <code>Rewrite</code>, <code>Close</code>… sur une variable fichier qui est un champ d'enregistrement (<code>Z.F</code>), <code>Byte('&lt;')</code> (code du caractère), paramètres <code>Const</code> chaîne recopiés à l'entrée (une chaîne temporaire pouvait être recouverte), types du programme qui masquent les types prédéfinis du même nom (<code>PWord</code>), champs d'un <code>With</code> prioritaires sur les variables, <code>ClrEol</code> qui applique la couleur courante (la ligne de titre de CMD est bleue sur toute la largeur). Le noyau sert les <code>GetMem</code> de 64 Ko et plus par de grands blocs de mémoire physique (le tas du noyau ne compte que quelques Mo) ; PMSPL transmet la taille de page <code>/W:</code> <code>/H:</code> à PicPrint.
+
+<h3>Excelsior (EXCELSIO.PAS) : tableur</h3>
+
+<b>Excelsior</b> est le tableur d'OS/2-0, dans le dossier <b>Productivité</b> (Système OS/2 → Productivité → Excelsior ; <code>EXCELSIO [/CLASSICMENU | /RUBANMENU] [classeur]</code> à l'invite, <code>EXCELSIO /?</code> : aide). Un classeur (<code>.XLC</code>, <code>.XLS</code>, <code>.XLSX</code>) ouvert depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans Excelsior. C'est le <code>EXCEL.PAS</code> du dépôt OFFICE-0, écrit pour MS-DOS (BGI en 640 × 480, souris de l'interruption 33h), porté vers Presentation Manager avec toutes ses fonctions :
+
+<ul>
+	<li>les mêmes dimensions que la version DOS : <b>16 feuilles de 4096 lignes sur 256 colonnes</b> (A à IV), lignes allouées à la demande ; onglets des feuilles (insérer, renommer, supprimer), largeurs des colonnes et hauteurs des lignes ;</li>
+	<li>saisie et barre de formule ; <b>formules</b> avec opérateurs (+ − × ÷ ^ &amp; comparaisons), plages et références, recalcul automatique, erreurs (#DIV/0!, #VALUE!, #NAME?, #CIRC!) et une cinquantaine de fonctions en anglais ou en français (SUM, AVERAGE/MOYENNE, MIN, MAX, COUNT, PRODUCT/PRODUIT, IF/SI, ROUND/ARRONDI, SQRT/RACINE, POWER/PUISSANCE, LEFT/GAUCHE, MID/STXT, LEN/NBCAR, UPPER/MAJUSCULE, AND/ET, OR/OU, MOD, INT/ENT, PI, TODAY/AUJOURDHUI…) ;</li>
+	<li>sélection (souris, F8), Couper, Copier, Coller, Annuler et Rétablir (30 niveaux), menus contextuels des cellules et des onglets ;</li>
+	<li>mise en forme des cellules : gras, italique, souligné, alignements, formats Nombre, Pourcentage, Monétaire, Date et Texte, couleurs du texte et du fond ;</li>
+	<li><b>graphiques</b> (barres, lignes, secteurs) et images BMP ancrés aux cellules ;</li>
+	<li>formats : <b>XLC</b> (format natif), <b>XLS</b> d'Excel 97 à 2003 (BIFF8 dans un conteneur OLE2, lecture et écriture) et <b>XLSX</b> (ZIP et Deflate écrits en Pascal, lecture et écriture) ; boîtes Ouvrir et Enregistrer sous avec les lecteurs et les dossiers ;</li>
+	<li>menus classiques (style Excel 2003, par défaut) ou ruban (<code>/RUBANMENU</code>, style Excel 2007).</li>
+</ul>
+
+<img width="800" height="600" alt="OS/2-0 : Excelsior sur un bureau de 800 x 600, avec le classeur BUDGET.XLC et un graphique en secteurs" src="IMAGE/EXCELSIOR.png" />
+<img width="800" height="600" alt="OS/2-0 : Excelsior avec le ruban (/RUBANMENU)" src="IMAGE/EXCELSIOR_RUBAN.png" />
+
+<table>
+	<tr><th>Partie</th><th>Version DOS (OFFICE-0)</th><th>OS/2-0 (Presentation Manager)</th></tr>
+	<tr><td>Fenêtre</td><td>Plein écran BGI 640 × 480, barre de menus dessinée par Excelsior</td><td>Fenêtre de PM (barre de titre avec le nom du classeur, menu système, bouton de réduction, liste des fenêtres) ; l'image de 640 × 480 est gardée en mémoire et montrée par <code>GpiDrawBits</code>, zones modifiées seulement</td></tr>
+	<tr><td>Menus</td><td>Menus déroulants d'Excelsior, F10, Alt+lettre</td><td>Barre de menus de PM construite à partir des menus d'Excelsior (lettres soulignées, raccourcis à droite ; les commandes que la version DOS n'a pas sont grisées, comme dans son ruban) ; avec le ruban, les titres de la barre de menus de PM sont les onglets</td></tr>
+	<tr><td>Boîtes</td><td>Cadres gris, barre de titre bleue</td><td>Barre de titre d'OS/2 (case du menu système, titre centré) ; messages et confirmations par <code>WinMessageBox</code></td></tr>
+	<tr><td>Clavier et souris</td><td><code>ReadKey</code>, interruption 33h ou PtcMouse</td><td>WM_CHAR (codes de <code>ReadKey</code>), WM_BUTTON*, pointeur de PM ; Alt+F4 ou fermer la fenêtre : Quitter ; la boucle principale rend la main à OS/2 quand il n'y a rien à faire</td></tr>
+</table>
+
+L'exemple <b>BUDGET.XLC</b> (<code>IMAGE/EXEMPLES</code> : deux feuilles, une trentaine de formules, formats et couleurs) est copié sur le CD-ROM. EXCELSIO.PAS (9 400 lignes) est compilé par OS2PC ; le portage a été vérifié en comparant ce que lisent et écrivent Excelsior compilé par Free Pascal sous Linux et Excelsior compilé par OS2PC sous OS/2-0 (un XLC avec formules, un XLSX et un XLS écrits par LibreOffice ; pour chacun, les cellules calculées, puis les enregistrements XLC, XLS et XLSX relus) : les résultats sont identiques (les fichiers XLC d'OS/2 ont des fins de ligne CR-LF). Des défauts de la version DOS sont corrigés : le flux XLS de moins de 4096 octets (qui doit aller dans le mini-flux d'OLE2) est complété comme le fait Excel et la longueur de l'enregistrement FONT est la bonne (ni Excel, ni LibreOffice, ni Excelsior lui-même ne relisaient les XLS d'Excelsior ; LibreOffice les ouvre maintenant) ; la lecture XLS prend les nombres RK et MULRK et les résultats des formules (FORMULA, STRING) qu'écrivent Excel et LibreOffice ; une formule dont le résultat est un texte (<code>=SI(…;"grand";"petit")</code>, <code>=A2&amp;" et "&amp;A3</code>) est enregistrée en XLS et en XLSX avec ce texte, et non comme le nombre 0. Ce travail a corrigé OS2PC : un <code>Break</code> ou un <code>Continue</code> placé dans un <code>Case</code> laissait le sélecteur du <code>Case</code> sur la pile (la boucle <code>For</code> qui l'entourait relisait sa borne au mauvais endroit). Le noyau honore la réserve de pile de l'en-tête PE quand un programme demande plus de 1 Mo (<code>{$M}</code> d'OS2PC ; Excelsior prend 2 Mo pour l'évaluation récursive des formules) et sert jusqu'à 2048 grands blocs de mémoire par processus (une ligne d'Excelsior en est un).
 
 <h3>Outlink (OUTLINK.PAS) : courrier IMAP, POP3 et SMTP</h3>
 

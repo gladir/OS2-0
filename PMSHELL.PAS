@@ -154,7 +154,7 @@ Const
   IC_TILEMAN = 35; IC_HEX2048 = 36; IC_BACKGAM = 37; IC_POKER = 38; IC_BILLARD = 39; IC_CHECKERS = 40;
   IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43; IC_SOKOBAN = 44;
   IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49; IC_OUTLINK = 50; IC_PAINT = 51; OB_IMAGE = 33;
-  IC_WORDIUM = 52; OB_WORDDOC = 34;
+  IC_WORDIUM = 52; OB_WORDDOC = 34; IC_EXCELSIOR = 53; OB_XLSDOC = 35;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -589,6 +589,20 @@ Begin
   End;
 End;
 
+{ Excelsior (EXCELSIO.EXE, dossier Productivite) : memes emplacements }
+Function ExcelsiorPath : String;
+Var S : String;
+Begin
+  ExcelsiorPath := '';
+  If FileExists('C:\EXCELSIO.EXE') Then ExcelsiorPath := 'C:\EXCELSIO.EXE'
+  Else
+  Begin
+    S := Comspec;
+    While (S <> '') And (S[Length(S)] <> '\') Do Delete(S, Length(S), 1);
+    If (S <> '') And FileExists(S + 'EXCELSIO.EXE') Then ExcelsiorPath := S + 'EXCELSIO.EXE';
+  End;
+End;
+
 Function OutlinkPath : String;
 Var S : String;
 Begin
@@ -898,6 +912,11 @@ Begin
     { document (Word, WorDium, MonsterBook, PDF) : ouvert par WorDium }
     Icon := IC_WORDIUM; Obj := OB_WORDDOC;
   End
+  Else If ((E = 'XLC') Or (E = 'XLS') Or (E = 'XLSX')) And (ExcelsiorPath <> '') Then
+  Begin
+    { classeur (Excelsior, Excel) : ouvert par Excelsior }
+    Icon := IC_EXCELSIOR; Obj := OB_XLSDOC;
+  End
   Else
   Begin
     Icon := IC_FILE; Obj := OB_DATA;
@@ -1168,7 +1187,7 @@ Begin
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
         If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Or
-           (WordiumPath <> '') Then
+           (WordiumPath <> '') Or (ExcelsiorPath <> '') Then
           Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
@@ -1232,6 +1251,8 @@ Begin
         { WorDium : traitement de texte (WORD.PAS d'OFFICE-0) ; DOCX, DOC,
           PDF, GAT du MonsterBook, WPD }
         If WordiumPath <> '' Then Dummy := NewItem(V, IC_WORDIUM, OB_GAME, 'WorDium', WordiumPath);
+        { Excelsior : tableur (EXCEL.PAS d'OFFICE-0) ; XLC, XLS, XLSX }
+        If ExcelsiorPath <> '' Then Dummy := NewItem(V, IC_EXCELSIOR, OB_GAME, 'Excelsior', ExcelsiorPath);
       End;
     VK_DEVKIT :
       Begin
@@ -1715,6 +1736,23 @@ Begin
         GLn(Hps, X + 29, Y + 30, X + 19, Y + 5, CLR_BROWN);
         GLn(Hps, X + 30, Y + 29, X + 25, Y + 20, CLR_BROWN);
         GLn(Hps, X + 20, Y + 4, X + 19, Y + 2, CLR_BLACK);
+      End;
+    IC_EXCELSIOR :
+      Begin
+        { feuille de calcul : quadrillage, ligne d'en-tete verte et
+          histogramme }
+        FBox(Hps, X + 2, Y + 3, X + 29, Y + 28, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 23, X + 28, Y + 27, CLR_DARKGREEN, DRO_FILL);
+        GLn(Hps, X + 3, Y + 18, X + 28, Y + 18, CLR_PALEGRAY);
+        GLn(Hps, X + 3, Y + 13, X + 28, Y + 13, CLR_PALEGRAY);
+        GLn(Hps, X + 3, Y + 8, X + 28, Y + 8, CLR_PALEGRAY);
+        GLn(Hps, X + 11, Y + 4, X + 11, Y + 22, CLR_PALEGRAY);
+        GLn(Hps, X + 20, Y + 4, X + 20, Y + 22, CLR_PALEGRAY);
+        GBox(Hps, X + 13, Y + 4, X + 15, Y + 11, CLR_BLUE, DRO_FILL);
+        GBox(Hps, X + 17, Y + 4, X + 19, Y + 16, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 22, Y + 4, X + 24, Y + 20, CLR_DARKGREEN, DRO_FILL);
+        GLn(Hps, X + 5, Y + 26, X + 9, Y + 24, CLR_WHITE);
+        GLn(Hps, X + 5, Y + 24, X + 9, Y + 26, CLR_WHITE);
       End;
     IC_OUTLINK :
       Begin
@@ -2933,6 +2971,7 @@ Begin
     OB_SONG : RunPm('C:\NOTATOR.EXE', It(K)^.Path);
     OB_IMAGE : RunPm(PaintPath, It(K)^.Path);
     OB_WORDDOC : RunPm(WordiumPath, It(K)^.Path);
+    OB_XLSDOC : RunPm(ExcelsiorPath, It(K)^.Path);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :

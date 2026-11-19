@@ -10581,6 +10581,10 @@ Var
   { Pile de boucles pour Break/Continue (TODO 13) }
   LoopBreakLbl : Array[0..31] Of TString;
   LoopContLbl  : Array[0..31] Of TString;
+  { selecteurs de CASE empiles (PUSH EAX) : un BREAK ou un CONTINUE qui
+    sort d'un CASE doit les depiler avant de sauter }
+  LoopCaseDepth : Array[0..31] Of LongInt;
+  CaseDepth     : LongInt;
   LoopTop      : LongInt;
 
 { MsgLinePfx (voir FatalError) : pendant l'analyse du corps, ligne du jeton }
@@ -23944,6 +23948,22 @@ Begin
   End;
   LoopBreakLbl[LoopTop] := LblBreak;
   LoopContLbl[LoopTop]  := LblCont;
+  LoopCaseDepth[LoopTop] := CaseDepth;
+End;
+
+{ ------------------------------------------------------------ }
+{ LoopJump : BREAK ou CONTINUE vers la boucle englobante ; les  }
+{ selecteurs des CASE ouverts depuis la boucle sont depiles     }
+{ (sans cela, la borne d'une boucle FOR englobante lue sur la   }
+{ pile devenait le selecteur du CASE)                           }
+{ ------------------------------------------------------------ }
+
+Procedure LoopJump(Const Lbl : TString);
+Var N : LongInt;
+Begin
+  N := CaseDepth - LoopCaseDepth[LoopTop];
+  If N > 0 Then EmitInstr('ADD ESP,' + IntToStr_(4 * N));
+  EmitInstr('JMP ' + Lbl);
 End;
 
 { ------------------------------------------------------------ }
@@ -24036,6 +24056,7 @@ Begin
   { Evaluer l expression selecteur }
   ParseExpr(PI);
   EmitInstr('PUSH EAX');  { sauvegarder le selecteur sur la pile }
+  Inc(CaseDepth);
 
   { Consommer OF }
   If Not EPAtEnd Then
@@ -24184,6 +24205,7 @@ Begin
 
   EmitLabel(LblEnd);
   EmitInstr('POP EAX');  { depiler le selecteur }
+  Dec(CaseDepth);
 
   { Consommer END }
   If Not EPAtEnd Then
@@ -24672,9 +24694,9 @@ Begin
     Begin
       Inc(EP);
       If Up = 'BREAK' Then
-        EmitInstr('JMP ' + LoopBreakLbl[LoopTop])
+        LoopJump(LoopBreakLbl[LoopTop])
       Else
-        EmitInstr('JMP ' + LoopContLbl[LoopTop]);
+        LoopJump(LoopContLbl[LoopTop]);
       If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_PUNCT) And
          (TokIsP(EP, ';')) Then
         Inc(EP);
@@ -24901,7 +24923,7 @@ Begin
     Begin
       Inc(EP);
       If LoopTop >= 0 Then
-        EmitInstr('JMP ' + LoopBreakLbl[LoopTop])
+        LoopJump(LoopBreakLbl[LoopTop])
       Else
         WarnMsg('break en dehors d une boucle');
       If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_PUNCT) And
@@ -24915,7 +24937,7 @@ Begin
     Begin
       Inc(EP);
       If LoopTop >= 0 Then
-        EmitInstr('JMP ' + LoopContLbl[LoopTop])
+        LoopJump(LoopContLbl[LoopTop])
       Else
         WarnMsg('continue en dehors d une boucle');
       If (Not EPAtEnd) And (TokenPool^[EP].Kind = TK_PUNCT) And
@@ -30279,6 +30301,7 @@ Begin
 
   { Initialiser la pile de boucles }
   LoopTop := -1;
+  CaseDepth := 0;
 
   { Sauter le BEGIN initial }
   If Not EPAtEnd Then

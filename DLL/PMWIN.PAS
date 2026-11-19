@@ -3493,6 +3493,26 @@ Begin
   End;
 End;
 
+{ Meme chose pour toutes les fenetres dessinees apres I, celles de ce
+  processus comprises : la zone a mettre a jour d'une fenetre est un seul
+  rectangle (englobant) ; si deux zones l'ont agrandi, la fenetre repeint
+  aussi des parties que ses enfants n'avaient pas a redessiner (le cadre
+  d'une application ouverte par-dessus un dossier effacait la fin de sa
+  barre de titre et son bouton de reduction) }
+Procedure InvalAboveAll(I, X1, Y1, X2, Y2 : LongInt);
+Var K, J : LongInt; Found : Boolean;
+Begin
+  If (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  BuildPOrd;
+  Found := False;
+  For K := 0 To PCnt - 1 Do
+  Begin
+    J := POrd[K];
+    If Found And (J > 1) Then AddUpd(J, X1, Y1, X2, Y2);
+    If J = I Then Found := True;
+  End;
+End;
+
 Procedure InvalWin(I : LongInt);
 Var X1, Y1, X2, Y2 : LongInt;
 Begin
@@ -3708,13 +3728,17 @@ Begin
   If WUpd[I] <> 0 Then
   Begin
     X1 := WUx1[I]; Y1 := WUy1[I]; X2 := WUx2[I]; Y2 := WUy2[I];
+    WUpd[I] := 0;
+    InvalAboveAll(I, X1, Y1, X2, Y2);
   End
-  Else If Not VisRect(I, X1, Y1, X2, Y2) Then
+  Else
   Begin
-    X2 := X1; Y2 := Y1;
+    If Not VisRect(I, X1, Y1, X2, Y2) Then
+    Begin
+      X2 := X1; Y2 := Y1;
+    End;
+    InvalAboveOthers(I, X1, Y1, X2, Y2);
   End;
-  WUpd[I] := 0;
-  InvalAboveOthers(I, X1, Y1, X2, Y2);
   PsX1[K] := X1; PsY1[K] := Y1; PsX2[K] := X2; PsY2[K] := Y2;
   If PRcl <> 0 Then
   Begin
