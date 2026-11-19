@@ -18,7 +18,8 @@
 #     BATTLE.PAS (Bataille navale, en cinq langues), POWER4.PAS (Puissance 4),
 #     SOKOBAN.PAS (Soko-Ban), BACCARAT.PAS (Baccarat), HANOIS.PAS (Tours de
 #     Hanoi), BABY.PAS (Baby, sauvetage de bebes), 421.PAS (421, des),
-#     CENTIPED.PAS (Mille-pattes), et
+#     CENTIPED.PAS (Mille-pattes), ASTEROID.PAS (Asteroide), BADUGI.PAS
+#     (Badugi, poker coreen), TTT.PAS (Tic-Tac-Toe), BASEBALL.PAS (Baseball), et
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), NOTATOR.PAS
 #     (Notator for OS2-Zero, sequenceur et editeur de partition porte de
 #     NOTATOR.PAS du depot OFFICE-0, dossier Multimedia ; ses exemples de
