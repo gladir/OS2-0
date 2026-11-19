@@ -696,6 +696,9 @@ au nombre de fenetres ni d'objets par dossier.
   Glisser-deposer (bouton 2, ou bouton 1 dans un dossier) : sur un
   dossier = deplacer (Ctrl = copier) ; sur le Broyeur = supprimer ; sur
   le LaunchPad = l'y ajouter ; Ctrl+Maj = creer un raccourci.
+  Un objet programme d'un dossier du systeme (Jeux, Productivite...) ou
+  pose sur le bureau n'est jamais deplace ni supprime : le deposer
+  ailleurs cree un raccourci (son executable reste en place).
   Raccourcis (shadows) : menu "Creer un raccourci" ; Modeles : Dossier,
   Fichier de donnees, Fichier de commandes (ouvrir = creer un objet).
   Clavier : fleches, Debut, Fin, lettre = choisir ; Entree = ouvrir ;

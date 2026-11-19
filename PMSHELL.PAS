@@ -138,6 +138,9 @@ Const
   DRO_FILL = 1; DRO_OUTLINE = 2;
   { vues et objets }
   CW = 112; CH = 80;
+  { seuil d'un glisser (pixels) : un double-clic un peu tremble, ou la souris
+    absolue de VirtualBox, ne doit pas deplacer l'objet }
+  DragMin = 10;
   VK_DESK = 0; VK_SYS = 1; VK_DRIVES = 2; VK_DIR = 3; VK_VIEWER = 4; VK_LIST = 5;
   IC_FOLDER = 0; IC_SYSTEM = 1; IC_DRIVES = 2; IC_PROGRAM = 3; IC_CMD = 4; IC_BATCH = 5; IC_FILE = 6;
   IC_CDROM = 7; IC_DISK = 8; IC_SHUTDOWN = 9; IC_WINLIST = 10; IC_INFO = 11; IC_HELP = 12;
@@ -2829,6 +2832,27 @@ Begin
   DirOf := Copy(S, 1, K);
 End;
 
+{ vrai fichier (ou dossier) de sa vue : un repertoire, ou le bureau pour
+  les fichiers de C:\DESKTOP. Les objets des dossiers du systeme (Jeux,
+  Productivite, Systeme OS/2...) et les programmes poses sur le bureau
+  (Navigateur Web...) sont des objets programmes : comme dans le Workplace
+  Shell, les deplacer ne deplace jamais leur executable (un raccourci est
+  cree), et ils ne peuvent pas etre supprimes. }
+Function IsFileItem(K : LongInt) : Boolean;
+Var P, D : String; Kd : LongInt;
+Begin
+  IsFileItem := False;
+  P := UpStr(It(K)^.Path);
+  If P = '' Then Exit;
+  If P[Length(P)] = '\' Then P := Copy(P, 1, Length(P) - 1);
+  Kd := Vw(It(K)^.View)^.Kind;
+  If Kd = VK_DIR Then D := UpStr(Vw(It(K)^.View)^.Path)
+  Else If Kd = VK_DESK Then D := UpStr(DeskDir)
+  Else Exit;
+  If (D <> '') And (D[Length(D)] <> '\') Then D := D + '\';
+  IsFileItem := DirOf(P) = D;
+End;
+
 { actualiser les vues qui montrent le repertoire Dir (et le bureau pour
   C:\DESKTOP et les raccourcis) }
 Procedure RefreshDir(Dir : String);
@@ -2886,7 +2910,8 @@ Begin
     Exit;
   End;
   { objet du systeme, raccourci, ou Ctrl+Maj : raccourci }
-  If (It(S)^.Path = '') Or (It(S)^.Shadow <> 0) Or ((Kc And (KC_CTRL Or KC_SHIFT)) = (KC_CTRL Or KC_SHIFT)) Then
+  If (It(S)^.Path = '') Or (It(S)^.Shadow <> 0) Or Not IsFileItem(S) Or
+     ((Kc And (KC_CTRL Or KC_SHIFT)) = (KC_CTRL Or KC_SHIFT)) Then
   Begin
     MakeShadow(ContOf(Dest), It(S)^.Name, TargetOf(S));
     { un raccourci deplace (sans Ctrl) quitte son ancien dossier }
@@ -3078,8 +3103,8 @@ End;
   racine d'une unite) }
 Function Deletable(K : LongInt) : Boolean;
 Begin
-  Deletable := (It(K)^.Shadow <> 0) Or (It(K)^.Obj = OB_EXE) Or (It(K)^.Obj = OB_BATCH) Or
-               (It(K)^.Obj = OB_DATA) Or ((It(K)^.Obj = OB_DIR) And (Length(It(K)^.Path) > 3));
+  Deletable := (It(K)^.Shadow <> 0) Or IsFileItem(K) And ((It(K)^.Obj = OB_EXE) Or (It(K)^.Obj = OB_BATCH) Or
+               (It(K)^.Obj = OB_DATA) Or ((It(K)^.Obj = OB_DIR) And (Length(It(K)^.Path) > 3)));
 End;
 
 { supprimer l'objet K (Ask : confirmation) ; rend TRUE si fait }
@@ -5039,7 +5064,7 @@ Begin
         Begin
           X := S16(Mp1); Y := S16(Mp1 Shr 16);
           Dx := X - DragX0; Dy := Y - DragY0;
-          If (Dragging = 0) And (AbsI(Dx) + AbsI(Dy) > 4) Then Dragging := 1;
+          If (Dragging = 0) And (AbsI(Dx) + AbsI(Dy) > DragMin) Then Dragging := 1;
           If Dragging <> 0 Then
           Begin
             InvalItem(DragItem);
@@ -5080,7 +5105,7 @@ Begin
           DActive := 0;
           Pt[0] := S16(Mp1); Pt[1] := S16(Mp1 Shr 16);
           Dummy := WinMapWindowPoints(H, HWND_DESKTOP, LongInt(@Pt), 1);
-          If (AbsI(Pt[0] - DX0) + AbsI(Pt[1] - DY0) > 4) And (DSrc >= 0) Then DropAt(Pt[0], Pt[1], Hi16(Mp2));
+          If (AbsI(Pt[0] - DX0) + AbsI(Pt[1] - DY0) > DragMin) And (DSrc >= 0) Then DropAt(Pt[0], Pt[1], Hi16(Mp2));
           DSrc := -1;
         End;
         ViewProc := 1;
@@ -5089,6 +5114,8 @@ Begin
       Begin
         X := S16(Mp1); Y := S16(Mp1 Shr 16);
         DragItem := -1; Dragging := 0;
+        { un double-clic n'est jamais un glisser }
+        DActive := 0; DSrc := -1;
         Dummy := WinSetCapture(HWND_DESKTOP, 0);
         K := HitItem(V, X, Y);
         SelectItem(V, K);
@@ -5123,7 +5150,7 @@ Begin
           DActive := 0;
           Pt[0] := S16(Mp1); Pt[1] := S16(Mp1 Shr 16);
           Dummy := WinMapWindowPoints(H, HWND_DESKTOP, LongInt(@Pt), 1);
-          If (AbsI(Pt[0] - DX0) + AbsI(Pt[1] - DY0) > 4) And (DSrc >= 0) Then
+          If (AbsI(Pt[0] - DX0) + AbsI(Pt[1] - DY0) > DragMin) And (DSrc >= 0) Then
           Begin
             NoMenu := 1;
             DropAt(Pt[0], Pt[1], Hi16(Mp2));
