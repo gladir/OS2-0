@@ -11744,7 +11744,9 @@ Begin
  End;
 
  { Ajouter la piece jointe }
- With Composer.Attachments[Composer.AttachmentCount] Do Begin
+ { champs ecrits en entier, sans With : FileName et FilePath sont aussi
+   ceux du parametre et de la variable locale }
+ Begin
   Composer.Attachments[Composer.AttachmentCount].FileName := FileName;
   Composer.Attachments[Composer.AttachmentCount].FilePath := FilePath;
   Composer.Attachments[Composer.AttachmentCount].FileSize := System.FileSize(F);

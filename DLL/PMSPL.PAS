@@ -52,7 +52,9 @@ Library PMSPL;
   separateur de la file (s'il y en a un) puis les donnees : PM_Q_RAW
   telles quelles, PM_Q_STD (metafichier de PMGPI.DLL) dessinees par
   PicPrint de PMPIC.DLL (graphique ESC/P) ; COP=n (parametres du
-  processeur, de la file ou du travail) imprime n copies. Un port qui ne
+  processeur, de la file ou du travail) imprime n copies ; /W:n et /H:n
+  (memes parametres) donnent la taille de la page de PicPrint en points
+  (640 x 480 par defaut). Un port qui ne
   s'ouvre pas laisse le travail retenu avec PRJ_ERROR et
   PRJ_DESTOFFLINE.
 
@@ -940,6 +942,22 @@ Begin
   Else InWindow := (M >= QStart[Q]) Or (M < QUntil[Q]);
 End;
 
+{ options de page de PicPrint (/W:n et /H:n) trouvees dans les parametres }
+Function PageOpts(Prm : String) : String;
+Var I : LongInt; W, R : String;
+Begin
+  R := ''; W := '';
+  Prm := Prm + ' ';
+  For I := 1 To Length(Prm) Do
+    If Prm[I] = ' ' Then
+    Begin
+      If (Length(W) > 3) And ((UpStr(Copy(W, 1, 3)) = '/W:') Or (UpStr(Copy(W, 1, 3)) = '/H:')) Then R := R + ' ' + W;
+      W := '';
+    End
+    Else W := W + Prm[I];
+  PageOpts := R;
+End;
+
 Procedure PrintJob(J : LongInt);
 Var Q, P, H, C, Cop, R : LongInt; Tmp, Prm : String; B, B2 : Array[0..259] Of Byte; Ok : Boolean;
 Begin
@@ -962,9 +980,11 @@ Begin
       End
       Else
       Begin
-        { PM_Q_STD : metafichier dessine par PicPrint dans un fichier }
+        { PM_Q_STD : metafichier dessine par PicPrint dans un fichier ; la
+          taille de la page (/W:n /H:n des parametres du processeur de
+          file) est transmise a PicPrint }
         Tmp := Copy(JobFile(J), 1, Length(JobFile(J)) - 4) + '.PRN';
-        PutZ(LongInt(@B), JobFile(J)); PutZ(LongInt(@B2), Tmp);
+        PutZ(LongInt(@B), JobFile(J)); PutZ(LongInt(@B2), Tmp + PageOpts(Prm));
         R := PicPrint(0, LongInt(@B), 1, LongInt(@B2));
         If (R = 0) Or (CopyTo(Tmp, H) < 0) Then Ok := False;
         Dummy := DosDelete(LongInt(@B2));

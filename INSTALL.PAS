@@ -1085,7 +1085,7 @@ Begin
           (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Then Wanted := OptNet <> 0
   Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or
           (U = 'PASDEV.EXE') Or (U = 'OS2PC.EXE') Or (U = 'CALC.EXE') Or (U = 'EXPLORER.EXE') Or
-          (U = 'PAINT.EXE') Then Wanted := True
+          (U = 'PAINT.EXE') Or (U = 'WORDIUM.EXE') Then Wanted := True
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 
