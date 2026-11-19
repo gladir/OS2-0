@@ -29,7 +29,8 @@ REM Pascal Developer, du dossier Developer Kit, CALC.PAS, Calculatrice, et
 REM EXPLORER.PAS, Explorateur OS2-0, et OUTLINK.PAS, Outlink (client de messagerie
 REM porte d'OFFICE-0 : IMAP, POP3, SMTP par TCPIP32.DLL et TLS32.DLL), du dossier Productivite)
 REM WORDIUM.PAS, WorDium (traitement de texte porte de WORD.PAS d'OFFICE-0 : DOCX, DOC, PDF,
-REM GAT du MonsterBook, correcteur d'orthographe), est aussi dans le dossier Productivite
+REM GAT du MonsterBook, correcteur d'orthographe), est aussi dans le dossier Productivite,
+REM comme EXCELSIO.PAS, Excelsior (tableur porte d'EXCEL.PAS d'OFFICE-0 : XLC, XLS, XLSX)
 REM (APPS\PAINT.PAS, Paint porte de Pasdows 95, utilise les AnsiString, Int64, PByte,
 REM tableaux dynamiques et Try/Except de Free Pascal, qu'OS2PC accepte)
 FOR %%F IN (..\*.PAS) DO ..\BUILD\OS2PC -Q %%F ..\BUILD\CD\%%~nF.EXE
@@ -45,6 +46,7 @@ COPY ..\IMAGE\EXEMPLES\*.PAS ..\BUILD\CD > NUL
 COPY ..\IMAGE\EXEMPLES\*.BMP ..\BUILD\CD > NUL
 COPY ..\IMAGE\EXEMPLES\*.GAT ..\BUILD\CD > NUL
 COPY ..\IMAGE\EXEMPLES\*.PDF ..\BUILD\CD > NUL
+COPY ..\IMAGE\EXEMPLES\*.XLC ..\BUILD\CD > NUL
 ECHO == Bibliotheques DOSCALLS.DLL, FKA.DLL, HPFS.IFS, NTFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL et PMCTLS.DLL
 ..\BUILD\OS2PC -Q ..\DLL\DOSCALLS.PAS ..\BUILD\CD\DOSCALLS.DLL
 IF ERRORLEVEL 1 GOTO ERREUR

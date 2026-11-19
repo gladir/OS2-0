@@ -20,7 +20,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
-              WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF,
+              WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
@@ -116,6 +116,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
   OS2PC APPS\PAINT.PAS                      -> PAINT.EXE (Paint, dessin bitmap)
   OS2PC WORDIUM.PAS                         -> WORDIUM.EXE (WorDium, traitement de texte)
+  OS2PC EXCELSIO.PAS                        -> EXCELSIO.EXE (Excelsior, tableur)
   nasm -f bin KERNEL\HDBOOT.ASM             -> MBR du disque dur (deja dans INSTALL.PAS)
   OS2PC DLL\DOSCALLS.PAS                    -> DOSCALLS.DLL (API Dos*)
   OS2PC DLL\TESTDOS.PAS                     -> TESTDOS.EXE (essai de la DLL)
@@ -1207,6 +1208,34 @@ Exemples : WORDIUM MONSTER.GAT, WORDIUM LETTRE.PDF.
   - impression (Fichier - Imprimer, Ctrl+P) par le tampon d'impression
     d'OS/2 (la version DOS ne l'offre pas) ;
   - fermer la fenetre : Fichier - Quitter (Alt+X).
+
+Excelsior (EXCELSIO.EXE, dossier Productivite)
+----------------------------------------------
+Tableur porte de EXCEL.PAS du depot OFFICE-0 (source EXCELSIO.PAS).
+Systeme OS/2 - Productivite - Excelsior, ou EXCELSIO [/CLASSICMENU |
+/RUBANMENU] [classeur] a l'invite (EXCELSIO /? : aide) ; un classeur
+(.XLC, .XLS, .XLSX) ouvert depuis un dossier du bureau ou l'Explorateur
+OS2-0 s'ouvre aussi dans Excelsior. Exemple : EXCELSIO BUDGET.XLC.
+  - toutes les fonctions de la version DOS : 16 feuilles de 4096 lignes
+    sur 256 colonnes (A a IV), formules (une cinquantaine de fonctions
+    en anglais ou en francais : SUM, MOYENNE, SI, ARRONDI, RACINE...),
+    recalcul, selection (souris, F8), couper, copier, coller, annuler et
+    retablir, mise en forme des cellules (gras, italique, souligne,
+    alignements, formats, couleurs), largeurs et hauteurs, feuilles
+    (inserer, renommer, supprimer), graphiques (barres, lignes,
+    secteurs), images BMP, menus contextuels ;
+  - formats : XLC (natif), XLS d'Excel 97 a 2003 (lecture et ecriture),
+    XLSX (lecture et ecriture) ;
+  - menus classiques ou ruban (/RUBANMENU) ;
+  - fenetre de Presentation Manager : barre de titre (nom du classeur),
+    barre de menus de PM construite a partir des menus d'Excelsior (les
+    commandes absentes de la version DOS sont grisees), boites de
+    dialogue dans le style d'OS/2, messages par WinMessageBox ;
+  - corrections de la version DOS : les fichiers XLS ecrits par
+    Excelsior se relisent (et s'ouvrent dans LibreOffice), la lecture
+    XLS prend les nombres et les resultats des formules d'Excel, une
+    formule au resultat texte est enregistree (XLS, XLSX) avec ce texte ;
+  - fermer la fenetre : Fichier - Quitter (Alt+F4 ou Alt+Q).
 
 Outlink (OUTLINK.EXE, dossier Productivite)
 -------------------------------------------

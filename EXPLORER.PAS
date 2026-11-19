@@ -1719,6 +1719,12 @@ Begin
       A := AppPath('WORDIUM.EXE');
       SetDir(CurPath);
     End
+    Else If ((X = 'XLC') Or (X = 'XLS') Or (X = 'XLSX')) And (AppPath('EXCELSIO.EXE') <> '') Then
+    Begin
+      { classeur : Excelsior (ses boites Ouvrir et Enregistrer montrent ce dossier) }
+      A := AppPath('EXCELSIO.EXE');
+      SetDir(CurPath);
+    End
     Else If (X = 'TXT') Or (X = 'PAS') Or (X = 'INI') Or (X = 'SYS') Or (X = 'LOG') Or (X = 'CFG') Or (X = 'ME') Or
        (X = 'INC') Or (X = 'ASM') Or (X = 'DOC') Or (X = '') Then A := AppPath('PASDEV.EXE')
     Else If X = 'WAV' Then A := AppPath('DIGAUDIO.EXE')

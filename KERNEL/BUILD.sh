@@ -34,7 +34,10 @@
 #     OFFICE-0 : IMAP, POP3 et SMTP par TCPIP32.DLL, TLS et STARTTLS par
 #     TLS32.DLL ; dossier Productivite) et WORDIUM.PAS (WorDium, traitement
 #     de texte porte de WORD.PAS du depot OFFICE-0 : DOCX, DOC, PDF, GAT du
-#     MonsterBook, correcteur d'orthographe ; dossier Productivite) ;
+#     MonsterBook, correcteur d'orthographe ; dossier Productivite) et
+#     EXCELSIO.PAS (Excelsior, tableur porte de EXCEL.PAS du depot
+#     OFFICE-0 : XLC, XLS, XLSX, formules, graphiques ; dossier
+#     Productivite) ;
 #  3a. compile APPS/PAINT.PAS (Paint, porte de Pasdows 95, dossier
 #     Productivite) avec OS2PC, qui accepte les AnsiString, Int64, QWord,
 #     PByte, tableaux dynamiques, types proceduraux et Try/Except de Free
@@ -42,7 +45,8 @@
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS, PAYSAGE.BMP pour Paint,
-#     MONSTER.GAT et LETTRE.PDF pour WorDium) sont copies sur le CD-ROM ;
+#     MONSTER.GAT et LETTRE.PDF pour WorDium, BUDGET.XLC pour Excelsior)
+#     sont copies sur le CD-ROM ;
 #  4. compile les bibliotheques DLL/DOSCALLS.PAS (DOSCALLS.DLL),
 #     DLL/FKA.PAS (FKA.DLL), DLL/NTFS.PAS (NTFS.IFS, NTFS en lecture, ecriture
 #     et formatage, porte de Pasdows 95), DLL/HPFS.PAS (HPFS.IFS, systeme de
@@ -130,7 +134,7 @@ echo "== OS2PC.EXE (compilateur natif : OS2PC.PAS compile par OS2PC) et exemples
 "$W/os2pc" -Q "$ROOT/TOOLS/OS2PC.PAS" "$W/cd/OS2PC.EXE"
 cp "$ROOT"/IMAGE/EXEMPLES/*.PAS "$W/cd/"
 cp "$ROOT"/IMAGE/EXEMPLES/*.BMP "$W/cd/"
-cp "$ROOT"/IMAGE/EXEMPLES/*.GAT "$ROOT"/IMAGE/EXEMPLES/*.PDF "$W/cd/"
+cp "$ROOT"/IMAGE/EXEMPLES/*.GAT "$ROOT"/IMAGE/EXEMPLES/*.PDF "$ROOT"/IMAGE/EXEMPLES/*.XLC "$W/cd/"
 echo "== Bibliotheques DOSCALLS.DLL, FKA.DLL, HPFS.IFS, NTFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL et PMCTLS.DLL (OS2PC, Library)"
 "$W/os2pc" -Q "$ROOT/DLL/DOSCALLS.PAS" "$W/cd/DOSCALLS.DLL"
 "$W/os2pc" -Q "$ROOT/DLL/TESTDOS.PAS" "$W/cd/TESTDOS.EXE"
