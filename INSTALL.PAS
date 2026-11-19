@@ -1076,7 +1076,8 @@ Begin
           (U = 'OTHELLO.EXE') Or (U = 'TILEMAN.EXE') Or (U = 'HEX2048.EXE') Or (U = 'BACKGAM.EXE') Or
           (U = 'POKER.EXE') Or (U = 'BILLARD.EXE') Or (U = 'CHECKERS.EXE') Or (U = 'YATHZEE.EXE') Or
           (U = 'BATTLE.EXE') Or (U = 'POWER4.EXE') Or (U = 'SOKOBAN.EXE') Or (U = 'BACCARAT.EXE') Or
-          (U = 'HANOIS.EXE') Or (U = 'BABY.EXE') Or (U = '421.EXE') Or (U = 'CENTIPED.EXE') Then
+          (U = 'HANOIS.EXE') Or (U = 'BABY.EXE') Or (U = '421.EXE') Or (U = 'CENTIPED.EXE') Or
+          (U = 'ASTEROID.EXE') Or (U = 'BADUGI.EXE') Or (U = 'TTT.EXE') Or (U = 'BASEBALL.EXE') Then
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or

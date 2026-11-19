@@ -16,7 +16,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OTHELLO.EXE, TILEMAN.EXE, HEX2048.EXE, BACKGAM.EXE, POKER.EXE,
               BILLARD.EXE, CHECKERS.EXE, YATHZEE.EXE, BATTLE.EXE, POWER4.EXE,
               SOKOBAN.EXE, BACCARAT.EXE, HANOIS.EXE, BABY.EXE, 421.EXE,
-              CENTIPED.EXE,
+              CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
@@ -96,6 +96,10 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC BABY.PAS                            -> BABY.EXE (Baby)
   OS2PC 421.PAS                             -> 421.EXE (421)
   OS2PC CENTIPED.PAS                        -> CENTIPED.EXE (Mille-pattes)
+  OS2PC ASTEROID.PAS                        -> ASTEROID.EXE (Asteroide)
+  OS2PC BADUGI.PAS                          -> BADUGI.EXE (Badugi)
+  OS2PC TTT.PAS                             -> TTT.EXE (Tic-Tac-Toe)
+  OS2PC BASEBALL.PAS                        -> BASEBALL.EXE (Baseball)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -900,9 +904,28 @@ traditionnels, composant Jeux de l'installation) :
   est invincible. Fleches ou souris, Espace ou clic pour tirer, P pause.
   Porte du prototype CENTIPED.PAS de 7iles (mode texte) en graphique.
   /AUTO.
+  Asteroide (ASTEROID.EXE) : le vaisseau au centre tourne et tire sur
+  les asteroides qui arrivent des bords, par vagues de plus en plus
+  rapides ; trois vies, record. Fleches gauche et droite, Espace, souris
+  (viser et cliquer), P pause. Porte du prototype ASTEROID.PAS de 7iles
+  (mode texte) en graphique. /AUTO.
+  Badugi (BADUGI.EXE) : poker coreen a quatre cartes contre trois
+  ordinateurs ; blindes, quatre tours de mise et trois echanges ; la
+  meilleure main a quatre couleurs et quatre rangs differents, la plus
+  basse possible. C parole/suivre, R relancer, P se coucher, clic ou
+  1 a 4 et D echanger, S servi. Porte du prototype BADUGI.PAS de 7iles.
+  /AUTO.
+  Tic-Tac-Toe (TTT.EXE) : aligner trois X contre l'ordinateur ; trois
+  niveaux (Facile, Moyen comme le prototype, Difficile imbattable),
+  souris ou 1 a 9, Ctrl+Z annuler. Porte du prototype TTT.PAS de 7iles.
+  Baseball (BASEBALL.EXE) : neuf manches contre l'ordinateur, terrain
+  vu d'en haut ; au baton, Espace ou clic au passage de la balle ; au
+  monticule, + et - la force du lancer. Porte du prototype BASEBALL.PAS
+  de 7iles (simulation en mode texte) en graphique. /AUTO.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
-Puissance 4, Baccarat, Baby, 421, Mille-pattes) : donne reproductible.
+Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,
+Tic-Tac-Toe, Baseball) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------
