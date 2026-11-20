@@ -19,7 +19,8 @@ Program BASEBALL;
   du losange, monticule, lignes de craie, cloture, gradins), joueurs en
   uniformes, balle lancee et frappee, coureurs qui courent d'un but a
   l'autre, tableau de pointage par manche, balles, prises et retraits,
-  barre d'etat et apparence d'OS/2.
+  bruitages (lancer, frappe, gant, retrait, point, foule ; menu Options,
+  Son), barre d'etat et apparence d'OS/2.
 
   Regles du prototype : deux equipes de neuf joueurs (memes noms et memes
   moyennes au baton), neuf manches, trois retraits par demi-manche, quatre
@@ -37,7 +38,8 @@ Program BASEBALL;
 
   Clavier : Espace (lancer, ou frapper), + et - (puissance), F2 (nouvelle
   partie), F1 (regles). Souris : clic sur le terrain (lancer ou frapper).
-  Parametres : /SEED:n ; /AUTO (l'ordinateur joue les deux equipes). }
+  Parametres : /SEED:n ; /AUTO (l'ordinateur joue les deux equipes) ;
+  /NOSOUND (sans bruitages). }
 
 Const
   WM_SIZE = $0007; WM_COMMAND = $0020; WM_PAINT = $0023; WM_TIMER = $0024; WM_CLOSE = $0029; WM_QUIT = $002A;
@@ -55,7 +57,9 @@ Const
   CLR_YELLOW = 6; CLR_DARKGRAY = 8; CLR_DARKBLUE = 9; CLR_DARKRED = 10; CLR_DARKGREEN = 12;
   CLR_DARKCYAN = 13; CLR_BROWN = 14; CLR_PALEGRAY = 15;
   CM_NEW = 101; CM_ACT = 102; CM_QUIT = 104; CM_VIS = 111; CM_DOM = 112;
+  CM_SOUND = 201;
   CM_RULES = 301; CM_ABOUT = 302;
+  SndRate = 11025;
   { image du terrain }
   BW = 440; BH = 400; OX = 8; OY = 8;
   PnX = 456; PW = 156;
@@ -121,6 +125,10 @@ Var
   Font : Array[0..4095] Of Byte;
   FontH : LongInt;
   Qmsg : Array[0..7] Of LongInt;
+  { bruitages }
+  SndBuf : Array[0..39999] Of Byte;
+  SndOfs, SndLen, SndPri : Array[0..15] Of LongInt;
+  NSndBuf, SndPrio, SndCur, SndEnd, SoundOn : LongInt;
 
 Function WinInitialize(Fl : LongInt) : LongInt; External 'PMWIN';
 Function WinCreateMsgQueue(Hab, N : LongInt) : LongInt; External 'PMWIN';
@@ -241,6 +249,91 @@ End;
 
 
 Function GpiDrawBits(Hps, PBits, Pbmi, N, P, Rop, Fl : LongInt) : LongInt; External 'PMGPI';
+
+{ ==================================================================== }
+{ Bruitages (fabriques au demarrage, 8 bits, 11025 Hz, joues par MDM)   }
+{ ==================================================================== }
+
+Function MdmPlay(PData, Bytes, Rate, Bits, Ch : LongInt) : LongInt; External 'MDM' Name 'MDMPLAY';
+
+{ son N : onde carree de F1 vers F2 (Hz), duree Ms, volume Vol (0..100) }
+Procedure MakeTone(N, F1, F2, Ms, Vol : LongInt);
+Var K, Len, F, Ph, V, Env : LongInt;
+Begin
+  Len := SndRate * Ms Div 1000;
+  If NSndBuf + Len > SizeOf(SndBuf) Then Exit;
+  SndOfs[N] := NSndBuf; SndLen[N] := Len; SndPri[N] := SndPrio;
+  Ph := 0;
+  For K := 0 To Len - 1 Do
+  Begin
+    F := F1 + (F2 - F1) * K Div Len;
+    Ph := (Ph + F * 65536 Div SndRate) And $FFFF;
+    If K < 40 Then Env := K * 255 Div 40 Else Env := 255 * (Len - K) Div (Len - 40 + 1);
+    If Ph < 32768 Then V := Vol Else V := -Vol;
+    If (Ph < 2048) Or ((Ph >= 32768) And (Ph < 34816)) Then V := V Div 2;
+    SndBuf[NSndBuf + K] := 128 + V * Env Div 255;
+  End;
+  NSndBuf := NSndBuf + Len;
+End;
+
+{ son N : bruit (explosion, choc) ; Hold : echantillons tenus (grave si grand) }
+Procedure MakeNoise(N, Ms, Vol, Hold : LongInt);
+Var K, Len, V, Env, R, H : LongInt;
+Begin
+  Len := SndRate * Ms Div 1000;
+  If NSndBuf + Len > SizeOf(SndBuf) Then Exit;
+  SndOfs[N] := NSndBuf; SndLen[N] := Len; SndPri[N] := SndPrio;
+  R := 12345; V := 0; H := 0;
+  For K := 0 To Len - 1 Do
+  Begin
+    If H <= 0 Then
+    Begin
+      R := (R * 1103515245 + 12345) And $7FFFFFFF;
+      V := ((R Shr 16) And 255) - 128;
+      H := Hold + K * Hold Div Len;
+    End;
+    Dec(H);
+    If K < 30 Then Env := K * 255 Div 30 Else Env := 255 * (Len - K) Div (Len - 30 + 1);
+    Env := Env * Env Div 255;
+    SndBuf[NSndBuf + K] := 128 + V * Vol Div 128 * Env Div 255;
+  End;
+  NSndBuf := NSndBuf + Len;
+End;
+
+{ heure en millisecondes (le son en cours se termine a SndEnd) }
+Function SndNow : LongInt;
+Var T : Array[0..15] Of Byte;
+Begin
+  Dummy := DosGetDateTime(LongInt(@T));
+  SndNow := ((T[0] * 60 + T[1]) * 60 + T[2]) * 1000 + T[3] * 10;
+End;
+
+{ un nouveau son coupe celui qui joue : un son moins important (Pri)
+  n'interrompt pas un son plus important qui n'est pas termine }
+Procedure PlaySnd(N : LongInt);
+Var T : LongInt;
+Begin
+  If (SoundOn = 0) Or (SndLen[N] = 0) Then Exit;
+  T := SndNow;
+  If (SndPri[N] < SndCur) And (T < SndEnd) And (T >= SndEnd - 60000) Then Exit;
+  SndCur := SndPri[N];
+  SndEnd := T + SndLen[N] * 1000 Div SndRate;
+  Dummy := MdmPlay(LongInt(@SndBuf[SndOfs[N]]), SndLen[N], SndRate, 8, 1);
+End;
+
+Procedure MakeSounds;
+Begin
+  NSndBuf := 0;
+  SndPrio := 1; MakeNoise(0, 140, 45, 1);                 { lancer : la balle siffle }
+  SndPrio := 3; MakeNoise(1, 70, 125, 1);                 { frappe du baton }
+  SndPrio := 1; MakeTone(2, 260, 120, 120, 35);           { elan }
+  SndPrio := 2; MakeNoise(3, 45, 90, 3);                  { balle dans le gant }
+  SndPrio := 3; MakeTone(4, 420, 180, 320, 50);           { retrait }
+  SndPrio := 4; MakeTone(5, 523, 1046, 420, 50);          { point marque }
+  SndPrio := 4; MakeNoise(6, 1100, 45, 1);                { la foule : coup de circuit }
+  SndPrio := 5; MakeTone(7, 392, 784, 800, 55);           { fin de partie }
+  SndPrio := 0;
+End;
 
 Procedure WrL(A, V : LongInt);
 Begin
@@ -675,6 +768,7 @@ Procedure Score(N : LongInt);
 Begin
   Runs[BatTeam] := Runs[BatTeam] + N;
   Line[BatTeam, Inning] := Line[BatTeam, Inning] + N;
+  If N > 0 Then PlaySnd(5);
 End;
 
 { GetBattingResult du prototype : moyenne du frappeur, qualite du lancer }
@@ -957,6 +1051,7 @@ Procedure GameOver;
 Var S : String;
 Begin
   State := S_OVER;
+  PlaySnd(7);
   If Runs[0] = Runs[1] Then S := 'Match nul'
   Else If (AutoAll = 0) And ((Runs[You] > Runs[1 - You])) Then S := 'Victoire !'
   Else If AutoAll = 0 Then S := 'D' + Chr(130) + 'faite'
@@ -1008,6 +1103,7 @@ End;
 { ProcessOut du prototype }
 Procedure DoOut;
 Begin
+  PlaySnd(4);
   Inc(Outs);
   NextBatter;
   If Outs >= 3 Then ChangeSides;
@@ -1105,6 +1201,7 @@ Begin
             Begin Dist := 70 + Rnd(30); BallH := 4; End;
           End;
         End;
+        PlaySnd(1);
         Th := Ang * Pi / 180;
         BallX0 := HX; BallY0 := HY - 6;
         BallX1 := HX + Round(Sin(Th) * Dist); BallY1 := HY - Round(Cos(Th) * Dist);
@@ -1115,6 +1212,7 @@ Begin
   Else
     Begin
       State := S_SHOW; Wait := 0;
+      PlaySnd(3);
       Case Result Of
         R_STRIKE :
           Begin
@@ -1191,6 +1289,7 @@ Begin
         Show('Circuit !', 'Coup de circuit de ' + BatterName + ' !', C_YELLOW);
       End;
       StartRun(K);
+      If K = R_HR Then PlaySnd(6);
     End;
   End;
   If (State = S_SHOW) Then BuildBack;
@@ -1211,6 +1310,7 @@ Begin
   If HumanPitches Then NFrm := 30 - Power Div 5 Else NFrm := 30 - CpuPower Div 5;
   Frm := 0; BallOn := 1; Swung := 0; SwingF := 0;
   State := S_PITCH;
+  PlaySnd(0);
   Msg := PitcherName + ' lance...';
   BuildBack;
   PanelOnly;
@@ -1221,6 +1321,7 @@ Begin
   If (State <> S_PITCH) Or (Swung <> 0) Then Exit;
   Swung := Frm + 1;
   SwingF := 1;
+  PlaySnd(2);
 End;
 
 { l'ordinateur au baton : elan une fois sur deux environ }
@@ -1357,6 +1458,11 @@ Begin
         If Id = CM_VIS Then You := 0 Else You := 1;
         SetMark(CM_VIS, You = 0); SetMark(CM_DOM, You = 1);
         NewGame;
+      End;
+    CM_SOUND :
+      Begin
+        SoundOn := 1 - SoundOn;
+        SetMark(CM_SOUND, SoundOn <> 0);
       End;
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
     CM_RULES :
@@ -1510,7 +1616,7 @@ End;
 
 
 Var
-  Fl, H0, H1, H2, Sw, Sh, Fw, Fh, M, K, E, X, Y : LongInt;
+  Fl, H0, H1, H2, H3, Sw, Sh, Fw, Fh, M, K, E, X, Y : LongInt;
   Dt : Array[0..15] Of Byte;
   Rc : Array[0..3] Of LongInt;
   S : String;
@@ -1521,13 +1627,16 @@ BEGIN
   Seed := Dt[0] * 3600 + Dt[1] * 60 + Dt[2] + Dt[3] * 7919;
   Msg := ''; AutoAll := 0; You := 0; Banner := ''; Banner2 := ''; NSpr := 0; NDirty := 0;
   Client := 0; State := S_IDLE; Inning := 1; TopHalf := 1;
+  SoundOn := 1; SndCur := 0; SndEnd := 0;
   For K := 1 To ParamCount Do
   Begin
     S := ParamStr(K);
     If (Length(S) > 6) And ((Copy(S, 1, 6) = '/SEED:') Or (Copy(S, 1, 6) = '/seed:')) Then
       Val(Copy(S, 7, 20), Seed, E);
     If (S = '/AUTO') Or (S = '/auto') Then AutoAll := 1;
+    If (S = '/NOSOUND') Or (S = '/nosound') Then SoundOn := 0;
   End;
+  MakeSounds;
   Hab := WinInitialize(0);
   Hmq := WinCreateMsgQueue(Hab, 64);
   LoadFont;
@@ -1549,12 +1658,17 @@ BEGIN
   MItem(MIS_SEPARATOR, 0, 0, '');
   MItem(MIS_TEXT, 0, CM_QUIT, '~Quitter');
   MenuClose(H1, 7);
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 200, '~Options');
+  H3 := MenuOpen;
+  If SoundOn <> 0 Then MItem(MIS_TEXT, MIA_CHECKED, CM_SOUND, '~Son')
+  Else MItem(MIS_TEXT, 0, CM_SOUND, '~Son');
+  MenuClose(H3, 1);
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 300, 'A~ide');
   H2 := MenuOpen;
   MItem(MIS_TEXT, 0, CM_RULES, '~R' + Chr(138) + 'gles du jeu' + Chr(9) + 'F1');
   MItem(MIS_TEXT, 0, CM_ABOUT, '~A propos de Baseball');
   MenuClose(H2, 2);
-  MenuClose(H0, 2);
+  MenuClose(H0, 3);
   M := WinCreateMenu(Frame, LongInt(@MenuT));
   Rc[0] := 0; Rc[1] := 0; Rc[2] := CWant; Rc[3] := CHWant;
   Dummy := WinCalcFrameRect(Frame, LongInt(@Rc), 0);

@@ -17,7 +17,8 @@ Program CENTIPED;
   Manager avec menus, image en memoire (GpiDrawBits, seuls les carreaux
   changes sont recopies), dessins en couleur (jardin de nuit, bordure de
   pierres, champignons, mille-pattes, araignee, canon), panneau du
-  pointage, pause, barre d'etat et apparence d'OS/2. Le terrain, les
+  pointage, pause, bruitages (tir, champignon et anneau touches, canon
+  perdu ; menu Options, Son), barre d'etat et apparence d'OS/2. Le terrain, les
   regles et les deplacements du prototype sont repris tels quels.
 
   But (comme le prototype) : empechez le mille-pattes de descendre sur
@@ -36,7 +37,7 @@ Program CENTIPED;
   continu), P (pause), F2 (nouvelle partie), F1 (regles).
   Souris : le canon suit la souris, clic : tirer.
   Parametres : /SEED:n (parties reproductibles) ; /AUTO (le canon joue
-  seul : demonstration). }
+  seul : demonstration) ; /NOSOUND (sans bruitages). }
 
 Const
   WM_SIZE = $0007; WM_COMMAND = $0020; WM_PAINT = $0023; WM_TIMER = $0024; WM_CLOSE = $0029; WM_QUIT = $002A;
@@ -56,7 +57,9 @@ Const
   CLR_DARKCYAN = 13; CLR_BROWN = 14; CLR_PALEGRAY = 15;
   CM_NEW = 101; CM_PAUSE = 102; CM_AUTO = 103; CM_QUIT = 104;
   CM_SLOW = 111; CM_NORMAL = 112; CM_FAST = 113;
+  CM_SOUND = 114;
   CM_RULES = 301; CM_ABOUT = 302;
+  SndRate = 11025;
   { terrain du prototype : 23 rangees, 40 colonnes (bordure, terre en bas) }
   ScreenRow = 23; ScreenCol = 40;
   CW_ = 12; CH_ = 16;                    { taille d'un carreau }
@@ -94,6 +97,10 @@ Var
   Font : Array[0..4095] Of Byte;
   FontH : LongInt;
   Qmsg : Array[0..7] Of LongInt;
+  { bruitages }
+  SndBuf : Array[0..29999] Of Byte;
+  SndOfs, SndLen, SndPri : Array[0..15] Of LongInt;
+  NSndBuf, SndPrio, SndCur, SndEnd, SoundOn : LongInt;
 
 
 { --- PMWIN.DLL, PMGPI.DLL, VIOCALLS.DLL, DOSCALLS.DLL --- }
@@ -209,6 +216,88 @@ End;
 Function WinGetPS(H : LongInt) : LongInt; External 'PMWIN';
 Function WinReleasePS(Hps : LongInt) : LongInt; External 'PMWIN';
 Function GpiDrawBits(Hps, PBits, Pbmi, N, P, Rop, Fl : LongInt) : LongInt; External 'PMGPI';
+
+{ ==================================================================== }
+{ Bruitages (fabriques au demarrage, 8 bits, 11025 Hz, joues par MDM)   }
+{ ==================================================================== }
+
+Function MdmPlay(PData, Bytes, Rate, Bits, Ch : LongInt) : LongInt; External 'MDM' Name 'MDMPLAY';
+
+{ son N : onde carree de F1 vers F2 (Hz), duree Ms, volume Vol (0..100) }
+Procedure MakeTone(N, F1, F2, Ms, Vol : LongInt);
+Var K, Len, F, Ph, V, Env : LongInt;
+Begin
+  Len := SndRate * Ms Div 1000;
+  If NSndBuf + Len > SizeOf(SndBuf) Then Exit;
+  SndOfs[N] := NSndBuf; SndLen[N] := Len; SndPri[N] := SndPrio;
+  Ph := 0;
+  For K := 0 To Len - 1 Do
+  Begin
+    F := F1 + (F2 - F1) * K Div Len;
+    Ph := (Ph + F * 65536 Div SndRate) And $FFFF;
+    If K < 40 Then Env := K * 255 Div 40 Else Env := 255 * (Len - K) Div (Len - 40 + 1);
+    If Ph < 32768 Then V := Vol Else V := -Vol;
+    If (Ph < 2048) Or ((Ph >= 32768) And (Ph < 34816)) Then V := V Div 2;
+    SndBuf[NSndBuf + K] := 128 + V * Env Div 255;
+  End;
+  NSndBuf := NSndBuf + Len;
+End;
+
+{ son N : bruit (explosion, choc) ; Hold : echantillons tenus (grave si grand) }
+Procedure MakeNoise(N, Ms, Vol, Hold : LongInt);
+Var K, Len, V, Env, R, H : LongInt;
+Begin
+  Len := SndRate * Ms Div 1000;
+  If NSndBuf + Len > SizeOf(SndBuf) Then Exit;
+  SndOfs[N] := NSndBuf; SndLen[N] := Len; SndPri[N] := SndPrio;
+  R := 12345; V := 0; H := 0;
+  For K := 0 To Len - 1 Do
+  Begin
+    If H <= 0 Then
+    Begin
+      R := (R * 1103515245 + 12345) And $7FFFFFFF;
+      V := ((R Shr 16) And 255) - 128;
+      H := Hold + K * Hold Div Len;
+    End;
+    Dec(H);
+    If K < 30 Then Env := K * 255 Div 30 Else Env := 255 * (Len - K) Div (Len - 30 + 1);
+    Env := Env * Env Div 255;
+    SndBuf[NSndBuf + K] := 128 + V * Vol Div 128 * Env Div 255;
+  End;
+  NSndBuf := NSndBuf + Len;
+End;
+
+{ heure en millisecondes (le son en cours se termine a SndEnd) }
+Function SndNow : LongInt;
+Var T : Array[0..15] Of Byte;
+Begin
+  Dummy := DosGetDateTime(LongInt(@T));
+  SndNow := ((T[0] * 60 + T[1]) * 60 + T[2]) * 1000 + T[3] * 10;
+End;
+
+{ un nouveau son coupe celui qui joue : un son moins important (Pri)
+  n'interrompt pas un son plus important qui n'est pas termine }
+Procedure PlaySnd(N : LongInt);
+Var T : LongInt;
+Begin
+  If (SoundOn = 0) Or (SndLen[N] = 0) Then Exit;
+  T := SndNow;
+  If (SndPri[N] < SndCur) And (T < SndEnd) And (T >= SndEnd - 60000) Then Exit;
+  SndCur := SndPri[N];
+  SndEnd := T + SndLen[N] * 1000 Div SndRate;
+  Dummy := MdmPlay(LongInt(@SndBuf[SndOfs[N]]), SndLen[N], SndRate, 8, 1);
+End;
+
+Procedure MakeSounds;
+Begin
+  NSndBuf := 0;
+  SndPrio := 0; MakeTone(0, 1500, 500, 70, 45);          { tir }
+  SndPrio := 1; MakeNoise(1, 45, 70, 2);                  { champignon touche }
+  SndPrio := 2; MakeNoise(2, 160, 100, 3);                { anneau detruit }
+  SndPrio := 5; MakeTone(3, 620, 70, 750, 70);            { canon perdu }
+  SndPrio := 4; MakeTone(4, 300, 900, 350, 50);           { nouvelle vague }
+  SndPrio := 0;
+End;
 
 Procedure WrL(A, V : LongInt);
 Begin
@@ -895,7 +984,7 @@ End;
 { vie perdue : araignee sur le canon, ou mille-pattes sur la terre }
 Procedure LoseLife(Why : String);
 Begin
-  Dummy := WinAlarm(HWND_DESKTOP, 1);
+  If SoundOn <> 0 Then PlaySnd(3) Else Dummy := WinAlarm(HWND_DESKTOP, 1);
   Dec(Lives);
   LostFlag := 1;
   If ShotGoing Then
@@ -1022,6 +1111,7 @@ Begin
   KTail[0] := Prev;
   For Col := 2 To 39 Do DrawCell(2, Col);
   Msg := 'Vague ' + IStr(Wave) + ' : un mille-pattes de ' + IStr(Len) + ' anneaux arrive !';
+  If Wave > 1 Then PlaySnd(4);
 End;
 
 Procedure MoveCentipede;
@@ -1113,26 +1203,31 @@ Begin
           Begin
             SetCell(ShotY, ShotX, O_BLANK);
             ShotGoing := False; AddScore(10);
+            PlaySnd(1);
           End;
         O_WEAKMUSH :
           Begin
             Dec(NumMush);
             SetCell(ShotY, ShotX, O_BLANK);
             ShotGoing := False; AddScore(10);
+            PlaySnd(1);
           End;
         O_STRONGMUSH :
           Begin
             SetCell(ShotY, ShotX, O_WEAKMUSH);
             ShotGoing := False;
+            PlaySnd(1);
           End;
         O_STRONGSEG :
           Begin
             SetCell(ShotY, ShotX, O_WEAKSEG);
             ShotGoing := False;
+            PlaySnd(1);
           End;
         O_CENT :
           Begin
             AddScore(100);
+            PlaySnd(2);
             DeleteSegment(ShotY, ShotX);
             ShotGoing := False;
           End;
@@ -1147,6 +1242,7 @@ Begin
   If (State <> 0) Or ShotGoing Then Exit;
   ShotGoing := True;
   ShotY := ScreenRow - 1; ShotX := YouX;
+  PlaySnd(0);
   AddScore(-2);
 End;
 
@@ -1337,6 +1433,7 @@ Procedure SetMarks;
 Begin
   SetMark(CM_SLOW, Speed = 3); SetMark(CM_NORMAL, Speed = 0); SetMark(CM_FAST, Speed = -3);
   SetMark(CM_AUTO, Auto <> 0);
+  SetMark(CM_SOUND, SoundOn <> 0);
 End;
 
 Procedure SetSpeed(V : LongInt);
@@ -1355,6 +1452,11 @@ Begin
     CM_AUTO :
       Begin
         Auto := 1 - Auto;
+        SetMarks;
+      End;
+    CM_SOUND :
+      Begin
+        SoundOn := 1 - SoundOn;
         SetMarks;
       End;
     CM_SLOW : SetSpeed(3);
@@ -1519,6 +1621,7 @@ BEGIN
   Dummy := DosGetDateTime(LongInt(@Dt));
   Seed := Dt[0] * 3600 + Dt[1] * 60 + Dt[2] + Dt[3] * 7919;
   Auto := 0; Best := 0; Speed := 0; NDirty := 0; State := 1; Frame := 0; Lives := 3; Wave := 1;
+  SoundOn := 1; SndCur := 0; SndEnd := 0;
   Client := 0;
   For K := 1 To ParamCount Do
   Begin
@@ -1526,7 +1629,9 @@ BEGIN
     If (Length(S) > 6) And ((Copy(S, 1, 6) = '/SEED:') Or (Copy(S, 1, 6) = '/seed:')) Then
       Val(Copy(S, 7, 20), Seed, E);
     If (S = '/AUTO') Or (S = '/auto') Then Auto := 1;
+    If (S = '/NOSOUND') Or (S = '/nosound') Then SoundOn := 0;
   End;
+  MakeSounds;
   InitBmi;
   Hab := WinInitialize(0);
   Hmq := WinCreateMsgQueue(Hab, 64);
@@ -1552,7 +1657,9 @@ BEGIN
   MItem(MIS_SEPARATOR, 0, 0, '');
   If Auto <> 0 Then MItem(MIS_TEXT, MIA_CHECKED, CM_AUTO, 'Canon ~automatique')
   Else MItem(MIS_TEXT, 0, CM_AUTO, 'Canon ~automatique');
-  MenuClose(H3, 5);
+  If SoundOn <> 0 Then MItem(MIS_TEXT, MIA_CHECKED, CM_SOUND, '~Son')
+  Else MItem(MIS_TEXT, 0, CM_SOUND, '~Son');
+  MenuClose(H3, 6);
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 300, 'A~ide');
   H2 := MenuOpen;
   MItem(MIS_TEXT, 0, CM_RULES, '~R' + Chr(138) + 'gles du jeu' + Chr(9) + 'F1');

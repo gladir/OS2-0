@@ -18,6 +18,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               SOKOBAN.EXE, BACCARAT.EXE, HANOIS.EXE, BABY.EXE, 421.EXE,
               CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
+              INVADERS.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
@@ -106,6 +107,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC BARBU.PAS                           -> BARBU.EXE (Barbu)
   OS2PC BREAKOUT.PAS                        -> BREAKOUT.EXE (Casse-Brique)
   OS2PC BATAILLE.PAS                        -> BATAILLE.EXE (Bataille)
+  OS2PC INVADERS.PAS                        -> INVADERS.EXE (Invasion de l'espace)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -910,14 +912,15 @@ traditionnels, composant Jeux de l'installation) :
   contre 1 a 3 ordinateurs. Porte du prototype 421.PAS de 7iles. /AUTO.
   Mille-pattes (CENTIPED.EXE) : tirer sur le mille-pattes avant qu'il
   descende sur terre ; touche au milieu, il se coupe en deux ; l'araignee
-  est invincible. Fleches ou souris, Espace ou clic pour tirer, P pause.
-  Porte du prototype CENTIPED.PAS de 7iles (mode texte) en graphique.
-  /AUTO.
+  est invincible. Fleches ou souris, Espace ou clic pour tirer, P pause ;
+  bruitages (menu Options, Son). Porte du prototype CENTIPED.PAS de
+  7iles (mode texte) en graphique. /AUTO, /NOSOUND.
   Asteroide (ASTEROID.EXE) : le vaisseau au centre tourne et tire sur
   les asteroides qui arrivent des bords, par vagues de plus en plus
   rapides ; trois vies, record. Fleches gauche et droite, Espace, souris
-  (viser et cliquer), P pause. Porte du prototype ASTEROID.PAS de 7iles
-  (mode texte) en graphique. /AUTO.
+  (viser et cliquer), P pause ; bruitages (menu Options, Son). Porte du
+  prototype ASTEROID.PAS de 7iles (mode texte) en graphique. /AUTO,
+  /NOSOUND.
   Badugi (BADUGI.EXE) : poker coreen a quatre cartes contre trois
   ordinateurs ; blindes, quatre tours de mise et trois echanges ; la
   meilleure main a quatre couleurs et quatre rangs differents, la plus
@@ -929,8 +932,9 @@ traditionnels, composant Jeux de l'installation) :
   souris ou 1 a 9, Ctrl+Z annuler. Porte du prototype TTT.PAS de 7iles.
   Baseball (BASEBALL.EXE) : neuf manches contre l'ordinateur, terrain
   vu d'en haut ; au baton, Espace ou clic au passage de la balle ; au
-  monticule, + et - la force du lancer. Porte du prototype BASEBALL.PAS
-  de 7iles (simulation en mode texte) en graphique. /AUTO.
+  monticule, + et - la force du lancer ; bruitages (menu Options, Son).
+  Porte du prototype BASEBALL.PAS de 7iles (simulation en mode texte) en
+  graphique. /AUTO, /NOSOUND.
   Excavateur (EXCAVAT.EXE) : creuser des galeries et ramasser les
   pierres precieuses ; les sacs d'or tombent quand rien ne les soutient
   (de deux etages : l'or vaut 500 points) et ecrasent ce qui est dessous ;
@@ -962,11 +966,17 @@ traditionnels, composant Jeux de l'installation) :
   remporte le pli ; a egalite, bataille (trois cartes cachees et une
   visible). Espace ou clic pour jouer, A pour le jeu automatique, trois
   vitesses. Porte du prototype BATAILLE.PAS de 7iles. /AUTO, /BATAILLE.
+  Invasion de l'espace (INVADERS.EXE) : cinq rangees de douze
+  envahisseurs descendent en tirant ; abattez-les (40, 30, 20 ou 10
+  points, 100 pour le vaisseau mere) avant qu'ils n'arrivent en bas ;
+  quatre abris, trois canons, un canon de plus par tableau. Fleches (ou
+  4 et 6) ou souris, Espace ou clic pour tirer, P pause ; bruitages.
+  Porte du prototype INVADERS.PAS de 7iles. /AUTO, /LEVEL:n, /NOSOUND.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
 Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,
 Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique,
-Bataille) : donne reproductible.
+Bataille, Invasion de l'espace) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------

@@ -159,7 +159,7 @@ Const
   IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49; IC_OUTLINK = 50; IC_PAINT = 51; OB_IMAGE = 33;
   IC_WORDIUM = 52; OB_WORDDOC = 34; IC_EXCELSIOR = 53; OB_XLSDOC = 35;
   IC_ASTEROID = 54; IC_BADUGI = 55; IC_TTT = 56; IC_BASEBALL = 57; IC_EXCAVAT = 58; IC_PINBALL = 59;
-  IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62;
+  IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62; IC_INVADERS = 63;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1250,6 +1250,8 @@ Begin
         If FileExists('C:\BREAKOUT.EXE') Then
           Dummy := NewItem(V, IC_BREAKOUT, OB_GAME, 'Casse-Brique', 'C:\BREAKOUT.EXE');
         If FileExists('C:\BATAILLE.EXE') Then Dummy := NewItem(V, IC_BATAILLE, OB_GAME, 'Bataille', 'C:\BATAILLE.EXE');
+        If FileExists('C:\INVADERS.EXE') Then
+          Dummy := NewItem(V, IC_INVADERS, OB_GAME, 'Invasion de l''espace', 'C:\INVADERS.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1909,6 +1911,25 @@ Begin
         GLn(Hps, X + 26, Y + 12, X + 22, Y + 8, CLR_RED);
         GLn(Hps, X + 19, Y + 12, X + 22, Y + 9, CLR_RED);
         GLn(Hps, X + 25, Y + 12, X + 22, Y + 9, CLR_RED);
+      End;
+    IC_INVADERS :
+      Begin
+        { ciel noir, envahisseur vert, tir, canon blanc sur le sol }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_BLACK, CLR_DARKGRAY);
+        GBox(Hps, X + 9, Y + 19, X + 22, Y + 25, CLR_GREEN, DRO_FILL);
+        GBox(Hps, X + 12, Y + 26, X + 19, Y + 27, CLR_GREEN, DRO_FILL);
+        GBox(Hps, X + 6, Y + 21, X + 8, Y + 24, CLR_GREEN, DRO_FILL);
+        GBox(Hps, X + 23, Y + 21, X + 25, Y + 24, CLR_GREEN, DRO_FILL);
+        GLn(Hps, X + 10, Y + 18, X + 8, Y + 15, CLR_GREEN);
+        GLn(Hps, X + 21, Y + 18, X + 23, Y + 15, CLR_GREEN);
+        GBox(Hps, X + 12, Y + 22, X + 13, Y + 23, CLR_BLACK, DRO_FILL);
+        GBox(Hps, X + 18, Y + 22, X + 19, Y + 23, CLR_BLACK, DRO_FILL);
+        GLn(Hps, X + 15, Y + 9, X + 15, Y + 13, CLR_YELLOW);
+        GBox(Hps, X + 10, Y + 4, X + 20, Y + 6, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 14, Y + 6, X + 16, Y + 8, CLR_WHITE, DRO_FILL);
+        GLn(Hps, X + 2, Y + 2, X + 29, Y + 2, CLR_GREEN);
+        GBox(Hps, X + 4, Y + 28, X + 4, Y + 28, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 27, Y + 14, X + 27, Y + 14, CLR_WHITE, DRO_FILL);
       End;
     IC_EXCAVAT :
       Begin
