@@ -960,9 +960,9 @@ Begin
   FBar(TX2 + 1, 0, CW - 1, CH - 1, CLR_PALEGRAY);
   FBar(TX1, 0, TX2, TY1 - 1, CLR_PALEGRAY);
   FBar(TX1, TY2 + 1, TX2, CH - 23, CLR_PALEGRAY);
-  DrawTable;
   DrawPanel;
   DrawStatus;
+  DrawTable;
   Dummy := WinEndPaint(Hps);
 End;
 
@@ -991,7 +991,6 @@ Begin
     YourTurnMsg;
   End
   Else Thinking := 12;
-  Redraw;
 End;
 
 Procedure StartPlay;
@@ -1003,6 +1002,7 @@ Begin
   If Dealer = 0 Then Msg := 'Vous avez choisi : ' Else Msg := PName(Dealer) + ' a choisi : ';
   Msg := Msg + KName(Contract) + '.';
   NextTurn;
+  Redraw;
 End;
 
 Procedure NewDeal;
@@ -1091,6 +1091,7 @@ Begin
   Phase := PH_PLAY;
   CurP := LastWin;
   NextTurn;
+  Redraw;
 End;
 
 Procedure PlayCard(P, I : LongInt);
@@ -1121,6 +1122,7 @@ Begin
   End;
   CurP := (CurP + 1) Mod 4;
   NextTurn;
+  Redraw;
 End;
 
 Procedure CpuTurn;
