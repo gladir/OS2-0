@@ -20,7 +20,8 @@
 #     Hanoi), BABY.PAS (Baby, sauvetage de bebes), 421.PAS (421, des),
 #     CENTIPED.PAS (Mille-pattes), ASTEROID.PAS (Asteroide), BADUGI.PAS
 #     (Badugi, poker coreen), TTT.PAS (Tic-Tac-Toe), BASEBALL.PAS (Baseball),
-#     EXCAVAT.PAS (Excavateur), et
+#     EXCAVAT.PAS (Excavateur), PINBALL.PAS (Pinball : tables et sons dans le
+#     programme), et
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), NOTATOR.PAS
 #     (Notator for OS2-Zero, sequenceur et editeur de partition porte de
 #     NOTATOR.PAS du depot OFFICE-0, dossier Multimedia ; ses exemples de
