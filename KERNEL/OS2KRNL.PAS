@@ -18685,28 +18685,31 @@ Begin
   End;
 End;
 
-{ recopie de la zone (X1, Y1)-(X2, Y2) dans les quatre plans de la VGA :
-  les quatre plans sont d'abord calcules ensemble (une seule lecture de
-  chaque point, dans la zone SplPl qui suit le tampon), puis chaque plan
-  est recopie d'un bloc }
+{ recopie de la zone (X1, Y1)-(X2, Y2) dans les quatre plans de la VGA.
+  En mode 12h, chaque octet ecrit dans la memoire de la carte est lent
+  (une machine virtuelle doit l'emuler) : on n'ecrit que les octets qui
+  changent. SplPl garde ce que contient la carte (quatre plans de 38400
+  octets, a zero apres le changement de mode), SplNw les plans calcules.
+  Les couleurs sont renumerotees (C xor 6, voir SplStart) pour que le
+  fond (couleur 6) soit 0 dans les quatre plans : rien a ecrire pour lui. }
 Procedure SFlush(X1, Y1, X2, Y2 : LongInt);
-Var P, Y, BX, B1, N, K, A, C, Bit, B0, Bb1, Bb2, Bb3, Pl : LongInt;
+Var P, Y, BX, B1, B2, K, A, C, Bit, B0, Bb1, Bb2, Bb3, Pl, Nw, O : LongInt;
 Begin
   If X1 < 0 Then X1 := 0;
   If Y1 < 0 Then Y1 := 0;
   If X2 > 639 Then X2 := 639;
   If Y2 > 479 Then Y2 := 479;
   If (X2 < X1) Or (Y2 < Y1) Then Exit;
-  Pl := SplBuf + 307200;
-  B1 := X1 Div 8; N := X2 Div 8 - B1 + 1;
+  Pl := SplBuf + 307200; Nw := Pl + 153600;
+  B1 := X1 Div 8; B2 := X2 Div 8;
   For Y := Y1 To Y2 Do
-    For BX := B1 To X2 Div 8 Do
+    For BX := B1 To B2 Do
     Begin
       A := SplBuf + Y * 640 + BX * 8;
       B0 := 0; Bb1 := 0; Bb2 := 0; Bb3 := 0;
       For K := 0 To 7 Do
       Begin
-        C := Mem[0:A + K];
+        C := Mem[0:A + K] Xor 6;
         If C <> 0 Then
         Begin
           Bit := $80 Shr K;
@@ -18716,13 +18719,25 @@ Begin
           If (C And 8) <> 0 Then Bb3 := Bb3 Or Bit;
         End;
       End;
-      A := Pl + Y * 80 + BX;
+      A := Nw + Y * 80 + BX;
       Mem[0:A] := B0; Mem[0:A + 38400] := Bb1; Mem[0:A + 76800] := Bb2; Mem[0:A + 115200] := Bb3;
     End;
   For P := 0 To 3 Do
   Begin
     Port[$3C4] := 2; Port[$3C5] := 1 Shl P;
-    For Y := Y1 To Y2 Do MoveMem(Pl + P * 38400 + Y * 80 + B1, $A0000 + Y * 80 + B1, N);
+    For Y := Y1 To Y2 Do
+    Begin
+      O := P * 38400 + Y * 80;
+      For BX := B1 To B2 Do
+      Begin
+        C := Mem[0:Nw + O + BX];
+        If C <> Mem[0:Pl + O + BX] Then
+        Begin
+          Mem[0:Pl + O + BX] := C;
+          Mem[0:$A0000 + Y * 80 + BX] := C;
+        End;
+      End;
+    End;
   End;
   Port[$3C4] := 2; Port[$3C5] := $0F;
 End;
@@ -18857,9 +18872,11 @@ Procedure SplStart;
 Var I : LongInt;
 Begin
   If SplOn Or (VmFontBuf = 0) Or Not SUsed[0] Then Exit;
-  { image d'un octet par point, puis ses quatre plans (SFlush) }
-  SplBuf := PAlloc(307200 + 153600);
+  { image d'un octet par point, puis le contenu de la carte et les plans
+    calcules (SFlush) }
+  SplBuf := PAlloc(307200 + 2 * 153600);
   If SplBuf = 0 Then Exit;
+  For I := 0 To 153600 Div 4 - 1 Do MemL[0:SplBuf + 307200 + I * 4] := 0;
   { etat du VGA en mode texte, pour VIOCALLS.DLL (KrnVideo 6) : il est
     charge pendant que la carte est en mode graphique }
   SplSnap := KAlloc(5120);
@@ -18896,7 +18913,7 @@ Begin
   BiosInt($10);
   For I := 0 To 15 Do
   Begin
-    Port[$3C8] := SplDac(I);
+    Port[$3C8] := SplDac(I Xor 6);
     Port[$3C9] := SplPal[I * 3] Shr 2; Port[$3C9] := SplPal[I * 3 + 1] Shr 2; Port[$3C9] := SplPal[I * 3 + 2] Shr 2;
   End;
   SplX := (640 - SplW) Div 2; SplY := (480 - SplH) Div 2;
