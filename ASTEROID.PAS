@@ -18,7 +18,8 @@ Program ASTEROID;
   image en memoire (GpiDrawBits, seules les parties qui bougent sont
   recopiees), espace etoile avec une planete, asteroides en roches
   crateres, vaisseau en relief, tirs lumineux, explosions, panneau du
-  pointage, pause, barre d'etat et apparence d'OS/2.
+  pointage, pause, bruitages (tir, explosions ; menu Options, Son),
+  barre d'etat et apparence d'OS/2.
 
   Regles du prototype : le vaisseau reste au centre et tourne ; les
   asteroides arrivent des bords en ligne droite ; un tir detruit un
@@ -30,7 +31,8 @@ Program ASTEROID;
   Clavier : fleches gauche et droite (tourner), Espace (tirer ; maintenue :
   tir continu), P (pause), F2 (nouvelle partie), F1 (regles).
   Souris : le vaisseau vise le pointeur, clic : tirer.
-  Parametres : /SEED:n ; /AUTO (le vaisseau joue seul : demonstration). }
+  Parametres : /SEED:n ; /AUTO (le vaisseau joue seul : demonstration) ;
+  /NOSOUND (sans bruitages). }
 
 Const
   WM_SIZE = $0007; WM_COMMAND = $0020; WM_PAINT = $0023; WM_TIMER = $0024; WM_CLOSE = $0029; WM_QUIT = $002A;
@@ -49,7 +51,9 @@ Const
   CLR_DARKCYAN = 13; CLR_BROWN = 14; CLR_PALEGRAY = 15;
   VK_UP = $16; VK_PAUSE = $0D;
   CM_NEW = 101; CM_PAUSE = 102; CM_QUIT = 104;
+  CM_SOUND = 201;
   CM_RULES = 301; CM_ABOUT = 302;
+  SndRate = 11025;
   BW = 456; BH = 400; OX = 8; OY = 8;
   PnX = 472; PW = 146;
   CWant = 624; CHWant = 436;
@@ -96,6 +100,10 @@ Var
   Font : Array[0..4095] Of Byte;
   FontH : LongInt;
   Qmsg : Array[0..7] Of LongInt;
+  { bruitages }
+  SndBuf : Array[0..29999] Of Byte;
+  SndOfs, SndLen, SndPri : Array[0..15] Of LongInt;
+  NSndBuf, SndPrio, SndCur, SndEnd, SoundOn : LongInt;
 
 Function WinInitialize(Fl : LongInt) : LongInt; External 'PMWIN';
 Function WinCreateMsgQueue(Hab, N : LongInt) : LongInt; External 'PMWIN';
@@ -216,6 +224,87 @@ End;
 
 
 Function GpiDrawBits(Hps, PBits, Pbmi, N, P, Rop, Fl : LongInt) : LongInt; External 'PMGPI';
+
+{ ==================================================================== }
+{ Bruitages (fabriques au demarrage, 8 bits, 11025 Hz, joues par MDM)   }
+{ ==================================================================== }
+
+Function MdmPlay(PData, Bytes, Rate, Bits, Ch : LongInt) : LongInt; External 'MDM' Name 'MDMPLAY';
+
+{ son N : onde carree de F1 vers F2 (Hz), duree Ms, volume Vol (0..100) }
+Procedure MakeTone(N, F1, F2, Ms, Vol : LongInt);
+Var K, Len, F, Ph, V, Env : LongInt;
+Begin
+  Len := SndRate * Ms Div 1000;
+  If NSndBuf + Len > SizeOf(SndBuf) Then Exit;
+  SndOfs[N] := NSndBuf; SndLen[N] := Len; SndPri[N] := SndPrio;
+  Ph := 0;
+  For K := 0 To Len - 1 Do
+  Begin
+    F := F1 + (F2 - F1) * K Div Len;
+    Ph := (Ph + F * 65536 Div SndRate) And $FFFF;
+    If K < 40 Then Env := K * 255 Div 40 Else Env := 255 * (Len - K) Div (Len - 40 + 1);
+    If Ph < 32768 Then V := Vol Else V := -Vol;
+    If (Ph < 2048) Or ((Ph >= 32768) And (Ph < 34816)) Then V := V Div 2;
+    SndBuf[NSndBuf + K] := 128 + V * Env Div 255;
+  End;
+  NSndBuf := NSndBuf + Len;
+End;
+
+{ son N : bruit (explosion, choc) ; Hold : echantillons tenus (grave si grand) }
+Procedure MakeNoise(N, Ms, Vol, Hold : LongInt);
+Var K, Len, V, Env, R, H : LongInt;
+Begin
+  Len := SndRate * Ms Div 1000;
+  If NSndBuf + Len > SizeOf(SndBuf) Then Exit;
+  SndOfs[N] := NSndBuf; SndLen[N] := Len; SndPri[N] := SndPrio;
+  R := 12345; V := 0; H := 0;
+  For K := 0 To Len - 1 Do
+  Begin
+    If H <= 0 Then
+    Begin
+      R := (R * 1103515245 + 12345) And $7FFFFFFF;
+      V := ((R Shr 16) And 255) - 128;
+      H := Hold + K * Hold Div Len;
+    End;
+    Dec(H);
+    If K < 30 Then Env := K * 255 Div 30 Else Env := 255 * (Len - K) Div (Len - 30 + 1);
+    Env := Env * Env Div 255;
+    SndBuf[NSndBuf + K] := 128 + V * Vol Div 128 * Env Div 255;
+  End;
+  NSndBuf := NSndBuf + Len;
+End;
+
+{ heure en millisecondes (le son en cours se termine a SndEnd) }
+Function SndNow : LongInt;
+Var T : Array[0..15] Of Byte;
+Begin
+  Dummy := DosGetDateTime(LongInt(@T));
+  SndNow := ((T[0] * 60 + T[1]) * 60 + T[2]) * 1000 + T[3] * 10;
+End;
+
+{ un nouveau son coupe celui qui joue : un son moins important (Pri)
+  n'interrompt pas un son plus important qui n'est pas termine }
+Procedure PlaySnd(N : LongInt);
+Var T : LongInt;
+Begin
+  If (SoundOn = 0) Or (SndLen[N] = 0) Then Exit;
+  T := SndNow;
+  If (SndPri[N] < SndCur) And (T < SndEnd) And (T >= SndEnd - 60000) Then Exit;
+  SndCur := SndPri[N];
+  SndEnd := T + SndLen[N] * 1000 Div SndRate;
+  Dummy := MdmPlay(LongInt(@SndBuf[SndOfs[N]]), SndLen[N], SndRate, 8, 1);
+End;
+
+Procedure MakeSounds;
+Begin
+  NSndBuf := 0;
+  SndPrio := 0; MakeTone(0, 1800, 700, 80, 40);          { tir }
+  SndPrio := 2; MakeNoise(1, 260, 110, 4);                { asteroide detruit }
+  SndPrio := 5; MakeNoise(2, 900, 120, 10);               { vaisseau touche }
+  SndPrio := 4; MakeTone(3, 330, 990, 400, 50);           { nouvelle vague }
+  SndPrio := 0;
+End;
 
 Procedure WrL(A, V : LongInt);
 Begin
@@ -936,6 +1025,7 @@ Begin
   TVX[K] := 9 * SinT[ShipA] * 16 Div 1024; TVY[K] := -9 * CosT[ShipA] * 16 Div 1024;
   TLife[K] := 60;
   FireCool := 5;
+  PlaySnd(0);
 End;
 
 Procedure GameOver;
@@ -951,6 +1041,7 @@ End;
 Procedure ShipHit;
 Begin
   Burst(SCX, SCY, 40);
+  PlaySnd(2);
   Dec(Lives);
   ClearSky;
   If Lives <= 0 Then
@@ -1053,11 +1144,13 @@ Begin
           Begin
             RAlive[K] := 0; TLife[J] := 0;
             Burst(RX[K] Div 16, RY[K] Div 16, 8 + RR[K] Div 2);
+            PlaySnd(1);
             Score := Score + 10;
             Inc(Killed);
             If Killed Mod 15 = 0 Then
             Begin
               Inc(Wave);
+              PlaySnd(3);
               Show('Vague ' + IStr(Wave), 'Les ast' + Chr(130) + 'ro' + Chr(139) + 'des acc' + Chr(130) +
                    'l' + Chr(138) + 'rent !', C_YELLOW);
               Wait := 50;
@@ -1117,10 +1210,24 @@ Begin
   End;
 End;
 
+Procedure SetMark(Id : LongInt; On : Boolean);
+Var M : LongInt;
+Begin
+  M := WinWindowFromID(Frame, $8005);
+  If M = 0 Then Exit;
+  If On Then Dummy := WinSendMsg(M, MM_SETITEMATTR, Id Or $10000, MIA_CHECKED Or (MIA_CHECKED Shl 16))
+  Else Dummy := WinSendMsg(M, MM_SETITEMATTR, Id Or $10000, MIA_CHECKED);
+End;
+
 Procedure Command(Id : LongInt);
 Begin
   Case Id Of
     CM_NEW : NewGame;
+    CM_SOUND :
+      Begin
+        SoundOn := 1 - SoundOn;
+        SetMark(CM_SOUND, SoundOn <> 0);
+      End;
     CM_PAUSE : TogglePause;
     CM_QUIT : Dummy := WinPostMsg(Client, WM_CLOSE, 0, 0);
     CM_RULES :
@@ -1323,7 +1430,7 @@ End;
 
 
 Var
-  Fl, H0, H1, H2, Sw, Sh, Fw, Fh, M, K, E, X, Y : LongInt;
+  Fl, H0, H1, H2, H3, Sw, Sh, Fw, Fh, M, K, E, X, Y : LongInt;
   Dt : Array[0..15] Of Byte;
   Rc : Array[0..3] Of LongInt;
   S : String;
@@ -1334,13 +1441,16 @@ BEGIN
   Seed := Dt[0] * 3600 + Dt[1] * 60 + Dt[2] + Dt[3] * 7919;
   Msg := ''; AutoAll := 0; Banner := ''; Banner2 := ''; NSpr := 0; NDirty := 0; Best := 0; Tick := 0;
   MouseAim := 0; Client := 0; Lives := 3; Wave := 1; State := S_TITLE;
+  SoundOn := 1; SndCur := 0; SndEnd := 0;
   For K := 1 To ParamCount Do
   Begin
     S := ParamStr(K);
     If (Length(S) > 6) And ((Copy(S, 1, 6) = '/SEED:') Or (Copy(S, 1, 6) = '/seed:')) Then
       Val(Copy(S, 7, 20), Seed, E);
     If (S = '/AUTO') Or (S = '/auto') Then AutoAll := 1;
+    If (S = '/NOSOUND') Or (S = '/nosound') Then SoundOn := 0;
   End;
+  MakeSounds;
   Hab := WinInitialize(0);
   Hmq := WinCreateMsgQueue(Hab, 64);
   LoadFont;
@@ -1362,12 +1472,17 @@ BEGIN
   MItem(MIS_SEPARATOR, 0, 0, '');
   MItem(MIS_TEXT, 0, CM_QUIT, '~Quitter');
   MenuClose(H1, 4);
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 200, '~Options');
+  H3 := MenuOpen;
+  If SoundOn <> 0 Then MItem(MIS_TEXT, MIA_CHECKED, CM_SOUND, '~Son')
+  Else MItem(MIS_TEXT, 0, CM_SOUND, '~Son');
+  MenuClose(H3, 1);
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 300, 'A~ide');
   H2 := MenuOpen;
   MItem(MIS_TEXT, 0, CM_RULES, '~R' + Chr(138) + 'gles du jeu' + Chr(9) + 'F1');
   MItem(MIS_TEXT, 0, CM_ABOUT, '~A propos d''Ast' + Chr(130) + 'ro' + Chr(139) + 'de');
   MenuClose(H2, 2);
-  MenuClose(H0, 2);
+  MenuClose(H0, 3);
   M := WinCreateMenu(Frame, LongInt(@MenuT));
   Rc[0] := 0; Rc[1] := 0; Rc[2] := CWant; Rc[3] := CHWant;
   Dummy := WinCalcFrameRect(Frame, LongInt(@Rc), 0);

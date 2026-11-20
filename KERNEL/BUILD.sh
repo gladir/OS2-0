@@ -22,7 +22,7 @@
 #     (Badugi, poker coreen), TTT.PAS (Tic-Tac-Toe), BASEBALL.PAS (Baseball),
 #     EXCAVAT.PAS (Excavateur), PINBALL.PAS (Pinball : tables et sons dans le
 #     programme), BARBU.PAS (Barbu), BREAKOUT.PAS (Casse-Brique),
-#     BATAILLE.PAS (Bataille), et
+#     BATAILLE.PAS (Bataille), INVADERS.PAS (Invasion de l'espace), et
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), NOTATOR.PAS
 #     (Notator for OS2-Zero, sequenceur et editeur de partition porte de
 #     NOTATOR.PAS du depot OFFICE-0, dossier Multimedia ; ses exemples de
