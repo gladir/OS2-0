@@ -27,7 +27,8 @@ REM DIGAUDIO.PAS, Audio numerique, et NOTATOR.PAS, Notator for OS2-Zero (porte
 REM d'OFFICE-0, exemples .SON et .MID de IMAGE\NOTATOR), du dossier Multimedia, TASKMGR.PAS,
 REM Gestionnaire des taches, du dossier Systeme OS/2, BROWSER.PAS,
 REM Navigateur Web, du bureau et du dossier Systeme OS/2, PASDEV.PAS,
-REM Pascal Developer, du dossier Developer Kit, CALC.PAS, Calculatrice, et
+REM Pascal Developer, et GETSRC.PAS, Telecharger le code source d'OS2-Zero (GitHub), du dossier
+REM Developer Kit, CALC.PAS, Calculatrice, et
 REM EXPLORER.PAS, Explorateur OS2-0, et OUTLINK.PAS, Outlink (client de messagerie
 REM porte d'OFFICE-0 : IMAP, POP3, SMTP par TCPIP32.DLL et TLS32.DLL), du dossier Productivite)
 REM WORDIUM.PAS, WorDium (traitement de texte porte de WORD.PAS d'OFFICE-0 : DOCX, DOC, PDF,

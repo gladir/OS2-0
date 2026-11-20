@@ -20,7 +20,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
               INVADERS.EXE, FREECELL.EXE, MISSILE.EXE, L25.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
-              NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
+              NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE, GETSRC.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
@@ -111,6 +111,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC FREECELL.PAS                        -> FREECELL.EXE (FreeCell)
   OS2PC MISSILE.PAS                         -> MISSILE.EXE (Commandement des missiles)
   OS2PC L25.PAS                             -> L25.EXE (L25)
+  OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -1360,6 +1361,24 @@ Il faut le composant Reseau TCP/IP (TCPIP32.DLL, TLS32.DLL).
     et TLS32.DLL (TLS 1.3 et 1.2) ; une connexion chiffree a la fois.
 Limites : l'envoi des pieces jointes n'est pas fait ; le certificat du
 serveur n'est pas verifie (voir TLS32.DLL) ; 100 messages par dossier.
+
+Telecharger le code source d'OS2-Zero (GETSRC.EXE, dossier Developer Kit)
+-------------------------------------------------------------------------
+Copie le code source actuel d'OS/2-0 depuis GitHub (gladir/OS2-0) dans
+C:\SOURCE\OS2-0\, sans les donnees de Git (source GETSRC.PAS).
+  - Telecharger : liste des fichiers par l'API de GitHub, puis chaque
+    fichier de raw.githubusercontent.com en https:// (TLS32.DLL), sur
+    une seule connexion ; barre de progression avec pourcentage, fichier
+    en cours, vitesse et temps restant ;
+  - Mettre a jour : seulement les fichiers nouveaux ou modifies (liste
+    C:\SOURCE\OS2-0.LST : empreinte SHA-1 de Git et taille) ; les
+    fichiers retires du depot sont effaces ;
+  - Annuler : arrete le telechargement ; a la fin, l'Explorateur OS2-0
+    s'ouvre sur le dossier ;
+  - case : avec les images du CD-ROM (IMAGE\*.ISO, environ 60 Mo).
+L'API de GitHub permet 60 demandes par heure sans jeton : SET
+GITHUB_TOKEN=... pour davantage. Proxy : SET HTTP_PROXY=hote:port.
+Il faut la carte reseau (DHCP) et le composant reseau TCP/IP.
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------

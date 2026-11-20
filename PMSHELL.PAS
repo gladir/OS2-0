@@ -160,7 +160,7 @@ Const
   IC_WORDIUM = 52; OB_WORDDOC = 34; IC_EXCELSIOR = 53; OB_XLSDOC = 35;
   IC_ASTEROID = 54; IC_BADUGI = 55; IC_TTT = 56; IC_BASEBALL = 57; IC_EXCAVAT = 58; IC_PINBALL = 59;
   IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62; IC_INVADERS = 63;
-  IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66;
+  IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -762,6 +762,8 @@ Var Rc : Array[0..3] Of LongInt;
 Begin
   If (K < 0) Or (It(K)^.Use = 0) Then Exit;
   CellRect(K, Rc[0], Rc[1], Rc[2], Rc[3]);
+  { la troisieme ligne d'un titre long depasse la cellule vers le bas }
+  Rc[1] := Rc[1] - 16;
   Dummy := WinInvalidateRect(Vw(It(K)^.View)^.Client, LongInt(@Rc), 1);
 End;
 
@@ -1282,6 +1284,10 @@ Begin
         { Developer Kit : l'EDI Pascal Developer (compilateur OS2PC.EXE) }
         If PasDevPath <> '' Then
           Dummy := NewItem(V, IC_PASDEV, OB_GAME, 'Pascal Developer', PasDevPath);
+        { copie du code source d'OS/2-0 depuis GitHub }
+        If FileExists('C:\GETSRC.EXE') Then
+          Dummy := NewItem(V, IC_GETSRC, OB_GAME, 'T' + Chr(130) + 'l' + Chr(130) + 'charger le code source d''OS2-Zero',
+                           'C:\GETSRC.EXE');
       End;
     VK_SETUP :
       Begin
@@ -2181,6 +2187,16 @@ Begin
         GLn(Hps, X + 21, Y + 19, X + 24, Y + 23, CLR_GREEN);
         FBox(Hps, X + 10, Y + 3, X + 21, Y + 7, CLR_PALEGRAY, CLR_BLACK);
       End;
+    IC_GETSRC :
+      Begin
+        { dossier jaune, fleche verte de telechargement et signes de code }
+        FBox(Hps, X + 2, Y + 3, X + 29, Y + 20, CLR_YELLOW, CLR_BROWN);
+        GBox(Hps, X + 2, Y + 20, X + 12, Y + 23, CLR_BROWN, DRO_FILL);
+        GText(Hps, X + 4, Y + 5, '</>', CLR_DARKBLUE, CLR_YELLOW);
+        GBox(Hps, X + 19, Y + 17, X + 24, Y + 30, CLR_DARKGREEN, DRO_FILL);
+        For K := 0 To 5 Do GLn(Hps, X + 15 + K, Y + 17 - K, X + 28 - K, Y + 17 - K, CLR_DARKGREEN);
+        GLn(Hps, X + 20, Y + 18, X + 20, Y + 29, CLR_GREEN);
+      End;
     IC_PASDEV :
       Begin
         { feuille de source Pascal (lignes colorees) et plume }
@@ -2235,10 +2251,10 @@ End;
 { etiquette : premiere ligne de 13 caracteres au plus (la cellule en
   contient 14 : un espace reste entre deux etiquettes voisines, sinon
   "Navigateur Web" et "Aide du bureau" se touchent), seconde de 14 }
-Procedure SplitLabel(S : String; Var L1, L2 : String);
+Procedure SplitLabel(S : String; Var L1, L2, L3 : String);
 Var K : LongInt;
 Begin
-  L2 := '';
+  L2 := ''; L3 := '';
   If Length(S) <= 13 Then
   Begin
     L1 := S;
@@ -2254,17 +2270,28 @@ Begin
   Begin
     L1 := Copy(S, 1, K - 1); L2 := Copy(S, K + 1, 255);
   End;
-  If Length(L2) > 14 Then L2 := Copy(L2, 1, 12) + '..';
+  { titre long (Telecharger le code source d'OS2-Zero) : une troisieme ligne }
+  If Length(L2) > 14 Then
+  Begin
+    K := 15;
+    While (K > 1) And (L2[K] <> ' ') Do Dec(K);
+    If K > 1 Then
+    Begin
+      L3 := Copy(L2, K + 1, 255); L2 := Copy(L2, 1, K - 1);
+      If Length(L3) > 14 Then L3 := Copy(L3, 1, 12) + '..';
+    End
+    Else L2 := Copy(L2, 1, 12) + '..';
+  End;
 End;
 
 Procedure DrawItem(Hps, K, Fg, Bg : LongInt);
-Var X1, Y1, X2, Y2, V : LongInt; L1, L2 : String; Sel : Boolean;
+Var X1, Y1, X2, Y2, V : LongInt; L1, L2, L3 : String; Sel : Boolean;
 Begin
   V := It(K)^.View;
   CellRect(K, X1, Y1, X2, Y2);
   Sel := Vw(V)^.Sel = K;
   DrawIcon(Hps, It(K)^.Icon, X1 + (CW - 32) Div 2, Y2 - 36);
-  SplitLabel(It(K)^.Name, L1, L2);
+  SplitLabel(It(K)^.Name, L1, L2, L3);
   { raccourci : titre en couleur (bleu, jaune sur le bureau) }
   If It(K)^.Shadow <> 0 Then
   Begin
@@ -2276,6 +2303,7 @@ Begin
   End;
   GText(Hps, X1 + (CW - Length(L1) * 8) Div 2, Y2 - 56, L1, Fg, Bg);
   If L2 <> '' Then GText(Hps, X1 + (CW - Length(L2) * 8) Div 2, Y2 - 72, L2, Fg, Bg);
+  If L3 <> '' Then GText(Hps, X1 + (CW - Length(L3) * 8) Div 2, Y2 - 88, L3, Fg, Bg);
 End;
 
 Procedure PaintView(V : LongInt);
@@ -2298,7 +2326,7 @@ Begin
     If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
     Begin
       CellRect(K, X1, Y1, X2, Y2);
-      If (X2 > Rc[0]) And (X1 < Rc[2]) And (Y2 > Rc[1]) And (Y1 < Rc[3]) Then DrawItem(Hps, K, Fg, Bg);
+      If (X2 > Rc[0]) And (X1 < Rc[2]) And (Y2 > Rc[1]) And (Y1 - 16 < Rc[3]) Then DrawItem(Hps, K, Fg, Bg);
     End;
   Dummy := WinEndPaint(Hps);
 End;

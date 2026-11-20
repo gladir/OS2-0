@@ -1088,7 +1088,7 @@ Begin
   Else If (U = 'TCPIP32.DLL') Or (U = 'E1000.DLL') Or (U = 'PCNET.DLL') Or (U = 'IFCONFIG.EXE') Or (U = 'PING.EXE') Or
           (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Then Wanted := OptNet <> 0
   Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or
-          (U = 'PASDEV.EXE') Or (U = 'OS2PC.EXE') Or (U = 'CALC.EXE') Or (U = 'EXPLORER.EXE') Or
+          (U = 'PASDEV.EXE') Or (U = 'OS2PC.EXE') Or (U = 'GETSRC.EXE') Or (U = 'CALC.EXE') Or (U = 'EXPLORER.EXE') Or
           (U = 'PAINT.EXE') Or (U = 'WORDIUM.EXE') Or (U = 'EXCELSIO.EXE') Then Wanted := True
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;

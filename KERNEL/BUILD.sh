@@ -32,7 +32,9 @@
 #     (Gestionnaire des taches, dossier Systeme OS/2) et BROWSER.PAS
 #     (Navigateur Web : HTML, CSS, JavaScript, codes QR, outils F12 ;
 #     bureau et dossier Systeme OS/2), PASDEV.PAS (Pascal Developer,
-#     environnement de developpement du dossier Developer Kit), CALC.PAS
+#     environnement de developpement du dossier Developer Kit), GETSRC.PAS
+#     (Telecharger le code source d'OS2-Zero depuis GitHub, dossier
+#     Developer Kit), CALC.PAS
 #     (Calculatrice portee de Pasdows 95, dossier Productivite) et
 #     EXPLORER.PAS (Explorateur OS2-0, porte de l'Explorateur Pasdows :
 #     dossier Productivite et menu contextuel du bureau) et OUTLINK.PAS
