@@ -158,7 +158,7 @@ Const
   IC_YAHTZEE = 41; IC_BATTLE = 42; IC_POWER4 = 43; IC_SOKOBAN = 44;
   IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49; IC_OUTLINK = 50; IC_PAINT = 51; OB_IMAGE = 33;
   IC_WORDIUM = 52; OB_WORDDOC = 34; IC_EXCELSIOR = 53; OB_XLSDOC = 35;
-  IC_ASTEROID = 54; IC_BADUGI = 55; IC_TTT = 56; IC_BASEBALL = 57; IC_EXCAVAT = 58;
+  IC_ASTEROID = 54; IC_BADUGI = 55; IC_TTT = 56; IC_BASEBALL = 57; IC_EXCAVAT = 58; IC_PINBALL = 59;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1244,6 +1244,7 @@ Begin
         If FileExists('C:\TTT.EXE') Then Dummy := NewItem(V, IC_TTT, OB_GAME, 'Tic-Tac-Toe', 'C:\TTT.EXE');
         If FileExists('C:\BASEBALL.EXE') Then Dummy := NewItem(V, IC_BASEBALL, OB_GAME, 'Baseball', 'C:\BASEBALL.EXE');
         If FileExists('C:\EXCAVAT.EXE') Then Dummy := NewItem(V, IC_EXCAVAT, OB_GAME, 'Excavateur', 'C:\EXCAVAT.EXE');
+        If FileExists('C:\PINBALL.EXE') Then Dummy := NewItem(V, IC_PINBALL, OB_GAME, 'Pinball', 'C:\PINBALL.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1841,6 +1842,21 @@ Begin
         GDisc(Hps, X + 16, Y + 15, 2, CLR_BROWN);
         GDisc(Hps, X + 22, Y + 23, 2, CLR_WHITE);
         GLn(Hps, X + 21, Y + 23, X + 23, Y + 23, CLR_RED);
+      End;
+    IC_PINBALL :
+      Begin
+        { table de flipper : cadre, bumpers, batteurs, balle }
+        FBox(Hps, X + 4, Y + 1, X + 27, Y + 30, CLR_DARKBLUE, CLR_BLACK);
+        GBox(Hps, X + 5, Y + 26, X + 26, Y + 29, CLR_RED, DRO_FILL);
+        GDisc(Hps, X + 11, Y + 21, 3, CLR_YELLOW);
+        GDisc(Hps, X + 20, Y + 21, 3, CLR_GREEN);
+        GDisc(Hps, X + 15, Y + 15, 3, CLR_RED);
+        GLn(Hps, X + 6, Y + 8, X + 12, Y + 5, CLR_YELLOW);
+        GLn(Hps, X + 6, Y + 9, X + 12, Y + 6, CLR_YELLOW);
+        GLn(Hps, X + 25, Y + 8, X + 19, Y + 5, CLR_YELLOW);
+        GLn(Hps, X + 25, Y + 9, X + 19, Y + 6, CLR_YELLOW);
+        GDisc(Hps, X + 17, Y + 10, 1, CLR_WHITE);
+        GLn(Hps, X + 24, Y + 2, X + 24, Y + 14, CLR_PALEGRAY);
       End;
     IC_EXCAVAT :
       Begin

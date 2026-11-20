@@ -1078,7 +1078,7 @@ Begin
           (U = 'BATTLE.EXE') Or (U = 'POWER4.EXE') Or (U = 'SOKOBAN.EXE') Or (U = 'BACCARAT.EXE') Or
           (U = 'HANOIS.EXE') Or (U = 'BABY.EXE') Or (U = '421.EXE') Or (U = 'CENTIPED.EXE') Or
           (U = 'ASTEROID.EXE') Or (U = 'BADUGI.EXE') Or (U = 'TTT.EXE') Or (U = 'BASEBALL.EXE') Or
-          (U = 'EXCAVAT.EXE') Then
+          (U = 'EXCAVAT.EXE') Or (U = 'PINBALL.EXE') Then
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or
