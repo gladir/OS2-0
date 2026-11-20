@@ -18,7 +18,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               SOKOBAN.EXE, BACCARAT.EXE, HANOIS.EXE, BABY.EXE, 421.EXE,
               CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
-              INVADERS.EXE,
+              INVADERS.EXE, FREECELL.EXE, MISSILE.EXE, L25.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
@@ -108,6 +108,9 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC BREAKOUT.PAS                        -> BREAKOUT.EXE (Casse-Brique)
   OS2PC BATAILLE.PAS                        -> BATAILLE.EXE (Bataille)
   OS2PC INVADERS.PAS                        -> INVADERS.EXE (Invasion de l'espace)
+  OS2PC FREECELL.PAS                        -> FREECELL.EXE (FreeCell)
+  OS2PC MISSILE.PAS                         -> MISSILE.EXE (Commandement des missiles)
+  OS2PC L25.PAS                             -> L25.EXE (L25)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -972,11 +975,26 @@ traditionnels, composant Jeux de l'installation) :
   quatre abris, trois canons, un canon de plus par tableau. Fleches (ou
   4 et 6) ou souris, Espace ou clic pour tirer, P pause ; bruitages.
   Porte du prototype INVADERS.PAS de 7iles. /AUTO, /LEVEL:n, /NOSOUND.
+  FreeCell (FREECELL.EXE) : solitaire ; 52 cartes visibles en huit
+  colonnes, quatre cellules libres, quatre fondations de l'as au roi.
+  Cliquer une carte (ou une suite) puis sa destination ; double clic :
+  fondation ou cellule ; Ctrl+Z annuler ; donnes numerotees comme celles
+  de Windows. Porte du prototype FREECELL.PAS de 7iles. /DEAL:n, /AUTO.
+  Commandement des missiles (MISSILE.EXE) : des missiles tombent sur six
+  villes ; viser et cliquer : l'antimissile explose au point vise et sa
+  boule de feu detruit les missiles (reactions en chaine) ; 30
+  antimissiles par niveau ; bruitages. Porte du prototype MISSILE.PAS
+  de 7iles. /AUTO, /LEVEL:n, /NOSOUND.
+  L25 (L25.EXE) : le cavalier doit parcourir les 25 cases d'un
+  echiquier de 5 x 5 sans repasser par une case ; clic ou fleches et
+  Entree, annulation, solution montree coup par coup. Porte du prototype
+  L25.PAS de 7iles. /AUTO.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
 Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,
 Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique,
-Bataille, Invasion de l'espace) : donne reproductible.
+Bataille, Invasion de l'espace, FreeCell, Commandement des missiles) :
+donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------
