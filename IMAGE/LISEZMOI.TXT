@@ -17,6 +17,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               BILLARD.EXE, CHECKERS.EXE, YATHZEE.EXE, BATTLE.EXE, POWER4.EXE,
               SOKOBAN.EXE, BACCARAT.EXE, HANOIS.EXE, BABY.EXE, 421.EXE,
               CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
+              EXCAVAT.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
@@ -100,6 +101,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC BADUGI.PAS                          -> BADUGI.EXE (Badugi)
   OS2PC TTT.PAS                             -> TTT.EXE (Tic-Tac-Toe)
   OS2PC BASEBALL.PAS                        -> BASEBALL.EXE (Baseball)
+  OS2PC EXCAVAT.PAS                         -> EXCAVAT.EXE (Excavateur)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -925,10 +927,17 @@ traditionnels, composant Jeux de l'installation) :
   vu d'en haut ; au baton, Espace ou clic au passage de la balle ; au
   monticule, + et - la force du lancer. Porte du prototype BASEBALL.PAS
   de 7iles (simulation en mode texte) en graphique. /AUTO.
+  Excavateur (EXCAVAT.EXE) : creuser des galeries et ramasser les
+  pierres precieuses ; les sacs d'or tombent quand rien ne les soutient
+  (de deux etages : l'or vaut 500 points) et ecrasent ce qui est dessous ;
+  taupes et foreuses sortent du repaire ; Espace tire ; la lanterne les
+  effraie. Fleches (une case par appui), P pause, trois vitesses.
+  Ecrit a partir des regles d'un clone en Turbo Pascal (DigMan In the
+  Rock) ; dessins et niveaux propres a OS/2-0. /AUTO, /LEVEL:n.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
 Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,
-Tic-Tac-Toe, Baseball) : donne reproductible.
+Tic-Tac-Toe, Baseball, Excavateur) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------
