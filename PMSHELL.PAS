@@ -160,6 +160,7 @@ Const
   IC_WORDIUM = 52; OB_WORDDOC = 34; IC_EXCELSIOR = 53; OB_XLSDOC = 35;
   IC_ASTEROID = 54; IC_BADUGI = 55; IC_TTT = 56; IC_BASEBALL = 57; IC_EXCAVAT = 58; IC_PINBALL = 59;
   IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62; IC_INVADERS = 63;
+  IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1252,6 +1253,10 @@ Begin
         If FileExists('C:\BATAILLE.EXE') Then Dummy := NewItem(V, IC_BATAILLE, OB_GAME, 'Bataille', 'C:\BATAILLE.EXE');
         If FileExists('C:\INVADERS.EXE') Then
           Dummy := NewItem(V, IC_INVADERS, OB_GAME, 'Invasion de l''espace', 'C:\INVADERS.EXE');
+        If FileExists('C:\FREECELL.EXE') Then Dummy := NewItem(V, IC_FREECELL, OB_GAME, 'FreeCell', 'C:\FREECELL.EXE');
+        If FileExists('C:\MISSILE.EXE') Then
+          Dummy := NewItem(V, IC_MISSILE, OB_GAME, 'Commandement des missiles', 'C:\MISSILE.EXE');
+        If FileExists('C:\L25.EXE') Then Dummy := NewItem(V, IC_L25, OB_GAME, 'L25', 'C:\L25.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1911,6 +1916,52 @@ Begin
         GLn(Hps, X + 26, Y + 12, X + 22, Y + 8, CLR_RED);
         GLn(Hps, X + 19, Y + 12, X + 22, Y + 9, CLR_RED);
         GLn(Hps, X + 25, Y + 12, X + 22, Y + 9, CLR_RED);
+      End;
+    IC_FREECELL :
+      Begin
+        { tapis vert, cellule libre vide en haut, deux cartes en eventail }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKGREEN, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 23, X + 11, Y + 29, CLR_GREEN, DRO_OUTLINE);
+        GBox(Hps, X + 20, Y + 23, X + 28, Y + 29, CLR_GREEN, DRO_OUTLINE);
+        FBox(Hps, X + 5, Y + 3, X + 17, Y + 20, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 9, Y + 15, 2, CLR_RED);
+        GDisc(Hps, X + 12, Y + 15, 2, CLR_RED);
+        GLn(Hps, X + 8, Y + 14, X + 10, Y + 10, CLR_RED);
+        GLn(Hps, X + 13, Y + 14, X + 11, Y + 10, CLR_RED);
+        FBox(Hps, X + 14, Y + 2, X + 26, Y + 19, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 20, Y + 11, 3, CLR_BLACK);
+        GLn(Hps, X + 20, Y + 5, X + 20, Y + 9, CLR_BLACK);
+      End;
+    IC_MISSILE :
+      Begin
+        { ciel de nuit, trainee rouge, boule de feu, villes }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKBLUE, CLR_BLACK);
+        GLn(Hps, X + 4, Y + 29, X + 14, Y + 14, CLR_RED);
+        GLn(Hps, X + 26, Y + 29, X + 22, Y + 20, CLR_RED);
+        GLn(Hps, X + 15, Y + 6, X + 20, Y + 18, CLR_CYAN);
+        GDisc(Hps, X + 20, Y + 19, 4, CLR_YELLOW);
+        GDisc(Hps, X + 20, Y + 19, 2, CLR_WHITE);
+        GBox(Hps, X + 2, Y + 2, X + 29, Y + 4, CLR_BROWN, DRO_FILL);
+        GBox(Hps, X + 3, Y + 5, X + 6, Y + 9, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 7, Y + 5, X + 9, Y + 11, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 23, Y + 5, X + 26, Y + 10, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 13, Y + 5, X + 18, Y + 7, CLR_PALEGRAY, DRO_FILL);
+      End;
+    IC_L25 :
+      Begin
+        { echiquier de 5 x 5, chemin du cavalier }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_BROWN, CLR_BLACK);
+        For K := 0 To 24 Do
+          If (K Mod 5 + K Div 5) Mod 2 = 0 Then
+            GBox(Hps, X + 3 + (K Mod 5) * 5, Y + 3 + (K Div 5) * 5, X + 7 + (K Mod 5) * 5, Y + 7 + (K Div 5) * 5,
+                 CLR_WHITE, DRO_FILL)
+          Else
+            GBox(Hps, X + 3 + (K Mod 5) * 5, Y + 3 + (K Div 5) * 5, X + 7 + (K Mod 5) * 5, Y + 7 + (K Div 5) * 5,
+                 CLR_DARKGREEN, DRO_FILL);
+        GLn(Hps, X + 5, Y + 25, X + 10, Y + 15, CLR_RED);
+        GLn(Hps, X + 10, Y + 15, X + 20, Y + 10, CLR_RED);
+        GLn(Hps, X + 20, Y + 10, X + 25, Y + 20, CLR_RED);
+        GDisc(Hps, X + 25, Y + 20, 2, CLR_BLACK);
       End;
     IC_INVADERS :
       Begin
