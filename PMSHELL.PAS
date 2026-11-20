@@ -159,6 +159,7 @@ Const
   IC_BACCARAT = 45; IC_HANOIS = 46; IC_BABY = 47; IC_421 = 48; IC_CENTIPED = 49; IC_OUTLINK = 50; IC_PAINT = 51; OB_IMAGE = 33;
   IC_WORDIUM = 52; OB_WORDDOC = 34; IC_EXCELSIOR = 53; OB_XLSDOC = 35;
   IC_ASTEROID = 54; IC_BADUGI = 55; IC_TTT = 56; IC_BASEBALL = 57; IC_EXCAVAT = 58; IC_PINBALL = 59;
+  IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -1245,6 +1246,10 @@ Begin
         If FileExists('C:\BASEBALL.EXE') Then Dummy := NewItem(V, IC_BASEBALL, OB_GAME, 'Baseball', 'C:\BASEBALL.EXE');
         If FileExists('C:\EXCAVAT.EXE') Then Dummy := NewItem(V, IC_EXCAVAT, OB_GAME, 'Excavateur', 'C:\EXCAVAT.EXE');
         If FileExists('C:\PINBALL.EXE') Then Dummy := NewItem(V, IC_PINBALL, OB_GAME, 'Pinball', 'C:\PINBALL.EXE');
+        If FileExists('C:\BARBU.EXE') Then Dummy := NewItem(V, IC_BARBU, OB_GAME, 'Barbu', 'C:\BARBU.EXE');
+        If FileExists('C:\BREAKOUT.EXE') Then
+          Dummy := NewItem(V, IC_BREAKOUT, OB_GAME, 'Casse-Brique', 'C:\BREAKOUT.EXE');
+        If FileExists('C:\BATAILLE.EXE') Then Dummy := NewItem(V, IC_BATAILLE, OB_GAME, 'Bataille', 'C:\BATAILLE.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -1857,6 +1862,53 @@ Begin
         GLn(Hps, X + 25, Y + 9, X + 19, Y + 6, CLR_YELLOW);
         GDisc(Hps, X + 17, Y + 10, 1, CLR_WHITE);
         GLn(Hps, X + 24, Y + 2, X + 24, Y + 14, CLR_PALEGRAY);
+      End;
+    IC_BARBU :
+      Begin
+        { roi de coeur (le Barbu) : carte, couronne jaune, barbe brune }
+        FBox(Hps, X + 5, Y + 1, X + 26, Y + 30, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 8, Y + 22, X + 23, Y + 25, CLR_YELLOW, DRO_FILL);
+        GLn(Hps, X + 8, Y + 26, X + 8, Y + 28, CLR_YELLOW);
+        GLn(Hps, X + 15, Y + 26, X + 15, Y + 28, CLR_YELLOW);
+        GLn(Hps, X + 23, Y + 26, X + 23, Y + 28, CLR_YELLOW);
+        GDisc(Hps, X + 15, Y + 17, 6, CLR_BLACK);
+        GDisc(Hps, X + 15, Y + 17, 5, CLR_WHITE);
+        GDisc(Hps, X + 13, Y + 18, 1, CLR_BLACK);
+        GDisc(Hps, X + 18, Y + 18, 1, CLR_BLACK);
+        GBox(Hps, X + 10, Y + 7, X + 21, Y + 14, CLR_BROWN, DRO_FILL);
+        GDisc(Hps, X + 15, Y + 6, 4, CLR_BROWN);
+        GLn(Hps, X + 13, Y + 14, X + 18, Y + 14, CLR_RED);
+        GDisc(Hps, X + 8, Y + 4, 2, CLR_RED);
+        GDisc(Hps, X + 10, Y + 4, 2, CLR_RED);
+      End;
+    IC_BREAKOUT :
+      Begin
+        { mur de briques colorees, balle, raquette }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_BLACK, CLR_DARKGRAY);
+        GBox(Hps, X + 3, Y + 25, X + 9, Y + 27, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 11, Y + 25, X + 17, Y + 27, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 19, Y + 25, X + 26, Y + 27, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 3, Y + 21, X + 9, Y + 23, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 19, Y + 21, X + 26, Y + 23, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 3, Y + 17, X + 9, Y + 19, CLR_GREEN, DRO_FILL);
+        GBox(Hps, X + 11, Y + 17, X + 17, Y + 19, CLR_GREEN, DRO_FILL);
+        GBox(Hps, X + 19, Y + 17, X + 26, Y + 19, CLR_CYAN, DRO_FILL);
+        GDisc(Hps, X + 13, Y + 11, 2, CLR_WHITE);
+        GBox(Hps, X + 8, Y + 3, X + 20, Y + 5, CLR_PALEGRAY, DRO_FILL);
+      End;
+    IC_BATAILLE :
+      Begin
+        { deux cartes face a face : as de pique et as de coeur }
+        FBox(Hps, X + 1, Y + 6, X + 16, Y + 29, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 8, Y + 19, 3, CLR_BLACK);
+        GLn(Hps, X + 8, Y + 13, X + 8, Y + 19, CLR_BLACK);
+        FBox(Hps, X + 14, Y + 1, X + 29, Y + 24, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 20, Y + 14, 3, CLR_RED);
+        GDisc(Hps, X + 24, Y + 14, 3, CLR_RED);
+        GLn(Hps, X + 18, Y + 12, X + 22, Y + 8, CLR_RED);
+        GLn(Hps, X + 26, Y + 12, X + 22, Y + 8, CLR_RED);
+        GLn(Hps, X + 19, Y + 12, X + 22, Y + 9, CLR_RED);
+        GLn(Hps, X + 25, Y + 12, X + 22, Y + 9, CLR_RED);
       End;
     IC_EXCAVAT :
       Begin

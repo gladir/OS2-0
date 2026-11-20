@@ -17,7 +17,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               BILLARD.EXE, CHECKERS.EXE, YATHZEE.EXE, BATTLE.EXE, POWER4.EXE,
               SOKOBAN.EXE, BACCARAT.EXE, HANOIS.EXE, BABY.EXE, 421.EXE,
               CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
-              EXCAVAT.EXE, PINBALL.EXE,
+              EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
               DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
@@ -103,6 +103,9 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC BASEBALL.PAS                        -> BASEBALL.EXE (Baseball)
   OS2PC EXCAVAT.PAS                         -> EXCAVAT.EXE (Excavateur)
   OS2PC PINBALL.PAS                         -> PINBALL.EXE (Pinball)
+  OS2PC BARBU.PAS                           -> BARBU.EXE (Barbu)
+  OS2PC BREAKOUT.PAS                        -> BREAKOUT.EXE (Casse-Brique)
+  OS2PC BATAILLE.PAS                        -> BATAILLE.EXE (Bataille)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
@@ -942,10 +945,28 @@ traditionnels, composant Jeux de l'installation) :
   fourni (jeu d'origine de Ansgar Scherp et Joachim Gelhaus) avec ses
   tables, sa physique et ses sons, tous dans le programme.
   /TABLE:1 ou 2, /AUTO, /NOSOUND.
+  Barbu (BARBU.EXE) : jeu de levees a quatre (vous contre Ouest, Nord
+  et Est) ; le donneur choisit le contrat : pas de levees, pas de
+  coeurs, pas de dames, pas le roi de coeur (le Barbu), pas la derniere
+  levee, ou la salade (tout a la fois) ; le moins de points gagne.
+  Partie courte (6 donnes) ou complete (24 donnes). Clic ou fleches et
+  Entree pour jouer, 1 a 6 pour le contrat. Porte du prototype
+  BARBU.PAS de 7iles. /AUTO.
+  Casse-Brique (BREAKOUT.EXE) : abattre un mur de 6 rangees de 19
+  briques (7, 4 ou 1 point) avec la balle et la raquette ; 5 balles,
+  une de plus et un nouveau mur, plus bas, a chaque mur abattu. Souris
+  ou fleches (4 et 6), Espace lance la balle, P pause. Porte du
+  prototype BREAKOUT.PAS de 7iles (mode texte) en graphique, avec
+  bruitages. /FULLBALLS, /SHOWBRICKS, /NOSOUND, /AUTO.
+  Bataille (BATAILLE.EXE) : 26 cartes chacun ; la plus forte carte
+  remporte le pli ; a egalite, bataille (trois cartes cachees et une
+  visible). Espace ou clic pour jouer, A pour le jeu automatique, trois
+  vitesses. Porte du prototype BATAILLE.PAS de 7iles. /AUTO, /BATAILLE.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
 Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,
-Tic-Tac-Toe, Baseball, Excavateur, Pinball) : donne reproductible.
+Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique,
+Bataille) : donne reproductible.
 
 Multimedia (dossier Systeme OS/2, Multimedia)
 ---------------------------------------------
