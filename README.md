@@ -173,6 +173,10 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Pascal Developer : environnement de développement intégré Pascal de Presentation Manager (dossier Developer Kit du bureau), dans l'esprit de Borland Pascal mais avec l'apparence d'OS/2 : fenêtres d'édition MDI à coloration syntaxique, compilation par OS2PC.EXE, exécution, boîte Information.</td>
 		</tr>
 		<tr>
+			<td><b>GETSRC.PAS</b></td>
+			<td>Télécharger le code source d'OS2-Zero (dossier Developer Kit du bureau) : copie le code source actuel d'OS/2-0 depuis GitHub dans C:\SOURCE\OS2-0\ (sans les données de Git), avec barre de progression ; Mettre à jour ne copie que les fichiers modifiés.</td>
+		</tr>
+		<tr>
 			<td><b>REPLACE.PAS</b></td>
 			<td>Cette commande permet de remplacer un fichier. Cette commande est un équivalent du DOS.</td>
 		</tr>
@@ -1318,6 +1322,25 @@ Le bureau a maintenant un dossier <b>Developer Kit</b> qui contient <b>Pascal De
 </table>
 
 Alt+F9 (réduire) et F10 (menu) sont des touches du système d'OS/2 : la compilation est sur F9 (le « Make » de Borland). Deux exemples sont copiés sur le CD-ROM : <b>BONJOUR.PAS</b> (fenêtre de PM) et <b>HELLO.PAS</b> (console).
+
+<h3>Télécharger le code source d'OS2-Zero (GETSRC.PAS)</h3>
+
+Le dossier <b>Developer Kit</b> contient aussi <b>Télécharger le code source d'OS2-Zero</b> (GETSRC.EXE) : une boîte de dialogue qui copie le code source actuel d'OS/2-0 depuis GitHub (dépôt <code>gladir/OS2-0</code>, branche par défaut) dans le dossier <b>C:\SOURCE\OS2-0\</b>. Seuls les fichiers du projet sont copiés : ni l'historique ni les données de Git (pas de dossier <code>.git</code>). À la fin, l'<b>Explorateur OS2-0</b> s'ouvre sur le dossier.
+
+<img width="640" height="480" alt="OS/2-0 : Télécharger le code source d'OS2-Zero, téléchargement en cours (fichier, pourcentage, vitesse, temps restant)" src="IMAGE/GETSRC.png" />
+<img width="640" height="480" alt="OS/2-0 : le code source copié, ouvert dans l'Explorateur OS2-0" src="IMAGE/GETSRC_FIN.png" />
+
+<table>
+	<tr><th>Fonction</th><th>Description</th></tr>
+	<tr><td>Télécharger</td><td>La liste des fichiers vient de l'API de GitHub (arbre complet de la branche, <code>api.github.com</code>) ; chaque fichier est ensuite téléchargé de <code>raw.githubusercontent.com</code> en <b>https://</b> par TLS32.DLL, sur une seule connexion gardée ouverte d'un fichier à l'autre (HTTP/1.1), et les dossiers sont créés au besoin. Les noms et chemins sont ceux du dépôt.</td></tr>
+	<tr><td>Mettre à jour</td><td>La liste <code>C:\SOURCE\OS2-0.LST</code> garde l'empreinte SHA-1 de Git et la taille de chaque fichier copié : seuls les fichiers nouveaux ou modifiés sont téléchargés, ceux qui ont été retirés du dépôt sont effacés. La liste est enregistrée en cours de route : après une coupure, Mettre à jour reprend où le téléchargement s'est arrêté.</td></tr>
+	<tr><td>Annuler</td><td>Interrompt le téléchargement (le fichier en cours est effacé) ; une fois terminé, le bouton devient Fermer.</td></tr>
+	<tr><td>Progression</td><td>Barre de progression avec pourcentage, nom du fichier en cours, nombre de fichiers et d'octets copiés, vitesse et temps restant ; le travail se fait dans un fil d'exécution à part, la fenêtre reste active.</td></tr>
+	<tr><td>Images du CD-ROM</td><td>Les fichiers <code>IMAGE\*.ISO</code> (une soixantaine de Mo) ne sont copiés que si la case est cochée.</td></tr>
+	<tr><td>Contrôles</td><td>Espace libre vérifié avant de commencer ; erreurs expliquées (réseau, disque, message de GitHub). L'API de GitHub permet 60 demandes par heure et par adresse sans jeton (deux par téléchargement) ; <code>SET GITHUB_TOKEN=...</code> permet d'en faire davantage. Proxy : <code>SET HTTP_PROXY=hôte:port</code>.</td></tr>
+</table>
+
+Essayé sous QEMU avec le vrai dépôt : 343 fichiers (25 Mo) copiés de raw.githubusercontent.com, puis Mettre à jour (aucun fichier à copier). La régression utilise un faux GitHub local en https:// (liste, fichiers, puis un fichier modifié, un ajouté et un retiré). Paramètres d'essai : <code>/DEST:dossier</code>, <code>/API:</code> et <code>/RAW:</code> (serveurs), <code>/AUTO</code>, <code>/UPDATE</code>, <code>/ISO</code>, <code>/NOEXPLORER</code>.
 
 <img width="800" height="600" alt="OS/2-0 : Pascal Developer, boîte Information (taille du code et des données du programme compilé)" src="IMAGE/PASDEV_INFO.png" />
 
