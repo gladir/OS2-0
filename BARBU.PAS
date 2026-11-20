@@ -754,6 +754,29 @@ Begin
   If Face Then DrawFace(Hps, X, CH - Y - CardH, C, Hilite) Else DrawBack(Hps, X, CH - Y - CardH);
 End;
 
+{ carte recouverte par la suivante (eventails) : seul le coin reste
+  visible ; dessin allege (pas de symboles ni de treillis) }
+Procedure PartAt(X, Y, C : LongInt; Face : Boolean);
+Var B, Fg : LongInt; S : String;
+Begin
+  B := CH - Y - CardH;
+  GBox(Hps, X, B, X + CardW - 1, B + CardH - 1, CLR_WHITE, DRO_FILL, 10);
+  GBox(Hps, X, B, X + CardW - 1, B + CardH - 1, CLR_BLACK, DRO_OUTLINE, 10);
+  If Face Then
+  Begin
+    If IsRed(C) Then Fg := CLR_RED Else Fg := CLR_BLACK;
+    S := RankName(Rank(C));
+    TextXY(Hps, X + 4, B + CardH - 20, S, Fg, CLR_WHITE);
+    TextXY(Hps, X + 4 + Length(S) * 8, B + CardH - 20, SuitCh(C), Fg, CLR_WHITE);
+  End
+  Else
+  Begin
+    GBox(Hps, X + 4, B + 4, X + CardW - 5, B + CardH - 5, CLR_DARKBLUE, DRO_FILL, 6);
+    GLn(Hps, X + 5, B + CardH - 9, X + 9, B + CardH - 5, CLR_BLUE);
+    GLn(Hps, X + 5, B + CardH - 17, X + 13, B + CardH - 9, CLR_BLUE);
+  End;
+End;
+
 Function MyTurn : Boolean;
 Begin
   MyTurn := (Phase = PH_PLAY) And (CurP = 0) And (AutoAll = 0) And (Thinking = 0);
@@ -870,13 +893,16 @@ Begin
   { Nord : en haut ; Ouest et Est : sur les cotes }
   N := NHand[2]; Sp := 12; If AutoAll <> 0 Then Sp := 14;
   X := MidX - ((N - 1) * Sp + CardW) Div 2;
-  For K := 0 To N - 1 Do CardAt(X + K * Sp, 18, Hand[2, K], AutoAll <> 0, False);
+  For K := 0 To N - 2 Do PartAt(X + K * Sp, 18, Hand[2, K], AutoAll <> 0);
+  If N > 0 Then CardAt(X + (N - 1) * Sp, 18, Hand[2, N - 1], AutoAll <> 0, False);
   If N > 0 Then NameTag(X + (N - 1) * Sp + CardW + 8, 18, 2) Else NameTag(MidX - TagW(2) Div 2, 18, 2);
   N := NHand[1];
-  For K := 0 To N - 1 Do CardAt(18, 30 + K * 12, Hand[1, K], AutoAll <> 0, False);
+  For K := 0 To N - 2 Do PartAt(18, 30 + K * 12, Hand[1, K], AutoAll <> 0);
+  If N > 0 Then CardAt(18, 30 + (N - 1) * 12, Hand[1, N - 1], AutoAll <> 0, False);
   NameTag(18, 276, 1);
   N := NHand[3];
-  For K := 0 To N - 1 Do CardAt(TX2 - 18 - CardW, 30 + K * 12, Hand[3, K], AutoAll <> 0, False);
+  For K := 0 To N - 2 Do PartAt(TX2 - 18 - CardW, 30 + K * 12, Hand[3, K], AutoAll <> 0);
+  If N > 0 Then CardAt(TX2 - 18 - CardW, 30 + (N - 1) * 12, Hand[3, N - 1], AutoAll <> 0, False);
   NameTag(TX2 - 18 - TagW(3), 276, 3);
   { levee en cours (ou terminee) }
   For K := 0 To NTrick - 1 Do
