@@ -8332,7 +8332,12 @@ Type
   TProcByteArr = Array[0..PROC_IDX_MAX] Of Byte;
   TProcLongArr = Array[0..PROC_IDX_MAX] Of LongInt;
   TProcIntArr  = Array[0..PROC_IDX_MAX] Of LongInt;
-  TProcStrArr  = Array[0..PROC_IDX_MAX] Of String[63];
+  { String[63] : 64 octets avec Free Pascal, mais 256 dans le code produit
+    par OS2PC (toute chaine courte y occupe 256 octets) : les tailles des
+    tables s ecrivent SizeOf(TProcStr), jamais 64 (OS2PC.EXE natif ecrivait
+    sinon au-dela des tables des importations a partir de la 17e) }
+  TProcStr     = String[63];
+  TProcStrArr  = Array[0..PROC_IDX_MAX] Of TProcStr;
 
 Var
   { Table des procedures/fonctions }
@@ -8419,13 +8424,13 @@ Var NC : LongInt; P : Pointer;
 Begin
   If N <= ExpCap Then Exit;
   NC := NewCap(ExpCap, N, 64);
-  P := ExpNames; GrowMem(P, ExpCap, NC, 64); ExpNames := P;
+  P := ExpNames; GrowMem(P, ExpCap, NC, SizeOf(TProcStr)); ExpNames := P;
   P := ExpProcs; GrowMem(P, ExpCap, NC, SizeOf(LongInt)); ExpProcs := P;
-  P := ExpProcNm; GrowMem(P, ExpCap, NC, 64); ExpProcNm := P;
+  P := ExpProcNm; GrowMem(P, ExpCap, NC, SizeOf(TProcStr)); ExpProcNm := P;
   P := ExpIndex; GrowMem(P, ExpCap, NC, 4); ExpIndex := P;
   P := ExpDataKind; GrowMem(P, ExpCap, NC, 1); ExpDataKind := P;
   P := ExpDataInt; GrowMem(P, ExpCap, NC, 4); ExpDataInt := P;
-  P := ExpDataStr; GrowMem(P, ExpCap, NC, 64); ExpDataStr := P;
+  P := ExpDataStr; GrowMem(P, ExpCap, NC, SizeOf(TProcStr)); ExpDataStr := P;
   ExpCap := NC;
 End;
 
@@ -8434,8 +8439,8 @@ Var NC : LongInt; P : Pointer;
 Begin
   If N <= DllImpCap Then Exit;
   NC := NewCap(DllImpCap, N, 64);
-  P := DllImpApi; GrowMem(P, DllImpCap, NC, 64); DllImpApi := P;
-  P := DllImpDll; GrowMem(P, DllImpCap, NC, 64); DllImpDll := P;
+  P := DllImpApi; GrowMem(P, DllImpCap, NC, SizeOf(TProcStr)); DllImpApi := P;
+  P := DllImpDll; GrowMem(P, DllImpCap, NC, SizeOf(TProcStr)); DllImpDll := P;
   DllImpCap := NC;
 End;
 
@@ -8478,8 +8483,8 @@ Begin
   P := ProcAnsiSlot; Grow(P, SizeOf(LongInt)); ProcAnsiSlot := P;
   P := ProcExcSlot; Grow(P, SizeOf(LongInt)); ProcExcSlot := P;
   P := ProcWithSlots; Grow(P, SizeOf(LongInt)); ProcWithSlots := P;
-  P := ProcExtDll; Grow(P, 64); ProcExtDll := P;
-  P := ProcExtName; Grow(P, 64); ProcExtName := P;
+  P := ProcExtDll; Grow(P, SizeOf(TProcStr)); ProcExtDll := P;
+  P := ProcExtName; Grow(P, SizeOf(TProcStr)); ProcExtName := P;
   { une fiche par procedure, allouee une fois }
   For I := ProcCap To NC - 1 Do
   Begin
@@ -47792,7 +47797,9 @@ Begin
   { ========== Ecrire le fichier PE ========== }
   PrgStep(5);
   Assign(PEBinF, FileName);
-  Rewrite(PEBinF, 1);
+  {$I-} Rewrite(PEBinF, 1); {$I+}
+  If IOResult <> 0 Then
+    FatalError('impossible de creer ' + FileName + ' (lecteur en lecture seule, fichier en cours d''utilisation ?)');
   PEOutReset;
 
   { ===== DOS MZ Header (64 octets) ===== }
@@ -48173,7 +48180,9 @@ Begin
   NumSymbols := 4; { .text, .data, .bss, _main }
 
   Assign(PEBinF, FileName);
-  Rewrite(PEBinF, 1);
+  {$I-} Rewrite(PEBinF, 1); {$I+}
+  If IOResult <> 0 Then
+    FatalError('impossible de creer ' + FileName + ' (lecteur en lecture seule ?)');
   PEOutReset;
 
   { ===== COFF File Header (20 octets) ===== }
