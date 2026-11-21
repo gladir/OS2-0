@@ -2750,6 +2750,7 @@ Type
     FInit, FMount, FOpen, FClose, FRead, FWrite, FSeek, FNewSize, FCommit : LongInt;
     FFileInfo, FPathInfo, FFileAttr, FDelete, FMkDir, FRmDir, FMove, FChDir : LongInt;
     FFindFirst, FFindNext, FFindClose, FFsInfo, FFlush, FFsCtl, FExit, FShutdown : LongInt;
+    FAttach  : LongInt;         { FS_ATTACH : unites distantes (SMB.IFS) }
   End;
 
   { volume monte par un IFS : unite D: a Z: (le hVPB est le numero
@@ -2760,6 +2761,7 @@ Type
     Ifs      : LongInt;
     Vpfsi    : Array[0..43] Of Byte;
     Vpfsd    : Array[0..63] Of Byte;
+    Remote   : Boolean;         { unite attachee (DosFSAttach), sans peripherique bloc }
   End;
 
 Const
@@ -9090,6 +9092,7 @@ Begin
   Ifss[I].FFsCtl := ModuleExport(M, 'FS_FSCTL', 0);
   Ifss[I].FExit := ModuleExport(M, 'FS_EXIT', 0);
   Ifss[I].FShutdown := ModuleExport(M, 'FS_SHUTDOWN', 0);
+  Ifss[I].FAttach := ModuleExport(M, 'FS_ATTACH', 0);
   A := ModuleExport(M, 'FS_NAME', 0);
   If A <> 0 Then Ifss[I].Name := PStr(A) Else Ifss[I].Name := Mods^[M].Name;
   If (Ifss[I].FMount = 0) Or (Ifss[I].FOpen = 0) Then
@@ -9207,6 +9210,7 @@ Begin
   If Ok Then
   Begin
     IfsVols[D].Mounted := True;
+    IfsVols[D].Remote := False;
     If Blks[B].Kind = BlkRam Then S1 := 'disque virtuel'
     Else If Blks[B].Base >= AhciTag Then S1 := 'disque SATA'
     Else S1 := 'disque IDE';
@@ -9270,8 +9274,9 @@ Begin
   PartLetter := -1;
   For D := 2 To 25 Do
     If IfsVols[D].Mounted Then
-      If (Blks[IfsVols[D].Blk].Kind = BlkAta) And (Blks[IfsVols[D].Blk].Disk = Dk) And
-         (Blks[IfsVols[D].Blk].Start = Start) Then PartLetter := D;
+      If (IfsVols[D].Blk >= 0) And Not IfsVols[D].Remote Then
+        If (Blks[IfsVols[D].Blk].Kind = BlkAta) And (Blks[IfsVols[D].Blk].Disk = Dk) And
+           (Blks[IfsVols[D].Blk].Start = Start) Then PartLetter := D;
 End;
 
 { Peripherique bloc de la partition (cree au besoin) }
@@ -9327,6 +9332,106 @@ Begin
     End;
 End;
 
+{ ---- unites distantes (DosFSAttach) : un FSD distant (SMB.IFS) les
+  attache par FS_ATTACH ; le pilote est charge a la demande (C:\nom.IFS) ---- }
+
+{ pilote IFS de nom Fsd (FS_NAME), charge au besoin ; -1 s'il n'y en a pas }
+Function IfsByName(Fsd : String) : LongInt;
+Var I : LongInt;
+Begin
+  IfsByName := -1;
+  Fsd := UpStr(Fsd);
+  For I := 0 To NIfs - 1 Do
+    If UpStr(Ifss[I].Name) = Fsd Then
+    Begin
+      IfsByName := I;
+      Exit;
+    End;
+  If (Fsd = '') Or (Length(Fsd) > 8) Then Exit;
+  LoadIfs('C:\' + Fsd + '.IFS');
+  For I := 0 To NIfs - 1 Do
+    If UpStr(Ifss[I].Name) = Fsd Then IfsByName := I;
+End;
+
+{ attacher l'unite D (3 = D: ... 25 = Z:) au FSD : P = (nom du FSD ASCIIZ,
+  donnees, taille des donnees) ; 0 ou code d'erreur d'OS/2 }
+Function NetAttach(D, P : LongInt) : LongInt;
+Var I, R, A, K, Len : LongInt; Dev : Array[0..3] Of Byte; S : String;
+Begin
+  NetAttach := 87;                              { ERROR_INVALID_PARAMETER }
+  If (P = 0) Or (D < 3) Or (D > 25) Then Exit;
+  NetAttach := 85;                              { ERROR_ALREADY_ASSIGNED }
+  If IfsVols[D].Mounted Or (D = CdLetter) Then Exit;
+  If (D = 2) Or (FdOk And (D = 0)) Then Exit;
+  I := IfsByName(PStr(MemL[0:P]));
+  NetAttach := 124;                             { ERROR_INVALID_LEVEL : pas de FSD }
+  If (I < 0) Or (Ifss[I].FAttach = 0) Then Exit;
+  Dev[0] := 65 + D; Dev[1] := Ord(':'); Dev[2] := 0;
+  FillMem(LongInt(@IfsVols[D].Vpfsd), 64, 0);
+  FillMem(LongInt(@IfsVols[D].Vpfsi), 44, 0);
+  Len := MemL[0:P + 8];
+  IfsArgs4(0, LongInt(@Dev), LongInt(@IfsVols[D].Vpfsd), 0);
+  IfsArg[4] := MemL[0:P + 4]; IfsArg[5] := LongInt(@Len);
+  R := IfsCall(Ifss[I].FAttach, 6);
+  NetAttach := R;
+  If R <> 0 Then Exit;
+  IfsVols[D].Mounted := True;
+  IfsVols[D].Remote := True;
+  IfsVols[D].Blk := -1;
+  IfsVols[D].Ifs := I;
+  { nom du volume : le nom du partage (\\serveur\partage) }
+  S := PStr(MemL[0:P + 4]);
+  K := Length(S);
+  While (K > 0) And (S[K] <> '\') Do Dec(K);
+  S := UpStr(Copy(S, K + 1, 11));
+  A := LongInt(@IfsVols[D].Vpfsi);
+  PutPStr(A + 24, S, 12);
+  KLog('Unite ' + Chr(65 + D) + ': ' + PStr(MemL[0:P + 4]) + ' (' + Ifss[I].Name + ')');
+End;
+
+Function NetDetach(D : LongInt) : LongInt;
+Var Dev : Array[0..3] Of Byte; Len : LongInt;
+Begin
+  NetDetach := 15;                              { ERROR_INVALID_DRIVE }
+  If (D < 0) Or (D > 25) Then Exit;
+  If Not (IfsVols[D].Mounted And IfsVols[D].Remote) Then Exit;
+  Dev[0] := 65 + D; Dev[1] := Ord(':'); Dev[2] := 0;
+  Len := 0;
+  IfsArgs4(1, LongInt(@Dev), LongInt(@IfsVols[D].Vpfsd), 0);
+  IfsArg[4] := 0; IfsArg[5] := LongInt(@Len);
+  NetDetach := IfsCall(Ifss[IfsVols[D].Ifs].FAttach, 6);
+  IfsVols[D].Mounted := False;
+  IfsVols[D].Remote := False;
+End;
+
+{ unite D : P = (tampon, taille) <- nom du FSD ASCIIZ puis donnees de
+  FS_ATTACH (unite distante) ; rend 0, 1 si l'unite est locale, ou le code
+  d'erreur }
+Function NetQuery(D, P : LongInt) : LongInt;
+Var Dev : Array[0..3] Of Byte; Len, B, Cb, K : LongInt; N : String;
+Begin
+  NetQuery := 15;
+  If (D < 0) Or (D > 25) Or (P = 0) Then Exit;
+  If Not IfsVols[D].Mounted Then Exit;
+  B := MemL[0:P]; Cb := MemL[0:P + 4];
+  N := Ifss[IfsVols[D].Ifs].Name;
+  NetQuery := 111;                              { ERROR_BUFFER_OVERFLOW }
+  If Cb < Length(N) + 2 Then Exit;
+  PutPStr(B, N, Cb);
+  If Not IfsVols[D].Remote Then
+  Begin
+    Mem[0:B + Length(N) + 1] := 0;
+    NetQuery := 1;
+    Exit;
+  End;
+  K := Length(N) + 1;
+  Len := Cb - K;
+  Dev[0] := 65 + D; Dev[1] := Ord(':'); Dev[2] := 0;
+  IfsArgs4(2, LongInt(@Dev), LongInt(@IfsVols[D].Vpfsd), 0);
+  IfsArg[4] := B + K; IfsArg[5] := LongInt(@Len);
+  NetQuery := IfsCall(Ifss[IfsVols[D].Ifs].FAttach, 6);
+End;
+
 { KrnDiskCtl(op, p1, p2) : disques durs (INSTALL.EXE, DOSCALLS.DLL)
     0 nombre de disques durs IDE
     1 description du disque p1 dans p2 : secteurs, ports, esclave (0/1),
@@ -9341,6 +9446,12 @@ End;
    11 comme 5, avec en +16 le systeme de fichiers ASCIIZ ('HPFS', 'NTFS' :
       FS_NAME d'un pilote IFS charge ; 124 s'il n'y en a pas)
     6 demonter la partition du disque p1 qui commence au secteur p2
+   12 lettre du CD-ROM (2 = C: au demarrage du CD-ROM ; -1 aucune)
+   13 attacher l'unite p1 (3 = D:) a un FSD distant : p2 = (nom du FSD,
+      donnees de FS_ATTACH, taille) (DosFSAttach)
+   14 detacher l'unite distante p1
+   15 nom du FSD et donnees de l'unite p1 : p2 = (tampon, taille) ; rend 1
+      pour une unite locale (DosQueryFSAttach)
     7 monter la partition du disque p1 : p2 = debut, nombre, lettre en
       retour (+8) ; rend 0 si un pilote IFS la reconnait
     8 vider les tampons de tous les volumes
@@ -9456,6 +9567,9 @@ Begin
           KrnDiskCtl := Ord(HdBoot);
         End;
    12 : If HdBoot Then KrnDiskCtl := CdLetter Else KrnDiskCtl := 2;   { lettre du CD-ROM }
+   13 : KrnDiskCtl := NetAttach(P1, P2);
+   14 : KrnDiskCtl := NetDetach(P1);
+   15 : KrnDiskCtl := NetQuery(P1, P2);
   End;
 End;
 

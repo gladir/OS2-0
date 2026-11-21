@@ -39,7 +39,7 @@
 #     (Telecharger le code source d'OS2-Zero depuis GitHub, dossier
 #     Developer Kit), CALC.PAS
 #     (Calculatrice portee de Pasdows 95, dossier Productivite) et
-#     EXPLORER.PAS (Explorateur OS2-0, porte de l'Explorateur Pasdows :
+#     EXPLORER.PAS (Explorateur OS2-Zero, porte de l'Explorateur Pasdows :
 #     dossier Productivite et menu contextuel du bureau) et OUTLINK.PAS
 #     (Outlink, client de messagerie porte de OUTLOOK.PAS du depot
 #     OFFICE-0 : IMAP, POP3 et SMTP par TCPIP32.DLL, TLS et STARTTLS par
@@ -104,7 +104,9 @@
 #     AudioPCI), DLL/VBOXGST.PAS (VBOXGST.DLL, Additions VirtualBox :
 #     souris integree, taille de l'ecran), DLL/VMWTOOLS.PAS (VMWTOOLS.DLL,
 #     VMware Tools : souris vmmouse, Resolution_Set), DLL/TCPIP32.PAS (TCPIP32.DLL,
-#     pile TCP/IP), DLL/TLS32.PAS (TLS32.DLL, TLS 1.3/1.2 pour https://) et les pilotes reseau DLL/E1000.PAS (Intel PRO/1000)
+#     pile TCP/IP), DLL/TLS32.PAS (TLS32.DLL, TLS 1.3/1.2 pour https://), DLL/SMB.PAS
+#     (SMB.IFS, lecteurs reseau Windows et Samba : SMB2, NTLMv2, signature ;
+#     DosFSAttach, NET USE, Explorateur OS2-Zero) et les pilotes reseau DLL/E1000.PAS (Intel PRO/1000)
 #     et DLL/PCNET.PAS (AMD PCnet), et leurs programmes d'essai TESTDOS, TESTFKA,
 #     TESTHPFS, TESTVIO, TESTMOU, TESTNLS, TESTKBD, TESTMON, TESTMSG,
 #     TESTNMP, TESTSES, TESTQUE, TESTPFS, TESTRM, TESTSM, TESTHLP,
@@ -240,6 +242,8 @@ echo "== Bibliotheques DOSCALLS.DLL, FKA.DLL, HPFS.IFS, NTFS.IFS, VIOCALLS.DLL, 
 "$W/os2pc" -Q "$ROOT/DLL/TESTVIOP.PAS" "$W/cd/TESTVIOP.EXE"
 echo "== VirtualBox (VBOXGST.DLL), VMware (VMWTOOLS.DLL) et reseau : TCPIP32.DLL, TLS32.DLL (https), pilotes E1000.DLL et PCNET.DLL"
 for B in VBOXGST VMWTOOLS TCPIP32 TLS32 E1000 PCNET; do "$W/os2pc" -Q "$ROOT/DLL/$B.PAS" "$W/cd/$B.DLL"; done
+echo "== Lecteurs reseau : SMB.IFS (client SMB2 des partages Windows et Samba)"
+"$W/os2pc" -Q "$ROOT/DLL/SMB.PAS" "$W/cd/SMB.IFS"
 echo "== Multimedia : MDM.DLL et pilotes SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL"
 for B in MDM SBAUDIO ICHAUDIO ESAUDIO; do "$W/os2pc" -Q "$ROOT/DLL/$B.PAS" "$W/cd/$B.DLL"; done
 "$W/os2pc" -Q "$ROOT/DLL/TESTMDM.PAS" "$W/cd/TESTMDM.EXE"
@@ -252,7 +256,7 @@ cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 
 echo "== CD-ROM amorcable"
 "$W/makeiso" "$ROOT/IMAGE/OS2CD.ISO" /BOOT:"$W/cd/OS2BOOT" /LABEL:OS2_0 "$W/cd/*"
-for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE PMSHELL.EXE LAUNCHPD.EXE DOSCALLS.DLL FKA.DLL HPFS.IFS NTFS.IFS VIOCALLS.DLL MOUCALLS.DLL NLS.DLL KBDCALLS.DLL MONCALLS.DLL MSG.DLL NAMPIPES.DLL SESMGR.DLL QUECALLS.DLL SPOOLCP.DLL RMINFO.DLL OS2SM.DLL HELPMGR.DLL LIBUNI.DLL PMDRAG.DLL PMWIN.DLL PMGPI.DLL PMMERGE.DLL PMPIC.DLL PMSHAPI.DLL PMSPL.DLL PMVIOP.DLL API16.DLL PMWP.DLL PMCTLS.DLL MDM.DLL SBAUDIO.DLL ICHAUDIO.DLL ESAUDIO.DLL VBOXGST.DLL VMWTOOLS.DLL TCPIP32.DLL TLS32.DLL E1000.DLL PCNET.DLL; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
+for F in OS2BOOT OS2LDR OS2KRNL CMD.EXE PMSHELL.EXE LAUNCHPD.EXE DOSCALLS.DLL FKA.DLL HPFS.IFS NTFS.IFS SMB.IFS VIOCALLS.DLL MOUCALLS.DLL NLS.DLL KBDCALLS.DLL MONCALLS.DLL MSG.DLL NAMPIPES.DLL SESMGR.DLL QUECALLS.DLL SPOOLCP.DLL RMINFO.DLL OS2SM.DLL HELPMGR.DLL LIBUNI.DLL PMDRAG.DLL PMWIN.DLL PMGPI.DLL PMMERGE.DLL PMPIC.DLL PMSHAPI.DLL PMSPL.DLL PMVIOP.DLL API16.DLL PMWP.DLL PMCTLS.DLL MDM.DLL SBAUDIO.DLL ICHAUDIO.DLL ESAUDIO.DLL VBOXGST.DLL VMWTOOLS.DLL TCPIP32.DLL TLS32.DLL E1000.DLL PCNET.DLL; do cp "$W/cd/$F" "$ROOT/IMAGE/SYSTEM/$F"; done
 echo "== CD-ROM d'installation"
 rm -rf "$W/cdinst"; mkdir -p "$W/cdinst"
 cp "$W/cd/"* "$W/cdinst/"

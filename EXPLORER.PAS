@@ -1,4 +1,4 @@
-{ EXPLORER.PAS - Explorateur OS2-0 (Presentation Manager).
+{ EXPLORER.PAS - Explorateur OS2-Zero (Presentation Manager).
 
   Compilation : OS2PC EXPLORER.PAS EXPLORER.EXE
 
@@ -25,6 +25,11 @@
   (onglets General, Outils, Partage ; nom du volume modifiable ; espace
   utilise et libre ; camembert en relief) ; EXPLORER /PROPS:C: ouvre cette
   boite seule (dossier Lecteurs du bureau).
+  Outils (et bouton 2 sur le Poste de travail) : Connecter un lecteur
+  reseau... (lettre, \\serveur\partage, utilisateur, mot de passe, "Se
+  reconnecter a l'ouverture de session" : OS2.INI, PM_NetworkDrives) et
+  Deconnecter un lecteur reseau... ; DosFSAttach et SMB.IFS (SMB2,
+  NTLMv2), voir la section "Lecteurs reseau" plus bas.
 
   API d'OS/2 : DosFindFirst/DosFindNext (FILEFINDBUF3), DosQueryCurrentDisk,
   DosQueryFSInfo (etiquette, espace libre), DosSetFSInfo (nom du volume),
@@ -57,14 +62,28 @@ Const
   DT_RIGHT = $200;
   { icones (numeros de Pasdows 95) }
   icComputer = 1; icText = 6; icFolder = 7; icCdrom = 8; icFloppy = 9; icDisplay = 11;
-  icDocs = 23; icApp = 25; icHardDisk = 26; icExplorer = 28; icWeb = 39; icSound = 32;
+  icDocs = 23; icApp = 25; icHardDisk = 26; icExplorer = 28; icWeb = 39; icSound = 32; icNetDrive = 41;
   { types d'entrees }
-  ekFile = 0; ekDir = 1; ekHdd = 2; ekCd = 3; ekFloppy = 4;
+  ekFile = 0; ekDir = 1; ekHdd = 2; ekCd = 3; ekFloppy = 4; ekNet = 5;
   { commandes }
   cmOpen = 101; cmProps = 102; cmClose = 103;
   cmIcons = 111; cmDetails = 112; cmRefresh = 113;
   cmUp = 121; cmComputer = 122;
   cmAbout = 131;
+  cmMapNet = 141; cmUnmapNet = 142; cmDisconnect = 143;
+  { controles de PM (boites Connecter et Deconnecter un lecteur reseau) }
+  WC_COMBOBOX = $FFFF0002; WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005; WC_ENTRYFIELD = $FFFF0006;
+  WC_LISTBOX = $FFFF0007;
+  WS_VISIBLE = $80000000; WS_TABSTOP = $00020000;
+  BS_PUSHBUTTON = 0; BS_AUTOCHECKBOX = 2; BS_DEFAULT = $0400;
+  SS_TEXT = 1; DT_VCENTER = $0400; CBS_DROPDOWNLIST = 4;
+  ES_AUTOSCROLL = 4; ES_MARGIN = 8; ES_UNREADABLE = $80;
+  EM_SETTEXTLIMIT = $0143; EM_SETSEL = $0142;
+  BM_QUERYCHECK = $0124; BM_SETCHECK = $0125;
+  LM_INSERTITEM = $0161; LM_SELECTITEM = $0164; LM_QUERYSELECTION = $0165;
+  ID_OK = 1; ID_CANCEL = 2;
+  HINI_USERPROFILE = -1;
+  NetApp = 'PM_NetworkDrives';     { OS2.INI : lettre -> chemin, utilisateur, cle }
   { dimensions }
   MaxE = 1500;
   TreeMax = 256;
@@ -128,6 +147,19 @@ Function DosOpen(PName, PHf, PAct, Cb, Attr, Fl, Mode, PEa : LongInt) : LongInt;
 Function DosRead(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS';
 Function DosClose(H : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSetFilePtr(H, Ib, Method, PActual : LongInt) : LongInt; External 'DOSCALLS';
+Function DosFSAttach(PDev, PFsd, PData, CbData, Flag : LongInt) : LongInt; External 'DOSCALLS';
+Function DosLoadModule(PObj, CbObj, PName, PHmod : LongInt) : LongInt; External 'DOSCALLS';
+Function DosQueryProcAddr(H, Ord, PName, PPfn : LongInt) : LongInt; External 'DOSCALLS';
+Function KDiskCtl(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnDiskCtl';
+Function WinCreateWindow(HPar, PCls, PName, Style, X, Y, Cx, Cy, HOwn, HBehind, Id, PCtl, PPres : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryWindowText(H, Cch, P : LongInt) : LongInt; External 'PMWIN';
+Function WinEnableWindow(H, En : LongInt) : LongInt; External 'PMWIN';
+Function WinSetPresParam(H, Id, Cb, P : LongInt) : LongInt; External 'PMWIN';
+Function WinQuerySysPointer(HD, Id, Load : LongInt) : LongInt; External 'PMWIN';
+Function WinSetPointer(HD, Hptr : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryFocus(HD : LongInt) : LongInt; External 'PMWIN';
+Function PrfQueryProfileString(H, A, K, Df, B, M : LongInt) : LongInt; External 'PMMERGE';
+Function PrfWriteProfileString(H, A, K, D : LongInt) : LongInt; External 'PMMERGE';
 
 Var
   Hab, Hmq, Frame, Client, MenuHw, Lang, Dummy : LongInt;
@@ -151,6 +183,7 @@ Var
   DrvLbl : Array[0..25] Of String[15];
   DrvFs : Array[0..25] Of String[15];
   DrvKind : Array[0..25] Of LongInt;
+  DrvRem : Array[0..25] Of String[79];   { lecteur reseau : \\serveur\partage }
   DrvMap : LongInt;
   { icones }
   IcX, IcY, IcS : LongInt;
@@ -317,8 +350,8 @@ End;
 
 Function AppName : String;
 Begin
-  AppName := L('Explorateur OS2-0', 'OS2-0 Explorer', 'OS2-0-Explorer', 'Esplora risorse OS2-0',
-               'Explorador de OS2-0');
+  AppName := L('Explorateur OS2-Zero', 'OS2-Zero Explorer', 'OS2-Zero-Explorer', 'Esplora risorse OS2-Zero',
+               'Explorador de OS2-Zero');
 End;
 
 Procedure Msg(S : String; Fl : LongInt);
@@ -406,6 +439,19 @@ Begin
     FsOf := UpStr(GetZ(LongInt(@B) + 11));
 End;
 
+{ lecteur reseau (DosQueryFSAttach : FSAT_REMOTEDRV) : \\serveur\partage,
+  sinon '' }
+Function RemoteOf(D : LongInt) : String;
+Var Cb, N : LongInt; B : Array[0..299] Of Byte;
+Begin
+  RemoteOf := '';
+  Cb := 300;
+  If DosQueryFSAttach(Z(Chr(64 + D) + ':'), 0, 1, LongInt(@B), LongInt(@Cb)) <> 0 Then Exit;
+  If RdW(LongInt(@B)) <> 4 Then Exit;
+  N := RdW(LongInt(@B) + 2);
+  RemoteOf := Copy(GetZ(LongInt(@B) + 8 + N + 1 + RdW(LongInt(@B) + 4) + 1), 1, 79);
+End;
+
 Procedure ScanDrives;
 Var D, Cur, K : LongInt; B : Array[0..63] Of Byte; S : String;
 Begin
@@ -413,7 +459,7 @@ Begin
   Dummy := DosQueryCurrentDisk(LongInt(@Cur), LongInt(@DrvMap));
   For K := 0 To 25 Do
   Begin
-    DrvLbl[K] := ''; DrvFs[K] := ''; DrvKind[K] := ekHdd;
+    DrvLbl[K] := ''; DrvFs[K] := ''; DrvKind[K] := ekHdd; DrvRem[K] := '';
     If (DrvMap And (1 Shl K)) <> 0 Then
     Begin
       D := K + 1;
@@ -423,6 +469,17 @@ Begin
         S := FsOf(D);
         DrvFs[K] := Copy(S, 1, 15);
         If (S = 'CDFS') Or (S = 'ISO9660') Or (S = 'UDF') Then DrvKind[K] := ekCd;
+        DrvRem[K] := RemoteOf(D);
+        If DrvRem[K] <> '' Then
+        Begin
+          { lecteur reseau : pas de nom de volume a lire (le serveur peut
+            etre eteint : la connexion se fait au premier acces) }
+          DrvKind[K] := ekNet;
+          S := DrvRem[K];
+          While Pos('\', S) > 0 Do Delete(S, 1, Pos('\', S));
+          DrvLbl[K] := Copy(UpStr(S), 1, 15);
+          Continue;
+        End;
         FillChar(B, SizeOf(B), 0);
         If DosQueryFSInfo(D, 2, LongInt(@B), 64) = 0 Then
           If (B[4] > 0) And (B[4] < 13) Then
@@ -437,6 +494,21 @@ Begin
   End;
 End;
 
+{ \\serveur\partage -> partage sur 'serveur' (comme Windows 95) }
+Function NetName(R : String) : String;
+Var K : LongInt; Srv, Sh : String;
+Begin
+  If Copy(R, 1, 2) = '\\' Then Delete(R, 1, 2);
+  K := Pos('\', R);
+  If K = 0 Then
+  Begin
+    NetName := R;
+    Exit;
+  End;
+  Srv := Copy(R, 1, K - 1); Sh := Copy(R, K + 1, 255);
+  NetName := Sh + L(' sur ''', ' on ''', ' auf ''', ' su ''', ' en ''') + Srv + '''';
+End;
+
 Function DriveName(C : Char) : String;
 Var K : LongInt; S : String;
 Begin
@@ -444,6 +516,11 @@ Begin
   If (K < 0) Or (K > 25) Then
   Begin
     DriveName := C + ':';
+    Exit;
+  End;
+  If DrvKind[K] = ekNet Then
+  Begin
+    DriveName := NetName(DrvRem[K]) + ' (' + UpCase(C) + ':)';
     Exit;
   End;
   If DrvKind[K] = ekFloppy Then
@@ -604,6 +681,7 @@ Begin
     ekHdd : FileIcon := icHardDisk;
     ekCd : FileIcon := icCdrom;
     ekFloppy : FileIcon := icFloppy;
+    ekNet : FileIcon := icNetDrive;
   Else
     If (X = 'EXE') Or (X = 'COM') Or (X = 'CMD') Or (X = 'BAT') Then FileIcon := icApp
     Else If (X = 'TXT') Or (X = 'INI') Or (X = 'SYS') Or (X = 'PAS') Or (X = 'LOG') Or (X = 'CFG') Or
@@ -624,6 +702,8 @@ Begin
     ekHdd : TypeName := L('Disque local', 'Local Disk', 'Lokaler Datentr'#132'ger', 'Disco locale', 'Disco local');
     ekCd : TypeName := L('Disque compact', 'CD-ROM Disc', 'CD-ROM', 'CD-ROM', 'CD-ROM');
     ekFloppy : TypeName := L('Disquette', 'Floppy Disk', 'Diskette', 'Floppy', 'Disquete');
+    ekNet : TypeName := L('Lecteur r'#130'seau', 'Network Drive', 'Netzlaufwerk', 'Unit'#133' di rete',
+                          'Unidad de red');
   Else
     If (X = 'EXE') Or (X = 'COM') Then TypeName := L('Application', 'Application', 'Anwendung', 'Applicazione',
                                                    'Aplicaci'#162'n')
@@ -881,6 +961,17 @@ Begin
       QC(16, 8, 7, cGray);
       QD(16, 8, 2, cWhite);
       QL(12, 4, 15, 7, cAqua);
+    End;
+    icNetDrive :
+    Begin
+      { disque dur et son cable reseau }
+      IFrame(3, 6, 28, 17, cSilver);
+      QR(4, 7, 27, 7, cWhite);
+      QR(6, 13, 12, 14, cGray);
+      QR(23, 14, 25, 15, cLime);
+      QR(15, 18, 16, 24, cBlack);
+      QR(3, 25, 28, 26, cBlack);
+      QR(13, 23, 18, 28, cNavy);
     End;
     icFloppy, icHardDisk :
     Begin
@@ -1170,6 +1261,7 @@ Begin
     Case DrvKind[Ord(UpCase(P[1])) - 65] Of
       ekCd : NodeIcon := icCdrom;
       ekFloppy : NodeIcon := icFloppy;
+      ekNet : NodeIcon := icNetDrive;
     Else
       NodeIcon := icHardDisk;
     End;
@@ -1844,6 +1936,8 @@ Var K : LongInt; S : String;
 Begin
   K := PropDisk - 1;
   If DrvKind[K] = ekCd Then S := L('Disque CD-ROM', 'CD-ROM Disc', 'CD-ROM', 'Disco CD-ROM', 'Disco CD-ROM')
+  Else If DrvKind[K] = ekNet Then S := L('Lecteur r'#130'seau', 'Network Drive', 'Netzlaufwerk', 'Unit'#133' di rete',
+                                         'Unidad de red')
   Else If DrvKind[K] = ekFloppy Then S := L('Disquette', 'Floppy Disk', 'Diskette', 'Dischetto', 'Disquete')
   Else If UpStr(DrvLbl[K]) = 'RAMDISK' Then
     S := L('Disque virtuel', 'RAM Disk', 'RAM-Laufwerk', 'Disco virtuale', 'Disco virtual')
@@ -2045,8 +2139,11 @@ Begin
     Box(24, Y + 2, 36, Y + 14, cBlack);
   End;
   OutTxt(44, Y, T, cBlack, cSilver);
-  B := ThousandsD(Kb * 1024.0) + L(' octets', ' bytes', ' Byte', ' byte', ' bytes');
-  OutRight(PW - 96, Y, B, cBlack, cSilver);
+  B := ThousandsD(Kb * 1024.0);
+  { au-dela de 100 Go (partage reseau), sans le mot octets : la colonne
+    des Go reste libre }
+  If Length(B) < 13 Then B := B + L(' octets', ' bytes', ' Byte', ' byte', ' bytes');
+  OutRight(PW - 104, Y, B, cBlack, cSilver);
   OutRight(PW - 26, Y, ShortSize(Kb), cBlack, cSilver);
 End;
 
@@ -2127,7 +2224,7 @@ Begin
     WrapText(28, 58 + I * 106, PW - 56, T, cBlack, False);
     PropToolRect(I, X1, Y1, X2, Y2);
     T := ToolText(I, 2);
-    En := (I = 0) And (DrvKind[PropDisk - 1] <> ekFloppy);
+    En := (I = 0) And (DrvKind[PropDisk - 1] <> ekFloppy) And (DrvKind[PropDisk - 1] <> ekNet);
     PButton(X1, Y1, X2, Y2, T, En, False);
   End;
 End;
@@ -2292,7 +2389,8 @@ Begin
   Else If PTab = 1 Then
   Begin
     PropToolRect(0, X1, Y1, X2, Y2);
-    If (X >= X1) And (X <= X2) And (Y >= Y1) And (Y <= Y2) And (DrvKind[PropDisk - 1] <> ekFloppy) Then PropCheck;
+    If (X >= X1) And (X <= X2) And (Y >= Y1) And (Y <= Y2) And (DrvKind[PropDisk - 1] <> ekFloppy) And
+       (DrvKind[PropDisk - 1] <> ekNet) Then PropCheck;
   End;
 End;
 
@@ -2468,6 +2566,467 @@ Begin
 End;
 
 { ==================================================================== }
+{ Lecteurs reseau : Connecter un lecteur reseau, Deconnecter            }
+{ ==================================================================== }
+{ Boites de Presentation Manager (controles du systeme : liste
+  deroulante, champs de saisie, case a cocher, boutons), comme la boite
+  "Connecter un lecteur reseau" de Pasdows 95. Le lecteur est attache par
+  DosFSAttach(lettre, "SMB", "\\serveur\partage" 0 utilisateur 0 mot de
+  passe 0, FS_ATTACH) ; SMB.IFS ouvre la session (SMB2, NTLMv2) et
+  SMBLASTERROR en explique l'echec. "Se reconnecter a l'ouverture de
+  session" garde la connexion dans OS2.INI (application PM_NetworkDrives,
+  cle = lettre : chemin, utilisateur et cle NT du mot de passe, jamais le
+  mot de passe lui-meme) ; le bureau (PMSHELL) la retablit au demarrage. }
+
+Var
+  NdFr, NdCl, NdEnd, NdCombo, NdPath, NdUser, NdPass, NdCk, NdList, NdMode : LongInt;
+  NdLet : Array[0..25] Of Char;
+  NdTab : Array[0..9] Of LongInt;       { ordre de Tab }
+  NdTabN : LongInt;
+  NdN : LongInt;
+  NdRegDone : Boolean;
+  NdData : Array[0..767] Of Byte;
+
+Function NdCtl(Cls, Txt : LongInt; Style, X, Y, W, H, Id : LongInt) : LongInt;
+Var C : LongInt;
+Begin
+  C := WinCreateWindow(NdCl, Cls, Txt, Style Or WS_VISIBLE, X, Y, W, H, NdCl, HWND_TOP, Id, 0, 0);
+  If ((Style And WS_TABSTOP) <> 0) And (NdTabN < 10) And (C <> 0) Then
+  Begin
+    NdTab[NdTabN] := C;
+    Inc(NdTabN);
+  End;
+  NdCtl := C;
+End;
+
+{ Tab et Maj+Tab : controle suivant ou precedent }
+Procedure NdNext(Dir : LongInt);
+Var F, I, K : LongInt;
+Begin
+  If NdTabN = 0 Then Exit;
+  F := WinQueryFocus(HWND_DESKTOP);
+  K := -1;
+  For I := 0 To NdTabN - 1 Do If NdTab[I] = F Then K := I;
+  If K < 0 Then K := 0 Else K := (K + Dir + NdTabN) Mod NdTabN;
+  Dummy := WinSetFocus(HWND_DESKTOP, NdTab[K]);
+End;
+
+Procedure NdGray(H : LongInt);
+Var C : LongInt;
+Begin
+  C := cSilver;
+  Dummy := WinSetPresParam(H, 4, 4, LongInt(@C));
+End;
+
+Function NdText(H : LongInt) : String;
+Var N : LongInt; B : Array[0..259] Of Byte; S : String;
+Begin
+  FillChar(B, SizeOf(B), 0);
+  N := WinQueryWindowText(H, 250, LongInt(@B));
+  S := '';
+  While (Length(S) < N) And (B[Length(S)] <> 0) Do S := S + Chr(B[Length(S)]);
+  NdText := S;
+End;
+
+Procedure NdLabel(S : String; X, Y, W : LongInt);
+Begin
+  NdGray(NdCtl(WC_STATIC, Z(S), SS_TEXT Or DT_VCENTER, X, Y, W, 20, 0));
+End;
+
+{ texte de la derniere erreur de SMB.IFS (point d'entree SMBLASTERROR) }
+Function SmbText : String;
+Var H, F, R : LongInt; Fail : Array[0..63] Of Byte; B : Array[0..259] Of Byte;
+Begin
+  SmbText := '';
+  H := 0; F := 0;
+  If DosLoadModule(LongInt(@Fail), 64, Z('C:\SMB.IFS'), LongInt(@H)) <> 0 Then Exit;
+  If DosQueryProcAddr(H, 0, Z('SMBLASTERROR'), LongInt(@F)) <> 0 Then Exit;
+  If F = 0 Then Exit;
+  FillChar(B, SizeOf(B), 0);
+  R := LongInt(@B);
+  asm
+    mov eax,256
+    push eax
+    mov eax,R
+    push eax
+    mov eax,F
+    call eax
+    add esp,8
+  end;
+  SmbText := GetZ(LongInt(@B));
+End;
+
+Function NetErrText(E : LongInt) : String;
+Begin
+  Case E Of
+    5 : NetErrText := L('Acc'#138's refus'#130'.', 'Access is denied.', 'Zugriff verweigert.', 'Accesso negato.',
+                        'Acceso denegado.');
+    15 : NetErrText := L('Lecteur incorrect.', 'Invalid drive.', 'Ung'#129'ltiges Laufwerk.', 'Unit'#133' non valida.',
+                         'Unidad no v'#160'lida.');
+    53 : NetErrText := L('Le chemin r'#130'seau est introuvable.', 'The network path was not found.',
+                         'Der Netzwerkpfad wurde nicht gefunden.', 'Percorso di rete non trovato.',
+                         'No se encontr'#162' la ruta de red.');
+    59 : NetErrText := L('Erreur r'#130'seau inattendue.', 'An unexpected network error occurred.',
+                         'Unerwarteter Netzwerkfehler.', 'Errore di rete imprevisto.', 'Error de red inesperado.');
+    64 : NetErrText := L('Le serveur ne r'#130'pond plus.', 'The network name is no longer available.',
+                         'Der Server antwortet nicht mehr.', 'Il server non risponde.', 'El servidor no responde.');
+    65 : NetErrText := L('Acc'#138's au partage refus'#130'.', 'Network access is denied.',
+                         'Netzwerkzugriff verweigert.', 'Accesso alla rete negato.', 'Acceso a la red denegado.');
+    67 : NetErrText := L('Le nom du partage est introuvable.', 'The network name cannot be found.',
+                         'Der Netzwerkname wurde nicht gefunden.', 'Nome di rete non trovato.',
+                         'No se encuentra el nombre de red.');
+    85 : NetErrText := L('Cette lettre de lecteur est d'#130'j'#133' utilis'#130'e.', 'The drive letter is already in use.',
+                         'Der Laufwerkbuchstabe wird bereits verwendet.', 'Lettera di unit'#133' gi'#133' in uso.',
+                         'La letra de unidad ya est'#160' en uso.');
+    86 : NetErrText := L('Nom d''utilisateur ou mot de passe incorrect.', 'Unknown user name or bad password.',
+                         'Benutzername oder Kennwort falsch.', 'Nome utente o password errati.',
+                         'Usuario o contrase'#164'a incorrectos.');
+    124 : NetErrText := L('Le syst'#138'me de fichiers SMB.IFS est absent.', 'The SMB.IFS file system is missing.',
+                          'Das Dateisystem SMB.IFS fehlt.', 'Il file system SMB.IFS manca.',
+                          'Falta el sistema de archivos SMB.IFS.');
+  Else
+    NetErrText := L('Erreur ', 'Error ', 'Fehler ', 'Errore ', 'Error ') + IStr(E) + '.';
+  End;
+End;
+
+Procedure NdPut(Var P : LongInt; S : String);
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do
+  Begin
+    NdData[P] := Ord(S[K]);
+    Inc(P);
+  End;
+  NdData[P] := 0;
+  Inc(P);
+End;
+
+{ OS2.INI : la connexion permanente C: (chemin, utilisateur, #cle NT
+  donnee par SMB.IFS ; KrnDiskCtl 15 = informations de FS_ATTACH) }
+Procedure NetSave(C : Char);
+Var Q : Array[0..1] Of LongInt; B : Array[0..511] Of Byte; R, Us, Hs : String; K : LongInt;
+Begin
+  FillChar(B, SizeOf(B), 0);
+  Q[0] := LongInt(@B); Q[1] := 512;
+  If KDiskCtl(15, Ord(C) - 65, LongInt(@Q)) <> 0 Then Exit;
+  K := LongInt(@B) + Length(GetZ(LongInt(@B))) + 1;
+  R := GetZ(K); K := K + Length(R) + 1;
+  Us := GetZ(K); K := K + Length(Us) + 1;
+  Hs := GetZ(K);
+  PutZ(LongInt(@TxtBuf), R + Chr(9) + Us + Chr(9) + Hs);
+  Dummy := PrfWriteProfileString(HINI_USERPROFILE, Z(NetApp), Z2(C), LongInt(@TxtBuf));
+End;
+
+Procedure NetForget(C : Char);
+Begin
+  Dummy := PrfWriteProfileString(HINI_USERPROFILE, Z(NetApp), Z2(C), 0);
+End;
+
+{ Connecter : 0 ou le code d'erreur }
+Function NetMap(C : Char; Remote, User, Pass : String) : LongInt;
+Var P : LongInt;
+Begin
+  P := 0;
+  NdPut(P, Remote); NdPut(P, User); NdPut(P, Pass);
+  PutZ(LongInt(@ArgBuf), C + ':');
+  NetMap := DosFSAttach(LongInt(@ArgBuf), Z('SMB'), LongInt(@NdData), P, 0);
+  FillChar(NdData, SizeOf(NdData), 0);       { pas de mot de passe en memoire }
+End;
+
+Function NetUnmap(C : Char) : LongInt;
+Begin
+  PutZ(LongInt(@ArgBuf), C + ':');
+  NetUnmap := DosFSAttach(LongInt(@ArgBuf), Z('SMB'), 0, 0, 1);
+End;
+
+{ apres un changement : lecteurs, arbre et contenu a jour }
+Procedure NetChanged(Open : Char);
+Begin
+  ScanDrives;
+  If (Length(CurPath) >= 2) And ((DrvMap And (1 Shl (Ord(UpCase(CurPath[1])) - 65))) = 0) Then CurPath := '';
+  Refresh;
+  If Open <> ' ' Then Navigate(Open + ':');
+End;
+
+Function NetTitle(Mode : LongInt) : String;
+Begin
+  If Mode = 0 Then
+    NetTitle := L('Connecter un lecteur r'#130'seau', 'Map Network Drive', 'Netzlaufwerk verbinden',
+                  'Connetti unit'#133' di rete', 'Conectar a unidad de red')
+  Else
+    NetTitle := L('D'#130'connecter un lecteur r'#130'seau', 'Disconnect Network Drive', 'Netzlaufwerk trennen',
+                  'Disconnetti unit'#133' di rete', 'Desconectar unidad de red');
+End;
+
+Procedure NdClose;
+Begin
+  Dummy := WinEnableWindow(Frame, 1);
+  Dummy := WinSetActiveWindow(HWND_DESKTOP, Frame);
+  Dummy := WinSetFocus(HWND_DESKTOP, Client);
+  Dummy := WinDestroyWindow(NdFr);
+  NdFr := 0;
+End;
+
+Procedure NdMsg(S : String; Fl : LongInt);
+Begin
+  Dummy := WinMessageBox(HWND_DESKTOP, NdFr, Z(S), Z2(NetTitle(NdMode)), 0, Fl Or MB_MOVEABLE);
+End;
+
+{ OK de la boite Connecter }
+Procedure MapOk;
+Var C : Char; T, Remote, User, Pass, D : String; R, Ptr : LongInt;
+Begin
+  T := UpStr(NdText(NdCombo));
+  C := ' ';
+  If (Length(T) >= 1) And (T[1] >= 'A') And (T[1] <= 'Z') Then C := T[1];
+  Remote := NdText(NdPath);
+  While (Remote <> '') And (Remote[1] = ' ') Do Delete(Remote, 1, 1);
+  While (Remote <> '') And ((Remote[Length(Remote)] = ' ') Or (Remote[Length(Remote)] = '\')) Do
+    Delete(Remote, Length(Remote), 1);
+  For R := 1 To Length(Remote) Do If Remote[R] = '/' Then Remote[R] := '\';
+  If Copy(Remote, 1, 2) <> '\\' Then Remote := '\\' + Remote;
+  T := Copy(Remote, 3, 255);
+  If (C = ' ') Or (Pos('\', T) < 2) Or (Pos('\', T) = Length(T)) Then
+  Begin
+    NdMsg(L('Tapez le chemin r'#130'seau sous la forme \\serveur\partage.',
+            'Type the network path as \\server\share.', 'Geben Sie den Netzwerkpfad als \\Server\Freigabe ein.',
+            'Digitare il percorso di rete come \\server\condivisione.',
+            'Escriba la ruta de red como \\servidor\recurso.'), MB_OK Or MB_WARNING);
+    Dummy := WinSetFocus(HWND_DESKTOP, NdPath);
+    Exit;
+  End;
+  User := NdText(NdUser);
+  Pass := NdText(NdPass);
+  Ptr := WinQuerySysPointer(HWND_DESKTOP, 3, 0);        { SPTR_WAIT }
+  If Ptr <> 0 Then Dummy := WinSetPointer(HWND_DESKTOP, Ptr);
+  R := NetMap(C, Remote, User, Pass);
+  Pass := '';
+  Ptr := WinQuerySysPointer(HWND_DESKTOP, 1, 0);        { SPTR_ARROW }
+  If Ptr <> 0 Then Dummy := WinSetPointer(HWND_DESKTOP, Ptr);
+  If R <> 0 Then
+  Begin
+    D := SmbText;
+    T := NetErrText(R);
+    { detail de SMB.IFS (en francais), s'il ajoute quelque chose }
+    If (D <> '') And (Lang = 0) And (Pos(Copy(T, 1, Length(T) - 1), D) <> 1) Then T := T + Chr(10) + D;
+    T := L('Impossible de connecter ', 'Cannot connect ', 'Verbindung nicht m'#148'glich: ', 'Impossibile connettere ',
+           'No se puede conectar ') + C + ': ' + L(#133, 'to', 'mit', 'a', 'a') + ' ' + Remote + '.' + Chr(10) + T;
+    NdMsg(T, MB_OK Or MB_ERROR);
+    If (R = 86) Or (R = 5) Then
+    Begin
+      Dummy := WinSetFocus(HWND_DESKTOP, NdPass);
+      Dummy := WinSendMsg(NdPass, EM_SETSEL, 255 Shl 16, 0);
+    End
+    Else Dummy := WinSetFocus(HWND_DESKTOP, NdPath);
+    Exit;
+  End;
+  If WinSendMsg(NdCk, BM_QUERYCHECK, 0, 0) <> 0 Then NetSave(C) Else NetForget(C);
+  NdLet[0] := C;
+  NdEnd := ID_OK;
+End;
+
+{ OK de la boite Deconnecter }
+Procedure UnmapOk;
+Var I, R : LongInt; C : Char;
+Begin
+  I := WinSendMsg(NdList, LM_QUERYSELECTION, -1, 0);
+  If (I < 0) Or (I >= NdN) Then
+  Begin
+    NdMsg(L('Choisissez le lecteur r'#130'seau '#133' d'#130'connecter.', 'Select the network drive to disconnect.',
+            'W'#132'hlen Sie das zu trennende Netzlaufwerk.', 'Selezionare l''unit'#133' di rete da disconnettere.',
+            'Seleccione la unidad de red que desea desconectar.'), MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  C := NdLet[I];
+  R := NetUnmap(C);
+  If R <> 0 Then
+  Begin
+    NdMsg(NetErrText(R), MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  NetForget(C);
+  NdEnd := ID_OK;
+End;
+
+Function NdProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Hps, Fl, Vk : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  NdProc := 0;
+  Case Msg Of
+    WM_PAINT :
+    Begin
+      Hps := WinBeginPaint(H, 0, 0);
+      Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+      Dummy := WinFillRect(Hps, LongInt(@Rc), cSilver);
+      Dummy := WinEndPaint(Hps);
+    End;
+    WM_COMMAND :
+      If Lo16(Mp1) = ID_OK Then
+      Begin
+        If NdMode = 0 Then MapOk Else UnmapOk;
+      End
+      Else If Lo16(Mp1) = ID_CANCEL Then NdEnd := ID_CANCEL;
+    WM_CHAR :
+    Begin
+      Fl := Lo16(Mp1); Vk := Hi16(Mp2);
+      NdProc := 1;
+      If ((Fl And KC_KEYUP) = 0) And ((Fl And KC_VIRTUALKEY) <> 0) And ((Vk = VK_ENTER) Or (Vk = VK_NEWLINE)) Then
+        Dummy := WinPostMsg(H, WM_COMMAND, ID_OK, 0)
+      Else If ((Fl And KC_KEYUP) = 0) And ((Fl And KC_VIRTUALKEY) <> 0) And (Vk = VK_ESC) Then NdEnd := ID_CANCEL
+      Else If ((Fl And KC_KEYUP) = 0) And ((Fl And KC_VIRTUALKEY) <> 0) And (Vk = VK_TAB) And
+              ((Fl And KC_SHIFT) = 0) Then NdNext(1)
+      Else If ((Fl And KC_KEYUP) = 0) And ((Fl And KC_VIRTUALKEY) <> 0) And ((Vk = VK_BACKTAB) Or (Vk = VK_TAB)) Then
+        NdNext(-1)
+      Else NdProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+    End;
+    WM_CLOSE : NdEnd := ID_CANCEL;
+  Else
+    NdProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+Function NdOpen(W, H : LongInt) : Boolean;
+Var Fl, X, Y : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  If Not NdRegDone Then
+  Begin
+    Dummy := WinRegisterClass(Hab, Z('EXPNETDLG'), LongInt(@NdProc), 0, 0);
+    NdRegDone := True;
+  End;
+  Fl := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER;
+  NdCl := 0; NdTabN := 0;
+  NdFr := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Fl), Z('EXPNETDLG'), Z2(NetTitle(NdMode)), 0, 0, 0,
+                             LongInt(@NdCl));
+  NdOpen := NdFr <> 0;
+  If NdFr = 0 Then Exit;
+  Rc[0] := 0; Rc[1] := 0; Rc[2] := W; Rc[3] := H;
+  Dummy := WinCalcFrameRect(NdFr, LongInt(@Rc), 0);
+  W := Rc[2] - Rc[0]; H := Rc[3] - Rc[1];
+  X := MaxI(0, (WinQuerySysValue(HWND_DESKTOP, 20) - W) Div 2);
+  Y := MaxI(0, (WinQuerySysValue(HWND_DESKTOP, 21) - H) Div 2);
+  Dummy := WinSetWindowPos(NdFr, HWND_TOP, X, Y, W, H, SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW Or SWP_ACTIVATE);
+End;
+
+Function NdRun(Foc : LongInt) : LongInt;
+Var Qm : Array[0..7] Of LongInt;
+Begin
+  Dummy := WinEnableWindow(Frame, 0);
+  Dummy := WinSetActiveWindow(HWND_DESKTOP, NdFr);
+  If Foc <> 0 Then Dummy := WinSetFocus(HWND_DESKTOP, Foc);
+  NdEnd := 0;
+  While NdEnd = 0 Do
+    If WinGetMsg(Hab, LongInt(@Qm), 0, 0, 0) = 0 Then NdEnd := ID_CANCEL
+    Else Dummy := WinDispatchMsg(Hab, LongInt(@Qm));
+  NdRun := NdEnd;
+End;
+
+Procedure NdButtons(W : LongInt);
+Begin
+  Dummy := NdCtl(WC_BUTTON, Z('OK'), WS_TABSTOP Or BS_PUSHBUTTON Or BS_DEFAULT, W - 208, 8, 96, 26, ID_OK);
+  Dummy := NdCtl(WC_BUTTON, Z(L('Annuler', 'Cancel', 'Abbrechen', 'Annulla', 'Cancelar')), WS_TABSTOP Or BS_PUSHBUTTON,
+                 W - 104, 8, 96, 26, ID_CANCEL);
+End;
+
+{ Connecter un lecteur reseau... }
+Procedure MapDialog;
+Var W, H, K, Sel0 : LongInt; Open : Char;
+Begin
+  If Frame = 0 Then Exit;
+  ScanDrives;
+  NdN := 0;
+  For K := 3 To 25 Do
+    If (DrvMap And (1 Shl K)) = 0 Then
+    Begin
+      NdLet[NdN] := Chr(65 + K);
+      Inc(NdN);
+    End;
+  If NdN = 0 Then
+  Begin
+    Msg(L('Aucune lettre de lecteur n''est libre.', 'No drive letter is available.', 'Kein Laufwerkbuchstabe frei.',
+          'Nessuna lettera di unit'#133' libera.', 'No hay letras de unidad libres.'), MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  NdMode := 0;
+  W := 470; H := 214;
+  If Not NdOpen(W, H) Then Exit;
+  NdLabel(L('Lecteur :', 'Drive:', 'Laufwerk:', 'Unit'#133':', 'Unidad:'), 12, H - 36, 160);
+  NdCombo := NdCtl(WC_COMBOBOX, 0, WS_TABSTOP Or CBS_DROPDOWNLIST, 176, H - 36, 80, 20, 11);
+  For K := 0 To NdN - 1 Do Dummy := WinSendMsg(NdCombo, LM_INSERTITEM, -1, Z(NdLet[K] + ':'));
+  { premiere lettre libre apres les disques (comme Windows 95) }
+  Sel0 := 0;
+  Dummy := WinSendMsg(NdCombo, LM_SELECTITEM, Sel0, 1);
+  Dummy := WinSetWindowText(NdCombo, Z(NdLet[Sel0] + ':'));
+  NdLabel(L('Chemin :', 'Path:', 'Pfad:', 'Percorso:', 'Ruta:'), 12, H - 66, 160);
+  NdPath := NdCtl(WC_ENTRYFIELD, 0, WS_TABSTOP Or ES_AUTOSCROLL Or ES_MARGIN, 176, H - 66, W - 188, 20, 12);
+  Dummy := WinSendMsg(NdPath, EM_SETTEXTLIMIT, 200, 0);
+  Dummy := WinSetWindowText(NdPath, Z('\\'));
+  Dummy := WinSendMsg(NdPath, EM_SETSEL, 2 Or (2 Shl 16), 0);
+  NdLabel(L('Nom d''utilisateur :', 'User name:', 'Benutzername:', 'Nome utente:', 'Usuario:'), 12, H - 96, 160);
+  NdUser := NdCtl(WC_ENTRYFIELD, 0, WS_TABSTOP Or ES_AUTOSCROLL Or ES_MARGIN, 176, H - 96, W - 188, 20, 13);
+  Dummy := WinSendMsg(NdUser, EM_SETTEXTLIMIT, 100, 0);
+  NdLabel(L('(DOMAINE\nom ; vide : invit'#130')', '(DOMAIN\name; empty: guest)', '(DOM'#142'NE\Name; leer: Gast)',
+            '(DOMINIO\nome; vuoto: ospite)', '(DOMINIO\nombre; vac'#161'o: invitado)'), 176, H - 118, W - 188);
+  NdLabel(L('Mot de passe :', 'Password:', 'Kennwort:', 'Password:', 'Contrase'#164'a:'), 12, H - 144, 160);
+  NdPass := NdCtl(WC_ENTRYFIELD, 0, WS_TABSTOP Or ES_AUTOSCROLL Or ES_MARGIN Or ES_UNREADABLE, 176, H - 144,
+                  W - 188, 20, 14);
+  Dummy := WinSendMsg(NdPass, EM_SETTEXTLIMIT, 100, 0);
+  NdCk := NdCtl(WC_BUTTON, Z(L('Se reconnecter '#133' l''ouverture de session', 'Reconnect at logon',
+                               'Verbindung beim Anmelden wiederherstellen', 'Riconnetti all''accesso',
+                               'Volver a conectar al iniciar sesi'#162'n')),
+                WS_TABSTOP Or BS_AUTOCHECKBOX, 12, 44, W - 24, 20, 15);
+  NdGray(NdCk);
+  Dummy := WinSendMsg(NdCk, BM_SETCHECK, 1, 0);
+  NdButtons(W);
+  Open := ' ';
+  If NdRun(NdPath) = ID_OK Then Open := NdLet[0];
+  NdClose;
+  If Open <> ' ' Then NetChanged(Open);
+End;
+
+{ Deconnecter un lecteur reseau... (Only : une lettre deja choisie) }
+Procedure UnmapDialog(Only : Char);
+Var W, H, K, R : LongInt;
+Begin
+  If Frame = 0 Then Exit;
+  ScanDrives;
+  NdMode := 1;
+  If Only <> ' ' Then
+  Begin
+    R := NetUnmap(Only);
+    If R <> 0 Then Msg(NetErrText(R), MB_OK Or MB_ERROR)
+    Else NetForget(Only);
+    NetChanged(' ');
+    Exit;
+  End;
+  NdN := 0;
+  For K := 3 To 25 Do
+    If ((DrvMap And (1 Shl K)) <> 0) And (DrvKind[K] = ekNet) Then
+    Begin
+      NdLet[NdN] := Chr(65 + K);
+      Inc(NdN);
+    End;
+  If NdN = 0 Then
+  Begin
+    Msg(L('Aucun lecteur r'#130'seau n''est connect'#130'.', 'No network drive is connected.',
+          'Es sind keine Netzlaufwerke verbunden.', 'Nessuna unit'#133' di rete connessa.',
+          'No hay unidades de red conectadas.'), MB_OK Or MB_INFORMATION);
+    Exit;
+  End;
+  W := 400; H := 190;
+  If Not NdOpen(W, H) Then Exit;
+  NdLabel(L('Lecteur r'#130'seau '#133' d'#130'connecter :', 'Network drive to disconnect:', 'Zu trennendes Laufwerk:',
+            'Unit'#133' da disconnettere:', 'Unidad que desea desconectar:'), 12, H - 30, W - 24);
+  NdList := NdCtl(WC_LISTBOX, 0, WS_TABSTOP, 12, 44, W - 24, H - 82, 16);
+  For K := 0 To NdN - 1 Do
+    Dummy := WinSendMsg(NdList, LM_INSERTITEM, -1, Z(NdLet[K] + ':   ' + DrvRem[Ord(NdLet[K]) - 65]));
+  Dummy := WinSendMsg(NdList, LM_SELECTITEM, 0, 1);
+  NdButtons(W);
+  R := NdRun(NdList);
+  NdClose;
+  If R = ID_OK Then NetChanged(' ');
+End;
+
+{ ==================================================================== }
 { Menus                                                                 }
 { ==================================================================== }
 
@@ -2505,6 +3064,15 @@ Begin
   End;
 End;
 
+{ Connecter un lecteur reseau..., Deconnecter un lecteur reseau... }
+Procedure MapItems;
+Begin
+  MItem(MIS_TEXT, 0, cmMapNet, L('~Connecter un lecteur r'#130'seau...', '~Map Network Drive...',
+        'Netzlaufwerk ~verbinden...', '~Connetti unit'#133' di rete...', '~Conectar a unidad de red...'));
+  MItem(MIS_TEXT, 0, cmUnmapNet, L('~D'#130'connecter un lecteur r'#130'seau...', '~Disconnect Network Drive...',
+        'Netzlaufwerk ~trennen...', '~Disconnetti unit'#133' di rete...', '~Desconectar unidad de red...'));
+End;
+
 Procedure BuildMenu;
 Var H0, H1 : LongInt;
 Begin
@@ -2534,12 +3102,16 @@ Begin
         '~Subir un nivel') + Chr(9) + L('Retour', 'Backspace', 'R'#129'cktaste', 'Backspace', 'Retroceso'));
   MItem(MIS_TEXT, 0, cmComputer, PathTitle(''));
   MenuClose(H1, 2);
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 125, L('~Outils', '~Tools', '~Extras', '~Strumenti', '~Herramientas'));
+  H1 := MenuOpen;
+  MapItems;
+  MenuClose(H1, 2);
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 130, '~?');
   H1 := MenuOpen;
   MItem(MIS_TEXT, 0, cmAbout, L('~A propos de l''Explorateur...', '~About Explorer...', #154'ber ~Explorer...',
         '~Informazioni su Esplora risorse...', '~Acerca del Explorador...'));
   MenuClose(H1, 1);
-  MenuClose(H0, 4);
+  MenuClose(H0, 5);
   MenuHw := WinCreateMenu(Frame, LongInt(@MenuT));
 End;
 
@@ -2565,16 +3137,43 @@ Begin
   Redraw;
 End;
 
-{ menu contextuel : Ouvrir, Proprietes (X, Y : coordonnees de PM) }
-Procedure Context(X, Y : LongInt);
+{ menu contextuel : Ouvrir, Proprietes (X, Y : coordonnees de PM) ; le
+  Poste de travail et ses lecteurs ajoutent Connecter et Deconnecter un
+  lecteur reseau, un lecteur reseau Deconnecter }
+Procedure Context(X, Y : LongInt; Tree : Boolean);
+Var N : LongInt; Pc, Net : Boolean;
 Begin
   MenuLen := 0;
   MW(0); MW(0); MW(0);
+  N := 3;
+  If Tree Then
+  Begin
+    Pc := (TSel >= 0) And (TSel < TN) And (NdD[TSel] <= 2) And ((NdP[TSel] = '') Or (Length(NdP[TSel]) = 2));
+    Net := (TSel >= 0) And (TSel < TN) And (Length(NdP[TSel]) = 2) And (DrvKind[Ord(UpCase(NdP[TSel][1])) - 65] = ekNet);
+  End
+  Else
+  Begin
+    Pc := CurPath = '';
+    Net := Pc And (Sel >= 0) And (Sel < NEnt) And (E(Sel)^.Kind = ekNet);
+  End;
   MItem(MIS_TEXT, 0, cmOpen, L('~Ouvrir', '~Open', #148'~ffnen', '~Apri', '~Abrir'));
   MItem(MIS_SEPARATOR, 0, 0, '');
+  If Net Then
+  Begin
+    MItem(MIS_TEXT, 0, cmDisconnect, L('~D'#130'connecter', '~Disconnect', '~Trennen', '~Disconnetti',
+          '~Desconectar'));
+    MItem(MIS_SEPARATOR, 0, 0, '');
+    N := N + 2;
+  End
+  Else If Pc Then
+  Begin
+    MapItems;
+    MItem(MIS_SEPARATOR, 0, 0, '');
+    N := N + 3;
+  End;
   MItem(MIS_TEXT, 0, cmProps, L('Pr~opri'#130't'#130's', 'P~roperties', '~Eigenschaften', 'P~ropriet'#133,
         '~Propiedades'));
-  MenuClose(0, 3);
+  MenuClose(0, N);
   If CtxMenu <> 0 Then Dummy := WinDestroyWindow(CtxMenu);
   CtxMenu := WinCreateMenu(HWND_DESKTOP, LongInt(@MenuT));
   If CtxMenu <> 0 Then Dummy := WinPopupMenu(Client, Client, CtxMenu, X, Y, cmOpen, 0);
@@ -2598,6 +3197,14 @@ Begin
     cmUp : GoUp;
     cmComputer : Navigate('');
     cmAbout : About;
+    cmMapNet : MapDialog;
+    cmUnmapNet : UnmapDialog(' ');
+    cmDisconnect :
+      If Focus = 1 Then
+      Begin
+        If (TSel >= 0) And (TSel < TN) And (Length(NdP[TSel]) = 2) Then UnmapDialog(UpCase(NdP[TSel][1]));
+      End
+      Else If (CurPath = '') And (Sel >= 0) And (Sel < NEnt) Then UnmapDialog(UpCase(E(Sel)^.Nm[1]));
   End;
 End;
 
@@ -2691,14 +3298,14 @@ Begin
     If Btn2 Then
     Begin
       TreeClick(X, Y, False);
-      Context(S16(Mp1), S16(Mp1 Shr 16));
+      Context(S16(Mp1), S16(Mp1 Shr 16), True);
     End
     Else TreeClick(X, Y, Dbl);
   End
   Else If (X >= PX1) And (X <= PX2) And (Y >= PY1) And (Y <= PY2) Then
   Begin
     ContentClick(X, Y, Dbl, Btn2);
-    If Btn2 Then Context(S16(Mp1), S16(Mp1 Shr 16));
+    If Btn2 Then Context(S16(Mp1), S16(Mp1 Shr 16), False);
   End;
 End;
 
@@ -2880,6 +3487,7 @@ BEGIN
   If DosAllocMem(LongInt(@EntBase), MaxE * SizeOf(TEnt), $13) <> 0 Then EntBase := 0;
   If EntBase = 0 Then Halt(8);
   NEnt := 0; Sel := -1; Top := 0; View := 0; Focus := 1; CtxMenu := 0;
+  NdFr := 0; NdRegDone := False;
   CW := 620; CH := 400;
   ScanDrives;
   { dossier de depart : parametre, sinon C: }

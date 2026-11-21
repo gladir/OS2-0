@@ -28,7 +28,7 @@ Program GETSRC;
   l'empreinte SHA-1 de Git de chaque fichier copie) ; les fichiers
   retires du depot sont effaces. Les images du CD-ROM (IMAGE\*.ISO,
   plusieurs dizaines de Mo) ne sont copiees que si la case est cochee.
-  A la fin, l'Explorateur OS2-0 s'ouvre sur le dossier.
+  A la fin, l'Explorateur OS2-Zero s'ouvre sur le dossier.
 
   Proxy : SET HTTP_PROXY=hote:port (tunnel CONNECT).
   Parametres (essais) : /DEST:dossier ; /API:https://hote[:port] ;
@@ -1566,7 +1566,7 @@ Begin
   If DosCreateThread(LongInt(@WorkTid), LongInt(@Worker), 0, 0, 131072) <> 0 Then Dummy := Worker(0);
 End;
 
-{ l'Explorateur OS2-0 sur le dossier copie }
+{ l'Explorateur OS2-Zero sur le dossier copie }
 Procedure OpenExplorer;
 Var Res : Array[0..1] Of LongInt; P : String;
 Begin

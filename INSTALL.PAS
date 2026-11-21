@@ -1089,7 +1089,8 @@ Begin
           (Pos('.SON', U) > 0) Or (Pos('.MID', U) > 0) Or (U = 'MP3PLAY.EXE') Or
           (Pos('.MP3', U) > 0) Then Wanted := OptMM <> 0
   Else If (U = 'TCPIP32.DLL') Or (U = 'E1000.DLL') Or (U = 'PCNET.DLL') Or (U = 'IFCONFIG.EXE') Or (U = 'PING.EXE') Or
-          (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Then Wanted := OptNet <> 0
+          (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Or (U = 'SMB.IFS') Or (U = 'NET.EXE') Then
+    Wanted := OptNet <> 0
   Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or
           (U = 'PASDEV.EXE') Or (U = 'OS2PC.EXE') Or (U = 'GETSRC.EXE') Or (U = 'CALC.EXE') Or (U = 'EXPLORER.EXE') Or
           (U = 'PAINT.EXE') Or (U = 'WORDIUM.EXE') Or (U = 'EXCELSIO.EXE') Or
@@ -1244,8 +1245,8 @@ Begin
                     'Multimedia (Audio digital, Reproductor MP3, Notator, sonido)',
                     'Multimedia (Audio digitale, Lettore MP3, Notator, schede audio)',
                     'Multimedia (Audio dixhital, Lexuesi MP3, Notator, kartat e z'#137'rit)'), OptMM <> 0, BS_AUTOCHECKBOX);
-        Hw := Check(30, Y + 182, ID_CNET, L('R'#130'seau TCP/IP (PRO/1000, PCnet ; Outlink, IFCONFIG, PING, WGET)',
-                    'TCP/IP networking (PRO/1000, PCnet ; Outlink, IFCONFIG, PING, WGET)',
+        Hw := Check(30, Y + 182, ID_CNET, L('R'#130'seau TCP/IP (PRO/1000, PCnet ; Outlink, lecteurs r'#130'seau SMB, PING)',
+                    'TCP/IP networking (PRO/1000, PCnet ; Outlink, SMB network drives, PING)',
                     'TCP/IP-Netzwerk (PRO/1000, PCnet ; Outlink)', 'Red TCP/IP (PRO/1000, PCnet ; Outlink)',
                     'Rete TCP/IP (PRO/1000, PCnet ; Outlink)', 'Rrjeti TCP/IP (PRO/1000, PCnet ; Outlink)'), OptNet <> 0,
                     BS_AUTOCHECKBOX);

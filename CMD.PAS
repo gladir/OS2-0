@@ -1255,6 +1255,12 @@ Begin
  End
   Else
  Begin
+  { le nouveau nom est dans le dossier de la source (comme REN d'OS/2) }
+  If(Pos('\',Target)=0)and(Pos(':',Target)=0)Then Begin
+   P:=Length(Source);
+   While(P>0)and(Source[P]<>'\')and(Source[P]<>':')do Dec(P);
+   Target:=Copy(Source,1,P)+Target;
+  End;
   {$I-}Assign(F,Source);
   Rename(F,Target);
   {$I+}
