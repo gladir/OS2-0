@@ -376,6 +376,7 @@ Var
   GUni, GUniV : PLongs;                   { groupes d'une seule couleur : decalage, couleur x 01010101h }
   GShad, GDirty, GFlushT, GFlushLock, GShadBlk : LongInt;
   BrdX, BrdY, TitleH, MenuH, VsbW, HsbH, MRowH, MPad : LongInt;
+  MenuWHint : LongInt;          { largeur de barre de menus imposee (WinCalcFrameRect) }
   GPl : Array[0..11] Of LongInt;
   HwBit : LongInt;
   POrd : Array[0..MaxWin - 1] Of LongInt;
@@ -7314,6 +7315,21 @@ Begin
   Else GBorderW := 0;
 End;
 
+Function MBarRowsW(I, W : LongInt) : LongInt; Forward;
+
+{ lignes de la barre de menus d'un cadre (MenuWHint : largeur donnee par
+  WinCalcFrameRect, le cadre n'ayant pas encore sa taille) }
+Function FrameMenuRows(I : LongInt) : LongInt;
+Var J, W : LongInt;
+Begin
+  FrameMenuRows := 0;
+  J := ChildId(I, FID_MENU);
+  If J < 0 Then Exit;
+  W := MenuWHint;
+  If W <= 0 Then W := WCX[I] - 2 * GBorderW(I);
+  FrameMenuRows := MBarRowsW(J, W);
+End;
+
 { marges du cadre (pels) : gauche, bas, droite, haut }
 Procedure FrameInsets(I : LongInt; Var L, B, R, T : LongInt);
 Var Bd : Boolean;
@@ -7322,7 +7338,7 @@ Begin
   Begin
     L := GBorderW(I); R := L; B := L; T := L;
     If (ChildId(I, FID_TITLEBAR) >= 0) Or (ChildId(I, FID_SYSMENU) >= 0) Or (ChildId(I, FID_MINMAX) >= 0) Then T := T + TitleH;
-    If ChildId(I, FID_MENU) >= 0 Then T := T + MenuH;
+    If ChildId(I, FID_MENU) >= 0 Then T := T + MenuH * FrameMenuRows(I);
     If ChildId(I, FID_VERTSCROLL) >= 0 Then R := R + VsbW;
     If ChildId(I, FID_HORZSCROLL) >= 0 Then B := B + HsbH;
     Exit;
@@ -7364,7 +7380,7 @@ End;
 
 { disposer les controles du cadre ; rend leur nombre }
 Function FormatFrameI(I, P, Max : LongInt) : LongInt;
-Var L, B, R, T, Cx, Cy, J, N, Sw, Mw, Bw, Bh, Hs, Vs, Th : LongInt;
+Var L, B, R, T, Cx, Cy, J, N, Sw, Mw, Bw, Bh, Hs, Vs, Th, Mr : LongInt;
 Begin
   FrameInsets(I, L, B, R, T);
   If GMode <> 0 Then
@@ -7388,7 +7404,11 @@ Begin
     J := ChildId(I, FID_TITLEBAR);
     If J >= 0 Then Place(J, Bw + Sw, Cy - Bw - TitleH, Cx - 2 * Bw - Sw - Mw, TitleH, P, Max, N);
     J := ChildId(I, FID_MENU);
-    If J >= 0 Then Place(J, Bw, Cy - Bw - Th - MenuH, Cx - 2 * Bw, MenuH, P, Max, N);
+    If J >= 0 Then
+    Begin
+      Mr := MBarRowsW(J, Cx - 2 * Bw);
+      Place(J, Bw, Cy - Bw - Th - MenuH * Mr, Cx - 2 * Bw, MenuH * Mr, P, Max, N);
+    End;
     Hs := 0; Vs := 0;
     If ChildId(I, FID_HORZSCROLL) >= 0 Then Hs := HsbH;
     If ChildId(I, FID_VERTSCROLL) >= 0 Then Vs := VsbW;
@@ -7541,7 +7561,15 @@ Begin
   WinCalcFrameRect := 0;
   I := WChk(H);
   If (I < 2) Or (P = 0) Then Exit;
+  { largeur de la barre de menus : celle du rectangle donne }
+  If FClient <> 0 Then MenuWHint := RdL(P + 8) - RdL(P) - 2 * GBorderW(I)
+  Else
+  Begin
+    MenuWHint := RdL(P + 8) - RdL(P);
+    If ChildId(I, FID_VERTSCROLL) >= 0 Then MenuWHint := MenuWHint + VsbW;
+  End;
   FrameInsets(I, L, B, R, T);
+  MenuWHint := 0;
   If FClient <> 0 Then
   Begin
     WrL(P, RdL(P) + L); WrL(P + 4, RdL(P + 4) + B); WrL(P + 8, RdL(P + 8) - R); WrL(P + 12, RdL(P + 12) - T);
@@ -9261,6 +9289,73 @@ Begin
   IsBar := (WStyle[I] And MS_ACTIONBAR) <> 0;
 End;
 
+{ barre de menus (mode graphique) : marge de chaque cote des titres de 8
+  pels, ou de 4 quand les titres ne tiennent pas autrement sur une ligne
+  de W pels ; s'ils ne tiennent toujours pas, la barre se replie sur
+  plusieurs lignes, comme celle de Presentation Manager }
+Function MBarSum(I, Pad : LongInt) : LongInt;
+Var J, K, T : LongInt;
+Begin
+  T := 0;
+  For J := 0 To ItCnt(I) - 1 Do
+  Begin
+    K := ItAt(I, J);
+    If K >= 0 Then
+      If (ItStyle[K] And MIS_SEPARATOR) <> 0 Then T := T + 8
+      Else T := T + VisLen(ItTextGet(K)) * 8 + 2 * Pad;
+  End;
+  MBarSum := T;
+End;
+
+Function MBarPadW(I, W : LongInt) : LongInt;
+Begin
+  MBarPadW := 8;
+  If (GMode = 0) Or (W <= 0) Or (WId[I] = FID_SYSMENU) Or (WId[I] = FID_MINMAX) Then Exit;
+  If (MBarSum(I, 8) > W) And (MBarSum(I, 4) <= W) Then MBarPadW := 4;
+End;
+
+Function MBarPad(I : LongInt) : LongInt;
+Begin
+  MBarPad := MBarPadW(I, WCX[I]);
+End;
+
+{ position de l'article Ps d'une barre de W pels : X et ligne (0 en haut) }
+Procedure MBarPosW(I, W, Ps : LongInt; Var X, Row : LongInt);
+Var J, K, Pad, Iw : LongInt;
+Begin
+  X := 0; Row := 0;
+  Pad := MBarPadW(I, W);
+  For J := 0 To Ps Do
+  Begin
+    K := ItAt(I, J);
+    If K >= 0 Then
+    Begin
+      If (ItStyle[K] And MIS_SEPARATOR) <> 0 Then Iw := 8
+      Else Iw := VisLen(ItTextGet(K)) * 8 + 2 * Pad;
+      If (GMode <> 0) And (W > 0) And (X > 0) And (X + Iw > W) Then
+      Begin
+        Inc(Row); X := 0;
+      End;
+      If J = Ps Then Exit;
+      X := X + Iw;
+    End;
+  End;
+End;
+
+{ nombre de lignes d'une barre de W pels }
+Function MBarRowsW(I, W : LongInt) : LongInt;
+Var X, Row, N : LongInt;
+Begin
+  N := ItCnt(I);
+  If (N = 0) Or (GMode = 0) Or (W <= 0) Then
+  Begin
+    MBarRowsW := 1;
+    Exit;
+  End;
+  MBarPosW(I, W, N - 1, X, Row);
+  MBarRowsW := Row + 1;
+End;
+
 { largeur (pels) d'un article d'une barre }
 Function MItemW(I, K : LongInt) : LongInt;
 Begin
@@ -9269,7 +9364,7 @@ Begin
   Begin
     If GMode <> 0 Then MItemW := TitleH Else MItemW := VisLen(ItTextGet(K)) * 8;
   End
-  Else MItemW := (VisLen(ItTextGet(K)) + 2) * 8;
+  Else MItemW := VisLen(ItTextGet(K)) * 8 + 2 * MBarPad(I);
 End;
 
 { position (pels) d'un article d'une barre }
@@ -9404,7 +9499,7 @@ Begin
 End;
 
 Procedure MenuOpenSub(I, Ps : LongInt);
-Var K, S, X, Y, Cx, Cy : LongInt;
+Var K, S, X, Y, Cx, Cy, Row : LongInt;
 Begin
   K := ItAt(I, Ps);
   If (K < 0) Or ((ItStyle[K] And MIS_SUBMENU) = 0) Then Exit;
@@ -9415,7 +9510,8 @@ Begin
   Cx := MenuWidthPels(S); Cy := MenuHeightPels(S);
   If IsBar(I) Then
   Begin
-    X := AbsX(I) + MItemX(I, Ps);
+    MBarPosW(I, WCX[I], Ps, X, Row);
+    X := AbsX(I) + X;
     Y := AbsY(I) - Cy;
   End
   Else
@@ -9490,20 +9586,28 @@ End;
 
 { article sous (x, y) relatif a la fenetre }
 Function MenuHit(I, X, Y : LongInt) : LongInt;
-Var J, N, K, C, Cx, R : LongInt;
+Var J, N, K, C, Cx, R, Row, Ry : LongInt;
 Begin
   R := -1;
   N := ItCnt(I);
   If IsBar(I) Then
   Begin
-    C := X; Cx := 0;
+    C := X;
+    { ligne de la barre (barre repliee sur plusieurs lignes) }
+    Ry := 0;
+    If (GMode <> 0) And (MenuH > 0) And (WId[I] <> FID_SYSMENU) And (WId[I] <> FID_MINMAX) Then
+      Ry := (WCY[I] - 1 - Y) Div MenuH;
     For J := 0 To N - 1 Do
     Begin
       K := ItAt(I, J);
       If (K >= 0) And (R < 0) Then
       Begin
-        If (C >= Cx) And (C < Cx + MItemW(I, K)) Then R := J;
-        Cx := Cx + MItemW(I, K);
+        If (WId[I] = FID_SYSMENU) Or (WId[I] = FID_MINMAX) Then
+        Begin
+          Cx := MItemX(I, J); Row := 0;
+        End
+        Else MBarPosW(I, WCX[I], J, Cx, Row);
+        If (Row = Ry) And (C >= Cx) And (C < Cx + MItemW(I, K)) Then R := J;
       End;
     End;
   End
@@ -9575,26 +9679,27 @@ Begin
   Begin
     GFillPS(K, 0, 0, WCX[I], WCY[I], Bg);
     GFillPS(K, 0, 0, WCX[I], 1, 8);
-    X := 0;
     For J := 0 To N - 1 Do
     Begin
       It := ItAt(I, J);
       If It >= 0 Then
       Begin
         W := MItemW(I, It);
-        If (ItStyle[It] And MIS_SEPARATOR) <> 0 Then GFillPS(K, X + 3, 3, X + 4, WCY[I] - 3, 8)
+        { ligne Tb de la barre : de WCY - (Tb + 1) * MenuH a WCY - Tb * MenuH }
+        MBarPosW(I, WCX[I], J, X, Tb);
+        Y := WCY[I] - (Tb + 1) * MenuH;
+        If (ItStyle[It] And MIS_SEPARATOR) <> 0 Then GFillPS(K, X + 3, Y + 3, X + 4, Y + MenuH - 3, 8)
         Else
         Begin
           C := Fg;
           If (ItAttr[It] And MIA_DISABLED) <> 0 Then C := Df;
           If Act And (WS0[I] = J) Then
           Begin
-            GFillPS(K, X, 1, X + W, WCY[I], Hb);
+            GFillPS(K, X, Y + 1, X + W, Y + MenuH, Hb);
             C := Hf;
           End;
-          GTextPS(K, X + 8, (WCY[I] - 16) Div 2, ItTextGet(It), W Div 8, C, Bg, False, True);
+          GTextPS(K, X + MBarPad(I), Y + (MenuH - 16) Div 2, ItTextGet(It), W Div 8, C, Bg, False, True);
         End;
-        X := X + W;
       End;
     End;
     Exit;

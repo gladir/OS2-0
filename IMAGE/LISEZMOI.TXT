@@ -915,6 +915,36 @@ et Annuler), messages par WinMessageBox.
   fleches, texte), importation et exportation SMILES, MOL, InChI, SVG,
   BMP, analyse (formule brute, masse, RMN, spectre de masse).
 
+Productivite : applications d'OFFICE-0 (dossier Productivite du bureau)
+-----------------------------------------------------------------------
+Cinq applications du depot OFFICE-0 portees vers Presentation Manager ;
+sources dans APPS (un seul fichier chacune). Fenetre de PM avec la barre
+de menus d'OS/2 (construite a partir des menus d'origine ; F10, Alt +
+lettre), boites de PM pour les messages, saisies, listes, formulaires et
+fichiers.
+  Maximilien CRM (MAXIMIZE.EXE ; source APPS\MAXIMIZE.PAS) : gestion des
+  relations clients, base MyISAM et SQL integres ; carnet d'adresses,
+  contacts, notes, journee de travail, opportunites, hotlist,
+  calendrier, courriels, bibliotheque, commandes, plans d'action,
+  publipostage, rapports, console SQL. Accueil : Lancer un exemple
+  (dossier EXEMPLE), Nouveau CRM vide, Ouvrir un CRM existant. Clic droit
+  ou F9 : menu contextuel de PM ; Ctrl+N : nouvelle entree (fiche de PM :
+  Tab et Maj+Tab, F4 liste du champ, F2 ou Entree OK) ; tables, editeur,
+  chronometre et A propos dans des fenetres de PM a part.
+  MAXIMIZE /SQL "requete" [/D:dossier] : requete SQL sans interface.
+  Sample Accounting (SIMPLY.EXE ; source APPS\SIMPLY.PAS) : comptabilite
+  (comptes, fournisseurs, clients, paie, inventaire, projets,
+  conciliation, rapports, graphiques).
+  Acrodoc (ACROBAT.EXE ; source APPS\ACROBAT.PAS) : visionneuse et
+  editeur PDF (commentaires, pages, filigrane, recherche, signature,
+  biffure, exportation en texte et BMP) ; ACROBAT fichier.pdf ouvre un
+  document (exemple : LETTRE.PDF). Ctrl+O ouvrir, Ctrl+S enregistrer,
+  Ctrl+Z annuler, F1 aide.
+  News Master (NEWS.EXE ; source APPS\NEWS.PAS) : mise en page de
+  journaux.
+  PresentPoint (POWERPNT.EXE ; source APPS\POWERPNT.PAS) : presentations
+  (diapositives, formes, themes, transitions, animations, diaporama).
+
 Jeux (dossier Jeux du bureau)
 -----------------------------
 Jeux de Presentation Manager (realisations originales des jeux

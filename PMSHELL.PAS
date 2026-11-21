@@ -166,6 +166,7 @@ Const
   IC_MP3PLAY = 68; OB_MP3 = 36;
   OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70;
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
+  IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14;
@@ -1183,7 +1184,9 @@ Begin
           Dummy := NewItem(V, IC_FOLDER, OB_DEVKIT, 'Developer Kit', '');
         { dossiers des applications, directement sur le bureau }
         If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Or
-           (WordiumPath <> '') Or (ExcelsiorPath <> '') Then
+           (WordiumPath <> '') Or (ExcelsiorPath <> '') Or FileExists('C:\MAXIMIZE.EXE') Or
+           FileExists('C:\SIMPLY.EXE') Or FileExists('C:\ACROBAT.EXE') Or FileExists('C:\NEWS.EXE') Or
+           FileExists('C:\POWERPNT.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
@@ -1297,6 +1300,21 @@ Begin
         If WordiumPath <> '' Then Dummy := NewItem(V, IC_WORDIUM, OB_GAME, 'WorDium', WordiumPath);
         { Excelsior : tableur (EXCEL.PAS d'OFFICE-0) ; XLC, XLS, XLSX }
         If ExcelsiorPath <> '' Then Dummy := NewItem(V, IC_EXCELSIOR, OB_GAME, 'Excelsior', ExcelsiorPath);
+        { applications d'OFFICE-0 : Maximilien CRM (MAXIMIZE.PAS, gestion
+          des relations clients, MyISAM et SQL), Sample Accounting
+          (SIMPLY.PAS, comptabilite), Acrodoc (ACROBAT.PAS, visionneuse et
+          editeur PDF), News Master (NEWS.PAS, mise en page de journaux) et
+          PresentPoint (POWERPNT.PAS, presentations) }
+        If FileExists('C:\MAXIMIZE.EXE') Then
+          Dummy := NewItem(V, IC_CRM, OB_GAME, 'Maximilien CRM', 'C:\MAXIMIZE.EXE');
+        If FileExists('C:\SIMPLY.EXE') Then
+          Dummy := NewItem(V, IC_ACCOUNT, OB_GAME, 'Sample Accounting', 'C:\SIMPLY.EXE');
+        If FileExists('C:\ACROBAT.EXE') Then
+          Dummy := NewItem(V, IC_ACRODOC, OB_GAME, 'Acrodoc', 'C:\ACROBAT.EXE');
+        If FileExists('C:\NEWS.EXE') Then
+          Dummy := NewItem(V, IC_NEWS, OB_GAME, 'News Master', 'C:\NEWS.EXE');
+        If FileExists('C:\POWERPNT.EXE') Then
+          Dummy := NewItem(V, IC_PRESENT, OB_GAME, 'PresentPoint', 'C:\POWERPNT.EXE');
       End;
     VK_LEISURE :
       Begin
@@ -2338,6 +2356,95 @@ Begin
         GLn(Hps, X + 12, Y + 12, X + 12, Y + 16, CLR_DARKBLUE);
         GLn(Hps, X + 15, Y + 22, X + 15, Y + 26, CLR_BLACK);
         GBox(Hps, X + 14, Y + 26, X + 17, Y + 28, CLR_RED, DRO_FILL);
+      End;
+    IC_CRM :
+      Begin
+        { Maximilien CRM : fiche de contact (personne) sur un fichier rotatif }
+        GBox(Hps, X + 13, Y + 2, X + 18, Y + 5, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 6, Y + 2, X + 25, Y + 3, CLR_DARKGRAY, DRO_FILL);
+        FBox(Hps, X + 2, Y + 6, X + 29, Y + 27, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 23, X + 28, Y + 26, CLR_DARKBLUE, DRO_FILL);
+        GLn(Hps, X + 9, Y + 27, X + 9, Y + 29, CLR_BLACK);
+        GLn(Hps, X + 22, Y + 27, X + 22, Y + 29, CLR_BLACK);
+        For K := -3 To 3 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 9 Do Inc(R);
+          GLn(Hps, X + 9 - R, Y + 17 + K, X + 9 + R, Y + 17 + K, CLR_BROWN);
+        End;
+        For K := 0 To 4 Do
+          GLn(Hps, X + 9 - 2 - K Div 2 - 1, Y + 9 + K, X + 9 + 2 + K Div 2 + 1, Y + 9 + K, CLR_BLUE);
+        GLn(Hps, X + 16, Y + 19, X + 26, Y + 19, CLR_BLACK);
+        GLn(Hps, X + 16, Y + 15, X + 26, Y + 15, CLR_DARKGRAY);
+        GLn(Hps, X + 16, Y + 11, X + 23, Y + 11, CLR_DARKGRAY);
+      End;
+    IC_ACCOUNT :
+      Begin
+        { Sample Accounting : grand livre (colonnes) et piece de monnaie }
+        FBox(Hps, X + 2, Y + 3, X + 25, Y + 29, CLR_DARKGREEN, CLR_BLACK);
+        FBox(Hps, X + 5, Y + 5, X + 27, Y + 27, CLR_WHITE, CLR_BLACK);
+        For K := 0 To 4 Do GLn(Hps, X + 6, Y + 22 - K * 4, X + 26, Y + 22 - K * 4, CLR_CYAN);
+        GLn(Hps, X + 12, Y + 6, X + 12, Y + 26, CLR_RED);
+        GLn(Hps, X + 20, Y + 6, X + 20, Y + 26, CLR_RED);
+        For K := -6 To 6 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 36 Do Inc(R);
+          GLn(Hps, X + 23 - R, Y + 8 + K, X + 23 + R, Y + 8 + K, CLR_YELLOW);
+        End;
+        GLn(Hps, X + 23, Y + 4, X + 23, Y + 12, CLR_BROWN);
+        GLn(Hps, X + 21, Y + 10, X + 25, Y + 10, CLR_BROWN);
+        GLn(Hps, X + 21, Y + 8, X + 25, Y + 8, CLR_BROWN);
+        GLn(Hps, X + 21, Y + 6, X + 25, Y + 6, CLR_BROWN);
+      End;
+    IC_ACRODOC :
+      Begin
+        { Acrodoc : document PDF (bandeau rouge, coin replie) }
+        FBox(Hps, X + 5, Y + 1, X + 26, Y + 29, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 21, Y + 25, X + 26, Y + 29, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 21, Y + 29, X + 26, Y + 24, CLR_BLACK);
+        GLn(Hps, X + 21, Y + 24, X + 26, Y + 24, CLR_BLACK);
+        GLn(Hps, X + 21, Y + 24, X + 21, Y + 29, CLR_BLACK);
+        GBox(Hps, X + 2, Y + 11, X + 22, Y + 18, CLR_RED, DRO_FILL);
+        { P D F en blanc dans le bandeau }
+        GLn(Hps, X + 4, Y + 12, X + 4, Y + 17, CLR_WHITE); GLn(Hps, X + 4, Y + 17, X + 7, Y + 17, CLR_WHITE);
+        GLn(Hps, X + 7, Y + 17, X + 7, Y + 15, CLR_WHITE); GLn(Hps, X + 4, Y + 15, X + 7, Y + 15, CLR_WHITE);
+        GLn(Hps, X + 10, Y + 12, X + 10, Y + 17, CLR_WHITE); GLn(Hps, X + 10, Y + 17, X + 12, Y + 17, CLR_WHITE);
+        GLn(Hps, X + 10, Y + 12, X + 12, Y + 12, CLR_WHITE); GLn(Hps, X + 13, Y + 13, X + 13, Y + 16, CLR_WHITE);
+        GLn(Hps, X + 16, Y + 12, X + 16, Y + 17, CLR_WHITE); GLn(Hps, X + 16, Y + 17, X + 20, Y + 17, CLR_WHITE);
+        GLn(Hps, X + 16, Y + 15, X + 19, Y + 15, CLR_WHITE);
+        For K := 0 To 2 Do GLn(Hps, X + 8, Y + 22 + K * 2, X + 19, Y + 22 + K * 2, CLR_DARKGRAY);
+        For K := 0 To 2 Do GLn(Hps, X + 8, Y + 4 + K * 2, X + 23, Y + 4 + K * 2, CLR_DARKGRAY);
+      End;
+    IC_NEWS :
+      Begin
+        { News Master : page de journal (titre, colonnes, photo) }
+        FBox(Hps, X + 3, Y + 1, X + 28, Y + 29, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 5, Y + 24, X + 26, Y + 27, CLR_BLACK, DRO_FILL);
+        GLn(Hps, X + 5, Y + 22, X + 26, Y + 22, CLR_DARKGRAY);
+        GBox(Hps, X + 5, Y + 13, X + 15, Y + 20, CLR_BLUE, DRO_FILL);
+        GBox(Hps, X + 7, Y + 14, X + 13, Y + 16, CLR_GREEN, DRO_FILL);
+        For K := 0 To 4 Do GLn(Hps, X + 17, Y + 20 - K * 2, X + 26, Y + 20 - K * 2, CLR_DARKGRAY);
+        For K := 0 To 4 Do
+        Begin
+          GLn(Hps, X + 5, Y + 11 - K * 2, X + 15, Y + 11 - K * 2, CLR_DARKGRAY);
+          GLn(Hps, X + 17, Y + 11 - K * 2, X + 26, Y + 11 - K * 2, CLR_DARKGRAY);
+        End;
+      End;
+    IC_PRESENT :
+      Begin
+        { PresentPoint : tableau de presentation sur chevalet (graphique) }
+        GLn(Hps, X + 15, Y + 27, X + 15, Y + 29, CLR_DARKGRAY);
+        FBox(Hps, X + 2, Y + 9, X + 29, Y + 27, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 24, X + 28, Y + 26, CLR_BROWN, DRO_FILL);
+        GBox(Hps, X + 6, Y + 11, X + 9, Y + 16, CLR_BLUE, DRO_FILL);
+        GBox(Hps, X + 11, Y + 11, X + 14, Y + 20, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 16, Y + 11, X + 19, Y + 18, CLR_DARKGREEN, DRO_FILL);
+        GBox(Hps, X + 21, Y + 11, X + 24, Y + 22, CLR_YELLOW, DRO_FILL);
+        GLn(Hps, X + 5, Y + 10, X + 26, Y + 10, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 9, X + 8, Y + 1, CLR_DARKGRAY);
+        GLn(Hps, X + 15, Y + 9, X + 22, Y + 1, CLR_DARKGRAY);
+        GLn(Hps, X + 15, Y + 9, X + 15, Y + 3, CLR_DARKGRAY);
       End;
     IC_DREAMS :
       Begin
