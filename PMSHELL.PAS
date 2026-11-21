@@ -265,6 +265,7 @@ Function DosFindFirst(PSpec, PHDir, Attr, PBuf, CbBuf, PCount, Level : LongInt) 
 Function DosFindNext(HDir, PBuf, CbBuf, PCount : LongInt) : LongInt; External 'DOSCALLS';
 Function DosFindClose(HDir : LongInt) : LongInt; External 'DOSCALLS';
 Function DosQueryCurrentDisk(PDisk, PLogical : LongInt) : LongInt; External 'DOSCALLS';
+Function KDiskCtl(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnDiskCtl';
 Function DosQuerySysInfo(IStart, ILast, PBuf, CbBuf : LongInt) : LongInt; External 'DOSCALLS';
 Function DosShutdown(Reserved : LongInt) : LongInt; External 'DOSCALLS';
 Function DosScanEnv(PName, PPValue : LongInt) : LongInt; External 'DOSCALLS';
@@ -1215,7 +1216,7 @@ Begin
 End;
 
 Procedure Populate(V : LongInt);
-Var D, L, K : LongInt;
+Var D, L, K, Cd : LongInt;
 Begin
   ClearItems(V);
   Case Vw(V)^.Kind Of
@@ -1425,10 +1426,13 @@ Begin
       Begin
         D := 0; L := 0;
         Dummy := DosQueryCurrentDisk(LongInt(@D), LongInt(@L));
+        { lettre du CD-ROM : C: au demarrage du CD, sinon la premiere libre
+          apres les partitions du disque dur (D: le plus souvent) }
+        Cd := KDiskCtl(12, 0, 0);
         For K := 2 To 25 Do
           If (L And (1 Shl K)) <> 0 Then
           Begin
-            If K = 2 Then Dummy := NewItem(V, IC_CDROM, OB_DIR, 'Lecteur ' + Chr(65 + K) + ' (CD-ROM)',
+            If K = Cd Then Dummy := NewItem(V, IC_CDROM, OB_DIR, 'Lecteur ' + Chr(65 + K) + ' (CD-ROM)',
                                            Chr(65 + K) + ':\')
             Else Dummy := NewItem(V, IC_DISK, OB_DIR, 'Lecteur ' + Chr(65 + K), Chr(65 + K) + ':\');
           End;

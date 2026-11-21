@@ -295,6 +295,7 @@ Var
   TrapFrame        : LongInt;
   DbgArm           : LongInt;       { debogueur (indice + 1) du prochain processus lance }
   DrOn             : Boolean;       { DR7 arme (point d'arret materiel) }
+  CdLetter         : LongInt;       { demarrage d'un disque dur : lettre du CD-ROM (-1 aucune) }
   DbgBuf           : Array[0..4095] Of Byte;   { copie de la memoire d'un processus debogue }
 
   { Minuterie }
@@ -3888,6 +3889,7 @@ End;
 Function DriveOk(Path : String) : Boolean;
 Begin
   DriveOk := ((Length(Path) >= 3) And (Path[1] = 'C')) Or (IfsDrive(Path) >= 0) Or
+             ((CdLetter >= 0) And (Length(Path) >= 3) And (UpCase(Path[1]) = Chr(65 + CdLetter))) Or
              ((Length(Path) >= 3) And FlpPath(Path) And FlpReady);
 End;
 
@@ -5517,7 +5519,7 @@ Begin
     GetDiskFreeSpaceA := 1;
     Exit;
   End;
-  If (Root = '') Or (Root[1] <> 'C') Then
+  If (Root = '') Or ((Root[1] <> 'C') And Not ((CdLetter >= 0) And (Root[1] = Chr(65 + CdLetter)))) Then
   Begin
     LastError := ErrInvalidDrive;
     Exit;
@@ -9221,8 +9223,28 @@ Function FreeLetter : LongInt;
 Var D : LongInt;
 Begin
   D := 3;
-  While (D <= 25) And IfsVols[D].Mounted Do Inc(D);
+  While (D <= 25) And (IfsVols[D].Mounted Or (D = CdLetter)) Do Inc(D);
   FreeLetter := D;
+End;
+
+{ Demarrage d'un disque dur : le CD-ROM (ISO 9660, lecture par l'ATAPI)
+  recoit la premiere lettre libre, apres les partitions et le disque
+  virtuel ; ses fichiers sont lus par le meme code que l'unite C: d'un
+  demarrage du CD-ROM }
+Procedure CdMount;
+Var A : LongInt;
+Begin
+  CdLetter := -1;
+  A := CdSector(16);
+  If A = 0 Then Exit;
+  If (Mem[0:A] <> 1) Or (Mem[0:A + 1] <> Ord('C')) Or (Mem[0:A + 2] <> Ord('D')) Or
+     (Mem[0:A + 3] <> Ord('0')) Or (Mem[0:A + 4] <> Ord('0')) Or (Mem[0:A + 5] <> Ord('1')) Then Exit;
+  RootLba := GetD(A + 156 + 2);
+  RootSize := GetD(A + 156 + 10);
+  A := FreeLetter;
+  If A > 25 Then Exit;
+  CdLetter := A;
+  KLog('Unite ' + Chr(65 + A) + ': CD-ROM (ISO 9660).');
 End;
 
 { Presenter aux pilotes IFS les peripheriques bloc qui ne l'ont pas encore
@@ -9433,6 +9455,7 @@ Begin
           If P2 <> 0 Then MemL[0:P2] := BootPartLba;
           KrnDiskCtl := Ord(HdBoot);
         End;
+   12 : If HdBoot Then KrnDiskCtl := CdLetter Else KrnDiskCtl := 2;   { lettre du CD-ROM }
   End;
 End;
 
@@ -9817,6 +9840,7 @@ Begin
   If FdOk Then R := R Or 1;
   For D := 0 To 25 Do
     If IfsVols[D].Mounted Then R := R Or (1 Shl D);
+  If CdLetter >= 0 Then R := R Or (1 Shl CdLetter);
   GetLogicalDrives := R;
 End;
 
@@ -19663,6 +19687,7 @@ BEGIN
     +44h taille), recopie avant la pagination }
   NDisk := 0;
   HdBoot := MemW[0:BootInfo + $34] = $4448;
+  CdLetter := -1;
   BootPartLba := 0; BootIfsBuf := 0; BootIfsSize := 0; FmtIfs := -1;
   TrapSeq := 0; TrapMsg := ''; TrapProc := -1;
   BootIfsName := 'HPFS.IFS';
@@ -19750,13 +19775,17 @@ BEGIN
   For I := 0 To NIfsLines - 1 Do LoadIfs(IfsLines[I]);
   If NIfs > 0 Then
   Begin
-    { partitions des disques durs, puis disque virtuel }
+    { partitions des disques durs, CD-ROM (demarrage d'un disque dur), puis
+      disque virtuel }
     HdInit;
+    MountIfsVolumes;
+    If HdBoot And AtaFound Then CdMount;
     If RamDiskKb > 0 Then
       If RamDiskNew(RamDiskKb) < 0 Then
         KLog('SYS1719: disque virtuel de ' + IntStr(RamDiskKb) + ' Ko impossible.');
     MountIfsVolumes;
   End;
+  If HdBoot And AtaFound And (CdLetter < 0) Then CdMount;
   PutPStr(LongInt(@KCmdLine), 'OS2KRNL', 256);
   { processeur de commandes (PROTSHELL) : relance a sa fin }
   Runs := 0;

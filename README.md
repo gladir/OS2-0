@@ -1019,7 +1019,9 @@ Le menu contextuel du bureau (clic droit sur le fond, ou Maj+F10) et celui d'un 
 
 <img width="640" height="480" alt="OS/2-0 : menu contextuel du bureau, sous-menu Nouveau" src="IMAGE/BUREAU_NOUVEAU.png" />
 
-Les fenêtres à bordure de taille (FCF_SIZEBORDER) se redimensionnent maintenant à la souris : <b>PMWIN</b> reconnaît le bord gauche, droit, haut ou bas et les quatre coins (16 pels) d'un cadre, capture la souris et suit le glissement par WinSetWindowPos (taille d'au moins 100 x 60 pels) ; la fenêtre cliente reçoit WM_SIZE et se redessine.
+Les fenêtres à bordure de taille (FCF_SIZEBORDER), dont les dossiers du bureau, se redimensionnent maintenant à la souris : <b>PMWIN</b> reconnaît le bord gauche, droit, haut ou bas et les quatre coins (16 pels) d'un cadre, même quand la souris est sur un contrôle du cadre (les coins du bas débordent sur le bouton de la barre de défilement), capture la souris et suit le glissement par WinSetWindowPos (taille d'au moins 100 x 60 pels) ; la fenêtre cliente reçoit WM_SIZE et se redessine. Le pointeur prend la forme des flèches de taille d'OS/2 (horizontale, verticale ou diagonale, comme SPTR_SIZEWE, SPTR_SIZENS, SPTR_SIZENWSE et SPTR_SIZENESW) dès qu'il survole un bord ou un coin.
+
+<b>Lecteurs</b> : au démarrage du CD-ROM, C: est le CD-ROM ; au démarrage du disque dur où OS/2-0 est installé, C: est sa partition et le CD-ROM reçoit maintenant la première lettre libre après les partitions (D: le plus souvent) : le noyau lit son volume ISO 9660 par l'ATAPI (IDE ou AHCI) avec le même code que le C: d'un démarrage du CD-ROM. Le dossier Lecteurs montre « Lecteur C » et « Lecteur D (CD-ROM) » ; avant, le CD-ROM n'avait pas de lettre et C: était toujours appelé CD-ROM.
 
 <h3>Calculatrice (CALC.PAS)</h3>
 
