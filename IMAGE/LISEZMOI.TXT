@@ -1408,7 +1408,8 @@ du bureau, objet Pascal Developer (PASDEV fichier.pas le lance aussi).
     utilisables pendant la compilation ; une boite Compilation (comme
     celle de Borland Pascal) montre l'etape, la ligne en cours, les
     erreurs et la duree, et se ferme a la fin (OS2PC -PRG : progression
-    dans la memoire partagee \SHAREMEM\OS2PC.PRG) ;
+    dans la memoire partagee \SHAREMEM\OS2PC.PRG) ; son bouton Annuler
+    (ou Echap) arrete le compilateur (DosKillProcess) ;
   - Executer (Ctrl+F9) : compile si besoin, puis lance le programme (PM :
     directement ; Console : dans une fenetre OS/2, pause a la fin ; un
     programme compile pour PM sans fenetre, un simple WriteLn, est aussi
@@ -1427,9 +1428,28 @@ ecriture allait au disque : plus de 60 millions d'acces au controleur
 IDE pour un petit programme). Un programme arrete sur une exception, ou
 un programme de PM arrete sur une erreur d'execution (Runtime error 200
 a 217), est signale par une boite SYS3175 du bureau (programme, TRAP,
-adresse). OS2PC.EXE (compilateur natif) occupe environ 40 Mo de tables ; avec 64 Mo
-de memoire, il compile un source d'environ 3 000 lignes ; au-dela (par
-exemple PASDEV.PAS lui-meme, 4 000 lignes), donner 128 Mo a la machine.
+adresse). Les tables d'OS2PC.EXE (compilateur natif) n'ont aucune
+taille maximale : elles commencent petites et grandissent a la demande
+tant qu'il reste de la memoire (jetons, symboles, types, champs,
+procedures, donnees, code, etiquettes...). Les tables de fiches sont
+des tableaux de pointeurs vers des fiches jamais deplacees. Avant,
+OS2PC.EXE reservait 40 Mo au depart et avait des limites fixes (4 096
+symboles, 384 types, 64 champs par record, 512 Ko de code...). Avec
+64 Mo de memoire, il compile maintenant PASDEV.PAS (4 000 lignes) ; un
+programme d'essai de 15 700 lignes (1,6 Mo de code) se compile avec
+256 Mo.
+Des programmes ordinaires (421.PAS, par exemple : plus de 64
+procedures, 17 fonctions externes et plus) ne se compilaient pas : la
+compilation semblait figee, ou finissait sur une fausse erreur
+"identificateur deja declare". Les petits blocs de GetMem venaient du
+tas du noyau (quelques Mo pour tout le systeme), qu'OS2PC.EXE epuisait
+(GetMem rendait Nil) : un processus y prend maintenant au plus 256 Ko,
+le reste vient de ses propres arenes (memoire au-dela de 16 Mo, rendue
+a la fin du processus). Et OS2PC agrandissait ses tables de String[63]
+avec une taille de 64 octets ecrite en dur, alors que le code produit
+par OS2PC donne 256 octets a toute chaine courte : il ecrit maintenant
+SizeOf(TProcStr). OS2PC.EXE produit pour 421.PAS et FREECELL.PAS les
+memes fichiers, octet pour octet, que le compilateur de Free Pascal.
 
 LaunchPad (LAUNCHPD.EXE)
 ------------------------

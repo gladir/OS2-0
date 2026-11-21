@@ -245,6 +245,8 @@ Function SetStdHandle(N, H : LongInt) : LongInt; External 'DOSCALLS';
 Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesCtl';
 Function KTicks : LongInt; External 'DOSCALLS' Name 'GetTickCount';
 Function DosWaitChild(Action, Option, PRes, PPid, Pid : LongInt) : LongInt; External 'DOSCALLS';
+Function DosKillProcess(Action, Pid : LongInt) : LongInt; External 'DOSCALLS';
+Function DosSleep(Ms : LongInt) : LongInt; External 'DOSCALLS';
 Function DosAllocSharedMem(PPb, PName, Cb, Flag : LongInt) : LongInt; External 'DOSCALLS';
 Function DosGetNamedSharedMem(PPb, PName, Flag : LongInt) : LongInt; External 'DOSCALLS';
 Function WinStartTimer(Hab, H, Id, Dt : LongInt) : LongInt; External 'PMWIN';
@@ -2323,7 +2325,7 @@ Var PendCmd : LongInt;                 { commande a reprendre apres Enregistrer 
 { compilation en cours (OS2PC.EXE lance en asynchrone : l'EDI et le
   bureau restent vivants ; un minuteur attend la fin du compilateur) }
 Var
-  CompBusy, PendRun : Boolean;
+  CompBusy, PendRun, CompCancel : Boolean;
   CompPid, CompT0 : LongInt;
   CompEF : Text;
   CompErrN : String;
@@ -2332,6 +2334,18 @@ Procedure CompileDone(R, Code : LongInt); Forward;
 Procedure CompBoxOpen; Forward;
 Procedure CompBoxClose; Forward;
 
+{ le fichier N peut-il etre (re)cree ? absent, ou efface avec succes
+  (un fichier du CD-ROM ne peut pas etre remplace) }
+Function CanReplace(N : String) : Boolean;
+Var F : File;
+Begin
+  CanReplace := True;
+  If Not FileExists(N) Then Exit;
+  Assign(F, N);
+  {$I-} Erase(F); {$I+}
+  CanReplace := IOResult = 0;
+End;
+
 Function Compile : Boolean;
 Var W, R, K, T0 : LongInt; Src, Exe, ErrN, Args, S : String; Res : Array[0..1] Of LongInt;
   PL : PLong;
@@ -2339,8 +2353,9 @@ Begin
   Compile := False;
   If CompBusy Then
   Begin
-    StatusMsg := Acc('Compilation d^ej^a en cours...');
+    StatusMsg := Acc('Compilation d^ej^a en cours (Annuler dans la bo^ite Compilation pour l''arr^eter)...');
     InvRect(0, WorkH, CW, CH);
+    If CompFr <> 0 Then Dummy := WinSetActiveWindow(HWND_DESKTOP, CompFr);
     Exit;
   End;
   W := SrcWin;
@@ -2366,6 +2381,21 @@ Begin
   Src := Wins[W].FileName;
   Exe := ChangeExt(Src, '.EXE');
   ErrN := DirOf(Exe) + 'PASDEV.ERR';
+  { ancien .EXE qui ne peut pas etre remplace (CD-ROM, lecture seule, en
+    cours d'execution) : sorties dans le repertoire de travail }
+  If Not CanReplace(Exe) Then
+  Begin
+    If CanReplace(WorkDir + NameOf(Exe)) And (WorkDir <> DirOf(Exe)) Then
+    Begin
+      Exe := WorkDir + NameOf(Exe);
+      ErrN := WorkDir + 'PASDEV.ERR';
+    End
+    Else
+    Begin
+      Exe := 'D:\' + NameOf(Exe);
+      ErrN := 'D:\PASDEV.ERR';
+    End;
+  End;
   { repertoire du source en lecture seule (CD-ROM) : sorties dans le repertoire de travail }
   Assign(CompEF, ErrN);
   {$I-} Rewrite(CompEF); {$I+}
@@ -2459,6 +2489,12 @@ Begin
   ErrN := CompErrN; Exe := LastExe; Src := LastSrc;
   MsgClear;
   MsgAdd('Compilation de ' + Src + ' -> ' + Exe + ' (' + TargetName(LastTarget) + ')', -1);
+  If CompCancel Then
+  Begin
+    MsgAdd(Acc('Compilation interrompue : le compilateur a ^et^e arr^et^e (bouton Annuler).'), -2);
+    Inc(LastErrs);
+    CompCancel := False;
+  End;
   If R <> 0 Then
   Begin
     MsgAdd(Acc('Impossible de lancer le compilateur (erreur ') + IStr(R) + ').', -2);
@@ -2514,6 +2550,27 @@ Begin
       End;
   End;
   Redraw;
+End;
+
+{ bouton Annuler (ou Echap, ou fermeture) de la boite de compilation :
+  arreter le compilateur (OS2PC.EXE qui ne finirait pas) et rendre la
+  main ; la sortie deja produite est affichee dans la fenetre Messages }
+Procedure CompileAbort;
+Var Res : Array[0..1] Of LongInt; Pid, K : LongInt;
+Begin
+  If Not CompBusy Then Exit;
+  Dummy := WinStopTimer(Hab, Client, 7);
+  CompBusy := False;
+  CompCancel := True;
+  { DKP_PROCESS : le compilateur seul ; puis recolter sa fin }
+  Dummy := DosKillProcess(1, CompPid);
+  For K := 1 To 50 Do
+  Begin
+    Res[0] := 0; Res[1] := 0; Pid := 0;
+    If DosWaitChild(0, 1, LongInt(@Res), LongInt(@Pid), CompPid) <> 129 Then Break;
+    Dummy := DosSleep(20);
+  End;
+  CompileDone(0, 0);
 End;
 
 Var ShieldOk : Boolean;
@@ -3062,7 +3119,17 @@ Begin
         If Rc[2] > Rc[0] Then Dummy := WinFillRect(Hps, LongInt(@Rc), CLR_DARKBLUE);
         Dummy := WinEndPaint(Hps);
       End;
-    WM_CLOSE : ;                         { la boite se ferme a la fin de la compilation }
+    WM_CREATE :
+      Dummy := WinCreateWindow(H, WC_BUTTON, Z('Annuler'), WS_VISIBLE Or WS_TABSTOP Or BS_PUSHBUTTON Or BS_DEFAULT,
+                               328, 10, 90, 26, H, HWND_TOP, ID_DCANCEL, 0, 0);
+    { Annuler, Echap ou fermeture : arreter le compilateur ; sinon la boite
+      se ferme d'elle-meme a la fin de la compilation }
+    WM_COMMAND, WM_CLOSE : CompileAbort;
+    WM_CHAR :
+      If ((Lo16(Mp1) And KC_KEYUP) = 0) And ((Lo16(Mp1) And KC_VIRTUALKEY) <> 0) And
+         (Hi16(Mp2) = VK_ESC) Then
+        CompileAbort
+      Else CompProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
   Else
     CompProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
   End;
@@ -3071,7 +3138,7 @@ End;
 Procedure CompBoxOpen;
 Begin
   If CompFr <> 0 Then Dummy := WinDestroyWindow(CompFr);
-  CompFr := OpenBox('PDCOMP', 'Compilation', 440, 210, CompCl);
+  CompFr := OpenBox('PDCOMP', 'Compilation', 440, 250, CompCl);
 End;
 
 Procedure CompBoxClose;

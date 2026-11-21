@@ -2096,10 +2096,14 @@ Begin
     KBlockSize := -1;
 End;
 
+Var
+  KUse : Array[0..MaxProcs - 1] Of LongInt;   { octets du tas du noyau pris par chaque processus (HeapAlloc) }
+
 { Liberer tous les blocs d'un processus termine }
 Procedure KFreeOwner(Pid : LongInt);
 Var P, BS : LongInt;
 Begin
+  If (Pid >= 0) And (Pid < MaxProcs) Then KUse[Pid] := 0;
   P := HeapStart;
   While P < HeapEnd Do
   Begin
@@ -4178,11 +4182,21 @@ End;
 Function XBlkAlloc(Size : LongInt) : LongInt; Forward;
 Function XBlkFree(A : LongInt) : Boolean; Forward;
 Function XBlkSize(A : LongInt) : LongInt; Forward;
+Function ArAlloc(Size : LongInt) : LongInt; Forward;
+Function ArFree(A : LongInt) : Boolean; Forward;
+Function ArSize(A : LongInt) : LongInt; Forward;
 
 { tas d'un processus (GetMem, New des programmes OS2PC) : les blocs de
   64 Ko et plus sont de grands blocs du processus (memoire physique
-  au-dela de 16 Mo, comme DosAllocMem), le tas du noyau ne compte que
-  quelques Mo ; les autres viennent du tas du noyau }
+  au-dela de 16 Mo, comme DosAllocMem). Le tas du noyau ne compte que
+  quelques Mo, partages par tout le systeme : un processus y prend au
+  plus KUseMax octets, le reste de ses petits blocs vient de ses arenes
+  (Partie 9, memoire physique au-dela de 16 Mo). Sans cette limite, un
+  gros programme (OS2PC.EXE compilant un jeu) epuisait le tas du noyau :
+  GetMem rendait alors Nil et le systeme entier manquait de memoire. }
+Const
+  KUseMax = 262144;
+
 Function HeapAlloc(Heap, Flags, Size : LongInt) : LongInt;
 Var A : LongInt;
 Begin
@@ -4195,27 +4209,64 @@ Begin
       Exit;
     End;
   End;
+  A := 0;
+  If (Heap = 1) And (CurProc >= 0) And (KUse[CurProc] + Size > KUseMax) Then
+    A := ArAlloc(Size);
+  If A <> 0 Then
+  Begin
+    If (Flags And 8) <> 0 Then FillMem(A, Size, 0);
+    HeapAlloc := A;
+    Exit;
+  End;
   A := KAlloc(Size);
+  { tas du noyau plein : arenes du processus }
+  If (A = 0) And (Heap = 1) And (CurProc >= 0) Then
+  Begin
+    A := ArAlloc(Size);
+    If (A <> 0) And ((Flags And 8) <> 0) Then FillMem(A, Size, 0);
+    HeapAlloc := A;
+    Exit;
+  End;
   If A <> 0 Then
   Begin
     { tas 2 : memoire partagee (DLL, DosAllocSharedMem), jamais liberee a
       la fin du processus ; sinon liberee a la fin du processus }
-    If Heap = 2 Then MemL[0:A - 8] := -1 Else MemL[0:A - 8] := CurProc;
+    If (Heap = 2) Or (CurProc < 0) Then MemL[0:A - 8] := -1
+    Else
+    Begin
+      MemL[0:A - 8] := CurProc;
+      KUse[CurProc] := KUse[CurProc] + MemL[0:A - 12];
+    End;
     If (Flags And 8) <> 0 Then FillMem(A, Size, 0);
   End;
   HeapAlloc := A;
 End;
 
 Function HeapFree(Heap, Flags, A : LongInt) : LongInt;
+Var O : LongInt;
 Begin
   If A <> 0 Then
-    If Not XBlkFree(A) Then KFree(A);
+    If Not ArFree(A) Then
+      If Not XBlkFree(A) Then
+      Begin
+        If KBlockSize(A) >= 0 Then
+        Begin
+          O := MemL[0:A - 8];
+          If (O >= 0) And (O < MaxProcs) Then
+          Begin
+            KUse[O] := KUse[O] - MemL[0:A - 12];
+            If KUse[O] < 0 Then KUse[O] := 0;
+          End;
+        End;
+        KFree(A);
+      End;
   HeapFree := 1;
 End;
 
 Function HeapSize(Heap, Flags, A : LongInt) : LongInt;
 Begin
-  If XBlkSize(A) > 0 Then HeapSize := XBlkSize(A)
+  If ArSize(A) >= 0 Then HeapSize := ArSize(A)
+  Else If XBlkSize(A) > 0 Then HeapSize := XBlkSize(A)
   Else HeapSize := KBlockSize(A);
 End;
 
@@ -6796,6 +6847,174 @@ Begin
         If PBase[I] = A Then XBlkSize := PSize[I];
 End;
 
+{ --- Arenes des processus : petits blocs (moins de 64 Ko) au-dela du
+  quota du tas du noyau. Une arene est un grand bloc du processus (rendu
+  avec eux a la fin du processus) decoupe comme le tas du noyau (en-tete
+  de 16 octets : signature, taille, proprietaire). Recherche du premier
+  bloc libre a partir du dernier bloc donne (ArRover) ; ArFail retient
+  la plus petite demande refusee depuis la derniere liberation, pour ne
+  pas reparcourir une arene pleine. --- }
+Const
+  MaxAr = 256;
+Var
+  ArBase, ArEnd, ArOwner, ArRover, ArFail : Array[0..MaxAr - 1] Of LongInt;
+  ArLast : LongInt;
+
+Function ArFit(K, Need : LongInt) : LongInt;
+Var P, BS, Start : LongInt; Wrap : Boolean;
+Begin
+  ArFit := 0;
+  If Need >= ArFail[K] Then Exit;
+  Start := ArRover[K];
+  P := Start; Wrap := False;
+  While True Do
+  Begin
+    If P >= ArEnd[K] Then
+    Begin
+      If Wrap Then Break;
+      Wrap := True;
+      P := ArBase[K];
+    End;
+    If Wrap And (P >= Start) Then Break;
+    BS := MemL[0:P + 4];
+    If (BS <= 0) Or (P + BS > ArEnd[K]) Then
+    Begin
+      ArFail[K] := 0;   { arene abimee : ne plus s'en servir }
+      Exit;
+    End;
+    If MemL[0:P] = HeapMagicFree Then
+    Begin
+      While (P + BS < ArEnd[K]) And (MemL[0:P + BS] = HeapMagicFree) Do
+      Begin
+        BS := BS + MemL[0:P + BS + 4];
+        MemL[0:P + 4] := BS;
+      End;
+      If (ArRover[K] > P) And (ArRover[K] < P + BS) Then ArRover[K] := P;
+      If BS >= Need Then
+      Begin
+        If BS - Need >= 32 Then
+        Begin
+          MemL[0:P + Need] := HeapMagicFree;
+          MemL[0:P + Need + 4] := BS - Need;
+          MemL[0:P + Need + 8] := -1;
+          MemL[0:P + 4] := Need;
+        End;
+        MemL[0:P] := HeapMagicUsed;
+        MemL[0:P + 8] := ArOwner[K];
+        ArRover[K] := P + MemL[0:P + 4];
+        If ArRover[K] >= ArEnd[K] Then ArRover[K] := ArBase[K];
+        ArFit := P + 16;
+        Exit;
+      End;
+    End;
+    P := P + BS;
+  End;
+  ArFail[K] := Need;
+End;
+
+Function ArAlloc(Size : LongInt) : LongInt;
+Var K, Need, N, Sz, S, Free : LongInt;
+Begin
+  ArAlloc := 0;
+  If (CurProc < 0) Or (Size <= 0) Or (Size > 65536) Then Exit;
+  Need := ((Size + 15) And Not 15) + 16;
+  { derniere arene servie, puis les autres du processus }
+  If (ArLast >= 0) And (ArBase[ArLast] <> 0) And (ArOwner[ArLast] = CurProc) Then
+  Begin
+    S := ArFit(ArLast, Need);
+    If S <> 0 Then
+    Begin
+      ArAlloc := S;
+      Exit;
+    End;
+  End;
+  N := 0; Free := -1;
+  For K := 0 To MaxAr - 1 Do
+    If ArBase[K] = 0 Then
+    Begin
+      If Free < 0 Then Free := K;
+    End
+    Else If ArOwner[K] = CurProc Then
+    Begin
+      Inc(N);
+      If K <> ArLast Then
+      Begin
+        S := ArFit(K, Need);
+        If S <> 0 Then
+        Begin
+          ArLast := K;
+          ArAlloc := S;
+          Exit;
+        End;
+      End;
+    End;
+  If Free < 0 Then Exit;
+  { nouvelle arene : 256 Ko, puis plus grandes (jusqu'a 4 Mo) }
+  Sz := 262144;
+  While (N >= 2) And (Sz < 4194304) Do
+  Begin
+    Sz := Sz * 2;
+    N := N - 2;
+  End;
+  S := XBlkAlloc(Sz);
+  If S = 0 Then
+  Begin
+    Sz := 131072;
+    S := XBlkAlloc(Sz);
+    If S = 0 Then Exit;
+  End;
+  MemL[0:S] := HeapMagicFree;
+  MemL[0:S + 4] := Sz;
+  MemL[0:S + 8] := -1;
+  ArBase[Free] := S; ArEnd[Free] := S + Sz; ArOwner[Free] := CurProc;
+  ArRover[Free] := S; ArFail[Free] := $7FFFFFFF;
+  ArLast := Free;
+  ArAlloc := ArFit(Free, Need);
+End;
+
+{ arene contenant l'adresse A (-1 sinon) }
+Function ArOf(A : LongInt) : LongInt;
+Var K : LongInt;
+Begin
+  ArOf := -1;
+  If A < PhysProcBase Then Exit;
+  For K := 0 To MaxAr - 1 Do
+    If (ArBase[K] <> 0) And (A > ArBase[K]) And (A < ArEnd[K]) Then
+    Begin
+      ArOf := K;
+      Exit;
+    End;
+End;
+
+{ liberer le bloc A d'une arene ; False si A n'est pas dans une arene }
+Function ArFree(A : LongInt) : Boolean;
+Var K : LongInt;
+Begin
+  K := ArOf(A);
+  ArFree := K >= 0;
+  If K < 0 Then Exit;
+  If MemL[0:A - 16] <> HeapMagicUsed Then Exit;
+  MemL[0:A - 16] := HeapMagicFree;
+  ArFail[K] := $7FFFFFFF;
+End;
+
+Function ArSize(A : LongInt) : LongInt;
+Var K : LongInt;
+Begin
+  ArSize := -1;
+  K := ArOf(A);
+  If (K >= 0) And (MemL[0:A - 16] = HeapMagicUsed) Then ArSize := MemL[0:A - 12] - 16;
+End;
+
+{ fin du processus Pid : ses arenes (grands blocs, rendus par l'appelant) }
+Procedure ArDrop(Pid : LongInt);
+Var K : LongInt;
+Begin
+  For K := 0 To MaxAr - 1 Do
+    If (ArBase[K] <> 0) And (ArOwner[K] = Pid) Then ArBase[K] := 0;
+  KUse[Pid] := 0;
+End;
+
 Function PhysFree : LongInt;
 Var I, T : LongInt;
 Begin
@@ -7108,6 +7327,7 @@ Begin
         If (TkUsed[K] <> 0) And (TkProc[K] = P) Then Alive := True;
       If Not Alive Then
       Begin
+        ArDrop(P);
         For K := 0 To MaxXBlk - 1 Do
           If (XBase[K] <> 0) And (XOwner[K] = P) Then
           Begin
