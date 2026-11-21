@@ -19,7 +19,9 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
               INVADERS.EXE, FREECELL.EXE, MISSILE.EXE, L25.EXE,
-              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
+              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), ASTRO.EXE, SIMUPLAN.EXE,
+              CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
+              DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
               (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE, GETSRC.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
@@ -115,6 +117,11 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
   OS2PC APPS\ASTROMAN.PAS                   -> ASTROMAN.EXE (Astromancie)
   OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
+  OS2PC APPS\ASTRO.PAS                      -> ASTRO.EXE (Astronomie)
+  OS2PC APPS\SIMUPLAN.PAS                   -> SIMUPLAN.EXE (Simulateur de planete)
+  OS2PC APPS\CS3DA.PAS                      -> CS3DA.EXE (Anatomie 3D du systeme circulatoire)
+  OS2PC APPS\ELEMENTS.PAS                   -> ELEMENTS.EXE (Table des elements)
+  OS2PC APPS\CHEMDRAW.PAS                   -> CHEMDRAW.EXE (Dessin de chimie)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC MP3PLAY.PAS                         -> MP3PLAY.EXE (Lecteur MP3)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
@@ -703,8 +710,8 @@ PMSHELL.EXE (Workplace Shell) est lance au demarrage
 (PROTSHELL=C:\PMSHELL.EXE). Bureau en 640 x 480 x 16 couleurs avec les
 objets Systeme OS/2, Lecteurs, Invite de commandes OS/2, Liste des
 fenetres, Modeles, Broyeur, Arret, Fenetre OS/2 et Navigateur Web, les
-dossiers Developer Kit, Productivite, Jeux, Multimedia et Loisirs, puis
-le contenu de C:\DESKTOP (ou
+dossiers Developer Kit, Productivite, Jeux, Multimedia, Loisirs et
+Science, puis le contenu de C:\DESKTOP (ou
 D:\DESKTOP si C: est en lecture seule) et les raccourcis ; dossiers
 Systeme OS/2, Lecteurs, Modeles et repertoires (programmes, fichiers de
 commandes, fichiers de donnees ; visionneuse de texte). Pas de limite
@@ -714,7 +721,7 @@ au nombre de fenetres ni d'objets par dossier.
   Glisser-deposer (bouton 2, ou bouton 1 dans un dossier) : sur un
   dossier = deplacer (Ctrl = copier) ; sur le Broyeur = supprimer ; sur
   le LaunchPad = l'y ajouter ; Ctrl+Maj = creer un raccourci.
-  Un objet programme d'un dossier du systeme (Jeux, Loisirs...) ou
+  Un objet programme d'un dossier du systeme (Jeux, Loisirs, Science...) ou
   pose sur le bureau n'est jamais deplace ni supprime : le deposer
   ailleurs cree un raccourci (son executable reste en place).
   Raccourcis (shadows) : menu "Creer un raccourci" ; Modeles : Dossier,
@@ -865,6 +872,48 @@ fenetre tient dans un ecran de 640 x 480.
   REVES recit.txt ouvre un recit (exemple : REVE.TXT) ;
   REVES /TEST recit.txt et REVES /RAPPORT recit.txt : analyse en mode
   texte (memes resultats que l'original compile par Free Pascal).
+
+Science (dossier Science du bureau)
+-----------------------------------
+Cinq applications graphiques portees vers Presentation Manager ; sources
+dans APPS (un seul fichier chacune). Fenetre de PM avec la barre de
+menus d'OS/2 (construite a partir des menus d'origine ; F10, Alt +
+lettre), dessin dans une image en memoire de 640 x 480 en 256 couleurs ;
+saisies dans des boites de dialogue de PM (champ de saisie, boutons OK
+et Annuler), messages par WinMessageBox.
+  Astronomie (ASTRO.EXE ; source APPS\ASTRO.PAS, depot Axtro) :
+  calendriers (jour julien, rang du jour, Paques et fetes mobiles,
+  calendriers gregorien, julien, hebreu, maya...), coordonnees,
+  observation (equation du temps, refraction, cadran solaire),
+  ephemerides (planetes, etoiles doubles, cometes), phenomenes (phases
+  de la Lune, lever, coucher et meridien, satellites, reductions). Les
+  resultats s'affichent dans une fenetre de PM avec barres de defilement
+  verticale et horizontale, boutons Enregistrer... (fichier texte) et
+  Fermer. Barre d'outils : calendrier lunaire, systeme solaire, cometes,
+  Voie Lactee, planetes (92), constellations (88), etoiles (1000) ;
+  chaque vue s'ouvre dans sa propre fenetre de PM avec de vrais boutons
+  (Mois precedent, < Heure, Jour >>, Fermer...) et, pour les catalogues,
+  une liste de PM avec barre de defilement (Haut, Bas, Pg.prec.,
+  Pg.suiv., Debut, Fin, souris).
+  Simulateur de planete (SIMUPLAN.EXE ; source APPS\SIMUPLAN.PAS, depot
+  Axtro) : systeme solaire anime ; Espace demarrer / pause, Debut
+  recommencer, + et - vitesse, O orbites, N noms, C ceinture
+  d'asteroides, E etoiles du fond, I systeme interieur, S systeme
+  complet, Pg.prec. et Pg.suiv. zoom, F1 les astres.
+  Anatomie 3D du systeme circulatoire (CS3DA.EXE ; source APPS\CS3DA.PAS,
+  depot BIOLOGIE-0) : modele 3D du corps humain (HUMAN.C3D : arteres,
+  veines, capillaires, coeur), animation de la circulation, physiologie
+  (PHYSIO.CFG : frequence cardiaque, pression, debit...), ECG et courbe
+  de pression ; vues, camera, structures, animation (F10 = menus, F1 =
+  aide). HUMAN.C3D et PHYSIO.CFG sont lus a cote de CS3DA.EXE.
+  Table des elements (ELEMENTS.EXE ; source APPS\ELEMENTS.PAS, depot
+  QCHIMIE) : tableau periodique des 118 elements (F5) ou liste (F6),
+  fiche de l'element, recherche par nom, symbole ou numero (F3),
+  couleurs des categories (F1).
+  Dessin de chimie (CHEMDRAW.EXE ; source APPS\CHEMDRAW.PAS, depot
+  QCHIMIE) : editeur de structures chimiques (atomes, liaisons, cycles,
+  fleches, texte), importation et exportation SMILES, MOL, InChI, SVG,
+  BMP, analyse (formule brute, masse, RMN, spectre de masse).
 
 Jeux (dossier Jeux du bureau)
 -----------------------------

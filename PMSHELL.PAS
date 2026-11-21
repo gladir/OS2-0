@@ -165,9 +165,10 @@ Const
   IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
   IC_MP3PLAY = 68; OB_MP3 = 36;
   OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70;
+  OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
-  VK_LEISURE = 13;
+  VK_LEISURE = 13; VK_SCIENCE = 14;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
   BS_PUSHBUTTON = 0; BS_AUTOCHECKBOX = 2; BS_AUTORADIOBUTTON = 4; SS_TEXT = 1; SS_GROUPBOX = 2;
@@ -1020,7 +1021,7 @@ Begin
     OB_COUNTRY : Icon := IC_GLOBE;
     OB_COLORS : Icon := IC_PALETTE;
     OB_LANG : Icon := IC_LANG;
-    OB_GAMES, OB_MMFOLDER, OB_DEVKIT, OB_PRODUCT, OB_LEISURE : Icon := IC_FOLDER;
+    OB_GAMES, OB_MMFOLDER, OB_DEVKIT, OB_PRODUCT, OB_LEISURE, OB_SCIENCE : Icon := IC_FOLDER;
   Else
     Icon := IC_FILE;
   End;
@@ -1188,6 +1189,9 @@ Begin
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
         If FileExists('C:\ASTROMAN.EXE') Or FileExists('C:\REVES.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_LEISURE, 'Loisirs', '');
+        If FileExists('C:\ASTRO.EXE') Or FileExists('C:\SIMUPLAN.EXE') Or FileExists('C:\CS3DA.EXE') Or
+           FileExists('C:\ELEMENTS.EXE') Or FileExists('C:\CHEMDRAW.EXE') Then
+          Dummy := NewItem(V, IC_FOLDER, OB_SCIENCE, 'Science', '');
         { fichiers et dossiers du repertoire du bureau, puis raccourcis }
         AddSorted(V, DeskDir);
         AddShadows(V, 'BUREAU');
@@ -1303,6 +1307,23 @@ Begin
           Dummy := NewItem(V, IC_ASTRO, OB_GAME, 'Astromancie', 'C:\ASTROMAN.EXE');
         If FileExists('C:\REVES.EXE') Then
           Dummy := NewItem(V, IC_DREAMS, OB_GAME, 'Onirologie', 'C:\REVES.EXE');
+      End;
+    VK_SCIENCE :
+      Begin
+        { Science : Astronomie (ASTRO.PAS) et Simulateur de planete
+          (SIMUPLAN.PAS) du depot Axtro, Anatomie 3D du systeme
+          circulatoire (CS3DA.PAS) du depot BIOLOGIE-0, Table des elements
+          (ELEMENTS.PAS) et Dessin de chimie (CHEMDRAW.PAS) du depot QCHIMIE }
+        If FileExists('C:\ASTRO.EXE') Then
+          Dummy := NewItem(V, IC_TELESCOPE, OB_GAME, 'Astronomie', 'C:\ASTRO.EXE');
+        If FileExists('C:\SIMUPLAN.EXE') Then
+          Dummy := NewItem(V, IC_PLANETSIM, OB_GAME, 'Simulateur de plan'#138'te', 'C:\SIMUPLAN.EXE');
+        If FileExists('C:\CS3DA.EXE') Then
+          Dummy := NewItem(V, IC_HEART, OB_GAME, 'Anatomie 3D du syst'#138'me circulatoire', 'C:\CS3DA.EXE');
+        If FileExists('C:\ELEMENTS.EXE') Then
+          Dummy := NewItem(V, IC_ELEMENTS, OB_GAME, 'Table des '#130'l'#130'ments', 'C:\ELEMENTS.EXE');
+        If FileExists('C:\CHEMDRAW.EXE') Then
+          Dummy := NewItem(V, IC_CHEMDRAW, OB_GAME, 'Dessin de chimie', 'C:\CHEMDRAW.EXE');
       End;
     VK_DEVKIT :
       Begin
@@ -1447,7 +1468,7 @@ Begin
 End;
 
 Procedure DrawIcon(Hps, Icon, X, Y : LongInt);
-Var K, R : LongInt;
+Var K, R, C : LongInt;
 Begin
   Case Icon Of
     IC_FOLDER : IconFolder(Hps, X, Y, CLR_YELLOW);
@@ -2210,6 +2231,113 @@ Begin
         GLn(Hps, X + 10, Y + 19, X + 10, Y + 19, CLR_WHITE);
         GLn(Hps, X + 20, Y + 11, X + 20, Y + 11, CLR_WHITE);
         GLn(Hps, X + 19, Y + 20, X + 19, Y + 20, CLR_WHITE);
+      End;
+    IC_TELESCOPE :
+      Begin
+        { Astronomie : lunette sur trepied sous un ciel etoile }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_DARKBLUE, CLR_BLACK);
+        GLn(Hps, X + 6, Y + 25, X + 6, Y + 25, CLR_WHITE);
+        GLn(Hps, X + 11, Y + 27, X + 11, Y + 27, CLR_WHITE);
+        GLn(Hps, X + 26, Y + 26, X + 26, Y + 26, CLR_WHITE);
+        GLn(Hps, X + 5, Y + 17, X + 5, Y + 17, CLR_WHITE);
+        GLn(Hps, X + 21, Y + 27, X + 23, Y + 27, CLR_YELLOW);
+        GLn(Hps, X + 22, Y + 26, X + 22, Y + 28, CLR_YELLOW);
+        For K := 0 To 2 Do
+          GLn(Hps, X + 7, Y + 11 + K, X + 24, Y + 20 + K, CLR_PALEGRAY);
+        GLn(Hps, X + 7, Y + 14, X + 24, Y + 23, CLR_WHITE);
+        GBox(Hps, X + 22, Y + 19, X + 26, Y + 24, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 5, Y + 10, X + 8, Y + 13, CLR_DARKGRAY, DRO_FILL);
+        GLn(Hps, X + 15, Y + 15, X + 9, Y + 3, CLR_BROWN);
+        GLn(Hps, X + 15, Y + 15, X + 15, Y + 3, CLR_BROWN);
+        GLn(Hps, X + 15, Y + 15, X + 21, Y + 3, CLR_BROWN);
+      End;
+    IC_PLANETSIM :
+      Begin
+        { Simulateur de planete : planete (oceans, continents) et anneau }
+        For K := -13 To 13 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) * 169 <= 16 * (169 - K * K) Do Inc(R);
+          GLn(Hps, X + 15 + K, Y + 15 + R + K Div 4, X + 15 + K, Y + 16 + R + K Div 4, CLR_YELLOW);
+        End;
+        For K := -9 To 9 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 81 Do Inc(R);
+          GLn(Hps, X + 15 - R, Y + 15 + K, X + 15 + R, Y + 15 + K, CLR_BLUE);
+        End;
+        GBox(Hps, X + 10, Y + 16, X + 14, Y + 21, CLR_GREEN, DRO_FILL);
+        GBox(Hps, X + 16, Y + 9, X + 20, Y + 13, CLR_GREEN, DRO_FILL);
+        GBox(Hps, X + 18, Y + 18, X + 20, Y + 20, CLR_GREEN, DRO_FILL);
+        GLn(Hps, X + 12, Y + 23, X + 16, Y + 23, CLR_WHITE);
+        For K := -13 To 13 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) * 169 <= 16 * (169 - K * K) Do Inc(R);
+          GLn(Hps, X + 15 + K, Y + 14 - R + K Div 4, X + 15 + K, Y + 15 - R + K Div 4, CLR_BROWN);
+          GLn(Hps, X + 15 + K, Y + 16 - R + K Div 4, X + 15 + K, Y + 16 - R + K Div 4, CLR_YELLOW);
+        End;
+      End;
+    IC_HEART :
+      Begin
+        { Anatomie 3D du systeme circulatoire : coeur, aorte et veine cave }
+        GBox(Hps, X + 16, Y + 20, X + 18, Y + 29, CLR_RED, DRO_FILL);
+        GLn(Hps, X + 18, Y + 28, X + 24, Y + 28, CLR_RED);
+        GLn(Hps, X + 18, Y + 27, X + 24, Y + 27, CLR_RED);
+        GLn(Hps, X + 24, Y + 27, X + 24, Y + 22, CLR_RED);
+        GBox(Hps, X + 11, Y + 20, X + 13, Y + 29, CLR_BLUE, DRO_FILL);
+        For K := -6 To 6 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 36 Do Inc(R);
+          GLn(Hps, X + 11 - R, Y + 17 + K, X + 11 + R, Y + 17 + K, CLR_RED);
+          GLn(Hps, X + 19 - R, Y + 17 + K, X + 19 + R, Y + 17 + K, CLR_RED);
+        End;
+        For K := 3 To 17 Do
+        Begin
+          R := ((K - 3) * 11) Div 14;
+          GLn(Hps, X + 15 - R, Y + K, X + 15 + R, Y + K, CLR_RED);
+        End;
+        GLn(Hps, X + 9, Y + 19, X + 10, Y + 20, CLR_PINK);
+        GLn(Hps, X + 15, Y + 6, X + 15, Y + 15, CLR_DARKRED);
+      End;
+    IC_ELEMENTS :
+      Begin
+        { Table des elements : tableau periodique en couleurs }
+        For K := 0 To 8 Do
+          For R := 0 To 4 Do
+            If (R >= 3) Or ((R >= 1) And ((K <= 1) Or (K >= 4))) Or (K = 0) Or (K = 8) Then
+            Begin
+              If K = 0 Then C := CLR_RED
+              Else If K = 1 Then C := CLR_BROWN
+              Else If K <= 3 Then C := CLR_PINK
+              Else If K <= 5 Then C := CLR_GREEN
+              Else If K = 6 Then C := CLR_YELLOW
+              Else If K = 7 Then C := CLR_DARKGREEN
+              Else C := CLR_CYAN;
+              GBox(Hps, X + 2 + K * 3, Y + 26 - R * 4, X + 3 + K * 3, Y + 28 - R * 4, C, DRO_FILL);
+            End;
+        For K := 2 To 8 Do
+        Begin
+          GBox(Hps, X + 2 + K * 3, Y + 4, X + 3 + K * 3, Y + 6, CLR_DARKPINK, DRO_FILL);
+          GBox(Hps, X + 2 + K * 3, Y + 1, X + 3 + K * 3, Y + 3, CLR_BLUE, DRO_FILL);
+        End;
+      End;
+    IC_CHEMDRAW :
+      Begin
+        { Dessin de chimie : noyau benzenique sur une page }
+        FBox(Hps, X + 4, Y + 1, X + 27, Y + 29, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 22, X + 21, Y + 18, CLR_BLACK);
+        GLn(Hps, X + 21, Y + 18, X + 21, Y + 10, CLR_BLACK);
+        GLn(Hps, X + 21, Y + 10, X + 15, Y + 6, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 6, X + 9, Y + 10, CLR_BLACK);
+        GLn(Hps, X + 9, Y + 10, X + 9, Y + 18, CLR_BLACK);
+        GLn(Hps, X + 9, Y + 18, X + 15, Y + 22, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 19, X + 18, Y + 17, CLR_DARKBLUE);
+        GLn(Hps, X + 18, Y + 12, X + 15, Y + 9, CLR_DARKBLUE);
+        GLn(Hps, X + 12, Y + 12, X + 12, Y + 16, CLR_DARKBLUE);
+        GLn(Hps, X + 15, Y + 22, X + 15, Y + 26, CLR_BLACK);
+        GBox(Hps, X + 14, Y + 26, X + 17, Y + 28, CLR_RED, DRO_FILL);
       End;
     IC_DREAMS :
       Begin
@@ -3355,6 +3483,7 @@ Begin
     OB_GAME : RunPm(It(K)^.Path, '');
     OB_MMFOLDER : OpenFolder(VK_MM, '', 'Multimedia');
     OB_LEISURE : OpenFolder(VK_LEISURE, '', 'Loisirs');
+    OB_SCIENCE : OpenFolder(VK_SCIENCE, '', 'Science');
     OB_SOUND :
       If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', It(K)^.Path) Else OpenViewer(It(K)^.Path);
     OB_SONG : RunPm('C:\NOTATOR.EXE', It(K)^.Path);

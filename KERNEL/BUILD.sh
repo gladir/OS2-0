@@ -56,6 +56,12 @@
 #  3c. compile APPS/ASTROMAN.PAS (Astromancie, interpretation de
 #     l'astrologie) et APPS/REVES.PAS (Onirologie, interpretation des
 #     reves), portes du depot Mystix (dossier Loisirs du bureau) ;
+#  3d. compile APPS/ASTRO.PAS (Astronomie) et APPS/SIMUPLAN.PAS
+#     (Simulateur de planete) du depot Axtro, APPS/CS3DA.PAS (Anatomie 3D
+#     du systeme circulatoire, donnees APPS/HUMAN.C3D et APPS/PHYSIO.CFG)
+#     du depot BIOLOGIE-0, APPS/ELEMENTS.PAS (Table des elements) et
+#     APPS/CHEMDRAW.PAS (Dessin de chimie) du depot QCHIMIE (dossier
+#     Science du bureau) ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS, PAYSAGE.BMP pour Paint,
@@ -150,6 +156,13 @@ for B in ASTROMAN REVES; do
   "$W/os2pc" -Q "$ROOT/APPS/$B.PAS" "$W/cd/$B.EXE" > "$W/$B.log" 2>&1 || { cat "$W/$B.log"; exit 1; }
   echo "   $B.EXE"
 done
+echo "== Science (OS2PC : APPS/ASTRO.PAS, SIMUPLAN.PAS, CS3DA.PAS, ELEMENTS.PAS et CHEMDRAW.PAS)"
+for B in ASTRO SIMUPLAN CS3DA ELEMENTS CHEMDRAW; do
+  "$W/os2pc" -Q "$ROOT/APPS/$B.PAS" "$W/cd/$B.EXE" > "$W/$B.log" 2>&1 || { cat "$W/$B.log"; exit 1; }
+  echo "   $B.EXE"
+done
+# modele du corps humain et physiologie de l'Anatomie 3D (a cote de CS3DA.EXE)
+cp "$ROOT/APPS/HUMAN.C3D" "$ROOT/APPS/PHYSIO.CFG" "$W/cd/"
 echo "== OS2PC.EXE (compilateur natif : OS2PC.PAS compile par OS2PC) et exemples de Pascal Developer"
 "$W/os2pc" -Q "$ROOT/TOOLS/OS2PC.PAS" "$W/cd/OS2PC.EXE"
 cp "$ROOT"/IMAGE/EXEMPLES/*.PAS "$W/cd/"

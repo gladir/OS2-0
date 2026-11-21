@@ -1092,7 +1092,10 @@ Begin
           (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Then Wanted := OptNet <> 0
   Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or
           (U = 'PASDEV.EXE') Or (U = 'OS2PC.EXE') Or (U = 'GETSRC.EXE') Or (U = 'CALC.EXE') Or (U = 'EXPLORER.EXE') Or
-          (U = 'PAINT.EXE') Or (U = 'WORDIUM.EXE') Or (U = 'EXCELSIO.EXE') Then Wanted := True
+          (U = 'PAINT.EXE') Or (U = 'WORDIUM.EXE') Or (U = 'EXCELSIO.EXE') Or
+          { dossier Science du bureau, et donnees de l'Anatomie 3D }
+          (U = 'ASTRO.EXE') Or (U = 'SIMUPLAN.EXE') Or (U = 'CS3DA.EXE') Or (U = 'ELEMENTS.EXE') Or
+          (U = 'CHEMDRAW.EXE') Or (U = 'HUMAN.C3D') Or (U = 'PHYSIO.CFG') Then Wanted := True
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 

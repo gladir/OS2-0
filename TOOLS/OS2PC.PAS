@@ -9057,19 +9057,24 @@ Begin
       End
       Else If (I < TokenCount) And (TokenPool^[I]^.Kind = TK_REAL) Then
       Begin
-        { constante reelle locale : donnee statique Double }
-        Base := DataInitAlloc(8);
-        DataInitPutReal(Base, TY_IDX_REAL, TokenPool^[I]^.RealVal);
-        Lbl := NewStaticLabel;
-        If Base >= 0 Then DataAdd(Lbl, DK_INIT, Base, '', 8, 0)
-        Else DataAddStruct(Lbl, 8);
+        { constante reelle locale : donnee statique du type du litteral
+          (Single, Double ou Extended) ; elle etait toujours ecrite sur 8
+          octets (Double) puis lue selon le type du litteral : un Extended
+          (10 octets) ou un Single lisait une valeur fausse (NaN, 0) }
         Case TokenPool^[I]^.RealKind Of
           4 : TI := TY_IDX_SINGLE;
           8 : TI := TY_IDX_DOUBLE;
         Else TI := TY_IDX_EXTENDED;
         End;
+        Sz := TypeSizeofIdx(TI);
+        If Sz < 4 Then Sz := 8;
+        Base := DataInitAlloc(Sz);
+        DataInitPutReal(Base, TI, TokenPool^[I]^.RealVal);
+        Lbl := NewStaticLabel;
+        If Base >= 0 Then DataAdd(Lbl, DK_INIT, Base, '', Sz, 0)
+        Else DataAddStruct(Lbl, Sz);
         Inc(I);
-        AddLocalEntry(Name, TI, Lbl, 8, False, 0);
+        AddLocalEntry(Name, TI, Lbl, Sz, False, 0);
       End
       Else
       Begin
