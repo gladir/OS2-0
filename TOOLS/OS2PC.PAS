@@ -11355,6 +11355,12 @@ Begin
         GenRealLoad(EBPOfs(ProcTab^[PI]^.Params^[ParI].Offset), SI)
       Else If TypeIs64(SI) Or (TypeIsAnsi(SI) And W32Fpu) Then
         GenLoadScalar(EBPOfs(ProcTab^[PI]^.Params^[ParI].Offset), SI)
+      Else If (SI >= 0) And (SI < TypeCount) And (TypeSizeofIdx(SI) < 4) And
+              (Not Is68kTarget) And (Not Opts.Dos16Mode) Then
+        { Integer, Word, Byte, Char, Boolean... passe par valeur : lu selon sa
+          taille (une affectation dans la procedure, A := A + 360, ne range
+          que 1 ou 2 octets de la case de 4 octets) }
+        GenLoadScalar(EBPOfs(ProcTab^[PI]^.Params^[ParI].Offset), SI)
       Else
         EmitInstr('MOV EAX,DWORD PTR ' + EBPOfs(ProcTab^[PI]^.Params^[ParI].Offset));
       Exit;
@@ -23768,8 +23774,10 @@ Var
   FileArgTIdx  : LongInt;
   FileByRecord : Boolean;   { File Of T : un enregistrement par variable }
   FileByChar   : Boolean;   { Read(F, C) : caractere par caractere }
+  FileByStr    : Boolean;   { Read(F, S) : chaine jusqu a la fin de ligne }
+  LblLoop, LblDone : TString;
 Begin
-  FileArgName := ''; FileArgTIdx := -1; FileByRecord := False; FileByChar := False;
+  FileArgName := ''; FileArgTIdx := -1; FileByRecord := False; FileByChar := False; FileByStr := False;
   If IsReadLn Then
     EmitComment('readln')
   Else
@@ -23835,6 +23843,13 @@ Begin
       Else If (Not IsReadLn) And (Not EPAtEnd) And (TokenPool^[EP]^.Kind = TK_IDENT) And
               (FileVarType(PI, TokenPool^[EP]^.Val) = TY_IDX_CHAR) Then
         FileByChar := True
+      Else If (Not IsReadLn) And (Not EPAtEnd) And (TokenPool^[EP]^.Kind = TK_IDENT) And
+              (FileVarType(PI, TokenPool^[EP]^.Val) >= 0) And
+              (FileVarType(PI, TokenPool^[EP]^.Val) < TypeCount) And
+              (TypeTab^[FileVarType(PI, TokenPool^[EP]^.Val)]^.Kind = TYK_STRING) And
+              (EP + 1 < TokenCount) And (TokenPool^[EP + 1]^.Kind = TK_PUNCT) And
+              TokIsP(EP + 1, ')') Then
+        FileByStr := True
       Else
       Begin
         GenLoadAddr(PI, FileArgName);
@@ -23868,6 +23883,43 @@ Begin
       If (Not EPAtEnd) And (TokenPool^[EP]^.Kind = TK_PUNCT) And (TokIsP(EP, ',')) Then Inc(EP)
       Else Break;
     End;
+    If (Not EPAtEnd) And (TokenPool^[EP]^.Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Inc(EP);
+    Exit;
+  End;
+  If FileByStr Then
+  Begin
+    { Read(F, S) sur un Text (Turbo Pascal) : les caracteres jusqu a la fin
+      de la ligne (255 au plus), sans consommer la fin de ligne ; un
+      Read suivant lit la suite de la ligne }
+    VName := TokenPool^[EP]^.Val;
+    Inc(EP);
+    LblLoop := LabelGen;
+    LblDone := LabelGen;
+    GenLoadAddr(PI, VName);
+    EmitInstr('MOV BYTE PTR [EAX],0');
+    EmitLabel(LblLoop);
+    GenLoadAddr(PI, FileArgName);
+    EmitInstr('PUSH EAX');
+    EmitInstr('CALL ' + TP_RT_PFX + 'EOLN_FILE');
+    EmitInstr('ADD ESP,4');
+    EmitInstr('TEST EAX,EAX');
+    EmitInstr('JNZ ' + LblDone);
+    GenLoadAddr(PI, VName);
+    EmitInstr('CMP BYTE PTR [EAX],255');
+    EmitInstr('JAE ' + LblDone);
+    GenLoadAddr(PI, FileArgName);
+    EmitInstr('PUSH EAX');
+    EmitInstr('CALL ' + TP_RT_PFX + 'READCH_FILE');
+    EmitInstr('ADD ESP,4');
+    EmitInstr('PUSH EAX');
+    EmitIoCheck;
+    GenLoadAddr(PI, VName);
+    EmitInstr('POP EDX');
+    EmitInstr('INC BYTE PTR [EAX]');
+    EmitInstr('MOVZX ECX,BYTE PTR [EAX]');
+    EmitInstr('MOV BYTE PTR [EAX+ECX],DL');
+    EmitInstr('JMP ' + LblLoop);
+    EmitLabel(LblDone);
     If (Not EPAtEnd) And (TokenPool^[EP]^.Kind = TK_PUNCT) And (TokIsP(EP, ')')) Then Inc(EP);
     Exit;
   End;
@@ -30839,7 +30891,10 @@ Begin
         EmitInstr('MOV DWORD PTR ' + EBPOfs(ProcTab^[FI]^.RetOffset) + ',0');
         If TypeIs64(ProcTab^[FI]^.RetTypeIdx) Then
           EmitInstr('MOV DWORD PTR ' + EBPOfs(ProcTab^[FI]^.RetOffset + 4) + ',0');
-        If TypeIsReal(ProcTab^[FI]^.RetTypeIdx) And W32Fpu Then
+        { Single : 4 octets seulement (effacer [RetOffset + 4] ecraserait
+          l EBP sauve de l appelant quand le resultat est en [EBP-4]) }
+        If TypeIsReal(ProcTab^[FI]^.RetTypeIdx) And W32Fpu And
+           (RealSizeCode(ProcTab^[FI]^.RetTypeIdx) <> 4) Then
         Begin
           EmitInstr('MOV DWORD PTR ' + EBPOfs(ProcTab^[FI]^.RetOffset + 4) + ',0');
           If RealSizeCode(ProcTab^[FI]^.RetTypeIdx) = 10 Then

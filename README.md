@@ -27,7 +27,7 @@ OS2-0 démarre d'un CD-ROM ou d'un disque dur, dans QEMU, VirtualBox (y compris 
 	<li><b>Noyau 32 bits</b> (OS2KRNL) : mode protégé, pagination, tâches préemptives, sessions plein écran et fenêtrées, chargeur de programmes et de DLL 32 bits (PE et LX), programmes 16 bits d'OS/2 1.x (NE) et machine virtuelle DOS en mode V86 (Turbo Pascal 7, BGI, DPMI).</li>
 	<li><b>Systèmes de fichiers</b> : HPFS par défaut, NTFS en lecture, écriture et formatage pour partager ses fichiers avec Windows et Linux, FAT12 sur disquette, ISO 9660 sur CD-ROM, disque virtuel en mémoire ; pilotes IFS chargés par <code>IFS=</code> de CONFIG.SYS.</li>
 	<li><b>Presentation Manager et Workplace Shell</b> : fenêtres, menus, contrôles, GPI, presse-papiers, glisser-déposer, raccourcis, modèles, LaunchPad, carnets Système, Souris, Pays et Langue ; de 640 × 480 en 16 couleurs (VGA) à 1024 × 768 en 16 millions de couleurs (VESA).</li>
-	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), WorDium (traitement de texte : DOCX, PDF, GAT du MonsterBook, correcteur d'orthographe), Excelsior (tableur : XLC, XLS, XLSX, formules, graphiques), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Lecteur MP3, Notator for OS2-Zero, Pascal Developer, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes, Astéroïde, Badugi, Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique, Bataille, Invasion de l'espace, FreeCell, Commandement des missiles, L25), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
+	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), WorDium (traitement de texte : DOCX, PDF, GAT du MonsterBook, correcteur d'orthographe), Excelsior (tableur : XLC, XLS, XLSX, formules, graphiques), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Lecteur MP3, Notator for OS2-Zero, Pascal Developer, Astromancie (interprétation de l'astrologie) et Onirologie (interprétation des rêves) du dossier Loisirs, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes, Astéroïde, Badugi, Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique, Bataille, Invasion de l'espace, FreeCell, Commandement des missiles, L25), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
 	<li><b>Matériel</b> : disques IDE et ATAPI, lecteur de disquettes, cartes son (Sound Blaster, AC'97, AudioPCI), réseau (Intel PRO/1000, AMD PCnet) avec pile TCP/IP, DHCP, DNS et TLS ; outils invités de VirtualBox et de VMware (souris absolue, écran redimensionnable).</li>
 	<li><b>Installation</b> graphique dans le style de Warp 3, sur une partition HPFS ou NTFS, en six langues.</li>
 </ul>
@@ -74,7 +74,7 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		</tr>
 		<tr>
 			<td><b>CALC.PAS</b></td>
-			<td>Calculatrice de Presentation Manager (Système OS/2 → Productivité), portée de celle de Pasdows 95 vers l'API d'OS/2 (PMWIN, PMGPI) et l'apparence de Warp 3 : mode Standard, mémoire, presse-papiers de PM.</td>
+			<td>Calculatrice de Presentation Manager (bureau → Productivité), portée de celle de Pasdows 95 vers l'API d'OS/2 (PMWIN, PMGPI) et l'apparence de Warp 3 : mode Standard, mémoire, presse-papiers de PM.</td>
 		</tr>
 		<tr>
 			<td><b>CHKDSK.PAS</b></td>
@@ -118,7 +118,7 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		</tr>
 		<tr>
 			<td><b>EXPLORER.PAS</b></td>
-			<td>Explorateur OS2-0 : explorateur de fichiers à deux volets dans le style de Windows 95 (arbre des dossiers, Grandes icônes ou Détails, barre d'état), porté de l'Explorateur Pasdows ; application de Presentation Manager indépendante (Système OS/2 → Productivité, menu contextuel du bureau).</td>
+			<td>Explorateur OS2-0 : explorateur de fichiers à deux volets dans le style de Windows 95 (arbre des dossiers, Grandes icônes ou Détails, barre d'état), porté de l'Explorateur Pasdows ; application de Presentation Manager indépendante (bureau → Productivité, menu contextuel du bureau).</td>
 		</tr>
 		<tr>
 			<td><b>FIND.PAS</b></td>
@@ -154,19 +154,19 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		</tr>
 		<tr>
 			<td><b>OUTLINK.PAS</b></td>
-			<td>Outlink : client de messagerie dans l'esprit d'Outlook, porté de <code>OUTLOOK.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (Système OS/2 → Productivité) ; réception IMAP et POP3, envoi SMTP, TLS et STARTTLS, par les sockets de TCPIP32.DLL et TLS32.DLL.</td>
+			<td>Outlink : client de messagerie dans l'esprit d'Outlook, porté de <code>OUTLOOK.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (bureau → Productivité) ; réception IMAP et POP3, envoi SMTP, TLS et STARTTLS, par les sockets de TCPIP32.DLL et TLS32.DLL.</td>
 		</tr>
 		<tr>
 			<td><b>WORDIUM.PAS</b></td>
-			<td>WorDium : traitement de texte porté de <code>WORD.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (Système OS/2 → Productivité) ; formats WPD, DOCX, DOC, PDF et GAT du MonsterBook, correcteur d'orthographe en cinq langues, impression par le tampon d'impression d'OS/2.</td>
+			<td>WorDium : traitement de texte porté de <code>WORD.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (bureau → Productivité) ; formats WPD, DOCX, DOC, PDF et GAT du MonsterBook, correcteur d'orthographe en cinq langues, impression par le tampon d'impression d'OS/2.</td>
 		</tr>
 		<tr>
 			<td><b>EXCELSIO.PAS</b></td>
-			<td>Excelsior : tableur porté de <code>EXCEL.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (Système OS/2 → Productivité) ; 16 feuilles de 4096 lignes sur 256 colonnes, formules, graphiques, formats XLC, XLS (BIFF8) et XLSX.</td>
+			<td>Excelsior : tableur porté de <code>EXCEL.PAS</code> du dépôt OFFICE-0 vers Presentation Manager (bureau → Productivité) ; 16 feuilles de 4096 lignes sur 256 colonnes, formules, graphiques, formats XLC, XLS (BIFF8) et XLSX.</td>
 		</tr>
 		<tr>
 			<td><b>APPS/PAINT.PAS</b></td>
-			<td>Paint : programme de dessin bitmap dans l'esprit de Paint, porté de Pasdows 95 (CloneDRAW) vers Presentation Manager (Système OS/2 → Productivité).</td>
+			<td>Paint : programme de dessin bitmap dans l'esprit de Paint, porté de Pasdows 95 (CloneDRAW) vers Presentation Manager (bureau → Productivité).</td>
 		</tr>
 		<tr>
 			<td><b>PASDEV.PAS</b></td>
@@ -698,9 +698,9 @@ Le fichier <b>PMSHELL.PAS</b> est le programme OS/2 <b>PMSHELL.EXE</b>, l'interp
 
 <table>
 	<tr><th>Élément</th><th>Rôle</th></tr>
-	<tr><td>Bureau</td><td>Fenêtre de tout l'écran, toujours sous les autres ; objets Système OS/2, Lecteurs, Invite de commandes OS/2, Liste des fenêtres, Modèles, Broyeur, Arrêt et Fenêtre OS/2, puis le contenu du répertoire du bureau (<code>C:\DESKTOP</code>, ou <code>D:\DESKTOP</code> si C: est en lecture seule) et les raccourcis du bureau. Les icônes se déplacent à la souris ; leur position est gardée dans OS2.INI (application PMSHELL).</td></tr>
-	<tr><td>Dossiers</td><td>Système OS/2 (invite de commandes, lecteurs, liste des fenêtres, informations sur le système, aide, arrêt), Lecteurs (une icône par unité : C: CD-ROM, D: disque virtuel HPFS...) et les répertoires : sous-répertoires, programmes (.EXE, .COM), fichiers de commandes (.CMD, .BAT) et fichiers de données, triés, avec barre de défilement. Un dossier déjà ouvert est activé au lieu d'être rouvert.</td></tr>
-	<tr><td>Glisser-déposer</td><td>Avec le bouton 2 (ou le bouton 1 dans un dossier), entre le bureau et les dossiers : un objet déposé sur un dossier ou dans la fenêtre d'un dossier y est déplacé (copié avec Ctrl, ou d'une unité à une autre) ; sur le <b>Broyeur</b>, il est supprimé après confirmation ; sur le <b>LaunchPad</b>, il y est ajouté. Comme dans le Workplace Shell, un objet programme d'un dossier du système (Jeux, Productivité, Système OS/2…) ou un programme posé sur le bureau n'est pas un fichier du dossier : le déposer ailleurs crée un raccourci, son exécutable reste en place, et il ne peut pas être supprimé. Un glisser ne commence qu'au-delà de 10 pixels (un double clic un peu tremblé, ou la souris absolue de VirtualBox, ne déplace rien).</td></tr>
+	<tr><td>Bureau</td><td>Fenêtre de tout l'écran, toujours sous les autres ; objets Système OS/2, Lecteurs, Invite de commandes OS/2, Liste des fenêtres, Modèles, Broyeur, Arrêt et Fenêtre OS/2, Navigateur Web, les dossiers Developer Kit, Productivité, Jeux, Multimédia et Loisirs, puis le contenu du répertoire du bureau (<code>C:\DESKTOP</code>, ou <code>D:\DESKTOP</code> si C: est en lecture seule) et les raccourcis du bureau. Les icônes se déplacent à la souris ; leur position est gardée dans OS2.INI (application PMSHELL).</td></tr>
+	<tr><td>Dossiers</td><td>Système OS/2 (invite de commandes, lecteurs, liste des fenêtres, configuration du système, informations sur le système, gestionnaire des tâches, aide, arrêt, fenêtres OS/2 et DOS), Productivité, Jeux, Multimédia et Loisirs (directement sur le bureau), Lecteurs (une icône par unité : C: CD-ROM, D: disque virtuel HPFS...) et les répertoires : sous-répertoires, programmes (.EXE, .COM), fichiers de commandes (.CMD, .BAT) et fichiers de données, triés, avec barre de défilement. Un dossier déjà ouvert est activé au lieu d'être rouvert.</td></tr>
+	<tr><td>Glisser-déposer</td><td>Avec le bouton 2 (ou le bouton 1 dans un dossier), entre le bureau et les dossiers : un objet déposé sur un dossier ou dans la fenêtre d'un dossier y est déplacé (copié avec Ctrl, ou d'une unité à une autre) ; sur le <b>Broyeur</b>, il est supprimé après confirmation ; sur le <b>LaunchPad</b>, il y est ajouté. Comme dans le Workplace Shell, un objet programme d'un dossier du système (Jeux, Productivité, Loisirs, Système OS/2…) ou un programme posé sur le bureau n'est pas un fichier du dossier : le déposer ailleurs crée un raccourci, son exécutable reste en place, et il ne peut pas être supprimé. Un glisser ne commence qu'au-delà de 10 pixels (un double clic un peu tremblé, ou la souris absolue de VirtualBox, ne déplace rien).</td></tr>
 	<tr><td>Raccourcis (shadows)</td><td>Menu contextuel « Créer un raccourci » (sur le bureau), ou dépôt avec Ctrl+Maj : le raccourci (étiquette en couleur) ouvre l'objet d'origine ; le supprimer ne supprime que le raccourci. Ils sont gardés dans OS2.INI (application PMSHELL_RACCOURCIS).</td></tr>
 	<tr><td>Modèles</td><td>Dossier Modèles : Dossier, Fichier de données, Fichier de commandes ; ouvrir un modèle (ou le déposer sur un dossier) crée un nouvel objet (DOSSIER, NOUVEAU.TXT, NOUVEAU.CMD, numérotés au besoin).</td></tr>
 	<tr><td>Souris</td><td>Clic : sélection ; double clic : ouvrir ; bouton 2 : menu contextuel de l'objet (Ouvrir, Créer un raccourci ou Créer un autre, Propriétés, Supprimer) ou du fond (Actualiser, Réorganiser, Liste des fenêtres, Informations système, Aide, Arrêt ; dans un dossier : Dossier parent, Invite de commandes ici, Fermer).</td></tr>
@@ -780,9 +780,9 @@ Les valeurs sont gardées dans OS2.INI, application <code>PM_National</code>, so
 
 <h3>Jeux (KLONDIKE.PAS, ECHECS.PAS, MAHJONGG.PAS, SUDOKU.PAS, OTHELLO.PAS, TILEMAN.PAS, HEX2048.PAS, BACKGAM.PAS, POKER.PAS, BILLARD.PAS, CHECKERS.PAS, YATHZEE.PAS, BATTLE.PAS, POWER4.PAS, SOKOBAN.PAS, BACCARAT.PAS, HANOIS.PAS, BABY.PAS, 421.PAS, CENTIPED.PAS, ASTEROID.PAS, BADUGI.PAS, TTT.PAS, BASEBALL.PAS, EXCAVAT.PAS, PINBALL.PAS, BARBU.PAS, BREAKOUT.PAS, BATAILLE.PAS, INVADERS.PAS, FREECELL.PAS, MISSILE.PAS, L25.PAS)</h3>
 
-Comme OS/2 Warp 3, le bureau a un dossier <b>Jeux</b> (Système OS/2 → Jeux) avec trente-trois jeux de Presentation Manager, écrits en Pascal et compilés par OS2PC. Ce sont des réalisations originales des jeux traditionnels (dessins vectoriels faits par les programmes, aucune image d'IBM). Ils s'exécutent dans la session de Presentation Manager, en même temps que le bureau ; le programme d'installation les copie si le composant « Jeux » est choisi (le dossier n'affiche que les jeux présents).
+Comme OS/2 Warp 3, le bureau a un dossier <b>Jeux</b> avec trente-trois jeux de Presentation Manager, écrits en Pascal et compilés par OS2PC. Ce sont des réalisations originales des jeux traditionnels (dessins vectoriels faits par les programmes, aucune image d'IBM). Ils s'exécutent dans la session de Presentation Manager, en même temps que le bureau ; le programme d'installation les copie si le composant « Jeux » est choisi (le dossier n'affiche que les jeux présents).
 
-<img width="640" height="480" alt="OS/2-0 : le dossier Jeux de Système OS/2" src="IMAGE/JEUX.png" />
+<img width="640" height="480" alt="OS/2-0 : le dossier Jeux du bureau" src="IMAGE/JEUX.png" />
 
 <table>
 	<tr><th>Jeu</th><th>Description</th></tr>
@@ -861,11 +861,45 @@ Comme OS/2 Warp 3, le bureau a un dossier <b>Jeux</b> (Système OS/2 → Jeux) a
 
 Les chaînes d'OS2PC font au plus 255 caractères : les règles des jeux et plusieurs aides (Othello, Sudoku, Klondike, Navigateur Web, Audio numérique, Pascal Developer, Gestionnaire des tâches…) étaient coupées en plein mot ; le texte est maintenant cumulé dans un tampon (<code>LClr</code>, <code>LAdd</code>) puis affiché par <code>LMsgBox</code>. Un nom de procédure identique à une procédure du Graph intégré d'OS2PC appelle celle d'OS2PC sans message : la fonction <code>Sector</code> d'Hex 2048 démarrait le Graph de Win32 au premier clic sur le plateau et le jeu se fermait (SYS1804 CreateSolidBrush) ; elle s'appelle maintenant <code>DirSector</code>, et les noms des procédures de tous les jeux ont été vérifiés contre la liste des fonctions intégrées d'OS2PC. Écrire ces jeux a fait apparaître des limites d'OS2PC. La borne d'une boucle <code>For</code> était gardée dans une variable statique : dans une fonction récursive (la recherche alpha-bêta des Échecs), un appel intérieur écrasait la borne de la boucle de l'appelant, qui ne se terminait plus. OS2PC la range maintenant dans le cadre de pile de la procédure (une case par <code>For</code> du corps, sous les variables locales) ; seul le programme principal garde une variable statique. Les tableaux à deux dimensions dans un enregistrement et la copie d'enregistrements entiers ne sont pas encore fiables (les jeux utilisent des tableaux globaux à une dimension).
 
+<h3>Loisirs : Astromancie (APPS/ASTROMAN.PAS) et Onirologie (APPS/REVES.PAS)</h3>
+
+Le dossier <b>Loisirs</b> du bureau contient deux applications portées du dépôt <b>Mystix</b> (Turbo Pascal 7 et Free Pascal, BGI en 640 x 480 x 16 couleurs) vers Presentation Manager : <b>Astromancie</b>, logiciel interactif d'interprétation de l'astrologie (clone graphique du logiciel URRIS de 1985), et <b>Onirologie</b>, interprète de rêves. Comme les autres applications, leurs sources sont dans le dossier <b>APPS</b> du dépôt, chacune en un seul fichier (moteur, textes d'interprétation, dictionnaire et interface). Le moteur d'origine est conservé tel quel ; ce qui change pour OS/2 :
+
+<table>
+	<tr><th>Élément</th><th>OS/2-0</th></tr>
+	<tr><td>Fenêtre</td><td>Fenêtre de Presentation Manager : barre de titre (nom de la personne, titre du rêve), menu système, barre de menus d'OS/2 construite à partir des tables de menus d'origine dans la langue choisie (F10, Alt + lettre, souris ; raccourcis F1 à F9 et Alt+X affichés). La fenêtre tient dans un écran de 640 x 480 (32 lignes de texte par page au lieu de 34).</td></tr>
+	<tr><td>Pages</td><td>Pages de texte, éditeur du récit et graphiques sur fond blanc, avec les couleurs d'origine assombries pour rester lisibles ; barre d'information et barre d'état grises ; barre de défilement d'OS/2 (flèches et pages à la souris). La carte du ciel et les pages d'accueil gardent leur ciel étoilé.</td></tr>
+	<tr><td>Dialogues</td><td>Boîtes de dialogue, boutons, zones de saisie et listes dans le style d'OS/2 ; les messages et les questions (Oui/Non) passent par <code>WinMessageBox</code>.</td></tr>
+	<tr><td>Menus</td><td>Astromancie : les choix qui demandent un thème sont grisés tant qu'aucun horoscope n'est ouvert. Onirologie : Surligner est un choix coché.</td></tr>
+</table>
+
+<img width="640" height="480" alt="Le dossier Loisirs du bureau : Astromancie et Onirologie" src="IMAGE/LOISIRS.png" />
+
+<b>Astromancie</b> (ASTROMAN.EXE) : nouvel horoscope (nom, date et heure de naissance, pays, état, ville : les coordonnées et le décalage horaire sont retrouvés dans l'atlas intégré), calepin des personnes (ASTROMAN.CAL), thème natal (planètes, signes, maisons, mots-clés, planète dominante, ascendant), maisons, carte du ciel (roue du zodiaque, aspects, planètes du jour sur l'anneau extérieur), détail d'une planète ou d'une maison, thème du jour, prévisions, tarot astrologique, comparaison de deux thèmes, exportation de la page (ASTROMAN.TXT), guide ; cinq langues (variable <code>LANGUAGE</code> : FR, EN, DE, ES, IT).
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/ASTROMANCIE.png" width="400" alt="Astromancie : thème natal"><br><i>Thème natal (15/03/1970, 14 h 30, Paris)</i></td>
+		<td align="center"><img src="IMAGE/ASTROMANCIE_CARTE.png" width="400" alt="Astromancie : carte du ciel"><br><i>Carte du ciel (F7)</i></td>
+	</tr>
+</table>
+
+<b>Onirologie</b> (REVES.EXE) : éditeur du récit (accents par Tab, mots-clés surlignés : symboles, émotions positives et négatives), propriétés du rêve (titre, date, rêveur, humeur au réveil, langue du récit, rêve récurrent ou lucide), analyse par un dictionnaire intégré de 442 symboles et 17 831 mots-clés en cinq langues (détection de la langue), sens du rêve, rapport complet, symboles, tonalité et émotions (camembert, jauge, évolution au fil du récit), thèmes et domaines de vie, classification, archétypes, dictionnaire (parcourir, chercher, par catégorie), journal des rêves (REVES.JNL) et ses statistiques, importation et exportation de textes. <code>REVES récit.txt</code> ouvre un récit dans l'éditeur ; le CD-ROM contient l'exemple <b>REVE.TXT</b>.
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/ONIROLOGIE.png" width="400" alt="Onirologie : éditeur du récit"><br><i>Le récit, mots-clés surlignés</i></td>
+		<td align="center"><img src="IMAGE/ONIROLOGIE_TONALITE.png" width="400" alt="Onirologie : tonalité et émotions"><br><i>Tonalité et émotions (F7)</i></td>
+	</tr>
+</table>
+
+La couche d'OS/2 de chaque programme dessine dans une image en mémoire de 640 x 480 (les routines de l'unité Graph utilisées sont réécrites : traits, rectangles, cercles, arcs, secteurs, texte agrandi), montrée dans la fenêtre par <code>GpiDrawBits</code> ; la file de messages de PM alimente la boucle d'origine (touches, clics, choix des menus). Dans OS2PC, chaque élément d'un tableau de <code>String[n]</code> occupe 256 octets : les 17 831 mots-clés et les 3 872 lignes de texte d'Onirologie sont regroupés dans des chaînes de 200 caractères, indexées au démarrage (REVES.EXE passe de 6,7 Mo à 1,7 Mo, sous la limite de 4 Mo de l'image d'un programme). Le portage a été vérifié par les modes texte d'origine : <code>ASTROMAN /TEST</code> (deux thèmes : Paris 1970 et Montréal 1985) et <code>REVES /TEST</code> et <code>/RAPPORT</code> donnent exactement les mêmes lignes que les programmes d'origine compilés par Free Pascal sous Linux. Ce travail a corrigé trois défauts d'OS2PC, valables pour tous les programmes : une fonction qui rend un <code>Single</code> effaçait 8 octets au lieu de 4 en commençant (l'EBP sauvé de l'appelant était remis à zéro) ; un paramètre <code>Integer</code>, <code>Word</code> ou <code>Byte</code> passé par valeur et modifié dans la procédure (<code>A := A + 360</code>) n'était réécrit que sur 2 octets mais relu sur 4 ; <code>Read(F, S)</code> sur un fichier texte lisait toute la ligne au lieu de s'arrêter avant la fin de ligne, comme Turbo Pascal.
+
 <h3>Calculatrice (CALC.PAS)</h3>
 
 OS/2 Warp 3 n'avait pas de calculatrice. OS/2-0 en a une : celle de Pasdows 95 (<code>APPS/CALC.PAS</code>, programme Win32), portée vers l'API d'OS/2 et l'apparence de Warp. Elle est dans le nouveau dossier <b>Productivité</b> de Système OS/2 (objet <b>Calculatrice</b>) ; <code>CALC</code> à l'invite de commandes la lance aussi. Le programme d'installation la copie toujours.
 
-<img width="640" height="480" alt="OS/2-0 : la Calculatrice, ouverte depuis le dossier Productivité de Système OS/2" src="IMAGE/CALCULATRICE.png" />
+<img width="640" height="480" alt="OS/2-0 : la Calculatrice, ouverte depuis le dossier Productivité du bureau" src="IMAGE/CALCULATRICE.png" />
 
 <table>
 	<tr><th>Élément</th><th>Pasdows 95 (Win32)</th><th>OS/2-0 (Presentation Manager)</th></tr>
@@ -907,7 +941,7 @@ Le portage remplace les services du noyau de Pasdows par l'API d'OS/2 : <code>Do
 
 <h3>Paint (APPS/PAINT.PAS) : dessin bitmap</h3>
 
-<b>Paint</b> est le programme de dessin d'OS/2-0, dans le dossier <b>Productivité</b> (Système OS/2 → Productivité → Paint ; <code>PAINT [fichier]</code> à l'invite). Une image (<code>.BMP</code>, <code>.PCX</code>, <code>.GIF</code>, <code>.PNG</code>, <code>.JPG</code>…) ouverte depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans Paint. C'est le <code>PAINT.PAS</code> de Pasdows 95 (lui-même issu de CloneDRAW, pour MS-DOS) : tous les outils (sélection, gomme, remplissage, pipette, loupe, crayon, pinceau, aérographe, texte, ligne, courbe, rectangle, polygone, ellipse, rectangle arrondi), les menus Fichier, Modifier, Affichage, Image, Couleurs, Outils et ?, Annuler/Rétablir, une trentaine de formats d'image en lecture et en écriture.
+<b>Paint</b> est le programme de dessin d'OS/2-0, dans le dossier <b>Productivité</b> (bureau → Productivité → Paint ; <code>PAINT [fichier]</code> à l'invite). Une image (<code>.BMP</code>, <code>.PCX</code>, <code>.GIF</code>, <code>.PNG</code>, <code>.JPG</code>…) ouverte depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans Paint. C'est le <code>PAINT.PAS</code> de Pasdows 95 (lui-même issu de CloneDRAW, pour MS-DOS) : tous les outils (sélection, gomme, remplissage, pipette, loupe, crayon, pinceau, aérographe, texte, ligne, courbe, rectangle, polygone, ellipse, rectangle arrondi), les menus Fichier, Modifier, Affichage, Image, Couleurs, Outils et ?, Annuler/Rétablir, une trentaine de formats d'image en lecture et en écriture.
 
 <img width="800" height="600" alt="OS/2-0 : Paint sur un bureau de 800 x 600, avec PAYSAGE.BMP" src="IMAGE/PAINT.png" />
 <img width="800" height="600" alt="OS/2-0 : Paint, menu Image de Presentation Manager" src="IMAGE/PAINT_MENU.png" />
@@ -926,7 +960,7 @@ PAINT.PAS (45 000 lignes) est écrit pour Free Pascal : AnsiString, Int64, PByte
 
 <h3>WorDium (WORDIUM.PAS) : traitement de texte</h3>
 
-<b>WorDium</b> est le traitement de texte d'OS/2-0, dans le dossier <b>Productivité</b> (Système OS/2 → Productivité → WorDium ; <code>WORDIUM [/CLASSICMENU | /RUBANMENU] [document]</code> à l'invite, <code>WORDIUM /?</code> : aide). Un document (<code>.DOCX</code>, <code>.DOC</code>, <code>.PDF</code>, <code>.GAT</code>, <code>.GPX</code>, <code>.WPD</code>) ouvert depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans WorDium. C'est le <code>WORD.PAS</code> du dépôt OFFICE-0, écrit pour MS-DOS (BGI en 640 × 480, souris de l'interruption 33h), porté vers Presentation Manager avec toutes ses fonctions :
+<b>WorDium</b> est le traitement de texte d'OS/2-0, dans le dossier <b>Productivité</b> (bureau → Productivité → WorDium ; <code>WORDIUM [/CLASSICMENU | /RUBANMENU] [document]</code> à l'invite, <code>WORDIUM /?</code> : aide). Un document (<code>.DOCX</code>, <code>.DOC</code>, <code>.PDF</code>, <code>.GAT</code>, <code>.GPX</code>, <code>.WPD</code>) ouvert depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans WorDium. C'est le <code>WORD.PAS</code> du dépôt OFFICE-0, écrit pour MS-DOS (BGI en 640 × 480, souris de l'interruption 33h), porté vers Presentation Manager avec toutes ses fonctions :
 
 <ul>
 	<li>saisie et mise en forme : gras, italique, souligné, tailles de 6 à 72 points, 16 couleurs, alignements (gauche, centré, droite, justifié), retraits, filets, sauts de page ; affichage Normal ou Mise en page, règle, zoom ;</li>
@@ -956,7 +990,7 @@ Les exemples <b>MONSTER.GAT</b> (MonsterBook) et <b>LETTRE.PDF</b> (<code>IMAGE/
 
 <h3>Excelsior (EXCELSIO.PAS) : tableur</h3>
 
-<b>Excelsior</b> est le tableur d'OS/2-0, dans le dossier <b>Productivité</b> (Système OS/2 → Productivité → Excelsior ; <code>EXCELSIO [/CLASSICMENU | /RUBANMENU] [classeur]</code> à l'invite, <code>EXCELSIO /?</code> : aide). Un classeur (<code>.XLC</code>, <code>.XLS</code>, <code>.XLSX</code>) ouvert depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans Excelsior. C'est le <code>EXCEL.PAS</code> du dépôt OFFICE-0, écrit pour MS-DOS (BGI en 640 × 480, souris de l'interruption 33h), porté vers Presentation Manager avec toutes ses fonctions :
+<b>Excelsior</b> est le tableur d'OS/2-0, dans le dossier <b>Productivité</b> (bureau → Productivité → Excelsior ; <code>EXCELSIO [/CLASSICMENU | /RUBANMENU] [classeur]</code> à l'invite, <code>EXCELSIO /?</code> : aide). Un classeur (<code>.XLC</code>, <code>.XLS</code>, <code>.XLSX</code>) ouvert depuis un dossier du bureau ou depuis l'Explorateur OS2-0 s'ouvre aussi dans Excelsior. C'est le <code>EXCEL.PAS</code> du dépôt OFFICE-0, écrit pour MS-DOS (BGI en 640 × 480, souris de l'interruption 33h), porté vers Presentation Manager avec toutes ses fonctions :
 
 <ul>
 	<li>les mêmes dimensions que la version DOS : <b>16 feuilles de 4096 lignes sur 256 colonnes</b> (A à IV), lignes allouées à la demande ; onglets des feuilles (insérer, renommer, supprimer), largeurs des colonnes et hauteurs des lignes ;</li>
@@ -983,7 +1017,7 @@ L'exemple <b>BUDGET.XLC</b> (<code>IMAGE/EXEMPLES</code> : deux feuilles, une tr
 
 <h3>Outlink (OUTLINK.PAS) : courrier IMAP, POP3 et SMTP</h3>
 
-<b>Outlink</b> est le client de messagerie d'OS/2-0, dans le dossier <b>Productivité</b> (Système OS/2 → Productivité → Outlink ; <code>OUTLINK [/ACCOUNTS:fichier]</code> à l'invite). C'est un portage de <code>OUTLOOK.PAS</code>, le clone d'Outlook du dépôt OFFICE-0, écrit pour MS-DOS : la version d'origine dessine avec l'unité Graph du BGI, lit la souris par l'interruption 33h et passe par un pilote de paquets pour le réseau. Sous OS/2-0, Outlink est une vraie fenêtre de Presentation Manager, avec la barre de titre et la barre de menus d'OS/2 (Fichier, Édition, Affichage, Outils, Message, ?, avec leurs lettres soulignées et leurs raccourcis), et ses communications passent par l'API réseau d'OS/2 : les sockets de <b>TCPIP32.DLL</b> (<code>gethostbyname</code>, <code>socket</code>, <code>connect</code>, <code>send</code>, <code>recv</code>, <code>soclose</code>) et le chiffrement de <b>TLS32.DLL</b> (TLS 1.3 et 1.2).
+<b>Outlink</b> est le client de messagerie d'OS/2-0, dans le dossier <b>Productivité</b> (bureau → Productivité → Outlink ; <code>OUTLINK [/ACCOUNTS:fichier]</code> à l'invite). C'est un portage de <code>OUTLOOK.PAS</code>, le clone d'Outlook du dépôt OFFICE-0, écrit pour MS-DOS : la version d'origine dessine avec l'unité Graph du BGI, lit la souris par l'interruption 33h et passe par un pilote de paquets pour le réseau. Sous OS/2-0, Outlink est une vraie fenêtre de Presentation Manager, avec la barre de titre et la barre de menus d'OS/2 (Fichier, Édition, Affichage, Outils, Message, ?, avec leurs lettres soulignées et leurs raccourcis), et ses communications passent par l'API réseau d'OS/2 : les sockets de <b>TCPIP32.DLL</b> (<code>gethostbyname</code>, <code>socket</code>, <code>connect</code>, <code>send</code>, <code>recv</code>, <code>soclose</code>) et le chiffrement de <b>TLS32.DLL</b> (TLS 1.3 et 1.2).
 
 <img width="640" height="480" alt="OS/2-0 : Outlink, boîte de réception IMAP et prévisualisation d'un message" src="IMAGE/OUTLINK.png" />
 <img width="640" height="480" alt="OS/2-0 : Outlink, nouveau message" src="IMAGE/OUTLINK_MESSAGE.png" />
@@ -1003,7 +1037,7 @@ Le portage a mis au jour quelques défauts corrigés au passage : <b>OS2PC</b> c
 
 <h3>Multimédia : Audio numérique (DIGAUDIO.PAS), MDM.DLL et pilotes des cartes son</h3>
 
-Le dossier <b>Multimédia</b> (Système OS/2 → Multimédia) contient <b>Audio numérique</b>, l'application « Digital Audio » de MMPM/2 (le multimédia d'OS/2 Warp), et les sons du système ; un fichier <code>.WAV</code> ouvert depuis un dossier du bureau s'ouvre aussi dans Audio numérique. Tout est écrit en Pascal et compilé par OS2PC, avec trois nouveaux pilotes pour les cartes son les plus répandues.
+Le dossier <b>Multimédia</b> du bureau contient <b>Audio numérique</b>, l'application « Digital Audio » de MMPM/2 (le multimédia d'OS/2 Warp), et les sons du système ; un fichier <code>.WAV</code> ouvert depuis un dossier du bureau s'ouvre aussi dans Audio numérique. Tout est écrit en Pascal et compilé par OS2PC, avec trois nouveaux pilotes pour les cartes son les plus répandues.
 
 <img width="640" height="480" alt="OS/2-0 : Audio numérique (lecture de DEMARRE.WAV) ouvert depuis le dossier Multimédia" src="IMAGE/AUDIONUM.png" />
 
@@ -1018,7 +1052,7 @@ Le dossier <b>Multimédia</b> (Système OS/2 → Multimédia) contient <b>Audio 
 
 Un pilote de carte son est une DLL à un seul point d'entrée, <code>AUDIOSTRATEGY</code> (ordinal 1), qui reçoit un paquet de requête comme un pilote de périphérique d'OS/2 : détecter, ouvrir (format demandé → format de la carte, tampon circulaire de 64 Ko pris dans le tas du noyau, en mémoire basse : convient au DMA ISA et au bus maître PCI), démarrer, position, arrêter, volume, fermer. La position est lue dans la carte (compteur du 8237, CIV/PICB de l'AC'97, compteur de trame de l'ES1370) : les pilotes n'ont pas besoin des interruptions. Un programme de Presentation Manager n'étant pas préempté, MDM.DLL alimente aussi le tampon quand le programme demande la position du flux.
 
-<img width="640" height="480" alt="OS/2-0 : le dossier Multimédia de Système OS/2 (Audio numérique, Lecteur MP3, Notator for OS2-Zero, sons)" src="IMAGE/MULTIMEDIA.png" />
+<img width="640" height="480" alt="OS/2-0 : le dossier Multimédia du bureau (Audio numérique, Lecteur MP3, Notator for OS2-Zero, sons)" src="IMAGE/MULTIMEDIA.png" />
 
 Le noyau donne maintenant aux processus de grands blocs de mémoire (KrnTaskCtl 15 à 17 : mémoire physique au-delà de 16 Mo, vue à la même adresse, rendue à la fin du processus) : DOSCALLS.DLL les utilise pour DosAllocMem à partir de 64 Ko, au lieu du petit tas du noyau. Le programme <b>DLL/TESTMDM.PAS</b> vérifie MDM.DLL et le pilote (41 vérifications : lecture à 11 025, 22 050 et 44 100 Hz en 8 et 16 bits, mono et stéréo, pause, reprise, arrêt, chaînes MCI, enregistrement, sauvegarde et relecture d'un WAV) ; avec QEMU, <code>-audiodev wav</code> recueille le son produit :
 
@@ -1401,7 +1435,7 @@ Le fichier <b>INSTALL.PAS</b> est le programme OS/2 <b>INSTALL.EXE</b>, le progr
 	<tr><td>Configuration du système</td><td>Le tableau de bord de Warp 3 : pays, clavier, <b>langue</b> (nouveau, français par défaut), souris, ports série, affichage principal (VGA 640 x 480 ou un mode VESA : <code>SET PMRESOLUTION=</code>), affichage secondaire, gestion de l'alimentation, PCMCIA, CD-ROM, imprimante, multimédia, SCSI. Un clic sur l'icône (ou le titre) d'un choix ouvre la liste de ses valeurs ; les champs à flèches changent de valeur. L'assistant change aussitôt de langue (français, anglais, allemand, espagnol, italien, albanais ; le portugais, le suédois, le danois et le japonais sont affichés en anglais), le pays et le clavier suivent.</td></tr>
 	<tr><td>Partitionnement du disque dur</td><td>Comme FDISK : disques IDE (modèle, taille), partitions principales et espaces libres ; création d'une partition HPFS (07h) dont on donne la taille en Mo (alignée sur 1 Mo, après les 4 premiers Mo du disque), suppression (après confirmation), choix de la partition. La table est écrite au secteur 0 du disque.</td></tr>
 	<tr><td>Formatage</td><td><b>HPFS</b> (choix par défaut, le système de fichiers d'OS/2, par HPFS.IFS : FS_FSCTL 8000h) ou <b>NTFS</b> (par NTFS.IFS : KrnDiskCtl 11 ; les fichiers se partagent alors facilement avec Windows et Linux), avec le nom du volume ; « Ne pas formater » garde les fichiers d'une partition HPFS ou NTFS existante (réinstallation). <code>SET INSTALL_FS=NTFS</code> dans le CONFIG.SYS du CD-ROM d'installation fait de NTFS le choix initial (et le choix de l'installation facile).</td></tr>
-	<tr><td>Composants</td><td>Système de base et Presentation Manager (obligatoire), bureau et LaunchPad (sinon <code>PROTSHELL=C:\CMD.EXE</code>), utilitaires, programmes d'essai TEST*.EXE, disque virtuel de 4 Mo, jeux (Solitaire - Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes, Astéroïde, Badugi, Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique, Bataille, Invasion de l'espace, FreeCell, Commandement des missiles, L25), multimédia (Audio numérique, Lecteur MP3 et son morceau d'exemple, Notator for OS2-Zero et ses exemples, MDM.DLL, pilotes des cartes son, sons), réseau TCP/IP (TCPIP32.DLL, E1000.DLL, PCNET.DLL, IFCONFIG, PING, HOST, WGET, Outlink) ; espace nécessaire et espace disponible.</td></tr>
+	<tr><td>Composants</td><td>Système de base et Presentation Manager (obligatoire), bureau et LaunchPad (sinon <code>PROTSHELL=C:\CMD.EXE</code>), utilitaires, programmes d'essai TEST*.EXE, disque virtuel de 4 Mo, jeux (Solitaire - Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes, Astéroïde, Badugi, Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique, Bataille, Invasion de l'espace, FreeCell, Commandement des missiles, L25) et loisirs (Astromancie, Onirologie et son récit d'exemple REVE.TXT), multimédia (Audio numérique, Lecteur MP3 et son morceau d'exemple, Notator for OS2-Zero et ses exemples, MDM.DLL, pilotes des cartes son, sons), réseau TCP/IP (TCPIP32.DLL, E1000.DLL, PCNET.DLL, IFCONFIG, PING, HOST, WGET, Outlink) ; espace nécessaire et espace disponible.</td></tr>
 	<tr><td>Transfert des fichiers</td><td>Barre de progression aux logos OS/2, fichier courant ; copie des fichiers du CD-ROM, création de C:\DESKTOP et C:\AIDE, CONFIG.SYS du disque dur (<code>IFS=C:\HPFS.IFS /CACHE:64 /AUTOCHECK:C</code>, <code>SET LANGUAGE=</code>, <code>COUNTRY=</code>, <code>DEVINFO=KBD,...</code>, <code>SET PMRESOLUTION=</code>...), zone d'amorçage et secteur d'amorce principal.</td></tr>
 	<tr><td>Fin</td><td>Retirer le CD-ROM puis Redémarrer (les tampons des volumes sont vidés, puis remise à zéro par le contrôleur du clavier).</td></tr>
 </table>
@@ -1439,7 +1473,7 @@ Langue : la variable <code>LANGUAGE</code> de CONFIG.SYS (convention commune ave
 
 <img width="640" height="480" alt="OS/2-0 : onglet Langue du carnet Système - Paramètres" src="IMAGE/LANGUE.png" />
 
-Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL, PMCTLS.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, TLS32.DLL, NTFS.IFS, E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, DIGAUDIO.EXE, MP3PLAY.EXE, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, IFCONFIG.EXE, PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV, AURORE.MP3, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE, TESTVDM.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
+Le CD-ROM amorçable <b>IMAGE/OS2CD.ISO</b> contient OS2BOOT, OS2LDR, OS2KRNL, CONFIG.SYS, DOSCALLS.DLL, FKA.DLL, HPFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL, PMCTLS.DLL, MDM.DLL, SBAUDIO.DLL, ICHAUDIO.DLL, ESAUDIO.DLL, VBOXGST.DLL, VMWTOOLS.DLL, TCPIP32.DLL, TLS32.DLL, NTFS.IFS, E1000.DLL, PCNET.DLL, CMD.EXE, PMSHELL.EXE, LAUNCHPD.EXE, INSTALL.EXE, KLONDIKE.EXE, ECHECS.EXE, MAHJONGG.EXE, DIGAUDIO.EXE, MP3PLAY.EXE, ASTROMAN.EXE, REVES.EXE, REVE.TXT, DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, IFCONFIG.EXE, PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV, AURORE.MP3, TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE, TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE, TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE, TESTQUE.EXE, TESTPFS.EXE, TESTRM.EXE, TESTSM.EXE, TESTHLP.EXE, TESTUNI.EXE, TESTDRG.EXE, TESTWIN.EXE, TESTGPI.EXE, TESTMRG.EXE, TESTPIC.EXE, TESTSHA.EXE, TESTSPL.EXE, TESTVIOP.EXE, TESTMDM.EXE, TESTVDM.EXE et les commandes du dépôt compilées avec OS2PC. Il se fabrique avec <b>TOOLS/MAKEISO.PAS</b> (ISO 9660 + El Torito) ; le script <b>KERNEL/BUILD.sh</b> (ou <b>KERNEL/BUILD.BAT</b>) reconstruit le tout :
 
 <pre>KERNEL/BUILD.sh
 qemu-system-i386 -m 64 -cdrom IMAGE/OS2CD.ISO -boot d</pre>
