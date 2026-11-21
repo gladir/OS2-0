@@ -364,6 +364,7 @@ Function KCreateProcessA(App, Cmd, PA, TA, Inh, Flags, Env, Dir, SI, PI : LongIn
 Function KGetExitCodeProcess(H, PCode : LongInt) : LongInt; External 'DOSCALLS' Name 'GetExitCodeProcess';
 Function KWaitForSingleObject(H, Ms : LongInt) : LongInt; External 'DOSCALLS' Name 'WaitForSingleObject';
 Function KTaskCtl(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
+Function KDiskCtl(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnDiskCtl';
 Function KrnMonIo(Dev, Op, P : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnMonIo';
 Procedure KExitProcess(Code : LongInt); External 'DOSCALLS' Name 'ExitProcess';
 Function KHeapAlloc(Heap, Flags, Size : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapAlloc';
@@ -2343,6 +2344,41 @@ Begin
 End;
 
 { FSQBUFFER2 : iType, cbName, cbFSDName, cbFSAData, szName, szFSDName }
+Var RemoteErr : LongInt;
+    RemBuf : Array[0..511] Of Byte;
+
+{ unite D (1 = A:) attachee a un FSD distant : FSQBUFFER2 (iType 4
+  FSAT_REMOTEDRV, nom, FSD, donnees : \\serveur\partage) ; RemoteErr }
+Function RemoteInfo(D, PBuf, PCb : LongInt) : Boolean;
+Var Q : Array[0..1] Of LongInt; R, K, NL : LongInt; Fs, Dat : String;
+Begin
+  RemoteInfo := False;
+  Q[0] := LongInt(@RemBuf); Q[1] := 512;
+  R := KDiskCtl(15, D - 1, LongInt(@Q));
+  If R = 1 Then Exit;
+  If R <> 0 Then Exit;
+  RemoteInfo := True;
+  Fs := GetStr(LongInt(@RemBuf));
+  K := Length(Fs) + 1;
+  Dat := GetStr(LongInt(@RemBuf) + K);
+  NL := 8 + 3 + Length(Fs) + 1 + Length(Dat) + 1;
+  If PeekL(PCb) < NL Then
+  Begin
+    PokeL(PCb, NL);
+    RemoteErr := ERROR_BUFFER_OVERFLOW;
+    Exit;
+  End;
+  PokeW(PBuf, 4);                { FSAT_REMOTEDRV }
+  PokeW(PBuf + 2, 2);
+  PokeW(PBuf + 4, Length(Fs));
+  PokeW(PBuf + 6, Length(Dat) + 1);
+  PutStr(PBuf + 8, Chr(64 + D) + ':', 3);
+  PutStr(PBuf + 11, Fs, Length(Fs) + 1);
+  PutStr(PBuf + 12 + Length(Fs), Dat, Length(Dat) + 1);
+  PokeL(PCb, NL);
+  RemoteErr := NO_ERROR;
+End;
+
 Function DosQueryFSAttach(PDev, Ordinal, Level, PBuf, PCb : LongInt) : LongInt;
 Var Nm, Fs : String; D, N, I : LongInt;
 Begin
@@ -2379,6 +2415,12 @@ Begin
       Exit;
     End;
   End;
+  { unite distante (DosFSAttach) : FSAT_REMOTEDRV, donnees du FSD }
+  If RemoteInfo(D, PBuf, PCb) Then
+  Begin
+    DosQueryFSAttach := RemoteErr;
+    Exit;
+  End;
   Fs := FsNameOf(D);
   If PeekL(PCb) < 8 + 3 + Length(Fs) + 1 + 1 Then
   Begin
@@ -2402,13 +2444,33 @@ Begin
   DosQFSAttach := DosQueryFSAttach(PDev, Ordinal, Level, PBuf, PCb);
 End;
 
-{ Attacher un systeme de fichiers : aucun FSD installable (ERROR_INVALID_FSD_NAME 252) }
+{ Attacher (Flag 0, FS_ATTACH) ou detacher (1, FS_DETACH) l'unite PDev
+  ("Z:") a un FSD distant (PFsd : "SMB", charge a la demande par le
+  noyau) ; PData : donnees du FSD (SMB.IFS : "\\serveur\partage" 0
+  "utilisateur" 0 "mot de passe" 0). Les unites locales ne se detachent
+  pas (ERROR_INVALID_DRIVE). }
 Function DosFSAttach(PDev, PFsd, PData, CbData, Flag : LongInt) : LongInt;
+Var Dev : String; D : LongInt; P : Array[0..2] Of LongInt;
 Begin
-  If GetStr(PFsd) = '' Then DosFSAttach := ERROR_INVALID_PARAMETER
-  Else DosFSAttach := 252;
+  DosFSAttach := ERROR_INVALID_PARAMETER;
+  If PDev = 0 Then Exit;
+  Dev := UpStr(GetStr(PDev));
+  If (Length(Dev) <> 2) Or (Dev[2] <> ':') Or (Dev[1] < 'A') Or (Dev[1] > 'Z') Then
+  Begin
+    DosFSAttach := ERROR_INVALID_DRIVE;
+    Exit;
+  End;
+  D := Ord(Dev[1]) - 65;
+  Case Flag Of
+    0 :
+      Begin
+        If (PFsd = 0) Or (GetStr(PFsd) = '') Then Exit;
+        P[0] := PFsd; P[1] := PData; P[2] := CbData;
+        DosFSAttach := KDiskCtl(13, D, LongInt(@P));
+      End;
+    1 : DosFSAttach := KDiskCtl(14, D, 0);
+  End;
 End;
-
 { DosFSCtl : interface etendue avec le FSD ; fonction 1 (FSCTL_ERROR_INFO)
   rend un message vide, fonction 2 (FSCTL_MAX_EASIZE) les tailles maximales
   des attributs etendus (aucun) }

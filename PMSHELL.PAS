@@ -266,6 +266,8 @@ Function DosFindNext(HDir, PBuf, CbBuf, PCount : LongInt) : LongInt; External 'D
 Function DosFindClose(HDir : LongInt) : LongInt; External 'DOSCALLS';
 Function DosQueryCurrentDisk(PDisk, PLogical : LongInt) : LongInt; External 'DOSCALLS';
 Function KDiskCtl(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnDiskCtl';
+Function DosFSAttach(PDev, PFsd, PData, CbData, Flag : LongInt) : LongInt; External 'DOSCALLS';
+Function DosQueryFSAttach(PDev, Ordinal, Level, PBuf, PCb : LongInt) : LongInt; External 'DOSCALLS';
 Function DosQuerySysInfo(IStart, ILast, PBuf, CbBuf : LongInt) : LongInt; External 'DOSCALLS';
 Function DosShutdown(Reserved : LongInt) : LongInt; External 'DOSCALLS';
 Function DosScanEnv(PName, PPValue : LongInt) : LongInt; External 'DOSCALLS';
@@ -576,7 +578,7 @@ Begin
   End;
 End;
 
-{ Explorateur OS2-0 (EXPLORER.EXE, dossier Productivite et menu du bureau) }
+{ Explorateur OS2-Zero (EXPLORER.EXE, dossier Productivite et menu du bureau) }
 { Paint (PAINT.EXE, dossier Productivite) : memes emplacements }
 Function PaintPath : String;
 Var S : String;
@@ -672,6 +674,47 @@ Begin
   Val(PrfStr(App, Key), V, C);
   If C <> 0 Then V := 0;
   PrfInt := V;
+End;
+
+{ lecteurs reseau permanents (case "Se reconnecter a l'ouverture de
+  session" de l'Explorateur OS2-Zero) : OS2.INI, application
+  PM_NetworkDrives, cle = lettre, valeur = \\serveur\partage TAB
+  utilisateur TAB #cle NT. DosFSAttach avec l'option L (connexion
+  differee) : SMB.IFS ouvre la session au premier acces, le bureau
+  n'attend pas un serveur eteint. }
+Procedure NetRestore;
+Var C : Char; S, R, U, H : String; K, P : LongInt; B : Array[0..767] Of Byte;
+Begin
+  If Not FileExists('C:\SMB.IFS') Then Exit;
+  For C := 'D' To 'Z' Do
+  Begin
+    S := PrfStr('PM_NetworkDrives', C);
+    If S = '' Then Continue;
+    K := Pos(Chr(9), S);
+    If K = 0 Then Continue;
+    R := Copy(S, 1, K - 1); Delete(S, 1, K);
+    K := Pos(Chr(9), S);
+    If K = 0 Then Continue;
+    U := Copy(S, 1, K - 1); H := Copy(S, K + 1, 255);
+    P := 0;
+    PutZ(LongInt(@B) + P, R); P := P + Length(R) + 1;
+    PutZ(LongInt(@B) + P, U); P := P + Length(U) + 1;
+    PutZ(LongInt(@B) + P, H); P := P + Length(H) + 1;
+    PutZ(LongInt(@B) + P, 'L'); P := P + 2;
+    Dummy := DosFSAttach(Z(C + ':'), Z2('SMB'), LongInt(@B), P, 0);
+  End;
+End;
+
+{ lecteur reseau : \\serveur\partage (DosQueryFSAttach, FSAT_REMOTEDRV) }
+Function RemoteOf(K : LongInt) : String;
+Var Cb, N : LongInt; B : Array[0..299] Of Byte;
+Begin
+  RemoteOf := '';
+  Cb := 300;
+  If DosQueryFSAttach(Z(Chr(65 + K) + ':'), 0, 1, LongInt(@B), LongInt(@Cb)) <> 0 Then Exit;
+  If (B[0] <> 4) Or (B[1] <> 0) Then Exit;
+  N := B[2] + B[3] * 256;
+  RemoteOf := GetZ(LongInt(@B) + 8 + N + 1 + B[4] + B[5] * 256 + 1);
 End;
 
 { ==================================================================== }
@@ -1339,9 +1382,9 @@ Begin
         { Productivite (comme le dossier de Warp 3) : la Calculatrice,
           portee de Pasdows 95 (Warp 3 n'en avait pas), et l'Explorateur }
         If CalcPath <> '' Then Dummy := NewItem(V, IC_CALC, OB_GAME, 'Calculatrice', CalcPath);
-        { Explorateur OS2-0 : explorateur de fichiers a deux volets dans le
+        { Explorateur OS2-Zero : explorateur de fichiers a deux volets dans le
           style de Windows 95 (porte de l'Explorateur Pasdows) }
-        If ExplorerPath <> '' Then Dummy := NewItem(V, IC_EXPLORER, OB_GAME, 'Explorateur OS2-0', ExplorerPath);
+        If ExplorerPath <> '' Then Dummy := NewItem(V, IC_EXPLORER, OB_GAME, 'Explorateur OS2-Zero', ExplorerPath);
         { Outlink : client de messagerie (OUTLOOK.PAS d'OFFICE-0) ; IMAP,
           POP3 et SMTP par TCPIP32.DLL, TLS et STARTTLS par TLS32.DLL }
         If OutlinkPath <> '' Then Dummy := NewItem(V, IC_OUTLINK, OB_GAME, 'Outlink', OutlinkPath);
@@ -1434,6 +1477,9 @@ Begin
           Begin
             If K = Cd Then Dummy := NewItem(V, IC_CDROM, OB_DIR, 'Lecteur ' + Chr(65 + K) + ' (CD-ROM)',
                                            Chr(65 + K) + ':\')
+            Else If (K >= 3) And (RemoteOf(K) <> '') Then
+              Dummy := NewItem(V, IC_DISK, OB_DIR, 'Lecteur ' + Chr(65 + K) + ' (' + RemoteOf(K) + ')',
+                               Chr(65 + K) + ':\')
             Else Dummy := NewItem(V, IC_DISK, OB_DIR, 'Lecteur ' + Chr(65 + K), Chr(65 + K) + ':\');
           End;
       End;
@@ -2859,7 +2905,7 @@ Begin
     MenuAdd(0, '');
     MenuAdd(CM_WINLIST, '~Liste des fenetres');
     If TaskMgrPath <> '' Then MenuAdd(CM_TASKMGR, '~Gestionnaire des taches');
-    If ExplorerPath <> '' Then MenuAdd(CM_EXPLORER, '~Explorateur OS2-0');
+    If ExplorerPath <> '' Then MenuAdd(CM_EXPLORER, '~Explorateur OS2-Zero');
     If BrowserPath <> '' Then MenuAdd(CM_BROWSER, '~Navigateur Web');
     MenuAdd(CM_INFO, '~Informations systeme');
     MenuAdd(CM_SETTINGS, '~Parametres du systeme...');
@@ -3461,7 +3507,7 @@ Procedure RunPm(P, Params : String); Forward;
 Procedure Props(K : LongInt);
 Var T, P, X : String; Drv : Boolean;
 Begin
-  { lecteur (dossier Lecteurs) : boite Proprietes de l'Explorateur OS2-0,
+  { lecteur (dossier Lecteurs) : boite Proprietes de l'Explorateur OS2-Zero,
     avec l'espace utilise et libre en camembert (EXPLORER /PROPS:C:) }
   P := It(K)^.Path;
   Drv := False;
@@ -6056,6 +6102,7 @@ BEGIN
   End;
   LoadSettings;
   CountryLoad;
+  NetRestore;
   SetDeskColor;
   ScrW := WinQuerySysValue(HWND_DESKTOP, 20); ScrH := WinQuerySysValue(HWND_DESKTOP, 21);
   If ScrW <= 0 Then ScrW := 640;

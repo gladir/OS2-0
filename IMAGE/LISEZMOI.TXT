@@ -27,7 +27,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
-              PING.EXE, HOST.EXE, WGET.EXE, DEMARRE.WAV, CLOCHE.WAV,
+              PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, DEMARRE.WAV,
+              CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
               TESTMON.EXE, TESTMSG.EXE, TESTNMP.EXE, TESTSES.EXE,
@@ -140,6 +141,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\PCNET.PAS                       -> PCNET.DLL (pilote AMD PCnet)
   OS2PC DEVMGR.PAS                          -> DEVMGR.EXE (Gestionnaire de peripheriques)
   OS2PC IFCONFIG.PAS, PING.PAS, HOST.PAS, WGET.PAS -> commandes du reseau
+  OS2PC -Q DLL\SMB.PAS                     -> SMB.IFS (lecteurs reseau SMB2)
+  OS2PC NET.PAS                             -> NET.EXE (NET USE)
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
   OS2PC APPS\PAINT.PAS                      -> PAINT.EXE (Paint, dessin bitmap)
   OS2PC WORDIUM.PAS                         -> WORDIUM.EXE (WorDium, traitement de texte)
@@ -1219,7 +1222,38 @@ gethostbyname...). Commandes :
   PING hote [n]       echo ICMP
   HOST nom            adresse d'un nom (DNS)
   WGET http[s]://hote[:port]/chemin [fichier]
+  NET USE             lecteurs reseau (voir ci-dessous)
 QEMU : -nic user,model=e1000 (ou pcnet).
+
+Lecteurs reseau (SMB.IFS, NET USE, Explorateur OS2-Zero)
+--------------------------------------------------------
+Un dossier partage d'un serveur Windows (Windows Server 2019, 2016,
+2022, Windows 10 et 11) ou Samba devient une unite d'OS/2-0 :
+  - Explorateur OS2-Zero : Outils - Connecter un lecteur reseau..., ou
+    bouton 2 sur le Poste de travail. Lecteur (lettres libres), Chemin
+    \\serveur\partage (nom DNS ou adresse IP), Nom d'utilisateur (nom ou
+    DOMAINE\nom ; vide : invite), Mot de passe, "Se reconnecter a
+    l'ouverture de session" (OS2.INI, application PM_NetworkDrives : le
+    chemin, l'utilisateur et la cle NT du mot de passe, jamais le mot de
+    passe ; le bureau rattache le lecteur au demarrage, la connexion se
+    fait au premier acces). Outils - Deconnecter un lecteur reseau...,
+    ou Deconnecter dans le menu contextuel d'un lecteur reseau.
+  - a l'invite :
+      NET USE                               liste des lecteurs reseau
+      NET USE Z: \\serveur\partage [motdepasse | *] [/USER:[dom\]nom]
+      NET USE * \\serveur\partage ...      premiere lettre libre (de Z:)
+      NET USE Z: /DELETE                    deconnecter
+SMB.IFS (source DLL\SMB.PAS, porte du client SMB de Pasdows 95) est un
+systeme de fichiers installable distant (FS_NAME SMB) : SMB2 (2.0.2,
+2.1), NTLMv2, signature HMAC-SHA256, port TCP 445 par TCPIP32.DLL.
+Lecture, ecriture, DIR (dates, attributs), MD, RD, DEL, REN, espace
+libre ; une connexion perdue est rouverte a l'acces suivant. API d'OS/2 :
+DosFSAttach("Z:", "SMB", chemin 0 utilisateur 0 mot de passe 0, cb,
+FS_ATTACH ou FS_DETACH) et DosQueryFSAttach (FSAT_REMOTEDRV) ; le noyau
+charge C:\SMB.IFS a la premiere demande (pas de ligne IFS=).
+Windows Server 2019 : partager le dossier, autoriser le "Partage de
+fichiers et d'imprimantes (SMB-Entree)" dans le pare-feu. Le nom
+NetBIOS seul d'un serveur n'est pas resolu : nom DNS ou adresse IP.
 
 Connexions chiffrees (TLS32.DLL, https://)
 ------------------------------------------
@@ -1394,13 +1428,13 @@ Warp. Bureau - Productivite - Calculatrice (ou CALC a l'invite).
   - division par zero ou depassement : message dans l'affichage (les
     exceptions du coprocesseur sont masquees : pas de TRAP 0010).
 
-Explorateur OS2-0 (EXPLORER.EXE, dossier Productivite)
-------------------------------------------------------
+Explorateur OS2-Zero (EXPLORER.EXE, dossier Productivite)
+--------------------------------------------------------
 Explorateur de fichiers a deux volets dans le style de Windows 95, porte
 de l'Explorateur Pasdows (source EXPLORER.PAS). Application de PM
 independante : le Workplace Shell ne change pas. Bureau -
-Productivite - Explorateur OS2-0, ou bouton 2 sur le bureau -
-Explorateur OS2-0 (entre Gestionnaire des taches et Navigateur Web), ou
+Productivite - Explorateur OS2-Zero, ou bouton 2 sur le bureau -
+Explorateur OS2-Zero (entre Gestionnaire des taches et Navigateur Web), ou
 EXPLORER [dossier] a l'invite.
   - arbre "Tous les dossiers" : Bureau, Poste de travail, lecteurs,
     dossiers (cases + et -) ; fleches haut/bas, gauche (replier), droite
@@ -1412,7 +1446,8 @@ EXPLORER [dossier] a l'invite.
     numerique, .HTM dans le Navigateur Web ;
   - Retour arriere : dossier parent ; F5 : actualiser ; Tab : arbre ou
     contenu ; Alt+Entree : Proprietes ; bouton 2 : Ouvrir, Proprietes ;
-  - menus Fichier, Affichage, Aller a, ?.
+  - menus Fichier, Affichage, Aller a, Outils (Connecter et Deconnecter
+    un lecteur reseau), ?.
   - Proprietes d'un lecteur : boite "Proprietes de (C:)" de Pasdows 95,
     onglets General (nom du volume modifiable, type, espace utilise en
     bleu et libre en magenta, en octets et en Ko/Mo/Go, capacite,
@@ -1425,7 +1460,7 @@ Paint (PAINT.EXE, dossier Productivite)
 Programme de dessin bitmap porte de Pasdows 95 (source APPS\PAINT.PAS,
 issu de CloneDRAW). Bureau - Productivite - Paint, ou PAINT
 [fichier] a l'invite ; une image (.BMP, .PCX, .GIF, .PNG, .JPG...)
-ouverte depuis un dossier du bureau ou l'Explorateur OS2-0 s'ouvre aussi
+ouverte depuis un dossier du bureau ou l'Explorateur OS2-Zero s'ouvre aussi
 dans Paint. Exemple : PAINT PAYSAGE.BMP.
   - outils : selection, gomme, remplissage, pipette, loupe, crayon,
     pinceau, aerographe, texte, ligne, courbe, rectangle, polygone,
@@ -1447,7 +1482,7 @@ Traitement de texte porte de WORD.PAS du depot OFFICE-0 (source
 WORDIUM.PAS). Bureau - Productivite - WorDium, ou WORDIUM
 [/CLASSICMENU | /RUBANMENU] [document] a l'invite (WORDIUM /? : aide) ;
 un document (.DOCX, .DOC, .PDF, .GAT, .GPX, .WPD) ouvert depuis un
-dossier du bureau ou l'Explorateur OS2-0 s'ouvre aussi dans WorDium.
+dossier du bureau ou l'Explorateur OS2-Zero s'ouvre aussi dans WorDium.
 Exemples : WORDIUM MONSTER.GAT, WORDIUM LETTRE.PDF.
   - toutes les fonctions de la version DOS : mise en forme (gras,
     italique, souligne, tailles, couleurs, alignements, justification,
@@ -1539,7 +1574,7 @@ C:\SOURCE\OS2-0\, sans les donnees de Git (source GETSRC.PAS).
   - Mettre a jour : seulement les fichiers nouveaux ou modifies (liste
     C:\SOURCE\OS2-0.LST : empreinte SHA-1 de Git et taille) ; les
     fichiers retires du depot sont effaces ;
-  - Annuler : arrete le telechargement ; a la fin, l'Explorateur OS2-0
+  - Annuler : arrete le telechargement ; a la fin, l'Explorateur OS2-Zero
     s'ouvre sur le dossier ;
   - case : avec les images du CD-ROM (IMAGE\*.ISO, environ 60 Mo).
 L'API de GitHub permet 60 demandes par heure sans jeton : SET

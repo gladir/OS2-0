@@ -71,6 +71,7 @@ Var
   ArpNext : LongInt;
   { sockets }
   SType, SState, SLPort, SRIp, SRPort, SSeq, SUna, SAck, SBuf, SHead, SLen, SPWin, SBound : Array[0..MAXS - 1] Of LongInt;
+  SSys : Array[0..MAXS - 1] Of Boolean;   { tampon du tas partage (sosystem) }
   { gethostbyname }
   HostEnt : Array[0..7] Of LongInt;
   HostAddr : Array[0..1] Of LongInt;
@@ -87,6 +88,8 @@ Function DosScanEnv(PName, PPValue : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSleep(Ms : LongInt) : LongInt; External 'DOSCALLS';
 Function DosAllocMem(PPb, Cb, Flag : LongInt) : LongInt; External 'DOSCALLS';
 Function DosFreeMem(Pb : LongInt) : LongInt; External 'DOSCALLS';
+Function KHeapAlloc(Heap, Flags, Size : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapAlloc';
+Function KHeapFree(Heap, Flags, P : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapFree';
 Function KTicks : LongInt; External 'DOSCALLS' Name 'GetTickCount';
 
 { ==================================================================== }
@@ -912,7 +915,7 @@ Begin
     Errno := SOCENOBUFS;
     Exit;
   End;
-  SBuf[S] := B; SHead[S] := 0; SLen[S] := 0;
+  SBuf[S] := B; SHead[S] := 0; SLen[S] := 0; SSys[S] := False;
   SState[S] := TS_CLOSED; SRIp[S] := 0; SRPort[S] := 0; SBound[S] := 0;
   If Typ = SOCK_STREAM Then SType[S] := T_TCP
   Else If Typ = SOCK_DGRAM Then SType[S] := T_UDP
@@ -1159,9 +1162,39 @@ Begin
   S := SockOf(D);
   If S < 0 Then Exit;
   If (SType[S] = T_TCP) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT)) Then Dummy := Shutdown(D, 2);
-  If SBuf[S] <> 0 Then Dummy := DosFreeMem(SBuf[S]);
-  SBuf[S] := 0; SType[S] := 0; SState[S] := TS_CLOSED;
+  If SBuf[S] <> 0 Then
+  Begin
+    If SSys[S] Then Dummy := KHeapFree(2, 0, SBuf[S]) Else Dummy := DosFreeMem(SBuf[S]);
+  End;
+  SBuf[S] := 0; SType[S] := 0; SState[S] := TS_CLOSED; SSys[S] := False;
   SoClose := 0;
+End;
+
+{ sosystem(s) : socket du systeme (lecteurs reseau de SMB.IFS) ; son tampon
+  de reception passe dans le tas partage et survit au processus qui l'a
+  cree (les objets de DosAllocMem sont liberes a la fin du processus) }
+Function SoSystem(D : LongInt) : LongInt;
+Var S, B : LongInt;
+Begin
+  SoSystem := -1;
+  S := SockOf(D);
+  If S < 0 Then Exit;
+  If SSys[S] Then
+  Begin
+    SoSystem := 0;
+    Exit;
+  End;
+  B := KHeapAlloc(2, 8, RXCAP);
+  If B = 0 Then
+  Begin
+    Errno := SOCENOBUFS;
+    Exit;
+  End;
+  If SLen[S] > 0 Then MoveMem(SBuf[S], B, RXCAP);
+  If SBuf[S] <> 0 Then Dummy := DosFreeMem(SBuf[S]);
+  SBuf[S] := B;
+  SSys[S] := True;
+  SoSystem := 0;
 End;
 
 Function Sock_Errno : LongInt;
@@ -1333,7 +1366,8 @@ Exports
   GetHostId Index 213 Name 'gethostid',
   Inet_Addr Index 105 Name 'inet_addr',
   TcpipInfo Index 900 Name 'TCPIPINFO',
-  TcpipRenew Index 901 Name 'TCPIPRENEW';
+  TcpipRenew Index 901 Name 'TCPIPRENEW',
+  SoSystem Index 902 Name 'sosystem';
 
 Var
   InitK : LongInt;
@@ -1344,6 +1378,6 @@ BEGIN
   IpId := 1; NextPort := 1100; Errno := 0; ArpNext := 0; RxPkts := 0; TxPkts := 0;
   For InitK := 0 To MAXS - 1 Do
   Begin
-    SType[InitK] := 0; SBuf[InitK] := 0;
+    SType[InitK] := 0; SBuf[InitK] := 0; SSys[InitK] := False;
   End;
 END.
