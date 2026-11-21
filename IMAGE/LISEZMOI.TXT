@@ -1367,8 +1367,12 @@ Bureau : menu Nouveau et fenetres redimensionnables
 Le menu contextuel du bureau (bouton 2 sur le fond, ou Maj+F10) et celui
 d'un dossier ont un sous-menu Nouveau : Dossier, Document texte
 (Nouveau document.TXT) et Document HTML (Nouvelle page.HTML).
-Les fenetres a bordure de taille se redimensionnent a la souris par
-leurs bords et leurs coins.
+Les fenetres a bordure de taille (dont les dossiers) se redimensionnent
+a la souris par leurs bords et leurs coins ; le pointeur devient une
+fleche de taille sur un bord ou un coin.
+Demarrage du disque dur : C: est la partition d'OS/2-0 et le CD-ROM
+recoit la premiere lettre libre apres les partitions (D: le plus
+souvent) ; au demarrage du CD-ROM, C: est le CD-ROM.
 
 Calculatrice (CALC.EXE, dossier Productivite)
 ---------------------------------------------

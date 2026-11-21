@@ -285,6 +285,7 @@ Var
   { redimensionnement d'un cadre a la souris : bords saisis (TF_LEFT 1,
     TF_TOP 2, TF_RIGHT 4, TF_BOTTOM 8), position de depart }
   SizeEdge, SizeMX, SizeMY, SizeX, SizeY, SizeCX, SizeCY : LongInt;
+  GShape, GShapeOn : LongInt;      { pointeur : 0 fleche, 1 a 4 formes de taille (bordure d'un cadre) }
   { liste deroulante d'un champ combine (une a la fois) : champ, liste,
     remplissage en cours }
   DropCombo, DropList, DropFill : LongInt;
@@ -1017,6 +1018,20 @@ Const
                                     $8080, $83C0, $9200, $A900, $C900, $8480, $0480, $0300);
   PtrW : Array[0..15] Of LongInt = ($0000, $0000, $4000, $6000, $7000, $7800, $7C00, $7E00,
                                     $7F00, $7C00, $6C00, $4600, $0600, $0300, $0300, $0000);
+  { pointeurs de taille (bordure d'un cadre) : SPTR_SIZEWE, SPTR_SIZENS,
+    SPTR_SIZENWSE, SPTR_SIZENESW ; 16 rangees chacun, point chaud au centre }
+  PtrSzB : Array[0..63] Of LongInt = (
+    $0000, $0000, $0000, $0000, $0810, $1818, $381C, $7FFE, $7FFE, $381C, $1818, $0810, $0000, $0000,
+    $0000, $0000, $0000, $0180, $03C0, $07E0, $0FF0, $0180, $0180, $0180, $0180, $0180, $0180, $0FF0,
+    $07E0, $03C0, $0180, $0000, $0000, $7E00, $7C00, $7800, $7C00, $6600, $4300, $0180, $00C2, $0066,
+    $003E, $001E, $003E, $007E, $00FE, $0000, $0000, $007E, $003E, $001E, $003E, $0066, $00C2, $0180,
+    $4300, $6600, $7C00, $7800, $7C00, $7E00, $7F00, $0000);
+  PtrSzW : Array[0..63] Of LongInt = (
+    $0000, $0000, $0000, $1C38, $342C, $6426, $C7E3, $8001, $8001, $C7E3, $6426, $342C, $1C38, $0000,
+    $0000, $0000, $03C0, $0660, $0C30, $1818, $1008, $1E78, $0240, $0240, $0240, $0240, $1E78, $1008,
+    $1818, $0C30, $0660, $03C0, $FF00, $8100, $8300, $8600, $8300, $9980, $BCC0, $E667, $033D, $0199,
+    $00C1, $0061, $00C1, $0181, $0101, $01FF, $00FF, $0081, $00C1, $0061, $00C1, $0199, $033D, $E667,
+    $BCC0, $9980, $8300, $8600, $8300, $8180, $8080, $FF80);
 
 { --- ports du VGA --- }
 { l'ecran est-il a la session de l'appelant ? (session de PM au premier
@@ -1484,10 +1499,26 @@ Begin
   If GLfb <> 0 Then SprCol := GPixV[C And 15] Else SprCol := C And 15;
 End;
 
+{ rangee R du pointeur courant (fleche, ou forme de taille GShape) }
+Function PtrRowB(R : LongInt) : LongInt;
+Begin
+  If GShape = 0 Then PtrRowB := PtrB[R] Else PtrRowB := PtrSzB[(GShape - 1) * 16 + R];
+End;
+
+Function PtrRowW(R : LongInt) : LongInt;
+Begin
+  If GShape = 0 Then PtrRowW := PtrW[R] Else PtrRowW := PtrSzW[(GShape - 1) * 16 + R];
+End;
+
 Procedure SprDraw(Slot, X0, Row0 : LongInt; Trail : Boolean);
 Var R, C, Row, Px, Sz, N, Idx, Cb, Rb : LongInt; Bk, Wh : Boolean;
 Begin
   Sz := 16 * GPtrK;
+  { forme de taille : point chaud au centre }
+  If GShape <> 0 Then
+  Begin
+    X0 := X0 - 7 * GPtrK; Row0 := Row0 - 7 * GPtrK;
+  End;
   GSprX[Slot] := X0; GSprY[Slot] := Row0;
   For R := 0 To Sz - 1 Do
   Begin
@@ -1502,8 +1533,8 @@ Begin
       Begin
         Cb := C Div GPtrK;
         N := $8000 Shr Cb;
-        Bk := (PtrB[Rb] And N) <> 0;
-        Wh := ((PtrW[Rb] And N) <> 0) And Not Trail;
+        Bk := (PtrRowB(Rb) And N) <> 0;
+        Wh := ((PtrRowW(Rb) And N) <> 0) And Not Trail;
         If Bk Or Wh Then
         Begin
           GSave[Idx] := SprGet(Px, Row);
@@ -1564,6 +1595,7 @@ Begin
   Else GTrN := 0;
   GLastX := X0; GLastRow := Row0; GHaveLast := 1;
   GPtrX := X0; GPtrY := Row0;
+  GShapeOn := GShape;
   If (GLfb <> 0) And Not GMine Then Exit;
   If GLfb = 0 Then GBegin(0);
   N := 0;
@@ -6245,8 +6277,24 @@ End;
 
 Procedure CloseDrop; Forward;
 
+Function FrameSizeHit(I, X, Y : LongInt) : LongInt; Forward;
+Function FrameSizeHit2(I, X, Y : LongInt) : LongInt; Forward;
+
+{ forme du pointeur pour les bords E d'un cadre (1 gauche, 2 haut, 4 droit, 8 bas) }
+Function EdgeShape(E : LongInt) : LongInt;
+Begin
+  Case E Of
+    1, 4 : EdgeShape := 1;
+    2, 8 : EdgeShape := 2;
+    3, 12 : EdgeShape := 3;
+    6, 9 : EdgeShape := 4;
+  Else
+    EdgeShape := 0;
+  End;
+End;
+
 Procedure MouseInput(Q : LongInt);
-Var Ev : Array[0..11] Of Byte; Wait, H, Fs, Btn, T, N, Kc, K, Bit, Dn, Up, Dbl, TQ : LongInt;
+Var Ev : Array[0..11] Of Byte; Wait, H, Fs, Btn, T, N, Kc, K, Bit, Dn, Up, Dbl, TQ, SzF, SzE : LongInt;
 Begin
   If QMou[Q] = 0 Then
   Begin
@@ -6281,6 +6329,38 @@ Begin
     { SV_SWAPBUTTON : boutons 1 et 2 inverses (gaucher) }
     If (SysVal[0] <> 0) And ((Btn And 3) <> 0) And ((Btn And 3) <> 3) Then Btn := Btn Xor 3;
     If CaptureWin > 1 Then T := CaptureWin Else T := WinAtAbs(0, MouseX, MouseY, True);
+    { bord ou coin d'un cadre a bordure de taille (le cadre de la fenetre
+      visee, meme si la souris est sur un de ses controles : barre de
+      defilement contre le coin...) : fleches de taille, et un clic du
+      bouton 1 commence le redimensionnement }
+    SzF := 0; SzE := 0;
+    If (SizeEdge <> 0) And (CaptureWin > 1) Then GShape := EdgeShape(SizeEdge)
+    Else
+    Begin
+      If (CaptureWin <= 1) And (T > 1) And (WUse[T] <> 0) Then
+      Begin
+        SzF := T; K := 0;
+        While (SzF > 1) And (KindOf(SzF) <> CK_FRAME) And (K < 32) Do
+        Begin
+          SzF := WPar[SzF];
+          Inc(K);
+        End;
+        If (SzF > 1) And (WUse[SzF] <> 0) And (KindOf(SzF) = CK_FRAME) Then
+          SzE := FrameSizeHit2(SzF, MouseX - AbsX(SzF), MouseY - AbsY(SzF));
+        If SzE = 0 Then SzF := 0;
+      End;
+      GShape := EdgeShape(SzE);
+    End;
+    If (SzF > 1) And ((Btn And 1) <> 0) And ((MouseBtn And 1) = 0) Then
+    Begin
+      SizeEdge := SzE;
+      SizeMX := MouseX; SizeMY := MouseY;
+      SizeX := WX[SzF]; SizeY := WY[SzF]; SizeCX := WCX[SzF]; SizeCY := WCY[SzF];
+      CaptureWin := SzF;
+      T := SzF;
+      Dummy := WinSetActiveWindow(1, HwOf(SzF));
+      MouseBtn := MouseBtn Or 1;
+    End;
     If (SysModalWin > 1) And (T > 1) And (T <> SysModalWin) And Not IsChildOf(T, SysModalWin) Then T := -1;
     { clic hors de la liste deroulante ouverte (et de son champ) : fermee }
     If (DropList > 1) And ((Btn And Not MouseBtn) <> 0) And (T <> DropList) And (T <> DropCombo) And
@@ -6357,7 +6437,7 @@ Begin
     GXorRaw(GCdX1, GCdY1, GCdX2, GCdY2);
     GCarOn := 1;
   End;
-  If (GPtrOn <> 0) And ((GPtrX <> MouseX) Or (GPtrY <> ScrCY - 1 - MouseY)) Then GPtrHide;
+  If (GPtrOn <> 0) And ((GPtrX <> MouseX) Or (GPtrY <> ScrCY - 1 - MouseY) Or (GShapeOn <> GShape)) Then GPtrHide;
   { pointeur comete : la trainee s'efface quand la souris s'arrete }
   If (GPtrOn <> 0) And (GTrN > 0) And (KGetTickCount - GLastMove > 40) Then
   Begin
@@ -7675,6 +7755,24 @@ Begin
     If X >= WCX[I] - C Then E := E Or 4;
   End;
   FrameSizeHit := E;
+End;
+
+{ comme FrameSizeHit, avec des coins du bas plus faciles a saisir (16
+  pels le long des bords, 9 vers l'interieur : par-dessus le bouton de la
+  barre de defilement) }
+Function FrameSizeHit2(I, X, Y : LongInt) : LongInt;
+Var E, B, D : LongInt;
+Begin
+  E := FrameSizeHit(I, X, Y);
+  FrameSizeHit2 := E;
+  If E <> 0 Then Exit;
+  If Not (((WStyle[I] And FS_SIZEBORDER) <> 0) Or ((WS0[I] And FCF_SIZEBORDER) <> 0)) Then Exit;
+  If (WStyle[I] And (WS_MAXIMIZED Or WS_MINIMIZED)) <> 0 Then Exit;
+  If GMode <> 0 Then B := GBorderW(I) + 1 Else B := 8;
+  D := B + 5;
+  If (X < 0) Or (Y < 0) Or (X >= WCX[I]) Or (Y >= WCY[I]) Or (Y >= 16) Then Exit;
+  If (X >= WCX[I] - 16) And ((X >= WCX[I] - D) Or (Y < D)) Then FrameSizeHit2 := 12
+  Else If (X < 16) And ((X < D) Or (Y < D)) Then FrameSizeHit2 := 9;
 End;
 
 Function FrameProc(I, Msg, Mp1, Mp2 : LongInt) : LongInt;
