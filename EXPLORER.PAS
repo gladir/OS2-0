@@ -1771,6 +1771,13 @@ Begin
 End;
 
 { application de PM dans la session de Presentation Manager }
+{ argument d'un chemin avec des espaces : entre guillemets (le runtime
+  d'OS2PC et CMD.EXE en font un seul parametre) }
+Function QArg(S : String) : String;
+Begin
+  If (Pos(' ', S) > 0) And (Copy(S, 1, 1) <> '"') Then QArg := '"' + S + '"' Else QArg := S;
+End;
+
 Procedure RunPm(P, Params : String);
 Var Res : Array[0..1] Of LongInt; Rc : LongInt;
 Begin
@@ -1904,7 +1911,7 @@ Begin
     RunPm(P, '');
   End
   Else If (X = 'EXE') Or (X = 'COM') Then RunProgram(P, '', CurPath)
-  Else If (X = 'CMD') Or (X = 'BAT') Then RunProgram(Comspec, '/C ' + P, CurPath)
+  Else If (X = 'CMD') Or (X = 'BAT') Then RunProgram(Comspec, '/C ' + QArg(P), CurPath)
   Else
   Begin
     A := '';
@@ -1944,7 +1951,7 @@ Begin
       A := AppPath('PAINT.EXE');
       If A <> '' Then SetDir(CurPath);
     End;
-    If A <> '' Then RunPm(A, P)
+    If A <> '' Then RunPm(A, QArg(P))
     Else
       Msg(L('Aucune application n''est associ'#130'e '#133' ce fichier :', 'No application is associated with ' +
             'this file:', 'Dieser Datei ist keine Anwendung zugeordnet:', 'Nessuna applicazione associata al ' +

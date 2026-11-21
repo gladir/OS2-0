@@ -1084,7 +1084,7 @@ Begin
           (U = 'FREECELL.EXE') Or (U = 'MISSILE.EXE') Or (U = 'L25.EXE') Or
           (U = 'ASTROMAN.EXE') Or (U = 'REVES.EXE') Then
     Wanted := OptGames <> 0
-  Else If (U = 'DIGAUDIO.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
+  Else If (U = 'DIGAUDIO.EXE') Or (U = 'GLTEST.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or
           (Pos('.SON', U) > 0) Or (Pos('.MID', U) > 0) Or (U = 'MP3PLAY.EXE') Or
           (Pos('.MP3', U) > 0) Then Wanted := OptMM <> 0

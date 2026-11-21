@@ -27,7 +27,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
-              PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, DEMARRE.WAV,
+              PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
+              GLTEST.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -1157,6 +1158,19 @@ ouvert depuis un dossier du bureau s'ouvre dans le Lecteur MP3. Un fil
 decode en avance (anneau de 3 s, MDMSTREAM/MDMFEED) et cede le
 processeur par DosSleep(0) apres chaque trame : la fenetre reste
 active. Exemple : AURORE.MP3 (composition originale synthetisee).
+
+OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
+---------------------------------------------------------------------
+OpenGL 1.1 en rendu logiciel (source DLL\OPENGL.PAS, porte de
+l'OPENGL32.DLL de Pasdows 95) avec l'interface PGL d'OS/2 Warp :
+pglChooseConfig, pglCreateContext, pglMakeCurrent(hab, hgc, hwnd),
+pglSwapBuffers(hab, hwnd), pglDestroyContext... (389 fonctions).
+Textures, eclairage, brouillard, tampon Z, melange alpha, tableaux de
+sommets. Essai OpenGL (source APPS\GLTEST.PAS) : cube texture,
+pyramide, sol dans le brouillard, carre translucide ; Echap pour
+quitter.
+  OS2PC -Q DLL\OPENGL.PAS                   -> OPENGL.DLL
+  OS2PC APPS\GLTEST.PAS                     -> GLTEST.EXE
 
 Notator for OS2-Zero (NOTATOR.EXE, dossier Multimedia) : portage de
 NOTATOR.PAS du depot OFFICE-0, clone du sequenceur MIDI et editeur de

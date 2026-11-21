@@ -1329,6 +1329,9 @@ Begin
           Dummy := NewItem(V, IC_MP3PLAY, OB_GAME, 'Lecteur MP3', 'C:\MP3PLAY.EXE');
         If FileExists('C:\NOTATOR.EXE') Then
           Dummy := NewItem(V, IC_NOTATOR, OB_GAME, 'Notator for OS2-Zero', 'C:\NOTATOR.EXE');
+        { Essai OpenGL : OPENGL.DLL (OpenGL 1.1, interface PGL) }
+        If FileExists('C:\GLTEST.EXE') Then
+          Dummy := NewItem(V, IC_SCREEN, OB_GAME, 'Essai OpenGL', 'C:\GLTEST.EXE');
         If FileExists('C:\DEMARRE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'DEMARRE.WAV', 'C:\DEMARRE.WAV');
         If FileExists('C:\CLOCHE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'CLOCHE.WAV', 'C:\CLOCHE.WAV');
       End;
@@ -3502,6 +3505,13 @@ Begin
   Until False;
 End;
 
+{ argument d'un chemin avec des espaces : entre guillemets (le runtime
+  d'OS2PC et CMD.EXE en font un seul parametre) }
+Function QArg(S : String) : String;
+Begin
+  If (Pos(' ', S) > 0) And (Copy(S, 1, 1) <> '"') Then QArg := '"' + S + '"' Else QArg := S;
+End;
+
 Procedure RunPm(P, Params : String); Forward;
 
 Procedure Props(K : LongInt);
@@ -3782,14 +3792,14 @@ Begin
     OB_LEISURE : OpenFolder(VK_LEISURE, '', 'Loisirs');
     OB_SCIENCE : OpenFolder(VK_SCIENCE, '', 'Science');
     OB_SOUND :
-      If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', It(K)^.Path) Else OpenViewer(It(K)^.Path);
-    OB_SONG : RunPm('C:\NOTATOR.EXE', It(K)^.Path);
-    OB_MP3 : RunPm('C:\MP3PLAY.EXE', It(K)^.Path);
-    OB_IMAGE : RunPm(PaintPath, It(K)^.Path);
-    OB_WORDDOC : RunPm(WordiumPath, It(K)^.Path);
-    OB_XLSDOC : RunPm(ExcelsiorPath, It(K)^.Path);
-    OB_HTML : RunPm(BrowserPath, It(K)^.Path);
-    OB_TEXT : RunPm('C:\NOTEPAD.EXE', It(K)^.Path);
+      If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', QArg(It(K)^.Path)) Else OpenViewer(It(K)^.Path);
+    OB_SONG : RunPm('C:\NOTATOR.EXE', QArg(It(K)^.Path));
+    OB_MP3 : RunPm('C:\MP3PLAY.EXE', QArg(It(K)^.Path));
+    OB_IMAGE : RunPm(PaintPath, QArg(It(K)^.Path));
+    OB_WORDDOC : RunPm(WordiumPath, QArg(It(K)^.Path));
+    OB_XLSDOC : RunPm(ExcelsiorPath, QArg(It(K)^.Path));
+    OB_HTML : RunPm(BrowserPath, QArg(It(K)^.Path));
+    OB_TEXT : RunPm('C:\NOTEPAD.EXE', QArg(It(K)^.Path));
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
