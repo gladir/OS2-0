@@ -161,6 +161,7 @@ Const
   IC_ASTEROID = 54; IC_BADUGI = 55; IC_TTT = 56; IC_BASEBALL = 57; IC_EXCAVAT = 58; IC_PINBALL = 59;
   IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62; IC_INVADERS = 63;
   IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
+  IC_MP3PLAY = 68; OB_MP3 = 36;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   { controles du carnet des parametres }
@@ -907,6 +908,11 @@ Begin
     { morceau de Notator ou fichier MIDI : ouvert par Notator for OS2-Zero }
     Icon := IC_NOTATOR; Obj := OB_SONG;
   End
+  Else If ((E = 'MP3') Or (E = 'M3U')) And FileExists('C:\MP3PLAY.EXE') Then
+  Begin
+    { musique MP3 ou liste de lecture : ouverte par le Lecteur MP3 }
+    Icon := IC_MP3PLAY; Obj := OB_MP3;
+  End
   Else If ((E = 'BMP') Or (E = 'PCX') Or (E = 'GIF') Or (E = 'PNG') Or (E = 'JPG') Or (E = 'JPE') Or
            (E = 'TIF') Or (E = 'ICO') Or (E = 'CUR') Or (E = 'PPM') Or (E = 'LBM') Or (E = 'DIB')) And
           (PaintPath <> '') Then
@@ -1204,16 +1210,18 @@ Begin
       End;
     VK_MM :
       Begin
-        { multimedia (composant de l'installation) : Audio numerique et les
-          sons du systeme }
+        { multimedia (composant de l'installation) : Audio numerique, Lecteur
+          MP3, Notator for OS2-Zero (sequenceur et editeur de partition,
+          NOTATOR.PAS d'OFFICE-0 ; ses exemples .SON et .MID sont dans le
+          repertoire racine), puis les sons du systeme }
         If FileExists('C:\DIGAUDIO.EXE') Then
           Dummy := NewItem(V, IC_AUDIO, OB_GAME, 'Audio numerique', 'C:\DIGAUDIO.EXE');
-        If FileExists('C:\DEMARRE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'DEMARRE.WAV', 'C:\DEMARRE.WAV');
-        If FileExists('C:\CLOCHE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'CLOCHE.WAV', 'C:\CLOCHE.WAV');
-        { sequenceur et editeur de partition (NOTATOR.PAS d'OFFICE-0) ; ses
-          exemples (.SON, .MID) sont dans le repertoire racine }
+        If FileExists('C:\MP3PLAY.EXE') Then
+          Dummy := NewItem(V, IC_MP3PLAY, OB_GAME, 'Lecteur MP3', 'C:\MP3PLAY.EXE');
         If FileExists('C:\NOTATOR.EXE') Then
           Dummy := NewItem(V, IC_NOTATOR, OB_GAME, 'Notator for OS2-Zero', 'C:\NOTATOR.EXE');
+        If FileExists('C:\DEMARRE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'DEMARRE.WAV', 'C:\DEMARRE.WAV');
+        If FileExists('C:\CLOCHE.WAV') Then Dummy := NewItem(V, IC_WAVE, OB_SOUND, 'CLOCHE.WAV', 'C:\CLOCHE.WAV');
       End;
     VK_GAMES :
       Begin
@@ -2128,6 +2136,29 @@ Begin
         GLn(Hps, X + 20, Y + 12, X + 20, Y + 20, CLR_BLUE);
         GLn(Hps, X + 24, Y + 9, X + 24, Y + 23, CLR_BLUE);
         GLn(Hps, X + 28, Y + 6, X + 28, Y + 26, CLR_BLUE);
+      End;
+    IC_MP3PLAY :
+      Begin
+        { disque compact argente et double croche bleue }
+        For K := -11 To 11 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 132 Do Inc(R);
+          GLn(Hps, X + 13 - R, Y + 16 + K, X + 13 + R, Y + 16 + K, CLR_PALEGRAY);
+          GLn(Hps, X + 13 - R, Y + 16 + K, X + 13 - R, Y + 16 + K, CLR_DARKGRAY);
+          GLn(Hps, X + 13 + R, Y + 16 + K, X + 13 + R, Y + 16 + K, CLR_DARKGRAY);
+        End;
+        GLn(Hps, X + 6, Y + 21, X + 10, Y + 25, CLR_WHITE);
+        GLn(Hps, X + 5, Y + 18, X + 8, Y + 22, CLR_WHITE);
+        GBox(Hps, X + 11, Y + 14, X + 15, Y + 18, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 12, Y + 15, X + 14, Y + 17, CLR_DARKGRAY, DRO_FILL);
+        GBox(Hps, X + 17, Y + 2, X + 21, Y + 5, CLR_DARKBLUE, DRO_FILL);
+        GBox(Hps, X + 25, Y + 4, X + 29, Y + 7, CLR_DARKBLUE, DRO_FILL);
+        GLn(Hps, X + 21, Y + 4, X + 21, Y + 18, CLR_DARKBLUE);
+        GLn(Hps, X + 29, Y + 6, X + 29, Y + 20, CLR_DARKBLUE);
+        GLn(Hps, X + 21, Y + 18, X + 29, Y + 20, CLR_DARKBLUE);
+        GLn(Hps, X + 21, Y + 17, X + 29, Y + 19, CLR_DARKBLUE);
+        GLn(Hps, X + 21, Y + 15, X + 29, Y + 17, CLR_DARKBLUE);
       End;
     IC_WAVE :
       Begin
@@ -3253,6 +3284,7 @@ Begin
     OB_SOUND :
       If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', It(K)^.Path) Else OpenViewer(It(K)^.Path);
     OB_SONG : RunPm('C:\NOTATOR.EXE', It(K)^.Path);
+    OB_MP3 : RunPm('C:\MP3PLAY.EXE', It(K)^.Path);
     OB_IMAGE : RunPm(PaintPath, It(K)^.Path);
     OB_WORDDOC : RunPm(WordiumPath, It(K)^.Path);
     OB_XLSDOC : RunPm(ExcelsiorPath, It(K)^.Path);

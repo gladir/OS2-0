@@ -40,7 +40,7 @@ Program INSTALL;
     5. Composants : bureau et LaunchPad, utilitaires, programmes
        d'essai, disque virtuel, jeux (Solitaire - Klondike, Echecs,
        Mahjongg, Sudoku : dossier Jeux de Systeme OS/2), multimedia (Audio
-       numerique, MDM.DLL, pilotes des cartes son, sons), reseau TCP/IP
+       numerique, Lecteur MP3, MDM.DLL, pilotes des cartes son, sons), reseau TCP/IP
        (TCPIP32.DLL, pilotes E1000 et PCNET, IFCONFIG, PING, HOST,
        WGET, messagerie Outlink) ;
     6. Transfert des fichiers (barre de progression aux logos OS/2) :
@@ -1084,7 +1084,8 @@ Begin
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or
-          (Pos('.SON', U) > 0) Or (Pos('.MID', U) > 0) Then Wanted := OptMM <> 0
+          (Pos('.SON', U) > 0) Or (Pos('.MID', U) > 0) Or (U = 'MP3PLAY.EXE') Or
+          (Pos('.MP3', U) > 0) Then Wanted := OptMM <> 0
   Else If (U = 'TCPIP32.DLL') Or (U = 'E1000.DLL') Or (U = 'PCNET.DLL') Or (U = 'IFCONFIG.EXE') Or (U = 'PING.EXE') Or
           (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Then Wanted := OptNet <> 0
   Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or
@@ -1227,12 +1228,12 @@ Begin
                     'Veinte juegos (Klondike, Ajedrez, Backgammon...)',
                     'Venti giochi (Klondike, Scacchi, Backgammon...)',
                     'Nj'#137'zet loj'#137'ra (Klondike, Shah...)'), OptGames <> 0, BS_AUTOCHECKBOX);
-        Hw := Check(30, Y + 156, ID_CMM, L('Multim'#130'dia (Audio num'#130'rique, Notator, pilotes des cartes son)',
-                    'Multimedia (Digital Audio, Notator, sound card drivers)',
-                    'Multimedia (Digital Audio, Notator, Soundkarten)',
-                    'Multimedia (Audio digital, Notator, tarjetas de sonido)',
-                    'Multimedia (Audio digitale, Notator, schede audio)',
-                    'Multimedia (Audio dixhital, Notator, kartat e z'#137'rit)'), OptMM <> 0, BS_AUTOCHECKBOX);
+        Hw := Check(30, Y + 156, ID_CMM, L('Multim'#130'dia (Audio num'#130'rique, Lecteur MP3, Notator, cartes son)',
+                    'Multimedia (Digital Audio, MP3 Player, Notator, sound cards)',
+                    'Multimedia (Digital Audio, MP3-Player, Notator, Soundkarten)',
+                    'Multimedia (Audio digital, Reproductor MP3, Notator, sonido)',
+                    'Multimedia (Audio digitale, Lettore MP3, Notator, schede audio)',
+                    'Multimedia (Audio dixhital, Lexuesi MP3, Notator, kartat e z'#137'rit)'), OptMM <> 0, BS_AUTOCHECKBOX);
         Hw := Check(30, Y + 182, ID_CNET, L('R'#130'seau TCP/IP (PRO/1000, PCnet ; Outlink, IFCONFIG, PING, WGET)',
                     'TCP/IP networking (PRO/1000, PCnet ; Outlink, IFCONFIG, PING, WGET)',
                     'TCP/IP-Netzwerk (PRO/1000, PCnet ; Outlink)', 'Red TCP/IP (PRO/1000, PCnet ; Outlink)',

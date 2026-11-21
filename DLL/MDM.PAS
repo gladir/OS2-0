@@ -53,9 +53,11 @@ Library MDM;
   Codes d'erreur : 0 reussi, MCIERR_BASE (5000) + n (mciGetErrorString
   donne le texte).
 
-  Points d'entree internes d'OS/2-0 (ordinaux 100 a 108), utilises par
-  Audio numerique : MDMAUDIOINFO, MDMPLAY, MDMRECORD, MDMSTOP, MDMPAUSE,
-  MDMPOSITION, MDMSTATE, MDMVOLUME, MDMCARDFORMAT. }
+  Points d'entree internes d'OS/2-0 (ordinaux 100 a 110), utilises par
+  Audio numerique et le Lecteur MP3 : MDMAUDIOINFO, MDMPLAY, MDMRECORD,
+  MDMSTOP, MDMPAUSE, MDMPOSITION, MDMSTATE, MDMVOLUME, MDMCARDFORMAT,
+  MDMSTREAM (flux en anneau alimente par le programme pendant la
+  lecture) et MDMFEED. }
 
 Const
   MAXDEV = 8;
@@ -93,6 +95,11 @@ Var
   Filled, LastHw, WritePos, DevDone, NeedDev : LongInt;
   RecPos, RecMax, RecAcc : LongInt;
   Volume : LongInt;
+  { flux en anneau (MDMSTREAM, MDMFEED) : le programme ecrit le son dans un
+    anneau de StrRing trames ; StrFed trames y ont ete ecrites depuis le
+    debut ; StrEnd : plus rien ne viendra. Sans son a jouer, la carte
+    joue du silence (UnderDev trames) sans avancer. }
+  StrOn, StrRing, StrFed, StrEnd, UnderDev, DevWritten, EndDev : LongInt;
   { notification de fin }
   NotHwnd, NotUser, NotDev, NotCmd, PostFn : LongInt;
   { appareils MCI waveaudio }
@@ -353,7 +360,8 @@ Var
 Procedure GetSrc(I : LongInt);
 Var A : LongInt;
 Begin
-  A := SrcAddr + I * SrcFB;
+  If StrOn <> 0 Then A := SrcAddr + (I Mod StrRing) * SrcFB
+  Else A := SrcAddr + I * SrcFB;
   If SrcBits = 8 Then
   Begin
     SmpL := (RdB(A) - 128) * 256;
@@ -432,6 +440,20 @@ Procedure FillRing(N : LongInt);
 Begin
   While N >= DevFB Do
   Begin
+    If (StrOn <> 0) And (SrcIdx >= StrFed) Then
+    Begin
+      { flux : le programme n'a pas encore fourni la suite (ou fin) }
+      SmpL := 0; SmpR := 0;
+      PutDev(RingA + WritePos);
+      WritePos := WritePos + DevFB;
+      If WritePos >= RingSz Then WritePos := 0;
+      Filled := Filled + DevFB;
+      N := N - DevFB;
+      Inc(DevWritten);
+      If StrEnd = 0 Then Inc(UnderDev);
+      Continue;
+    End;
+    Inc(DevWritten);
     If SrcIdx < EndFrame Then GetSrc(SrcIdx)
     Else
     Begin
@@ -459,6 +481,14 @@ Function PlayPos : LongInt;
 Var P : LongInt;
 Begin
   If Paused <> 0 Then P := PausePos
+  Else If StrOn <> 0 Then
+  Begin
+    { flux : le silence des manques ne compte pas ; jamais au-dela de
+      ce qui a ete lu de l'anneau }
+    P := StartFrame + MulDiv(DevDone - UnderDev, SrcRate, DevRate);
+    If P > SrcIdx Then P := SrcIdx;
+    If P < StartFrame Then P := StartFrame;
+  End
   Else P := StartFrame + MulDiv(DevDone, SrcRate, DevRate);
   { la carte peut avoir lu le silence apres la fin : jamais au-dela }
   If P > EndFrame Then P := EndFrame;
@@ -482,6 +512,16 @@ Begin
   Filled := Filled - Delta;
   If Filled < 0 Then Filled := 0;
   DevDone := DevDone + Delta Div DevFB;
+  { flux termine : fin quand la carte a joue la derniere trame ecrite }
+  If (StrOn <> 0) And (StrEnd <> 0) And (SrcIdx >= StrFed) Then
+  Begin
+    If EndDev < 0 Then EndDev := DevWritten;
+    If DevDone >= EndDev Then
+    Begin
+      Done := 1;
+      Exit;
+    End;
+  End;
   If DevDone >= NeedDev Then
   Begin
     Done := 1;
@@ -620,10 +660,12 @@ Begin
   DevFB := (DevBits Div 8) * DevCh;
   RingSz := RingSz - RingSz Mod DevFB;
   LastHw := 0; WritePos := 0; Filled := 0; DevDone := 0; RecAcc := 0;
+  DevWritten := 0; UnderDev := 0; EndDev := -1;
   If Dir = 0 Then
   Begin
     SrcIdx := StartFrame; SrcFrac := 0;
-    NeedDev := MulDiv(EndFrame - StartFrame, DevRate, SrcRate) + 1;
+    If StrOn <> 0 Then NeedDev := $7FFFFFFF
+    Else NeedDev := MulDiv(EndFrame - StartFrame, DevRate, SrcRate) + 1;
     FillRing(RingSz);
   End;
   If CallDrv(3) <> 0 Then Exit;
@@ -690,10 +732,50 @@ Begin
     MdmPlay := MCIERR_NO_CARD;
     Exit;
   End;
+  StrOn := 0;
   SetFormat(PData, Bytes, Rate, Bits, Ch);
   StartFrame := 0; EndFrame := SrcFrames;
   NotHwnd := 0;
   MdmPlay := Launch(1);
+End;
+
+{ jouer un flux : le programme ecrit le son (format Rate, Bits, Ch) dans
+  l'anneau PRing de RingBytes octets, a la suite (l'octet n du flux est a
+  n mod RingBytes), et annonce par MdmFeed ce qu'il a ecrit. Il ne doit
+  pas recouvrir ce qui n'a pas encore ete joue (MdmPosition, MdmFeed). }
+Function MdmStream(PRing, RingBytes, Rate, Bits, Ch : LongInt) : LongInt;
+Begin
+  StopStream;
+  If Not DriverReady Then
+  Begin
+    MdmStream := MCIERR_NO_CARD;
+    Exit;
+  End;
+  SetFormat(PRing, RingBytes, Rate, Bits, Ch);
+  If SrcFrames <= 0 Then
+  Begin
+    MdmStream := MCIERR_OUTOFRANGE;
+    Exit;
+  End;
+  StrOn := 1; StrRing := SrcFrames; StrFed := 0; StrEnd := 0;
+  StartFrame := 0; EndFrame := $7FFFFFFF;
+  NotHwnd := 0;
+  MdmStream := Launch(1);
+End;
+
+{ flux : TotalBytes octets ecrits depuis le debut ; EndFlag <> 0 : fin du
+  flux (la lecture s'arrete apres le dernier octet). Rend la position
+  jouee (octets du flux). }
+Function MdmFeed(TotalBytes, EndFlag : LongInt) : LongInt;
+Begin
+  If StrOn <> 0 Then
+  Begin
+    StrFed := TotalBytes Div SrcFB;
+    If EndFlag <> 0 Then StrEnd := 1 Else StrEnd := 0;
+  End;
+  Service;
+  If (StrOn <> 0) And (State = 1) Then MdmFeed := PlayPos * SrcFB
+  Else MdmFeed := -1;
 End;
 
 { enregistrer au plus MaxBytes octets en PData }
@@ -705,6 +787,7 @@ Begin
     MdmRecord := MCIERR_NO_CARD;
     Exit;
   End;
+  StrOn := 0;
   SetFormat(PData, MaxBytes, Rate, Bits, Ch);
   RecPos := 0; RecMax := MaxBytes - MaxBytes Mod SrcFB;
   NotHwnd := 0;
@@ -1423,7 +1506,9 @@ Exports
   MdmPosition Index 105 Name 'MDMPOSITION',
   MdmState Index 106 Name 'MDMSTATE',
   MdmVolume Index 107 Name 'MDMVOLUME',
-  MdmCardFormat Index 108 Name 'MDMCARDFORMAT';
+  MdmCardFormat Index 108 Name 'MDMCARDFORMAT',
+  MdmStream Index 109 Name 'MDMSTREAM',
+  MdmFeed Index 110 Name 'MDMFEED';
 
 Var
   InitK : LongInt;
@@ -1431,7 +1516,7 @@ Var
 BEGIN
   DrvTried := 0; DrvFn := 0; DrvH := 0; DrvCaps := 0; DrvName := ''; CardName := '';
   State := 0; Paused := 0; StopReq := 0; ThreadOn := 0; Done := 0; PollLock := 0;
-  Volume := 80; NotHwnd := 0; PostFn := 0;
+  Volume := 80; NotHwnd := 0; PostFn := 0; StrOn := 0;
   For InitK := 0 To MAXDEV - 1 Do
   Begin
     DUse[InitK] := 0; DData[InitK] := 0;
