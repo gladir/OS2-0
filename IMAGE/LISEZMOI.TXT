@@ -1428,11 +1428,18 @@ ecriture allait au disque : plus de 60 millions d'acces au controleur
 IDE pour un petit programme). Un programme arrete sur une exception, ou
 un programme de PM arrete sur une erreur d'execution (Runtime error 200
 a 217), est signale par une boite SYS3175 du bureau (programme, TRAP,
-adresse). OS2PC.EXE (compilateur natif) occupe environ 40 Mo de tables ; avec 64 Mo
-de memoire, il compile un source d'environ 3 000 lignes ; au-dela (par
-exemple PASDEV.PAS lui-meme, 4 000 lignes), donner 128 Mo a la machine.
-Les programmes de plus de 63 routines ou de 17 fonctions externes et
-plus (421.PAS, par exemple) ne se compilaient pas dans OS/2-0 : la
+adresse). Les tables d'OS2PC.EXE (compilateur natif) n'ont aucune
+taille maximale : elles commencent petites et grandissent a la demande
+tant qu'il reste de la memoire (jetons, symboles, types, champs,
+procedures, donnees, code, etiquettes...). Les tables de fiches sont
+des tableaux de pointeurs vers des fiches jamais deplacees. Avant,
+OS2PC.EXE reservait 40 Mo au depart et avait des limites fixes (4 096
+symboles, 384 types, 64 champs par record, 512 Ko de code...). Avec
+64 Mo de memoire, il compile maintenant PASDEV.PAS (4 000 lignes) ; un
+programme d'essai de 15 700 lignes (1,6 Mo de code) se compile avec
+256 Mo.
+Des programmes ordinaires (421.PAS, par exemple : plus de 64
+procedures, 17 fonctions externes et plus) ne se compilaient pas : la
 compilation semblait figee, ou finissait sur une fausse erreur
 "identificateur deja declare". Les petits blocs de GetMem venaient du
 tas du noyau (quelques Mo pour tout le systeme), qu'OS2PC.EXE epuisait
