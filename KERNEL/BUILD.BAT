@@ -49,6 +49,14 @@ REM dossier Loisirs du bureau
 IF ERRORLEVEL 1 GOTO ERREUR
 ..\BUILD\OS2PC -Q ..\APPS\REVES.PAS ..\BUILD\CD\REVES.EXE
 IF ERRORLEVEL 1 GOTO ERREUR
+ECHO == Science (OS2PC : APPS\ASTRO.PAS, SIMUPLAN.PAS, CS3DA.PAS, ELEMENTS.PAS et CHEMDRAW.PAS)
+REM Astronomie et Simulateur de planete (depot Axtro), Anatomie 3D du systeme
+REM circulatoire (depot BIOLOGIE-0), Table des elements et Dessin de chimie
+REM (depot QCHIMIE), dossier Science du bureau
+FOR %%B IN (ASTRO SIMUPLAN CS3DA ELEMENTS CHEMDRAW) DO ..\BUILD\OS2PC -Q ..\APPS\%%B.PAS ..\BUILD\CD\%%B.EXE
+IF NOT EXIST ..\BUILD\CD\CHEMDRAW.EXE GOTO ERREUR
+COPY /Y ..\APPS\HUMAN.C3D ..\BUILD\CD\ > NUL
+COPY /Y ..\APPS\PHYSIO.CFG ..\BUILD\CD\ > NUL
 REM nom 8.3 sur le CD-ROM (ISO 9660 niveau 1)
 IF EXIST ..\BUILD\CD\LAUNCHPAD.EXE MOVE /Y ..\BUILD\CD\LAUNCHPAD.EXE ..\BUILD\CD\LAUNCHPD.EXE > NUL
 ECHO == OS2PC.EXE (compilateur natif : OS2PC.PAS compile par OS2PC) et exemples de Pascal Developer
