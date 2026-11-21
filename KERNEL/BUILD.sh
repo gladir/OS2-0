@@ -25,7 +25,10 @@
 #     BATAILLE.PAS (Bataille), INVADERS.PAS (Invasion de l'espace),
 #     FREECELL.PAS (FreeCell), MISSILE.PAS (Commandement des missiles),
 #     L25.PAS (L25, parcours du cavalier), et
-#     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), NOTATOR.PAS
+#     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), MP3PLAY.PAS
+#     (Lecteur MP3 : decodeur, liste de lecture et egaliseur dans le meme
+#     fichier, dossier Multimedia ; son exemple IMAGE/MUSIQUE/*.MP3 est
+#     copie sur le CD-ROM), NOTATOR.PAS
 #     (Notator for OS2-Zero, sequenceur et editeur de partition porte de
 #     NOTATOR.PAS du depot OFFICE-0, dossier Multimedia ; ses exemples de
 #     IMAGE/NOTATOR, .SON et .MID, sont copies sur le CD-ROM), TASKMGR.PAS
@@ -208,6 +211,7 @@ for B in MDM SBAUDIO ICHAUDIO ESAUDIO; do "$W/os2pc" -Q "$ROOT/DLL/$B.PAS" "$W/c
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"
 "$W/os2pc" -Q -CD "$ROOT/DLL/TESTVDM.PAS" "$W/cd/TESTVDM.EXE"
 cp "$ROOT"/IMAGE/SONS/*.WAV "$W/cd/"
+cp "$ROOT"/IMAGE/MUSIQUE/*.MP3 "$W/cd/"
 cp "$ROOT"/IMAGE/NOTATOR/*.SON "$ROOT"/IMAGE/NOTATOR/*.MID "$ROOT"/IMAGE/NOTATOR/NOTATOR.TXT "$W/cd/"
 cp "$ROOT/IMAGE/SYSTEM/CONFIG.SYS" "$W/cd/CONFIG.SYS"
 

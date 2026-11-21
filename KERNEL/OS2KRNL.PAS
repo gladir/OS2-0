@@ -978,6 +978,14 @@ End;
 Procedure KDelay(Ms : LongInt);
 Var Target : LongInt;
 Begin
+  { Sleep(0), DosSleep(0) : ceder le reste de la tranche de temps aux autres
+    taches pretes (un programme de PM n'est pas preempte : ses fils de
+    calcul cedent ainsi le processeur au fil des fenetres) }
+  If Ms <= 0 Then
+  Begin
+    If NTasks > 1 Then Yield;
+    Exit;
+  End;
   Target := Ticks + (Ms + 9) Div 10;
   While Ticks < Target Do Idle;
 End;

@@ -19,7 +19,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
               INVADERS.EXE, FREECELL.EXE, MISSILE.EXE, L25.EXE,
-              DIGAUDIO.EXE, NOTATOR.EXE (et ses exemples .SON, .MID et
+              DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
+              (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE, GETSRC.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
@@ -113,6 +114,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC L25.PAS                             -> L25.EXE (L25)
   OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
+  OS2PC MP3PLAY.PAS                         -> MP3PLAY.EXE (Lecteur MP3)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
   OS2PC DLL\MDM.PAS                         -> MDM.DLL (multimedia MMPM/2 : MCI, son)
   OS2PC DLL\SBAUDIO.PAS                     -> SBAUDIO.DLL (pilote Sound Blaster)
@@ -1008,7 +1010,9 @@ stereo), volume. Un fichier .WAV ouvert depuis un dossier du bureau
 s'ouvre dans Audio numerique.
 MDM.DLL : interface MCI (mciSendString, appareil waveaudio : open,
 play, record, stop, pause, resume, seek, status, set, save, close,
-info, capability, sysinfo ; mciGetErrorString) et flux audio.
+info, capability, sysinfo ; mciGetErrorString) et flux audio ;
+MDMSTREAM (109) et MDMFEED (110) jouent en flux un son produit au fur
+et a mesure (anneau ; silence si le producteur prend du retard).
 Pilotes (DLL a un point d'entree AUDIOSTRATEGY, paquet de requete) :
   SBAUDIO.DLL  Sound Blaster 1.x/2.0/Pro/16 (DMA ISA ; variable BLASTER)
   ICHAUDIO.DLL AC'97 Intel ICH a ICH7, nForce, AMD-8111 (PCI)
@@ -1017,6 +1021,25 @@ CONFIG.SYS : SET AUDIODRIVER=SBAUDIO, ICHAUDIO, ESAUDIO ou NONE (sans
 elle : detection, dans cet ordre : ICHAUDIO, ESAUDIO, SBAUDIO).
 QEMU : -audiodev pa,id=son -device sb16,audiodev=son (ou AC97, ES1370) ;
 -audiodev wav,id=son,path=sortie.wav enregistre le son produit.
+
+Lecteur MP3 (MP3PLAY.EXE, dossier Multimedia ; source : MP3PLAY.PAS,
+tout en un seul fichier, decodeur de PLAYMP3.PAS du depot
+MP3-Player-0) : MPEG-1, 2 et 2.5 Layer III, debit fixe ou variable.
+Afficheur (temps a sept segments, titre, debit, frequence, stereo,
+spectre), barre de position, boutons de lecture, volume, balance,
+aleatoire, repeter ; onglets Liste de lecture (ajouter des fichiers ou
+un dossier, retirer, monter, descendre, trier, melanger ; etiquettes
+ID3 v1 et v2 ; listes M3U ; sans taille maximale) et Egaliseur (10
+bandes et preamplification, -12 a +12 dB, 12 prereglages). La liste,
+le volume et l'egaliseur sont gardes dans MP3PLAY.M3U et MP3PLAY.INI.
+  MP3PLAY [fichier.MP3 ... | liste.M3U] [/NOSAVE]
+Clavier : Espace lecture/pause, S arret, fleches gauche et droite
+(5 s), Pg prec./Pg suiv. (morceau), + et - (volume), Entree (jouer la
+selection), Suppr (retirer), Ctrl+O, Ctrl+A, F1. Un .MP3 ou un .M3U
+ouvert depuis un dossier du bureau s'ouvre dans le Lecteur MP3. Un fil
+decode en avance (anneau de 3 s, MDMSTREAM/MDMFEED) et cede le
+processeur par DosSleep(0) apres chaque trame : la fenetre reste
+active. Exemple : AURORE.MP3 (composition originale synthetisee).
 
 Notator for OS2-Zero (NOTATOR.EXE, dossier Multimedia) : portage de
 NOTATOR.PAS du depot OFFICE-0, clone du sequenceur MIDI et editeur de

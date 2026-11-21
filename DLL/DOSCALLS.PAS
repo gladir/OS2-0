@@ -4654,6 +4654,8 @@ Function DosSleep(Msec : LongInt) : LongInt;
 Var Stop, N : LongInt;
 Begin
   PollTimers;
+  { DosSleep(0) : ceder le reste de la tranche de temps }
+  If Msec <= 0 Then KSleep(0);
   If Msec > 0 Then
   Begin
     Stop := KGetTickCount + Msec;
