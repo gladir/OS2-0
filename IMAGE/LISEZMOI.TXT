@@ -1446,8 +1446,24 @@ EXPLORER [dossier] a l'invite.
     numerique, .HTM dans le Navigateur Web ;
   - Retour arriere : dossier parent ; F5 : actualiser ; Tab : arbre ou
     contenu ; Alt+Entree : Proprietes ; bouton 2 : Ouvrir, Proprietes ;
-  - menus Fichier, Affichage, Aller a, Outils (Connecter et Deconnecter
-    un lecteur reseau), ?.
+  - menus Fichier (Ouvrir, Nouveau dossier, Supprimer, Renommer,
+    Proprietes, Fermer), Edition (Couper, Copier, Coller, Selectionner
+    tout, Inverser la selection), Affichage, Aller a, Outils (Connecter
+    et Deconnecter un lecteur reseau), ?.
+  - selection multiple : Ctrl+clic, Maj+clic, Maj+fleches, Ctrl+A ; la
+    barre d'etat donne le nombre d'objets choisis et leur taille.
+  - Couper (Ctrl+X), Copier (Ctrl+C), Coller (Ctrl+V) : fichiers et
+    dossiers avec leur contenu, d'un lecteur a l'autre ; "Copie de nom"
+    dans le meme dossier ; "Voulez-vous le remplacer ?" (Oui, Non,
+    Annuler). Suppr : supprimer (avec confirmation) ; F2 : renommer.
+  - bouton 2 sur un fichier : Ouvrir, Couper, Copier, Coller (dossier),
+    Supprimer, Renommer, Selectionner tout, Proprietes ; sur le fond :
+    Selectionner tout, Actualiser, Coller, Nouveau dossier, Proprietes.
+  - Proprietes d'un fichier, d'un dossier ou de plusieurs elements :
+    type, emplacement, taille, contenu, dates de creation, de
+    modification et de dernier acces, attributs Lecture seule, Masque,
+    Archive, Systeme (modifiables par OK ou Appliquer).
+  - .MP3, .M3U, .PLS : Lecteur MP3.
   - Proprietes d'un lecteur : boite "Proprietes de (C:)" de Pasdows 95,
     onglets General (nom du volume modifiable, type, espace utilise en
     bleu et libre en magenta, en octets et en Ko/Mo/Go, capacite,

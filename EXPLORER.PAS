@@ -25,6 +25,11 @@
   (onglets General, Outils, Partage ; nom du volume modifiable ; espace
   utilise et libre ; camembert en relief) ; EXPLORER /PROPS:C: ouvre cette
   boite seule (dossier Lecteurs du bureau).
+  Edition et bouton 2 : Couper, Copier, Coller (fichiers et dossiers,
+  d'un lecteur a l'autre), Supprimer, Renommer, Nouveau dossier,
+  Selectionner tout ; Ctrl+clic, Maj+clic, Ctrl+A, Ctrl+X, Ctrl+C,
+  Ctrl+V, Suppr, F2 ; Proprietes d'un fichier, d'un dossier ou de
+  plusieurs elements (dates, attributs modifiables). .MP3 : Lecteur MP3.
   Outils (et bouton 2 sur le Poste de travail) : Connecter un lecteur
   reseau... (lettre, \\serveur\partage, utilisateur, mot de passe, "Se
   reconnecter a l'ouverture de session" : OS2.INI, PM_NetworkDrives) et
@@ -55,6 +60,7 @@ Const
   VK_BACKSPACE = $05; VK_TAB = $06; VK_BACKTAB = $07; VK_NEWLINE = $08; VK_ESC = $0F;
   VK_PAGEUP = $11; VK_PAGEDOWN = $12; VK_END = $13; VK_HOME = $14; VK_LEFT = $15; VK_UP = $16;
   VK_RIGHT = $17; VK_DOWN = $18; VK_ENTER = $1E; VK_F5 = $24;
+  VK_SHIFTK = $09; VK_CTRLK = $0A; VK_DELETE = $1B; VK_F2 = $21;
   { couleurs (palette de PM ; equivalents de Windows 95) }
   cBlue = 1; cRed = 2; cLime = 4; cAqua = 5; cYellow = 6; cGray = 8; cNavy = 9;
   cMaroon = 10; cGreen = 12; cTeal = 13; cOlive = 14; cSilver = 15;
@@ -71,6 +77,8 @@ Const
   cmUp = 121; cmComputer = 122;
   cmAbout = 131;
   cmMapNet = 141; cmUnmapNet = 142; cmDisconnect = 143;
+  cmCut = 151; cmCopy = 152; cmPaste = 153; cmDelete = 154; cmRename = 155; cmSelAll = 156;
+  cmNewDir = 157; cmInvSel = 158; cmPasteIn = 159; cmPasteTree = 160;
   { controles de PM (boites Connecter et Deconnecter un lecteur reseau) }
   WC_COMBOBOX = $FFFF0002; WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005; WC_ENTRYFIELD = $FFFF0006;
   WC_LISTBOX = $FFFF0007;
@@ -159,6 +167,21 @@ Function WinQuerySysPointer(HD, Id, Load : LongInt) : LongInt; External 'PMWIN';
 Function WinSetPointer(HD, Hptr : LongInt) : LongInt; External 'PMWIN';
 Function WinQueryFocus(HD : LongInt) : LongInt; External 'PMWIN';
 Function PrfQueryProfileString(H, A, K, Df, B, M : LongInt) : LongInt; External 'PMMERGE';
+Function DosDelete(PName : LongInt) : LongInt; External 'DOSCALLS';
+Function DosDeleteDir(PName : LongInt) : LongInt; External 'DOSCALLS';
+Function DosMove(POld, PNew : LongInt) : LongInt; External 'DOSCALLS';
+Function DosCopy(PSrc, PDst, Opt : LongInt) : LongInt; External 'DOSCALLS';
+Function DosCreateDir(PName, PEa : LongInt) : LongInt; External 'DOSCALLS';
+Function DosQueryPathInfo(PName, Level, PInfo, Cb : LongInt) : LongInt; External 'DOSCALLS';
+Function DosSetPathInfo(PName, Level, PInfo, Cb, Fl : LongInt) : LongInt; External 'DOSCALLS';
+Function DosAllocSharedMem(PPb, PName, Cb, Fl : LongInt) : LongInt; External 'DOSCALLS';
+Function DosGetNamedSharedMem(PPb, PName, Fl : LongInt) : LongInt; External 'DOSCALLS';
+Function WinOpenClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
+Function WinCloseClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
+Function WinEmptyClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
+Function WinSetClipbrdData(Hab, D, Fmt, Fl : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryClipbrdData(Hab, Fmt : LongInt) : LongInt; External 'PMWIN';
+Function WinGetKeyState(HD, Vk : LongInt) : LongInt; External 'PMWIN';
 Function PrfWriteProfileString(H, A, K, D : LongInt) : LongInt; External 'PMMERGE';
 
 Var
@@ -172,6 +195,8 @@ Var
   CurPath : String;            { '' : Poste de travail ; 'C:' ; 'C:\DIR' }
   EntBase, NEnt, Sel, Top, View : LongInt;
   Idx : Array[0..MaxE - 1] Of LongInt;
+  SelF : Array[0..MaxE - 1] Of Boolean;   { elements choisis (Ctrl+clic, Maj+clic) }
+  SelA : LongInt;                         { ancre de Maj+clic }
   Truncated : Boolean;
   { arbre : '*' Bureau, '' Poste de travail, 'C:', 'C:\DIR' ; F : 1
     deplie, 2 sans sous-dossier }
@@ -226,6 +251,19 @@ Procedure WrW(A, V : LongInt);
 Begin
   WrB(A, V And 255);
   WrB(A + 1, (V Shr 8) And 255);
+End;
+
+Procedure WrL(A, V : LongInt);
+Var Q : PLong;
+Begin
+  Q := Pointer(A);
+  Q^ := V;
+End;
+
+{ LongInt non signe -> Double (tailles de plus de 2 Go) }
+Function GlUns(V : LongInt) : Double;
+Begin
+  If V < 0 Then GlUns := V + 4294967296.0 Else GlUns := V;
 End;
 
 Procedure PutZ(A : LongInt; S : String);
@@ -624,10 +662,66 @@ End;
 
 { dossier P : '' lecteurs, sinon fichiers et sous-dossiers ; Dirs : les
   sous-dossiers seulement (arbre) }
+{ selection : Sel est l'element courant, SelF les elements choisis }
+Procedure ClearSel;
+Var K : LongInt;
+Begin
+  For K := 0 To MaxE - 1 Do SelF[K] := False;
+  Sel := -1;
+End;
+
+Procedure SelOne(I : LongInt);
+Begin
+  ClearSel;
+  If (I >= 0) And (I < NEnt) Then
+  Begin
+    SelF[I] := True;
+    Sel := I; SelA := I;
+  End;
+End;
+
+Function SelCount : LongInt;
+Var K, N : LongInt;
+Begin
+  N := 0;
+  For K := 0 To NEnt - 1 Do If SelF[K] Then Inc(N);
+  SelCount := N;
+End;
+
+Procedure SelAll;
+Var K : LongInt;
+Begin
+  For K := 0 To NEnt - 1 Do SelF[K] := True;
+  If (Sel < 0) And (NEnt > 0) Then Sel := 0;
+End;
+
+Procedure SelInvert;
+Var K : LongInt;
+Begin
+  For K := 0 To NEnt - 1 Do SelF[K] := Not SelF[K];
+End;
+
+{ Maj : de l'ancre a I }
+Procedure SelRange(I : LongInt);
+Var K, A, B : LongInt;
+Begin
+  If (SelA < 0) Or (SelA >= NEnt) Then SelA := I;
+  For K := 0 To MaxE - 1 Do SelF[K] := False;
+  A := MinI(SelA, I); B := MaxI(SelA, I);
+  For K := A To B Do If (K >= 0) And (K < NEnt) Then SelF[K] := True;
+  Sel := I;
+End;
+
+Function KeyDown(Vk : LongInt) : Boolean;
+Begin
+  KeyDown := (WinGetKeyState(HWND_DESKTOP, Vk) And $8000) <> 0;
+End;
+
 Procedure ListDir(P : String; Dirs : Boolean);
 Var H, N, Off, A, K, Rc : LongInt; S : String;
 Begin
   NEnt := 0; Truncated := False;
+  ClearSel; SelA := -1;
   If P = '' Then
   Begin
     For K := 0 To 25 Do
@@ -1453,7 +1547,7 @@ Begin
         PaintIcon(FileIcon(E(I)^.Nm, E(I)^.Kind), CX + 5, Y + 1, 16);
         S := Fit(EntName(I), W1 - 30);
         Fg := cBlack; Bg := cWhite;
-        If I = Sel Then
+        If SelF[I] Then
         Begin
           Fg := cWhite;
           If Focus = 0 Then Bg := cNavy Else Bg := cGray;
@@ -1480,7 +1574,7 @@ Begin
           X := CX + 6 + C * CellW;
           Y := CY + 6 + R * CellH;
           PaintIcon(FileIcon(E(I)^.Nm, E(I)^.Kind), X + 32, Y, 32);
-          DrawLabel(X, Y + 34, CellW - 4, EntName(I), I = Sel);
+          DrawLabel(X, Y + 34, CellW - 4, EntName(I), SelF[I]);
         End;
       End;
   End;
@@ -1496,9 +1590,19 @@ End;
 
 { texte de la barre d'etat (partie gauche) }
 Function StatusText : String;
-Var S : String; Fr, Tot : Double;
+Var S : String; Fr, Tot : Double; K, N : LongInt;
 Begin
-  If (Sel >= 0) And (Sel < NEnt) Then
+  N := SelCount;
+  If N > 1 Then
+  Begin
+    Tot := 0;
+    For K := 0 To NEnt - 1 Do
+      If SelF[K] And (E(K)^.Kind = ekFile) Then Tot := Tot + GlUns(E(K)^.Size);
+    S := IStr(N) + L(' objet(s) s'#130'lectionn'#130'(s)', ' object(s) selected', ' Objekt(e) markiert',
+                     ' oggetti selezionati', ' objeto(s) seleccionado(s)');
+    If Tot > 0 Then S := S + ' : ' + SizeKb(Tot / 1024);
+  End
+  Else If (Sel >= 0) And (Sel < NEnt) And SelF[Sel] Then
   Begin
     If CurPath = '' Then
     Begin
@@ -1579,7 +1683,7 @@ Begin
   ListDir(CurPath, False);
   Sel := -1;
   For K := 0 To NEnt - 1 Do
-    If (Nm <> '') And (E(K)^.Nm = Nm) Then Sel := K;
+    If (Nm <> '') And (E(K)^.Nm = Nm) Then SelOne(K);
   Top := Old;
   { l'arbre est reconstruit (dossiers crees ou supprimes) }
   TreeInit;
@@ -1820,6 +1924,12 @@ Begin
     Else If (X = 'TXT') Or (X = 'PAS') Or (X = 'INI') Or (X = 'SYS') Or (X = 'LOG') Or (X = 'CFG') Or (X = 'ME') Or
        (X = 'INC') Or (X = 'ASM') Or (X = 'DOC') Or (X = '') Then A := AppPath('PASDEV.EXE')
     Else If X = 'WAV' Then A := AppPath('DIGAUDIO.EXE')
+    Else If (X = 'MP3') Or (X = 'M3U') Or (X = 'PLS') Then
+    Begin
+      { Lecteur MP3 : sa liste de lecture part de ce dossier }
+      A := AppPath('MP3PLAY.EXE');
+      If A <> '' Then SetDir(CurPath);
+    End
     Else If (X = 'SON') Or (X = 'MID') Then
     Begin
       { Notator : ses boites Charger et Sauver montrent ce dossier }
@@ -2494,61 +2604,26 @@ Begin
   Dummy := WinSetFocus(HWND_DESKTOP, PClient);
 End;
 
-{ boite Proprietes (objet choisi, sinon le dossier affiche) }
+{ boite Proprietes : lecteur (camembert de Pasdows 95), fichiers et
+  dossiers choisis, ou dossier affiche (FileProps, plus bas) }
+Procedure FileProps; Forward;
+
 Procedure Props;
-Var S, P, A : String; Fr, Tot : Double; K, Kd : LongInt;
+Var S : String;
 Begin
-  S := '';
-  If ((Sel < 0) Or (Sel >= NEnt)) And (Length(CurPath) <> 2) Then
+  If CurPath = '' Then
   Begin
-    If CurPath = '' Then
-      S := PathTitle('') + Chr(10) + IStr(NEnt) + ' ' + L('lecteur(s)', 'drive(s)', 'Laufwerk(e)', 'unit'#133,
-                                                          'unidad(es)')
+    If (Sel >= 0) And (Sel < NEnt) Then DriveProps(E(Sel)^.Nm[1])
     Else
-      S := PathTitle(CurPath) + Chr(10) + TypeName('', ekDir) + Chr(10) + L('Emplacement : ', 'Location: ', 'Ort: ',
-           'Percorso: ', 'Ubicaci'#162'n: ') + CurPath + Chr(10) + IStr(NEnt) + ' ' +
-           L('objet(s)', 'object(s)', 'Objekt(e)', 'oggetti', 'objeto(s)');
+    Begin
+      S := PathTitle('') + Chr(10) + IStr(NEnt) + ' ' + L('lecteur(s)', 'drive(s)', 'Laufwerk(e)', 'unit'#133,
+                                                          'unidad(es)');
+      Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(S), Z2(L('Propri'#130't'#130's', 'Properties', 'Eigenschaften',
+                             'Propriet'#133, 'Propiedades')), 0, MB_OK Or MB_INFORMATION Or MB_MOVEABLE);
+    End;
   End
-  Else If (CurPath = '') Or ((Sel < 0) And (Length(CurPath) = 2)) Then
-  Begin
-    If CurPath = '' Then P := E(Sel)^.Nm Else P := CurPath;
-    { lecteur : boite Proprietes de Pasdows 95 avec le camembert }
-    DriveProps(P[1]);
-    Exit;
-    K := Ord(UpCase(P[1])) - 65;
-    Kd := DrvKind[K];
-    S := DriveName(P[1]) + Chr(10) + TypeName('', Kd);
-    If DrvFs[K] <> '' Then S := S + Chr(10) + L('Syst'#138'me de fichiers : ', 'File system: ', 'Dateisystem: ',
-                                                'File system: ', 'Sistema de archivos: ') + DrvFs[K];
-    If DriveSpace(P[1], Fr, Tot) Then
-      S := S + Chr(10) + L('Espace utilis'#130' : ', 'Used space: ', 'Belegt: ', 'Spazio utilizzato: ',
-                           'Espacio usado: ') + SizeKb(Tot - Fr) + Chr(10) +
-           L('Espace libre : ', 'Free space: ', 'Frei: ', 'Spazio libero: ', 'Espacio libre: ') + SizeKb(Fr) +
-           Chr(10) + L('Capacit'#130' : ', 'Capacity: ', 'Kapazit'#132't: ', 'Capacit'#133': ', 'Capacidad: ') +
-           SizeKb(Tot);
-  End
-  Else
-  Begin
-    S := E(Sel)^.Nm + Chr(10) + TypeName(E(Sel)^.Nm, E(Sel)^.Kind) + Chr(10) +
-         L('Emplacement : ', 'Location: ', 'Ort: ', 'Percorso: ', 'Ubicaci'#162'n: ') + CurPath;
-    If E(Sel)^.Kind = ekFile Then
-      S := S + Chr(10) + L('Taille : ', 'Size: ', 'Gr'#148#225'e: ', 'Dimensione: ', 'Tama'#164'o: ') +
-           SizeKb((E(Sel)^.Size + 1023) Div 1024) + ' (' + Thousands(E(Sel)^.Size) +
-           L(' octets', ' bytes', ' Byte', ' byte', ' bytes') + ')';
-    If E(Sel)^.FDate <> 0 Then
-      S := S + Chr(10) + L('Modifi'#130' : ', 'Modified: ', 'Ge'#132'ndert: ', 'Modificato: ', 'Modificado: ') +
-           DateStr(E(Sel)^.FDate, E(Sel)^.FTime);
-    A := '';
-    If (E(Sel)^.Attr And 1) <> 0 Then A := A + L('Lecture seule ', 'Read-only ', 'Schreibgesch'#129'tzt ',
-                                                 'Sola lettura ', 'S'#162'lo lectura ');
-    If (E(Sel)^.Attr And 2) <> 0 Then A := A + L('Cach'#130' ', 'Hidden ', 'Versteckt ', 'Nascosto ', 'Oculto ');
-    If (E(Sel)^.Attr And 4) <> 0 Then A := A + L('Syst'#138'me ', 'System ', 'System ', 'Sistema ', 'Sistema ');
-    If (E(Sel)^.Attr And $20) <> 0 Then A := A + L('Archive', 'Archive', 'Archiv', 'Archivio', 'Modificado');
-    If A <> '' Then S := S + Chr(10) + L('Attributs : ', 'Attributes: ', 'Attribute: ', 'Attributi: ',
-                                         'Atributos: ') + A;
-  End;
-  Dummy := WinMessageBox(HWND_DESKTOP, Frame, Z(S), Z2(L('Propri'#130't'#130's', 'Properties', 'Eigenschaften',
-                         'Propriet'#133, 'Propiedades')), 0, MB_OK Or MB_INFORMATION Or MB_MOVEABLE);
+  Else If (Length(CurPath) = 2) And (SelCount = 0) Then DriveProps(CurPath[1])
+  Else FileProps;
 End;
 
 Procedure About;
@@ -2564,6 +2639,45 @@ Begin
                               'Informazioni su Esplora risorse', 'Acerca del Explorador')),
                          0, MB_OK Or MB_INFORMATION Or MB_MOVEABLE);
 End;
+
+{ ==================================================================== }
+{ Operations sur les fichiers : selection multiple, Couper, Copier,     }
+{ Coller, Supprimer, Renommer, Nouveau dossier, Proprietes              }
+{ ==================================================================== }
+{ Comme l'Explorateur de Pasdows 95 (et de Windows 95) : Ctrl+clic,
+  Maj+clic, Selectionner tout (Ctrl+A) ; Couper (Ctrl+X), Copier
+  (Ctrl+C) et Coller (Ctrl+V) des fichiers et des dossiers (avec leur
+  contenu) d'un lecteur a l'autre (HPFS, NTFS, disque virtuel, lecteurs
+  reseau SMB, depuis le CD-ROM) ; Couper deplace (DosMove sur le meme
+  lecteur, sinon DosCopy puis suppression). Copier dans le meme dossier
+  cree "Copie de nom" ; un element qui existe deja fait demander s'il
+  faut le remplacer. La liste des fichiers est gardee dans une memoire
+  partagee nommee (\SHAREMEM\EXPLORER.CLP, d'un Explorateur a l'autre) et
+  le presse-papiers de PM recoit leurs chemins en texte (CF_TEXT) : un
+  autre texte copie depuis remplace la liste. Proprietes : boite de PM
+  (type, emplacement, taille, contenu d'un dossier, dates de creation,
+  de modification et de dernier acces, attributs Lecture seule, Masque,
+  Archive, Systeme modifiables par DosSetPathInfo). }
+
+Const
+  ClipName = '\SHAREMEM\EXPLORER.CLP';
+  ClipSz = 65536;
+  ClipTxt = 32768;                      { copie du texte du presse-papiers }
+  MB_YESNO = 4; MB_YESNOCANCEL = 5; MB_ICONQUESTION = $10;
+  MBID_YES = 6; MBID_NO = 7; MBID_CANCEL = 2;
+
+Var
+  FoErr : LongInt;                      { premiere erreur d'une operation }
+  FoErrNm : String;
+  FoStop : Boolean;
+  PrN, PrFiles, PrDirs : LongInt;       { boite Proprietes }
+  PrSize : Double;
+  PrPath : Array[0..63] Of String[127];
+  PrAttr0, PrIcon : LongInt;
+  PrCk : Array[0..3] Of LongInt;
+  PrRO : Boolean;
+  RnOld : String;
+
 
 { ==================================================================== }
 { Lecteurs reseau : Connecter un lecteur reseau, Deconnecter            }
@@ -2585,6 +2699,7 @@ Var
   NdTabN : LongInt;
   NdN : LongInt;
   NdRegDone : Boolean;
+  NdTitleS : String;                    { titre des boites 2 (Renommer) et 4 (Proprietes) }
   NdData : Array[0..767] Of Byte;
 
 Function NdCtl(Cls, Txt : LongInt; Style, X, Y, W, H, Id : LongInt) : LongInt;
@@ -2750,7 +2865,8 @@ End;
 
 Function NetTitle(Mode : LongInt) : String;
 Begin
-  If Mode = 0 Then
+  If Mode >= 2 Then NetTitle := NdTitleS
+  Else If Mode = 0 Then
     NetTitle := L('Connecter un lecteur r'#130'seau', 'Map Network Drive', 'Netzlaufwerk verbinden',
                   'Connetti unit'#133' di rete', 'Conectar a unidad de red')
   Else
@@ -2848,22 +2964,44 @@ Begin
   NdEnd := ID_OK;
 End;
 
+Procedure RenameOk; Forward;
+Function PropsApply : Boolean; Forward;
+
 Function NdProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
-Var Hps, Fl, Vk : LongInt; Rc : Array[0..3] Of LongInt;
+Var Ps, Fl, Vk, SvH, SvC : LongInt; Rc : Array[0..3] Of LongInt;
 Begin
   NdProc := 0;
   Case Msg Of
     WM_PAINT :
     Begin
-      Hps := WinBeginPaint(H, 0, 0);
+      Ps := WinBeginPaint(H, 0, 0);
       Dummy := WinQueryWindowRect(H, LongInt(@Rc));
-      Dummy := WinFillRect(Hps, LongInt(@Rc), cSilver);
-      Dummy := WinEndPaint(Hps);
+      Dummy := WinFillRect(Ps, LongInt(@Rc), cSilver);
+      If NdMode = 4 Then
+      Begin
+        { Proprietes : icone de l'element et trait sous le nom }
+        SvH := Hps; SvC := CH;
+        Hps := Ps; CH := Rc[3];
+        PaintIcon(PrIcon, 22, 10, 32);
+        HLine(14, Rc[2] - 15, 52, cGray);
+        HLine(14, Rc[2] - 15, 53, cWhite);
+        Hps := SvH; CH := SvC;
+      End;
+      Dummy := WinEndPaint(Ps);
     End;
     WM_COMMAND :
       If Lo16(Mp1) = ID_OK Then
       Begin
-        If NdMode = 0 Then MapOk Else UnmapOk;
+        Case NdMode Of
+          0 : MapOk;
+          1 : UnmapOk;
+          2 : RenameOk;
+          4 : If PropsApply Then NdEnd := ID_OK;
+        End;
+      End
+      Else If Lo16(Mp1) = 30 Then
+      Begin
+        If NdMode = 4 Then Dummy := PropsApply;
       End
       Else If Lo16(Mp1) = ID_CANCEL Then NdEnd := ID_CANCEL;
     WM_CHAR :
@@ -3026,6 +3164,768 @@ Begin
   If R = ID_OK Then NetChanged(' ');
 End;
 
+Function DirOfP(P : String) : String;
+Var K : LongInt;
+Begin
+  K := Length(P);
+  While (K > 0) And (P[K] <> '\') Do Dec(K);
+  If K = 3 Then DirOfP := Copy(P, 1, 2)          { C:\X -> C: }
+  Else If K > 0 Then DirOfP := Copy(P, 1, K - 1)
+  Else DirOfP := '';
+End;
+
+Function JoinP(Dir, Nm : String) : String;
+Begin
+  If (Dir <> '') And (Dir[Length(Dir)] = '\') Then JoinP := Dir + Nm Else JoinP := Dir + '\' + Nm;
+End;
+
+{ FILESTATUS3 du chemin P dans B (24 octets) ; faux s'il n'existe pas }
+Function StatOf(P : String; B : LongInt) : Boolean;
+Begin
+  StatOf := DosQueryPathInfo(Z(P), 1, B, 24) = 0;
+End;
+
+Function PathExists(P : String) : Boolean;
+Var B : Array[0..31] Of Byte;
+Begin
+  PathExists := StatOf(P, LongInt(@B));
+End;
+
+Function IsDirP(P : String) : Boolean;
+Var B : Array[0..31] Of Byte;
+Begin
+  IsDirP := StatOf(P, LongInt(@B)) And ((RdL(LongInt(@B) + 20) And $10) <> 0);
+End;
+
+{ lecteur en lecture seule (CD-ROM) }
+Function ReadOnlyDrv(P : String) : Boolean;
+Var K : LongInt;
+Begin
+  ReadOnlyDrv := False;
+  If Length(P) < 2 Then Exit;
+  K := Ord(UpCase(P[1])) - 65;
+  If (K >= 0) And (K <= 25) Then ReadOnlyDrv := DrvKind[K] = ekCd;
+End;
+
+Function FileErrText(R : LongInt) : String;
+Begin
+  Case R Of
+    2, 3 : FileErrText := L('Fichier ou dossier introuvable.', 'File or folder not found.',
+                            'Datei oder Ordner nicht gefunden.', 'File o cartella non trovati.',
+                            'No se encuentra el archivo o la carpeta.');
+    19 : FileErrText := L('Le disque est prot'#130'g'#130' en '#130'criture (CD-ROM).', 'The disk is write-protected.',
+                          'Der Datentr'#132'ger ist schreibgesch'#129'tzt.', 'Il disco '#138' protetto da scrittura.',
+                          'El disco est'#160' protegido contra escritura.');
+    32 : FileErrText := L('Le fichier est utilis'#130' par un autre programme.', 'The file is in use.',
+                          'Die Datei wird verwendet.', 'Il file '#138' in uso.', 'El archivo est'#160' en uso.');
+    80, 183 : FileErrText := L('Le fichier existe d'#130'j'#133'.', 'The file already exists.',
+                               'Die Datei ist bereits vorhanden.', 'Il file esiste gi'#133'.', 'El archivo ya existe.');
+    112 : FileErrText := L('Le disque est plein.', 'The disk is full.', 'Der Datentr'#132'ger ist voll.',
+                           'Il disco '#138' pieno.', 'El disco est'#160' lleno.');
+    123, 206 : FileErrText := L('Nom de fichier incorrect.', 'Invalid file name.', 'Ung'#129'ltiger Dateiname.',
+                                'Nome di file non valido.', 'Nombre de archivo no v'#160'lido.');
+  Else
+    FileErrText := NetErrText(R);
+  End;
+End;
+
+Procedure FoNote(R : LongInt; Nm : String);
+Begin
+  If (R <> 0) And (FoErr = 0) Then
+  Begin
+    FoErr := R;
+    FoErrNm := Nm;
+  End;
+End;
+
+Procedure FoReport;
+Begin
+  If FoErr <> 0 Then
+    Msg(L('Impossible de traiter ', 'Cannot process ', 'Fehler bei ', 'Impossibile elaborare ', 'No se puede procesar ') +
+        FoErrNm + Chr(10) + FileErrText(FoErr), MB_OK Or MB_ERROR);
+End;
+
+Procedure WaitPtr(On : Boolean);
+Var P : LongInt;
+Begin
+  If On Then P := WinQuerySysPointer(HWND_DESKTOP, 3, 0) Else P := WinQuerySysPointer(HWND_DESKTOP, 1, 0);
+  If P <> 0 Then Dummy := WinSetPointer(HWND_DESKTOP, P);
+End;
+
+{ supprimer un fichier ou un dossier et tout son contenu }
+Function DeleteTree(P : String) : LongInt;
+Var H, N, R, A : LongInt; B : Array[0..299] Of Byte; S : String; Found : Boolean;
+    St : Array[0..31] Of Byte;
+Begin
+  If Not StatOf(P, LongInt(@St)) Then
+  Begin
+    DeleteTree := 2;
+    Exit;
+  End;
+  A := RdL(LongInt(@St) + 20);
+  If (A And $10) = 0 Then
+  Begin
+    { lecture seule, systeme, masque : retires pour supprimer }
+    If (A And 7) <> 0 Then
+    Begin
+      WrB(LongInt(@St) + 20, A And $20);
+      Dummy := DosSetPathInfo(Z(P), 1, LongInt(@St), 24, 0);
+    End;
+    DeleteTree := DosDelete(Z(P));
+    Exit;
+  End;
+  { dossier : supprimer le premier element tant qu'il en reste }
+  R := 0;
+  Repeat
+    Found := False;
+    H := -1; N := 1;
+    If DosFindFirst(Z(P + '\*'), LongInt(@H), $37, LongInt(@B), 300, LongInt(@N), 1) = 0 Then
+    Begin
+      Repeat
+        S := '';
+        For A := 0 To RdB(LongInt(@B) + 28) - 1 Do S := S + Chr(RdB(LongInt(@B) + 29 + A));
+        If (S <> '.') And (S <> '..') And (S <> '') Then Found := True
+        Else
+        Begin
+          N := 1;
+          If DosFindNext(H, LongInt(@B), 300, LongInt(@N)) <> 0 Then N := 0;
+        End;
+      Until Found Or (N = 0);
+    End;
+    If H <> -1 Then Dummy := DosFindClose(H);
+    If Found Then R := DeleteTree(P + '\' + S);
+  Until (Not Found) Or (R <> 0);
+  If R = 0 Then R := DosDeleteDir(Z(P));
+  DeleteTree := R;
+End;
+
+{ taille, fichiers et dossiers d'une arborescence }
+Procedure TreeStats(P : String; Var Files, Dirs : LongInt; Var Size : Double);
+Var H, N, A, K : LongInt; B : Array[0..299] Of Byte; S : String;
+Begin
+  H := -1; N := 1;
+  If DosFindFirst(Z(P + '\*'), LongInt(@H), $37, LongInt(@B), 300, LongInt(@N), 1) = 0 Then
+    Repeat
+      S := '';
+      For K := 0 To RdB(LongInt(@B) + 28) - 1 Do S := S + Chr(RdB(LongInt(@B) + 29 + K));
+      A := RdL(LongInt(@B) + 24);
+      If (S <> '.') And (S <> '..') And (S <> '') Then
+      Begin
+        If (A And $10) <> 0 Then
+        Begin
+          Inc(Dirs);
+          If Length(P) + Length(S) < 250 Then TreeStats(P + '\' + S, Files, Dirs, Size);
+        End
+        Else
+        Begin
+          Inc(Files);
+          Size := Size + GlUns(RdL(LongInt(@B) + 16));
+        End;
+      End;
+      N := 1;
+    Until DosFindNext(H, LongInt(@B), 300, LongInt(@N)) <> 0;
+  If H <> -1 Then Dummy := DosFindClose(H);
+End;
+
+{ ---------------------------------------------------- presse-papiers }
+
+Function ClipMem : LongInt;
+Var P : LongInt;
+Begin
+  P := 0;
+  If DosGetNamedSharedMem(LongInt(@P), Z(ClipName), 3) <> 0 Then
+  Begin
+    P := 0;
+    If DosAllocSharedMem(LongInt(@P), Z(ClipName), ClipSz, $13) <> 0 Then P := 0
+    Else WrL(P, 0);
+  End;
+  ClipMem := P;
+End;
+
+{ texte du presse-papiers de PM (CF_TEXT) egal a celui pose par Copier ? }
+Function ClipCurrent(P : LongInt) : Boolean;
+Var D, K : LongInt;
+Begin
+  ClipCurrent := False;
+  If (P = 0) Or (RdL(P) = 0) Then Exit;
+  If WinOpenClipbrd(Hab) = 0 Then Exit;
+  D := WinQueryClipbrdData(Hab, 1);
+  If D <> 0 Then
+  Begin
+    K := 0;
+    While (K < 16000) And (RdB(D + K) = RdB(P + ClipTxt + K)) And (RdB(D + K) <> 0) Do Inc(K);
+    ClipCurrent := (RdB(D + K) = 0) And (RdB(P + ClipTxt + K) = 0);
+  End;
+  Dummy := WinCloseClipbrd(Hab);
+End;
+
+{ Couper (Mode 2) ou Copier (Mode 1) les elements choisis }
+Procedure ClipPut(Mode : LongInt);
+Var P, I, N, Q, T, K : LongInt; S : String;
+Begin
+  If (CurPath = '') Or (SelCount = 0) Then Exit;
+  P := ClipMem;
+  If P = 0 Then Exit;
+  N := 0; Q := P + 16; T := P + ClipTxt;
+  For I := 0 To NEnt - 1 Do
+    If SelF[I] And (Q - P < ClipTxt - 300) And (T - P < ClipSz - 300) Then
+    Begin
+      S := EntPath(I);
+      PutZ(Q, S); Q := Q + Length(S) + 1;
+      If N > 0 Then
+      Begin
+        WrB(T, 13); WrB(T + 1, 10); T := T + 2;
+      End;
+      For K := 1 To Length(S) Do WrB(T + K - 1, Ord(S[K]));
+      T := T + Length(S);
+      Inc(N);
+    End;
+  WrB(T, 0);
+  WrL(P + 4, N);
+  WrL(P, Mode);
+  If WinOpenClipbrd(Hab) <> 0 Then
+  Begin
+    Dummy := WinEmptyClipbrd(Hab);
+    Dummy := WinSetClipbrdData(Hab, P + ClipTxt, 1, $400);
+    Dummy := WinCloseClipbrd(Hab);
+  End;
+End;
+
+Function ClipReady : Boolean;
+Begin
+  ClipReady := ClipCurrent(ClipMem);
+End;
+
+{ "Copie de nom", "Copie (2) de nom"... }
+Function CopyName(Dir, Nm : String) : String;
+Var K : LongInt; S : String;
+Begin
+  K := 1;
+  Repeat
+    If K = 1 Then S := L('Copie de ', 'Copy of ', 'Kopie von ', 'Copia di ', 'Copia de ') + Nm
+    Else S := L('Copie (', 'Copy (', 'Kopie (', 'Copia (', 'Copia (') + IStr(K) + L(') de ', ') of ', ') von ',
+              ') di ', ') de ') + Nm;
+    Inc(K);
+  Until Not PathExists(JoinP(Dir, S)) Or (K > 99);
+  CopyName := S;
+End;
+
+Function SameDrive(A, B : String) : Boolean;
+Begin
+  SameDrive := (Length(A) >= 2) And (Length(B) >= 2) And (UpCase(A[1]) = UpCase(B[1]));
+End;
+
+{ un element S colle dans Dir (Cut : deplacer) ; faux pour tout arreter }
+Function PasteOne(S, Dir : String; Cut : Boolean) : Boolean;
+Var Nm, D, US, UD : String; R : LongInt;
+Begin
+  PasteOne := True;
+  Nm := BaseName(S);
+  US := UpStr(S); UD := UpStr(Dir);
+  If Not PathExists(S) Then
+  Begin
+    FoNote(2, Nm);
+    Exit;
+  End;
+  { un dossier dans lui-meme ou dans un de ses sous-dossiers }
+  If (UD = US) Or (Copy(UD, 1, Length(US) + 1) = US + '\') Then
+  Begin
+    Msg(L('Impossible de copier ', 'Cannot copy ', 'Kann nicht kopieren: ', 'Impossibile copiare ',
+          'No se puede copiar ') + Nm + ' : ' +
+        L('le dossier de destination est un sous-dossier du dossier source.',
+          'the destination folder is a subfolder of the source folder.',
+          'der Zielordner ist ein Unterordner des Quellordners.',
+          'la cartella di destinazione '#138' una sottocartella dell''origine.',
+          'la carpeta de destino es una subcarpeta de la carpeta de origen.'), MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  If UpStr(DirOfP(S)) = UD Then
+  Begin
+    If Cut Then Exit;                      { deja la }
+    D := JoinP(Dir, CopyName(Dir, Nm));
+  End
+  Else
+  Begin
+    D := JoinP(Dir, Nm);
+    If PathExists(D) Then
+    Begin
+      R := WinMessageBox(HWND_DESKTOP, Frame,
+                         Z(L('Ce dossier contient d'#130'j'#133' un '#130'l'#130'ment nomm'#130' ',
+                             'This folder already contains an item named ',
+                             'Dieser Ordner enth'#132'lt bereits ', 'Questa cartella contiene gi'#133' ',
+                             'Esta carpeta ya contiene ') + Nm + '.' + Chr(10) + Chr(10) +
+                           L('Voulez-vous le remplacer ?', 'Do you want to replace it?', 'Ersetzen?',
+                             'Sostituirlo?', #168'Desea reemplazarlo?')),
+                         Z2(L('Confirmer le remplacement', 'Confirm File Replace', 'Ersetzen best'#132'tigen',
+                              'Conferma sostituzione', 'Confirmar reemplazo')), 0,
+                         MB_YESNOCANCEL Or MB_ICONQUESTION Or MB_MOVEABLE);
+      If R = MBID_CANCEL Then
+      Begin
+        PasteOne := False;
+        Exit;
+      End;
+      If R <> MBID_YES Then Exit;
+      R := DeleteTree(D);
+      If R <> 0 Then
+      Begin
+        FoNote(R, D);
+        Exit;
+      End;
+    End;
+  End;
+  If Cut And SameDrive(S, D) Then
+  Begin
+    R := DosMove(Z(S), Z2(D));
+    If R = 0 Then Exit;
+  End;
+  R := DosCopy(Z(S), Z2(D), 0);
+  If R <> 0 Then
+  Begin
+    FoNote(R, Nm);
+    Exit;
+  End;
+  If Cut Then FoNote(DeleteTree(S), Nm);
+End;
+
+{ Coller dans Dir }
+Procedure DoPaste(Dir : String);
+Var P, N, I, Q, Mode : LongInt; S : String;
+Begin
+  If Dir = '' Then Exit;
+  P := ClipMem;
+  If Not ClipCurrent(P) Then
+  Begin
+    WinAlarm(HWND_DESKTOP, 0);
+    Exit;
+  End;
+  If ReadOnlyDrv(Dir) Then
+  Begin
+    Msg(FileErrText(19), MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  Mode := RdL(P); N := RdL(P + 4);
+  FoErr := 0; FoErrNm := '';
+  WaitPtr(True);
+  Q := P + 16;
+  For I := 1 To N Do
+  Begin
+    S := GetZ(Q);
+    Q := Q + Length(S) + 1;
+    If Not PasteOne(S, Dir, Mode = 2) Then Break;
+  End;
+  WaitPtr(False);
+  { Couper : la liste ne sert qu'une fois }
+  If Mode = 2 Then
+  Begin
+    WrL(P, 0);
+    If WinOpenClipbrd(Hab) <> 0 Then
+    Begin
+      Dummy := WinEmptyClipbrd(Hab);
+      Dummy := WinCloseClipbrd(Hab);
+    End;
+  End;
+  Refresh;
+  FoReport;
+End;
+
+{ ---------------------------------------------------------- Supprimer }
+
+Procedure DoDelete;
+Var N, I, R : LongInt; S : String;
+Begin
+  If CurPath = '' Then Exit;
+  N := SelCount;
+  If N = 0 Then Exit;
+  If ReadOnlyDrv(CurPath) Then
+  Begin
+    Msg(FileErrText(19), MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  If N = 1 Then
+  Begin
+    S := '';
+    For I := 0 To NEnt - 1 Do If SelF[I] Then S := E(I)^.Nm;
+    S := L('Voulez-vous vraiment supprimer '#174' ', 'Are you sure you want to delete ''',
+           'M'#148'chten Sie '#174' ', 'Eliminare '#174' ', #168'Desea eliminar '#174' ') + S +
+         L(' '#175' ?', '''?', ' '#175' wirklich l'#148'schen?', ' '#175'?', ' '#175'?');
+  End
+  Else
+    S := L('Voulez-vous vraiment supprimer ces ', 'Are you sure you want to delete these ',
+           'M'#148'chten Sie diese ', 'Eliminare questi ', #168'Desea eliminar estos ') + IStr(N) +
+         L(' '#130'l'#130'ments ?', ' items?', ' Elemente wirklich l'#148'schen?', ' elementi?', ' elementos?');
+  R := WinMessageBox(HWND_DESKTOP, Frame, Z(S), Z2(L('Confirmer la suppression', 'Confirm Delete',
+                     'L'#148'schen best'#132'tigen', 'Conferma eliminazione', 'Confirmar eliminaci'#162'n')), 0,
+                     MB_YESNO Or MB_ICONQUESTION Or MB_MOVEABLE);
+  If R <> MBID_YES Then Exit;
+  FoErr := 0; FoErrNm := '';
+  WaitPtr(True);
+  For I := 0 To NEnt - 1 Do
+    If SelF[I] Then FoNote(DeleteTree(EntPath(I)), E(I)^.Nm);
+  WaitPtr(False);
+  Refresh;
+  FoReport;
+End;
+
+{ ------------------------------------------- Renommer, Nouveau dossier }
+
+Function BadName(S : String) : Boolean;
+Var K : LongInt;
+Begin
+  BadName := (S = '') Or (S = '.') Or (S = '..');
+  For K := 1 To Length(S) Do
+    If Pos(S[K], '\/:*?"<>|') > 0 Then BadName := True;
+End;
+
+Procedure RenameOk;
+Var S : String; R : LongInt;
+Begin
+  S := NdText(NdPath);
+  While (S <> '') And (S[Length(S)] = ' ') Do Delete(S, Length(S), 1);
+  While (S <> '') And (S[1] = ' ') Do Delete(S, 1, 1);
+  If S = BaseName(RnOld) Then
+  Begin
+    NdEnd := ID_CANCEL;
+    Exit;
+  End;
+  If BadName(S) Then
+  Begin
+    NdMsg(L('Un nom de fichier ne peut pas contenir les caract'#138'res suivants :', 'A file name cannot contain ' +
+            'any of the following characters:', 'Ein Dateiname darf diese Zeichen nicht enthalten:',
+            'Un nome di file non pu'#149' contenere:', 'Un nombre de archivo no puede contener:') +
+          Chr(10) + '\ / : * ? " < > |', MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  R := DosMove(Z(RnOld), Z2(JoinP(DirOfP(RnOld), S)));
+  If R <> 0 Then
+  Begin
+    NdMsg(FileErrText(R), MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  RnOld := S;
+  NdEnd := ID_OK;
+End;
+
+{ boite Renommer pour P ; vrai si renomme (RnOld <- nouveau nom) }
+Function RenameDialog(P : String) : Boolean;
+Var W, H : LongInt; S : String;
+Begin
+  RenameDialog := False;
+  If ReadOnlyDrv(P) Then
+  Begin
+    Msg(FileErrText(19), MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  RnOld := P;
+  S := BaseName(P);
+  NdMode := 2;
+  NdTitleS := L('Renommer', 'Rename', 'Umbenennen', 'Rinomina', 'Cambiar nombre');
+  W := 400; H := 96;
+  If Not NdOpen(W, H) Then Exit;
+  NdLabel(L('Nouveau nom de ', 'New name for ', 'Neuer Name f'#129'r ', 'Nuovo nome di ', 'Nuevo nombre de ') + S + ' :',
+          12, H - 30, W - 24);
+  NdPath := NdCtl(WC_ENTRYFIELD, 0, WS_TABSTOP Or ES_AUTOSCROLL Or ES_MARGIN, 12, H - 56, W - 24, 20, 12);
+  Dummy := WinSendMsg(NdPath, EM_SETTEXTLIMIT, 250, 0);
+  Dummy := WinSetWindowText(NdPath, Z(S));
+  Dummy := WinSendMsg(NdPath, EM_SETSEL, 255 Shl 16, 0);
+  NdButtons(W);
+  If NdRun(NdPath) = ID_OK Then RenameDialog := True;
+  NdClose;
+End;
+
+{ choisit l'element nomme Nm apres une actualisation }
+Procedure SelectName(Nm : String);
+Var K : LongInt;
+Begin
+  For K := 0 To NEnt - 1 Do
+    If UpStr(E(K)^.Nm) = UpStr(Nm) Then
+    Begin
+      SelOne(K);
+      Focus := 0;
+      Geometry;
+      ShowSel;
+    End;
+  Redraw;
+End;
+
+Procedure DoRename;
+Begin
+  If (CurPath = '') Or (Sel < 0) Or (Sel >= NEnt) Or (SelCount <> 1) Or Not SelF[Sel] Then Exit;
+  If RenameDialog(EntPath(Sel)) Then
+  Begin
+    Refresh;
+    SelectName(RnOld);
+  End;
+End;
+
+Procedure DoNewDir;
+Var S : String; R, K : LongInt;
+Begin
+  If CurPath = '' Then Exit;
+  If ReadOnlyDrv(CurPath) Then
+  Begin
+    Msg(FileErrText(19), MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  S := L('Nouveau dossier', 'New Folder', 'Neuer Ordner', 'Nuova cartella', 'Nueva carpeta');
+  K := 1;
+  While PathExists(JoinP(CurPath, S)) And (K < 99) Do
+  Begin
+    Inc(K);
+    S := L('Nouveau dossier', 'New Folder', 'Neuer Ordner', 'Nuova cartella', 'Nueva carpeta') + ' (' + IStr(K) + ')';
+  End;
+  R := DosCreateDir(Z(JoinP(CurPath, S)), 0);
+  If R <> 0 Then
+  Begin
+    Msg(FileErrText(R), MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  Refresh;
+  SelectName(S);
+  { comme Windows : le nom se tape aussitot }
+  If RenameDialog(JoinP(CurPath, S)) Then S := RnOld;
+  Refresh;
+  SelectName(S);
+End;
+
+{ ---------------------------------------------------------- Proprietes }
+
+Function DayName(D : LongInt) : String;
+Begin
+  Case D Of
+    0 : DayName := L('dimanche', 'Sunday', 'Sonntag', 'domenica', 'domingo');
+    1 : DayName := L('lundi', 'Monday', 'Montag', 'luned'#141, 'lunes');
+    2 : DayName := L('mardi', 'Tuesday', 'Dienstag', 'marted'#141, 'martes');
+    3 : DayName := L('mercredi', 'Wednesday', 'Mittwoch', 'mercoled'#141, 'mi'#130'rcoles');
+    4 : DayName := L('jeudi', 'Thursday', 'Donnerstag', 'gioved'#141, 'jueves');
+    5 : DayName := L('vendredi', 'Friday', 'Freitag', 'venerd'#141, 'viernes');
+  Else
+    DayName := L('samedi', 'Saturday', 'Samstag', 'sabato', 's'#160'bado');
+  End;
+End;
+
+Function MonthName(M : LongInt) : String;
+Begin
+  Case M Of
+    1 : MonthName := L('janvier', 'January', 'Januar', 'gennaio', 'enero');
+    2 : MonthName := L('f'#130'vrier', 'February', 'Februar', 'febbraio', 'febrero');
+    3 : MonthName := L('mars', 'March', 'M'#132'rz', 'marzo', 'marzo');
+    4 : MonthName := L('avril', 'April', 'April', 'aprile', 'abril');
+    5 : MonthName := L('mai', 'May', 'Mai', 'maggio', 'mayo');
+    6 : MonthName := L('juin', 'June', 'Juni', 'giugno', 'junio');
+    7 : MonthName := L('juillet', 'July', 'Juli', 'luglio', 'julio');
+    8 : MonthName := L('ao'#150't', 'August', 'August', 'agosto', 'agosto');
+    9 : MonthName := L('septembre', 'September', 'September', 'settembre', 'septiembre');
+    10 : MonthName := L('octobre', 'October', 'Oktober', 'ottobre', 'octubre');
+    11 : MonthName := L('novembre', 'November', 'November', 'novembre', 'noviembre');
+  Else
+    MonthName := L('d'#130'cembre', 'December', 'Dezember', 'dicembre', 'diciembre');
+  End;
+End;
+
+{ date et heure FAT -> "samedi 21 novembre 2026 21:51:30" }
+Function LongDate(D, T : LongInt) : String;
+Var Y, M, Dd, A, Yy, W : LongInt; S : String;
+Begin
+  If D = 0 Then
+  Begin
+    LongDate := L('(inconnue)', '(unknown)', '(unbekannt)', '(sconosciuta)', '(desconocida)');
+    Exit;
+  End;
+  Y := 1980 + ((D Shr 9) And 127); M := (D Shr 5) And 15; Dd := D And 31;
+  If (M < 1) Or (M > 12) Then M := 1;
+  { jour de la semaine (Sakamoto) }
+  A := 0;
+  Case M Of
+    1 : A := 0; 2 : A := 3; 3 : A := 2; 4 : A := 5; 5 : A := 0; 6 : A := 3;
+    7 : A := 5; 8 : A := 1; 9 : A := 4; 10 : A := 6; 11 : A := 2; 12 : A := 4;
+  End;
+  Yy := Y;
+  If M < 3 Then Dec(Yy);
+  W := (Yy + Yy Div 4 - Yy Div 100 + Yy Div 400 + A + Dd) Mod 7;
+  If Lang = 1 Then S := DayName(W) + ', ' + MonthName(M) + ' ' + IStr(Dd) + ', ' + IStr(Y)
+  Else If Lang = 2 Then S := DayName(W) + ', ' + IStr(Dd) + '. ' + MonthName(M) + ' ' + IStr(Y)
+  Else S := DayName(W) + ' ' + IStr(Dd) + ' ' + MonthName(M) + ' ' + IStr(Y);
+  LongDate := S + ' ' + Two((T Shr 11) And 31) + ':' + Two((T Shr 5) And 63) + ':' + Two((T And 31) * 2);
+End;
+
+Function SizeText(V : Double) : String;
+Begin
+  SizeText := SizeKb(V / 1024) + ' (' + ThousandsD(V) + L(' octets', ' bytes', ' Byte', ' byte', ' bytes') + ')';
+End;
+
+{ Appliquer : attributs coches ou decoches (seulement ceux qui changent) }
+Function PropsApply : Boolean;
+Var K, I, Want, Chg, A, R : LongInt; B : Array[0..31] Of Byte; Bits : Array[0..3] Of LongInt;
+Begin
+  PropsApply := True;
+  If PrRO Then Exit;
+  Bits[0] := 1; Bits[1] := 2; Bits[2] := $20; Bits[3] := 4;
+  Want := 0; Chg := 0;
+  For K := 0 To 3 Do
+    If PrCk[K] <> 0 Then
+    Begin
+      If WinSendMsg(PrCk[K], BM_QUERYCHECK, 0, 0) <> 0 Then Want := Want Or Bits[K];
+      If ((Want And Bits[K]) <> 0) <> ((PrAttr0 And Bits[K]) <> 0) Then Chg := Chg Or Bits[K];
+    End;
+  If Chg = 0 Then Exit;
+  For I := 0 To PrN - 1 Do
+    If StatOf(PrPath[I], LongInt(@B)) Then
+    Begin
+      A := RdL(LongInt(@B) + 20);
+      A := (A And Not Chg) Or (Want And Chg);
+      WrL(LongInt(@B) + 20, A And $37);
+      R := DosSetPathInfo(Z(PrPath[I]), 1, LongInt(@B), 24, 0);
+      If R <> 0 Then
+      Begin
+        NdMsg(BaseName(PrPath[I]) + Chr(10) + FileErrText(R), MB_OK Or MB_ERROR);
+        PropsApply := False;
+        Exit;
+      End;
+    End;
+  PrAttr0 := (PrAttr0 And Not Chg) Or (Want And Chg);
+End;
+
+Procedure PrRow(W, H : LongInt; Var Y : LongInt; Lb, V : String);
+Begin
+  NdLabel(Lb, 14, H - Y - 20, 120);
+  NdLabel(Fit(V, W - 160), 140, H - Y - 20, W - 150);
+  Y := Y + 22;
+End;
+
+{ boite Proprietes des elements de PrPath[0..PrN-1] }
+Procedure PropsDialog;
+Var W, H, Y, K, A, All, Any, F, D : LongInt; B : Array[0..31] Of Byte; S, T, Ty : String; Sz : Double;
+    Bits : Array[0..3] Of LongInt;
+
+Begin
+  If PrN = 0 Then Exit;
+  PrRO := ReadOnlyDrv(PrPath[0]);
+  Bits[0] := 1; Bits[1] := 2; Bits[2] := $20; Bits[3] := 4;
+  { attributs communs ; taille et contenu }
+  All := $27; Any := 0; Sz := 0; F := 0; D := 0;
+  WaitPtr(True);
+  For K := 0 To PrN - 1 Do
+    If StatOf(PrPath[K], LongInt(@B)) Then
+    Begin
+      A := RdL(LongInt(@B) + 20);
+      All := All And A; Any := Any Or A;
+      If (A And $10) <> 0 Then
+      Begin
+        If PrN > 1 Then Inc(D);
+        TreeStats(PrPath[K], F, D, Sz);
+      End
+      Else
+      Begin
+        Inc(F);
+        Sz := Sz + GlUns(RdL(LongInt(@B) + 12));
+      End;
+    End;
+  WaitPtr(False);
+  PrAttr0 := All;
+  NdMode := 4;
+  W := 430;
+  If PrN = 1 Then H := 380 Else H := 260;
+  NdTitleS := L('Propri'#130't'#130's de ', 'Properties of ', 'Eigenschaften von ', 'Propriet'#133' di ',
+                'Propiedades de ');
+  If PrN = 1 Then NdTitleS := NdTitleS + BaseName(PrPath[0])
+  Else NdTitleS := L('Propri'#130't'#130's', 'Properties', 'Eigenschaften', 'Propriet'#133, 'Propiedades');
+  If Not NdOpen(W, H) Then Exit;
+  Y := 14;
+  If PrN = 1 Then
+  Begin
+    S := BaseName(PrPath[0]);
+    If Not StatOf(PrPath[0], LongInt(@B)) Then FillChar(B, SizeOf(B), 0);
+    A := RdL(LongInt(@B) + 20);
+    If (A And $10) <> 0 Then
+    Begin
+      PrIcon := icFolder;
+      Ty := TypeName(S, ekDir);
+    End
+    Else
+    Begin
+      PrIcon := FileIcon(S, ekFile);
+      Ty := TypeName(S, ekFile);
+    End;
+    NdLabel(Fit(S, W - 90), 70, H - Y - 26, W - 84);
+    Y := 60;
+    PrRow(W, H, Y, L('Type :', 'Type:', 'Typ:', 'Tipo:', 'Tipo:'), Ty);
+    PrRow(W, H, Y, L('Emplacement :', 'Location:', 'Ort:', 'Percorso:', 'Ubicaci'#162'n:'), DirOfP(PrPath[0]));
+    PrRow(W, H, Y, L('Taille :', 'Size:', 'Gr'#148#225'e:', 'Dimensione:', 'Tama'#164'o:'), SizeText(Sz));
+    If (A And $10) <> 0 Then
+      PrRow(W, H, Y, L('Contenu :', 'Contains:', 'Inhalt:', 'Contenuto:', 'Contiene:'),
+          IStr(F) + L(' fichier(s), ', ' file(s), ', ' Datei(en), ', ' file, ', ' archivo(s), ') + IStr(D) +
+          L(' dossier(s)', ' folder(s)', ' Ordner', ' cartelle', ' carpeta(s)'));
+    Y := Y + 10;
+    PrRow(W, H, Y, L('Cr'#130#130' le :', 'Created:', 'Erstellt:', 'Creato:', 'Creado:'), LongDate(RdW(LongInt(@B)),
+        RdW(LongInt(@B) + 2)));
+    PrRow(W, H, Y, L('Modifi'#130' le :', 'Modified:', 'Ge'#132'ndert:', 'Modificato:', 'Modificado:'),
+        LongDate(RdW(LongInt(@B) + 8), RdW(LongInt(@B) + 10)));
+    PrRow(W, H, Y, L('Dernier acc'#138's :', 'Accessed:', 'Letzter Zugriff:', 'Ultimo accesso:', #351'ltimo acceso:'),
+        LongDate(RdW(LongInt(@B) + 4), RdW(LongInt(@B) + 6)));
+  End
+  Else
+  Begin
+    PrIcon := icDocs;
+    T := DirOfP(PrPath[0]);
+    For K := 1 To PrN - 1 Do If UpStr(DirOfP(PrPath[K])) <> UpStr(T) Then T := '';
+    NdLabel(IStr(F) + L(' fichier(s), ', ' file(s), ', ' Datei(en), ', ' file, ', ' archivo(s), ') + IStr(D) +
+            L(' dossier(s)', ' folder(s)', ' Ordner', ' cartelle', ' carpeta(s)'), 70, H - Y - 26, W - 84);
+    Y := 60;
+    PrRow(W, H, Y, L('Type :', 'Type:', 'Typ:', 'Tipo:', 'Tipo:'), L('Plusieurs types', 'Multiple types', 'Verschiedene Typen',
+        'Tipi diversi', 'Varios tipos'));
+    If T <> '' Then
+      PrRow(W, H, Y, L('Emplacement :', 'Location:', 'Ort:', 'Percorso:', 'Ubicaci'#162'n:'), L('Tous dans ', 'All in ',
+          'Alle in ', 'Tutti in ', 'Todos en ') + T);
+    PrRow(W, H, Y, L('Taille :', 'Size:', 'Gr'#148#225'e:', 'Dimensione:', 'Tama'#164'o:'), SizeText(Sz));
+  End;
+  Y := Y + 10;
+  NdLabel(L('Attributs :', 'Attributes:', 'Attribute:', 'Attributi:', 'Atributos:'), 14, H - Y - 20, 120);
+  For K := 0 To 3 Do
+  Begin
+    Case K Of
+      0 : S := L('~Lecture seule', '~Read-only', '~Schreibgesch'#129'tzt', 'Sola ~lettura', 'S'#162'lo ~lectura');
+      1 : S := L('~Masqu'#130, '~Hidden', '~Versteckt', '~Nascosto', '~Oculto');
+      2 : S := L('~Archive', '~Archive', '~Archiv', '~Archivio', '~Modificado');
+    Else
+      S := L('S~yst'#138'me', 'S~ystem', 'S~ystem', 'S~istema', 'S~istema');
+    End;
+    PrCk[K] := NdCtl(WC_BUTTON, Z(S), WS_TABSTOP Or BS_AUTOCHECKBOX, 140 + (K Mod 2) * 140,
+                     H - Y - 20 - (K Div 2) * 24, 136, 20, 20 + K);
+    NdGray(PrCk[K]);
+    If (All And Bits[K]) <> 0 Then Dummy := WinSendMsg(PrCk[K], BM_SETCHECK, 1, 0);
+    If PrRO Then Dummy := WinEnableWindow(PrCk[K], 0);
+  End;
+  Dummy := NdCtl(WC_BUTTON, Z('OK'), WS_TABSTOP Or BS_PUSHBUTTON Or BS_DEFAULT, W - 312, 8, 96, 26, ID_OK);
+  Dummy := NdCtl(WC_BUTTON, Z(L('Annuler', 'Cancel', 'Abbrechen', 'Annulla', 'Cancelar')), WS_TABSTOP Or BS_PUSHBUTTON,
+                 W - 208, 8, 96, 26, ID_CANCEL);
+  K := NdCtl(WC_BUTTON, Z(L('A~ppliquer', '~Apply', '~'#154'bernehmen', '~Applica', 'Apl~icar')),
+             WS_TABSTOP Or BS_PUSHBUTTON, W - 104, 8, 96, 26, 30);
+  If PrRO Then Dummy := WinEnableWindow(K, 0);
+  Dummy := NdRun(0);
+  NdClose;
+  For K := 0 To 3 Do PrCk[K] := 0;
+End;
+
+{ Proprietes des elements choisis (ou du dossier affiche) }
+Procedure FileProps;
+Var I : LongInt;
+Begin
+  PrN := 0;
+  For I := 0 To NEnt - 1 Do
+    If SelF[I] And (PrN < 64) Then
+    Begin
+      PrPath[PrN] := EntPath(I);
+      Inc(PrN);
+    End;
+  If (PrN = 0) And (Length(CurPath) > 2) Then
+  Begin
+    PrPath[0] := CurPath;
+    PrN := 1;
+  End;
+  PropsDialog;
+  Refresh;
+End;
+
 { ==================================================================== }
 { Menus                                                                 }
 { ==================================================================== }
@@ -3082,11 +3982,29 @@ Begin
   H1 := MenuOpen;
   MItem(MIS_TEXT, 0, cmOpen, L('~Ouvrir', '~Open', #148'~ffnen', '~Apri', '~Abrir') + Chr(9) + L('Entr'#130'e',
         'Enter', 'Eingabe', 'Invio', 'Entrar'));
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  MItem(MIS_TEXT, 0, cmNewDir, L('~Nouveau dossier', '~New Folder', '~Neuer Ordner', '~Nuova cartella',
+        '~Nueva carpeta'));
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  MItem(MIS_TEXT, 0, cmDelete, L('~Supprimer', '~Delete', '~L'#148'schen', '~Elimina', '~Eliminar') + Chr(9) +
+        L('Suppr', 'Del', 'Entf', 'Canc', 'Supr'));
+  MItem(MIS_TEXT, 0, cmRename, L('Reno~mmer', 'Rena~me', '~Umbenennen', '~Rinomina', 'Cambiar ~nombre') + Chr(9) + 'F2');
   MItem(MIS_TEXT, 0, cmProps, L('Pr~opri'#130't'#130's', 'P~roperties', '~Eigenschaften', 'P~ropriet'#133,
         '~Propiedades') + Chr(9) + 'Alt+Entr' + L(#130'e', 'er', 'ag', 'o', 'ar'));
   MItem(MIS_SEPARATOR, 0, 0, '');
   MItem(MIS_TEXT, 0, cmClose, L('~Fermer', '~Close', '~Schlie'#225'en', '~Chiudi', '~Cerrar'));
-  MenuClose(H1, 4);
+  MenuClose(H1, 9);
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 105, L('~Edition', '~Edit', '~Bearbeiten', '~Modifica', '~Edici'#162'n'));
+  H1 := MenuOpen;
+  MItem(MIS_TEXT, 0, cmCut, L('Co~uper', 'Cu~t', '~Ausschneiden', '~Taglia', 'Cor~tar') + Chr(9) + 'Ctrl+X');
+  MItem(MIS_TEXT, 0, cmCopy, L('~Copier', '~Copy', '~Kopieren', '~Copia', '~Copiar') + Chr(9) + 'Ctrl+C');
+  MItem(MIS_TEXT, 0, cmPaste, L('C~oller', '~Paste', '~Einf'#129'gen', 'I~ncolla', '~Pegar') + Chr(9) + 'Ctrl+V');
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  MItem(MIS_TEXT, 0, cmSelAll, L('~S'#130'lectionner tout', 'Select ~All', 'Alles ~markieren', 'Seleziona ~tutto',
+        'Seleccionar ~todo') + Chr(9) + 'Ctrl+A');
+  MItem(MIS_TEXT, 0, cmInvSel, L('~Inverser la s'#130'lection', '~Invert Selection', 'Markierung ~umkehren',
+        '~Inverti selezione', '~Invertir selecci'#162'n'));
+  MenuClose(H1, 6);
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 110, L('~Affichage', '~View', '~Ansicht', '~Visualizza', '~Ver'));
   H1 := MenuOpen;
   MItem(MIS_TEXT, MIA_CHECKED, cmIcons, L('~Grandes ic'#147'nes', 'Lar~ge Icons', '~Gro'#225'e Symbole',
@@ -3111,7 +4029,7 @@ Begin
   MItem(MIS_TEXT, 0, cmAbout, L('~A propos de l''Explorateur...', '~About Explorer...', #154'ber ~Explorer...',
         '~Informazioni su Esplora risorse...', '~Acerca del Explorador...'));
   MenuClose(H1, 1);
-  MenuClose(H0, 5);
+  MenuClose(H0, 6);
   MenuHw := WinCreateMenu(Frame, LongInt(@MenuT));
 End;
 
@@ -3137,46 +4055,101 @@ Begin
   Redraw;
 End;
 
-{ menu contextuel : Ouvrir, Proprietes (X, Y : coordonnees de PM) ; le
-  Poste de travail et ses lecteurs ajoutent Connecter et Deconnecter un
-  lecteur reseau, un lecteur reseau Deconnecter }
+{ menu contextuel (X, Y : coordonnees de PM), comme Windows 95 :
+  - element choisi : Ouvrir, Couper, Copier, Coller (dossier), Supprimer,
+    Renommer, Selectionner tout, Proprietes ;
+  - fond d'un dossier : Selectionner tout, Actualiser, Coller, Nouveau
+    dossier, Proprietes ;
+  - Poste de travail et lecteurs : Ouvrir, Connecter et Deconnecter un
+    lecteur reseau (lecteur reseau : Deconnecter), Proprietes ;
+  - dossier de l'arbre : Ouvrir, Coller, Nouveau dossier, Proprietes }
+Var
+  CtxN : LongInt;
+
+Procedure It(Id : LongInt; S : String);
+Begin
+  MItem(MIS_TEXT, 0, Id, S);
+  Inc(CtxN);
+End;
+
+Procedure Sep;
+Begin
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  Inc(CtxN);
+End;
+
 Procedure Context(X, Y : LongInt; Tree : Boolean);
-Var N : LongInt; Pc, Net : Boolean;
+Var Pc, Net, Item, IsDir : Boolean;
 Begin
   MenuLen := 0;
   MW(0); MW(0); MW(0);
-  N := 3;
+  CtxN := 0;
   If Tree Then
   Begin
     Pc := (TSel >= 0) And (TSel < TN) And (NdD[TSel] <= 2) And ((NdP[TSel] = '') Or (Length(NdP[TSel]) = 2));
     Net := (TSel >= 0) And (TSel < TN) And (Length(NdP[TSel]) = 2) And (DrvKind[Ord(UpCase(NdP[TSel][1])) - 65] = ekNet);
+    Item := False;
   End
   Else
   Begin
     Pc := CurPath = '';
     Net := Pc And (Sel >= 0) And (Sel < NEnt) And (E(Sel)^.Kind = ekNet);
+    Item := (Not Pc) And (Sel >= 0) And (Sel < NEnt) And SelF[Sel];
   End;
-  MItem(MIS_TEXT, 0, cmOpen, L('~Ouvrir', '~Open', #148'~ffnen', '~Apri', '~Abrir'));
-  MItem(MIS_SEPARATOR, 0, 0, '');
-  If Net Then
+  If Item Or Net Or Pc Or Tree Then
   Begin
-    MItem(MIS_TEXT, 0, cmDisconnect, L('~D'#130'connecter', '~Disconnect', '~Trennen', '~Disconnetti',
-          '~Desconectar'));
-    MItem(MIS_SEPARATOR, 0, 0, '');
-    N := N + 2;
+    It(cmOpen, L('~Ouvrir', '~Open', #148'~ffnen', '~Apri', '~Abrir'));
+    Sep;
+  End;
+  If Item Then
+  Begin
+    IsDir := (E(Sel)^.Kind = ekDir) And (SelCount = 1);
+    It(cmCut, L('Co~uper', 'Cu~t', '~Ausschneiden', '~Taglia', 'Cor~tar'));
+    It(cmCopy, L('~Copier', '~Copy', '~Kopieren', '~Copia', '~Copiar'));
+    If IsDir Then It(cmPasteIn, L('C~oller', '~Paste', '~Einf'#129'gen', 'I~ncolla', '~Pegar'));
+    Sep;
+    It(cmDelete, L('~Supprimer', '~Delete', '~L'#148'schen', '~Elimina', '~Eliminar'));
+    If SelCount = 1 Then It(cmRename, L('Reno~mmer', 'Rena~me', '~Umbenennen', '~Rinomina', 'Cambiar ~nombre'));
+    Sep;
+    It(cmSelAll, L('~S'#130'lectionner tout', 'Select ~All', 'Alles ~markieren', 'Seleziona ~tutto',
+       'Seleccionar ~todo'));
+    Sep;
+  End
+  Else If Net Then
+  Begin
+    It(cmDisconnect, L('~D'#130'connecter', '~Disconnect', '~Trennen', '~Disconnetti', '~Desconectar'));
+    Sep;
   End
   Else If Pc Then
   Begin
     MapItems;
-    MItem(MIS_SEPARATOR, 0, 0, '');
-    N := N + 3;
+    CtxN := CtxN + 2;
+    Sep;
+  End
+  Else If Tree Then
+  Begin
+    It(cmPasteTree, L('C~oller', '~Paste', '~Einf'#129'gen', 'I~ncolla', '~Pegar'));
+    It(cmNewDir, L('~Nouveau dossier', '~New Folder', '~Neuer Ordner', '~Nuova cartella', '~Nueva carpeta'));
+    Sep;
+  End
+  Else
+  Begin
+    { fond du dossier }
+    It(cmSelAll, L('~S'#130'lectionner tout', 'Select ~All', 'Alles ~markieren', 'Seleziona ~tutto',
+       'Seleccionar ~todo'));
+    It(cmRefresh, L('~Actualiser', '~Refresh', '~Aktualisieren', '~Aggiorna', '~Actualizar'));
+    Sep;
+    It(cmPaste, L('C~oller', '~Paste', '~Einf'#129'gen', 'I~ncolla', '~Pegar'));
+    Sep;
+    It(cmNewDir, L('~Nouveau dossier', '~New Folder', '~Neuer Ordner', '~Nuova cartella', '~Nueva carpeta'));
+    Sep;
   End;
-  MItem(MIS_TEXT, 0, cmProps, L('Pr~opri'#130't'#130's', 'P~roperties', '~Eigenschaften', 'P~ropriet'#133,
-        '~Propiedades'));
-  MenuClose(0, N);
+  It(cmProps, L('Pr~opri'#130't'#130's', 'P~roperties', '~Eigenschaften', 'P~ropriet'#133, '~Propiedades'));
+  MenuClose(0, CtxN);
   If CtxMenu <> 0 Then Dummy := WinDestroyWindow(CtxMenu);
   CtxMenu := WinCreateMenu(HWND_DESKTOP, LongInt(@MenuT));
-  If CtxMenu <> 0 Then Dummy := WinPopupMenu(Client, Client, CtxMenu, X, Y, cmOpen, 0);
+  If Item Or Net Or Pc Or Tree Then CtxN := cmOpen Else CtxN := cmSelAll;
+  If CtxMenu <> 0 Then Dummy := WinPopupMenu(Client, Client, CtxMenu, X, Y, CtxN, 0);
 End;
 
 Procedure Command(Id : LongInt);
@@ -3197,6 +4170,26 @@ Begin
     cmUp : GoUp;
     cmComputer : Navigate('');
     cmAbout : About;
+    cmCut : If Focus = 0 Then ClipPut(2);
+    cmCopy : If Focus = 0 Then ClipPut(1);
+    cmPaste : DoPaste(CurPath);
+    cmPasteIn : If (Sel >= 0) And (Sel < NEnt) And (E(Sel)^.Kind = ekDir) Then DoPaste(EntPath(Sel));
+    cmPasteTree : If (TSel >= 0) And (TSel < TN) And (Length(NdP[TSel]) >= 2) Then DoPaste(NdP[TSel]);
+    cmDelete : DoDelete;
+    cmRename : DoRename;
+    cmNewDir : DoNewDir;
+    cmSelAll :
+    Begin
+      Focus := 0;
+      SelAll;
+      Redraw;
+    End;
+    cmInvSel :
+    Begin
+      Focus := 0;
+      SelInvert;
+      Redraw;
+    End;
     cmMapNet : MapDialog;
     cmUnmapNet : UnmapDialog(' ');
     cmDisconnect :
@@ -3283,7 +4276,24 @@ Begin
     Exit;
   End;
   I := HitItem(X, Y);
-  Sel := I;
+  If Btn2 Then
+  Begin
+    { bouton 2 : sur un element deja choisi, la selection reste }
+    If I < 0 Then ClearSel
+    Else If Not SelF[I] Then SelOne(I)
+    Else Sel := I;
+  End
+  Else If I < 0 Then
+  Begin
+    If Not KeyDown(VK_CTRLK) Then ClearSel;
+  End
+  Else If KeyDown(VK_CTRLK) And Not Dbl Then
+  Begin
+    SelF[I] := Not SelF[I];
+    Sel := I; SelA := I;
+  End
+  Else If KeyDown(VK_SHIFTK) And Not Dbl Then SelRange(I)
+  Else SelOne(I);
   Redraw;
   If Dbl And (I >= 0) Then OpenItem(I);
 End;
@@ -3364,7 +4374,7 @@ Begin
   End;
   If N < 0 Then N := 0;
   If N >= NEnt Then N := NEnt - 1;
-  Sel := N;
+  If KeyDown(VK_SHIFTK) Then SelRange(N) Else SelOne(N);
   ShowSel;
   Redraw;
 End;
@@ -3398,10 +4408,20 @@ Begin
         Refresh;
         Exit;
       End;
+      VK_DELETE :
+      Begin
+        If Focus = 0 Then DoDelete;
+        Exit;
+      End;
+      VK_F2 :
+      Begin
+        If Focus = 0 Then DoRename;
+        Exit;
+      End;
       VK_TAB, VK_BACKTAB :
       Begin
         Focus := 1 - Focus;
-        If (Focus = 0) And (Sel < 0) And (NEnt > 0) Then Sel := 0;
+        If (Focus = 0) And (Sel < 0) And (NEnt > 0) Then SelOne(0);
         Redraw;
         Exit;
       End;
@@ -3412,6 +4432,16 @@ Begin
       End;
     End;
   End;
+  { Ctrl+A, Ctrl+X, Ctrl+C, Ctrl+V }
+  If ((Fl And KC_CTRL) <> 0) And ((Fl And KC_ALT) = 0) And (Ch > 0) And (Ch < 256) Then
+  Begin
+    If (Ch = 1) Or (UpCase(Chr(Ch)) = 'A') Then Command(cmSelAll)
+    Else If (Ch = 24) Or (UpCase(Chr(Ch)) = 'X') Then Command(cmCut)
+    Else If (Ch = 3) Or (UpCase(Chr(Ch)) = 'C') Then Command(cmCopy)
+    Else If (Ch = 22) Or (UpCase(Chr(Ch)) = 'V') Then Command(cmPaste)
+    Else KeyChar := False;
+    Exit;
+  End;
   { lettre : objet suivant dont le nom commence par elle }
   If ((Fl And KC_CHAR) <> 0) And ((Fl And (KC_CTRL Or KC_ALT)) = 0) And (Ch > 32) And (Ch < 256) And (Focus = 0) And
      (NEnt > 0) Then
@@ -3421,7 +4451,7 @@ Begin
       J := (MaxI(Sel, -1) + K) Mod NEnt;
       If UpCase(EntName(J)[1]) = UpCase(Chr(Ch)) Then
       Begin
-        Sel := J;
+        SelOne(J);
         ShowSel;
         Redraw;
         Exit;
