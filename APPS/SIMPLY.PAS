@@ -4645,7 +4645,7 @@ Begin
   1: Begin Dummy:=PmBox('Sample Accounting',T,MB_OK Or MB_INFORMATION);R:=1;End;
   2: If PmBox('Sample Accounting',T,MB_YESNO Or MB_ICONQUESTION)=MBID_YES Then R:=1 Else R:=2;
   Else Begin
-   I:=PmBox('Sample Accounting',T,3 Or MB_ICONQUESTION);
+   I:=PmBox('Sample Accounting',T,5 Or MB_ICONQUESTION);
    If I=MBID_YES Then R:=1 Else If I=7 Then R:=2 Else R:=3;
   End;
  End;

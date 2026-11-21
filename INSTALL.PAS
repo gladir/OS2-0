@@ -1097,9 +1097,10 @@ Begin
           (U = 'ASTRO.EXE') Or (U = 'SIMUPLAN.EXE') Or (U = 'CS3DA.EXE') Or (U = 'ELEMENTS.EXE') Or
           (U = 'CHEMDRAW.EXE') Or (U = 'HUMAN.C3D') Or (U = 'PHYSIO.CFG') Or
           { dossier Productivite : Maximilien CRM, Sample Accounting,
-            Acrodoc, News Master et PresentPoint (depot OFFICE-0) }
+            Acrodoc, News Master et PresentPoint (depot OFFICE-0), Bloc-notes ;
+            dossier Developer Kit : OS2-Zero Debugger }
           (U = 'MAXIMIZE.EXE') Or (U = 'SIMPLY.EXE') Or (U = 'ACROBAT.EXE') Or (U = 'NEWS.EXE') Or
-          (U = 'POWERPNT.EXE') Then Wanted := True
+          (U = 'POWERPNT.EXE') Or (U = 'NOTEPAD.EXE') Or (U = 'OS2DBG.EXE') Then Wanted := True
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 

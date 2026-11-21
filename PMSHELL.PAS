@@ -167,6 +167,7 @@ Const
   OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70;
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
+  OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14;
@@ -183,7 +184,7 @@ Const
   CM_OPEN = 100; CM_REFRESH = 101; CM_ARRANGE = 102; CM_WINLIST = 103; CM_INFO = 104; CM_SHUTDOWN = 105;
   CM_HELP = 106; CM_PROPS = 107; CM_DELETE = 108; CM_CLOSE = 109; CM_PARENT = 110; CM_CMDHERE = 111;
   CM_SHADOW = 112; CM_CREATE = 113; CM_SETTINGS = 114; CM_TASKMGR = 115; CM_BROWSER = 116;
-  CM_EXPLORER = 117;
+  CM_EXPLORER = 117; CM_NEWDIR = 118; CM_NEWTXT = 119; CM_NEWHTML = 120;
 
 Type
   { objet d'une vue (icone) }
@@ -220,6 +221,7 @@ Var
   ShieldOk : LongInt;
   MenuTpl : Array[0..2047] Of Byte;
   MenuLen, MenuCnt : LongInt;
+  MenuSubHdr, MenuSubOuter : LongInt;     { sous-menu en cours (Nouveau) }
   FindBuf : Array[0..4095] Of Byte;
   FileBuf : Array[0..4095] Of Byte;
   EntBuf, EntCap : LongInt;            { entrees d'un repertoire (tri) }
@@ -932,6 +934,17 @@ Begin
     { document (Word, WorDium, MonsterBook, PDF) : ouvert par WorDium }
     Icon := IC_WORDIUM; Obj := OB_WORDDOC;
   End
+  Else If ((E = 'HTM') Or (E = 'HTML')) And (BrowserPath <> '') Then
+  Begin
+    { page HTML : ouverte par le Navigateur Web }
+    Icon := IC_WEB; Obj := OB_HTML;
+  End
+  Else If ((E = 'TXT') Or (E = 'INI') Or (E = 'LOG') Or (E = 'PAS') Or (E = 'CFG') Or (E = 'SYS') Or
+           (E = 'ME')) And FileExists('C:\NOTEPAD.EXE') Then
+  Begin
+    { texte : ouvert par le Bloc-notes }
+    Icon := IC_NOTEPAD; Obj := OB_TEXT;
+  End
   Else If ((E = 'XLC') Or (E = 'XLS') Or (E = 'XLSX')) And (ExcelsiorPath <> '') Then
   Begin
     { classeur (Excelsior, Excel) : ouvert par Excelsior }
@@ -1163,6 +1176,44 @@ Begin
   End;
 End;
 
+{ Nouveau (menu contextuel du bureau et des dossiers) : dossier, document
+  texte vide ou page HTML minimale, nommes sans ecraser un objet existant }
+Function CreateNew(Cmd : LongInt; Dir : String) : Boolean;
+Var S, Txt : String; H, A, W : LongInt;
+Begin
+  CreateNew := False;
+  If (Dir <> '') And (Dir[Length(Dir)] <> '\') Then Dir := Dir + '\';
+  If Cmd = CM_NEWDIR Then
+  Begin
+    S := UniqueName(Dir, 'Nouveau dossier', '');
+    If S = '' Then Exit;
+    CreateNew := DosCreateDir(Z(Dir + S), 0) = 0;
+    Exit;
+  End;
+  If Cmd = CM_NEWTXT Then
+  Begin
+    S := UniqueName(Dir, 'Nouveau document', '.TXT'); Txt := '';
+  End
+  Else
+  Begin
+    S := UniqueName(Dir, 'Nouvelle page', '.HTML');
+    Txt := '<!DOCTYPE html>' + #13#10 + '<html>' + #13#10 + '<head>' + #13#10 +
+           '<meta charset="iso-8859-1">' + #13#10 + '<title>Nouvelle page</title>' + #13#10 +
+           '</head>' + #13#10 + '<body>' + #13#10 + '<h1>Nouvelle page</h1>' + #13#10 +
+           '<p></p>' + #13#10 + '</body>' + #13#10 + '</html>' + #13#10;
+  End;
+  If S = '' Then Exit;
+  H := 0; A := 0;
+  If DosOpen(Z(Dir + S), LongInt(@H), LongInt(@A), 0, 0, $12, $41, 0) = 0 Then
+  Begin
+    W := 0;
+    If Txt <> '' Then Dummy := DosWrite(H, Z2(Txt), Length(Txt), LongInt(@W));
+    Dummy := DosClose(H);
+    CreateNew := True;
+  End
+  Else ShowMsg('Impossible de creer ' + Dir + S + '.', 'Nouveau', MB_OK Or MB_ERROR);
+End;
+
 Procedure Populate(V : LongInt);
 Var D, L, K : LongInt;
 Begin
@@ -1186,7 +1237,7 @@ Begin
         If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Or
            (WordiumPath <> '') Or (ExcelsiorPath <> '') Or FileExists('C:\MAXIMIZE.EXE') Or
            FileExists('C:\SIMPLY.EXE') Or FileExists('C:\ACROBAT.EXE') Or FileExists('C:\NEWS.EXE') Or
-           FileExists('C:\POWERPNT.EXE') Then
+           FileExists('C:\POWERPNT.EXE') Or FileExists('C:\NOTEPAD.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
@@ -1305,6 +1356,9 @@ Begin
           (SIMPLY.PAS, comptabilite), Acrodoc (ACROBAT.PAS, visionneuse et
           editeur PDF), News Master (NEWS.PAS, mise en page de journaux) et
           PresentPoint (POWERPNT.PAS, presentations) }
+        { Bloc-notes : editeur de texte (Bloc-notes de Pasdows 95) }
+        If FileExists('C:\NOTEPAD.EXE') Then
+          Dummy := NewItem(V, IC_NOTEPAD, OB_GAME, 'Bloc-notes', 'C:\NOTEPAD.EXE');
         If FileExists('C:\MAXIMIZE.EXE') Then
           Dummy := NewItem(V, IC_CRM, OB_GAME, 'Maximilien CRM', 'C:\MAXIMIZE.EXE');
         If FileExists('C:\SIMPLY.EXE') Then
@@ -1348,6 +1402,9 @@ Begin
         { Developer Kit : l'EDI Pascal Developer (compilateur OS2PC.EXE) }
         If PasDevPath <> '' Then
           Dummy := NewItem(V, IC_PASDEV, OB_GAME, 'Pascal Developer', PasDevPath);
+        { debogueur des programmes d'OS/2-0 (dans l'esprit de Turbo Debugger) }
+        If FileExists('C:\OS2DBG.EXE') Then
+          Dummy := NewItem(V, IC_DEBUGGER, OB_GAME, 'OS2-Zero Debugger', 'C:\OS2DBG.EXE');
         { copie du code source d'OS/2-0 depuis GitHub }
         If FileExists('C:\GETSRC.EXE') Then
           Dummy := NewItem(V, IC_GETSRC, OB_GAME, 'T' + Chr(130) + 'l' + Chr(130) + 'charger le code source d''OS2-Zero',
@@ -2357,6 +2414,20 @@ Begin
         GLn(Hps, X + 15, Y + 22, X + 15, Y + 26, CLR_BLACK);
         GBox(Hps, X + 14, Y + 26, X + 17, Y + 28, CLR_RED, DRO_FILL);
       End;
+    IC_NOTEPAD :
+      Begin
+        { Bloc-notes : bloc de papier ligne a reliure en spirale }
+        FBox(Hps, X + 5, Y + 1, X + 26, Y + 27, CLR_WHITE, CLR_BLACK);
+        For K := 0 To 5 Do GLn(Hps, X + 8, Y + 22 - K * 4, X + 23, Y + 22 - K * 4, CLR_BLUE);
+        GLn(Hps, X + 10, Y + 2, X + 10, Y + 26, CLR_RED);
+        For K := 0 To 4 Do
+        Begin
+          GBox(Hps, X + 7 + K * 4, Y + 26, X + 8 + K * 4, Y + 30, CLR_DARKGRAY, DRO_FILL);
+        End;
+        GLn(Hps, X + 12, Y + 18, X + 20, Y + 18, CLR_BLACK);
+        GLn(Hps, X + 12, Y + 14, X + 22, Y + 14, CLR_BLACK);
+        GLn(Hps, X + 12, Y + 10, X + 18, Y + 10, CLR_BLACK);
+      End;
     IC_CRM :
       Begin
         { Maximilien CRM : fiche de contact (personne) sur un fichier rotatif }
@@ -2536,6 +2607,31 @@ Begin
         For K := 0 To 5 Do GLn(Hps, X + 15 + K, Y + 17 - K, X + 28 - K, Y + 17 - K, CLR_DARKGREEN);
         GLn(Hps, X + 20, Y + 18, X + 20, Y + 29, CLR_GREEN);
       End;
+    IC_DEBUGGER :
+      Begin
+        { fenetre CPU (code colore sur fond blanc, ligne d'EIP jaune) et
+          punaise rouge }
+        FBox(Hps, X + 1, Y + 6, X + 26, Y + 29, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 2, Y + 25, X + 25, Y + 28, CLR_DARKBLUE, DRO_FILL);
+        GBox(Hps, X + 2, Y + 15, X + 25, Y + 18, CLR_YELLOW, DRO_FILL);
+        GLn(Hps, X + 4, Y + 22, X + 9, Y + 22, CLR_DARKBLUE);
+        GLn(Hps, X + 11, Y + 22, X + 17, Y + 22, CLR_DARKPINK);
+        GLn(Hps, X + 4, Y + 16, X + 9, Y + 16, CLR_DARKRED);
+        GLn(Hps, X + 11, Y + 16, X + 20, Y + 16, CLR_BROWN);
+        GLn(Hps, X + 4, Y + 11, X + 9, Y + 11, CLR_DARKBLUE);
+        GLn(Hps, X + 11, Y + 11, X + 15, Y + 11, CLR_DARKGREEN);
+        { punaise : corps, tete, pattes }
+        GBox(Hps, X + 19, Y + 1, X + 28, Y + 11, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 19, Y + 1, X + 28, Y + 11, CLR_DARKRED, DRO_OUTLINE);
+        GLn(Hps, X + 23, Y + 2, X + 23, Y + 10, CLR_BLACK);
+        GBox(Hps, X + 21, Y + 11, X + 26, Y + 14, CLR_BLACK, DRO_FILL);
+        GLn(Hps, X + 16, Y + 9, X + 19, Y + 8, CLR_BLACK);
+        GLn(Hps, X + 16, Y + 5, X + 19, Y + 5, CLR_BLACK);
+        GLn(Hps, X + 16, Y + 1, X + 19, Y + 3, CLR_BLACK);
+        GLn(Hps, X + 28, Y + 8, X + 31, Y + 9, CLR_BLACK);
+        GLn(Hps, X + 28, Y + 5, X + 31, Y + 5, CLR_BLACK);
+        GLn(Hps, X + 28, Y + 3, X + 31, Y + 1, CLR_BLACK);
+      End;
     IC_PASDEV :
       Begin
         { feuille de source Pascal (lignes colorees) et plume }
@@ -2693,6 +2789,39 @@ Begin
   Inc(MenuCnt);
 End;
 
+{ sous-menu : article MIS_SUBMENU puis son propre gabarit (MenuSubEnd) }
+Procedure MenuSubBegin(Id : LongInt; S : String);
+Begin
+  WrW(LongInt(@MenuTpl) + MenuLen, $11);           { MIS_TEXT Or MIS_SUBMENU }
+  WrW(LongInt(@MenuTpl) + MenuLen + 2, 0);
+  WrW(LongInt(@MenuTpl) + MenuLen + 4, Id);
+  MenuLen := MenuLen + 6;
+  PutZ(LongInt(@MenuTpl) + MenuLen, S);
+  MenuLen := MenuLen + Length(S) + 1;
+  MenuSubOuter := MenuCnt + 1;
+  MenuSubHdr := MenuLen;
+  MenuLen := MenuLen + 6;
+  MenuCnt := 0;
+End;
+
+Procedure MenuSubEnd;
+Begin
+  WrW(LongInt(@MenuTpl) + MenuSubHdr, MenuLen - MenuSubHdr);
+  WrW(LongInt(@MenuTpl) + MenuSubHdr + 2, 0);
+  WrW(LongInt(@MenuTpl) + MenuSubHdr + 4, MenuCnt);
+  MenuCnt := MenuSubOuter;
+End;
+
+{ Nouveau : dossier, document texte, document HTML }
+Procedure MenuNew;
+Begin
+  MenuSubBegin(199, '~Nouveau');
+  MenuAdd(CM_NEWDIR, '~Dossier');
+  MenuAdd(CM_NEWTXT, 'Document ~texte');
+  MenuAdd(CM_NEWHTML, 'Document ~HTML');
+  MenuSubEnd;
+End;
+
 Procedure MenuShow(V, X, Y, First : LongInt);
 Begin
   WrW(LongInt(@MenuTpl), MenuLen); WrW(LongInt(@MenuTpl) + 2, 0); WrW(LongInt(@MenuTpl) + 4, MenuCnt);
@@ -2719,6 +2848,8 @@ Begin
   End
   Else If Vw(V)^.Kind = VK_DESK Then
   Begin
+    MenuNew;
+    MenuAdd(0, '');
     MenuAdd(CM_REFRESH, '~Actualiser');
     MenuAdd(CM_ARRANGE, '~Reorganiser');
     MenuAdd(0, '');
@@ -2734,6 +2865,11 @@ Begin
   End
   Else
   Begin
+    If Vw(V)^.Kind = VK_DIR Then
+    Begin
+      MenuNew;
+      MenuAdd(0, '');
+    End;
     MenuAdd(CM_REFRESH, '~Actualiser');
     If Vw(V)^.Kind = VK_DIR Then
     Begin
@@ -2743,7 +2879,9 @@ Begin
     MenuAdd(0, '');
     MenuAdd(CM_CLOSE, '~Fermer');
   End;
-  If K >= 0 Then MenuShow(V, X, Y, CM_OPEN) Else MenuShow(V, X, Y, CM_REFRESH);
+  If K >= 0 Then MenuShow(V, X, Y, CM_OPEN)
+  Else If (Vw(V)^.Kind = VK_DESK) Or (Vw(V)^.Kind = VK_DIR) Then MenuShow(V, X, Y, 199)
+  Else MenuShow(V, X, Y, CM_REFRESH);
 End;
 
 { ==================================================================== }
@@ -3341,6 +3479,8 @@ Begin
     OB_EXE : T := T + ' : programme ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
     OB_BATCH : T := T + ' : fichier de commandes ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
     OB_DATA : T := T + ' : fichier de donnees ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets).';
+    OB_HTML : T := T + ' : page HTML ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets), ouverte par le Navigateur Web.';
+    OB_TEXT : T := T + ' : texte ' + It(K)^.Path + ' (' + IStr(It(K)^.Size) + ' octets), ouvert par le Bloc-notes.';
     OB_CMD : T := T + ' : ' + Comspec + ' (plein ecran).';
     OB_CMDWIN : T := T + ' : ' + Comspec + ' dans une fenetre de PM (PMVIOP.DLL).';
     OB_DOSFS : T := T + ' : session DOS plein ecran (machine virtuelle 8086, COMMAND.COM integre).';
@@ -3598,6 +3738,8 @@ Begin
     OB_IMAGE : RunPm(PaintPath, It(K)^.Path);
     OB_WORDDOC : RunPm(WordiumPath, It(K)^.Path);
     OB_XLSDOC : RunPm(ExcelsiorPath, It(K)^.Path);
+    OB_HTML : RunPm(BrowserPath, It(K)^.Path);
+    OB_TEXT : RunPm('C:\NOTEPAD.EXE', It(K)^.Path);
     OB_SHRED : ShowMsg('Glissez un objet sur le broyeur (bouton 2 de la souris) pour le supprimer.', 'Broyeur',
                        MB_OK Or MB_INFORMATION);
     OB_TPLDIR, OB_TPLDATA, OB_TPLCMD :
@@ -3634,7 +3776,9 @@ End;
 Function Deletable(K : LongInt) : Boolean;
 Begin
   Deletable := (It(K)^.Shadow <> 0) Or IsFileItem(K) And ((It(K)^.Obj = OB_EXE) Or (It(K)^.Obj = OB_BATCH) Or
-               (It(K)^.Obj = OB_DATA) Or ((It(K)^.Obj = OB_DIR) And (Length(It(K)^.Path) > 3)));
+               (It(K)^.Obj = OB_DATA) Or (It(K)^.Obj = OB_HTML) Or (It(K)^.Obj = OB_TEXT) Or
+               (It(K)^.Obj = OB_IMAGE) Or (It(K)^.Obj = OB_WORDDOC) Or (It(K)^.Obj = OB_XLSDOC) Or
+               ((It(K)^.Obj = OB_DIR) And (Length(It(K)^.Path) > 3)));
 End;
 
 { supprimer l'objet K (Ask : confirmation) ; rend TRUE si fait }
@@ -3743,6 +3887,15 @@ Begin
       If K >= 0 Then
       Begin
         If CreateFromTemplate(It(K)^.Obj, DeskDir) Then RefreshDir(DeskDir);
+      End;
+    CM_NEWDIR, CM_NEWTXT, CM_NEWHTML :
+      If Vw(V)^.Kind = VK_DESK Then
+      Begin
+        If CreateNew(Cmd, DeskDir) Then RefreshDir(DeskDir);
+      End
+      Else If Vw(V)^.Kind = VK_DIR Then
+      Begin
+        If CreateNew(Cmd, Vw(V)^.Path) Then Refresh(V);
       End;
   End;
 End;

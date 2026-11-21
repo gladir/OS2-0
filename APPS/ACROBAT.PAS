@@ -19732,7 +19732,7 @@ Begin
   0: Begin Dummy := PmBox(Ti, T, MB_OK Or MB_INFORMATION); R := 1; End;
   1: If PmBox(Ti, T, 1 Or MB_ICONQUESTION) = 1 Then R := 1 Else R := 0;
   Else Begin
-   I := PmBox(Ti, T, 3 Or MB_ICONQUESTION);
+   I := PmBox(Ti, T, 5 Or MB_ICONQUESTION);
    If I = MBID_YES Then R := 1 Else If I = 7 Then R := 2 Else R := 0;
   End;
  End;

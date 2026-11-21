@@ -27,7 +27,7 @@ OS2-0 démarre d'un CD-ROM ou d'un disque dur, dans QEMU, VirtualBox (y compris 
 	<li><b>Noyau 32 bits</b> (OS2KRNL) : mode protégé, pagination, tâches préemptives, sessions plein écran et fenêtrées, chargeur de programmes et de DLL 32 bits (PE et LX), programmes 16 bits d'OS/2 1.x (NE) et machine virtuelle DOS en mode V86 (Turbo Pascal 7, BGI, DPMI).</li>
 	<li><b>Systèmes de fichiers</b> : HPFS par défaut, NTFS en lecture, écriture et formatage pour partager ses fichiers avec Windows et Linux, FAT12 sur disquette, ISO 9660 sur CD-ROM, disque virtuel en mémoire ; pilotes IFS chargés par <code>IFS=</code> de CONFIG.SYS.</li>
 	<li><b>Presentation Manager et Workplace Shell</b> : fenêtres, menus, contrôles, GPI, presse-papiers, glisser-déposer, raccourcis, modèles, LaunchPad, carnets Système, Souris, Pays et Langue ; de 640 × 480 en 16 couleurs (VGA) à 1024 × 768 en 16 millions de couleurs (VESA).</li>
-	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), WorDium (traitement de texte : DOCX, PDF, GAT du MonsterBook, correcteur d'orthographe), Excelsior (tableur : XLC, XLS, XLSX, formules, graphiques), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Lecteur MP3, Notator for OS2-Zero, Pascal Developer, Astromancie (interprétation de l'astrologie) et Onirologie (interprétation des rêves) du dossier Loisirs, Astronomie, Simulateur de planète, Anatomie 3D du système circulatoire, Table des éléments et Dessin de chimie du dossier Science, Maximilien CRM, Sample Accounting, Acrodoc (PDF), News Master et PresentPoint du dossier Productivité, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes, Astéroïde, Badugi, Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique, Bataille, Invasion de l'espace, FreeCell, Commandement des missiles, L25), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
+	<li><b>Applications</b> : Explorateur OS2-0, Calculatrice, Paint (dessin bitmap), WorDium (traitement de texte : DOCX, PDF, GAT du MonsterBook, correcteur d'orthographe), Excelsior (tableur : XLC, XLS, XLSX, formules, graphiques), Outlink (courrier IMAP, POP3 et SMTP), Navigateur Web, Gestionnaire des tâches, Gestionnaire de périphériques, Audio numérique, Lecteur MP3, Notator for OS2-Zero, Pascal Developer, Astromancie (interprétation de l'astrologie) et Onirologie (interprétation des rêves) du dossier Loisirs, Astronomie, Simulateur de planète, Anatomie 3D du système circulatoire, Table des éléments et Dessin de chimie du dossier Science, Maximilien CRM, Sample Accounting, Acrodoc (PDF), News Master, PresentPoint et Bloc-notes du dossier Productivité, OS2-Zero Debugger (débogueur graphique dans l'esprit de Turbo Debugger) du dossier Developer Kit, jeux (Solitaire Klondike, Échecs, Mahjongg, Sudoku, Othello, TileMan, Hex 2048, Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale, Puissance 4, Soko-Ban, Baccarat, Tours de Hanoï, Baby, 421, Mille-pattes, Astéroïde, Badugi, Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique, Bataille, Invasion de l'espace, FreeCell, Commandement des missiles, L25), fenêtres OS/2 et DOS, les commandes d'OS/2 (CMD.EXE, CHKDSK, FORMAT, XCOPY, MODE, TREE…).</li>
 	<li><b>Matériel</b> : disques IDE et ATAPI, lecteur de disquettes, cartes son (Sound Blaster, AC'97, AudioPCI), réseau (Intel PRO/1000, AMD PCnet) avec pile TCP/IP, DHCP, DNS et TLS ; outils invités de VirtualBox et de VMware (souris absolue, écran redimensionnable).</li>
 	<li><b>Installation</b> graphique dans le style de Warp 3, sur une partition HPFS ou NTFS, en six langues.</li>
 </ul>
@@ -175,6 +175,14 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 		<tr>
 			<td><b>GETSRC.PAS</b></td>
 			<td>Télécharger le code source d'OS2-Zero (dossier Developer Kit du bureau) : copie le code source actuel d'OS/2-0 depuis GitHub dans C:\SOURCE\OS2-0\ (sans les données de Git), avec barre de progression ; Mettre à jour ne copie que les fichiers modifiés.</td>
+		</tr>
+		<tr>
+			<td><b>APPS/OS2DBG.PAS</b></td>
+			<td>OS2-Zero Debugger (dossier Developer Kit du bureau) : débogueur des programmes d'OS/2-0 dans l'esprit de Turbo Debugger, avec l'apparence de Presentation Manager : désassembleur x86 32 bits coloré, registres, mémoire, pile, points d'arrêt, pas à pas, exceptions.</td>
+		</tr>
+		<tr>
+			<td><b>APPS/NOTEPAD.PAS</b></td>
+			<td>Bloc-notes (dossier Productivité du bureau) : le Bloc-notes de Pasdows 95 porté de l'API Win32 vers celle d'OS/2 (PMWIN, DOSCALLS).</td>
 		</tr>
 		<tr>
 			<td><b>REPLACE.PAS</b></td>
@@ -987,6 +995,32 @@ Les cinq programmes partagent la couche d'OS/2 du dossier Science (unité Graph,
 
 Ce travail a corrigé deux défauts d'<b>OS2PC</b>, valables pour tous les programmes : <code>FillChar(X, N, ' ')</code> remplissait avec l'octet de poids faible de l'adresse de la chaîne <code>' '</code> au lieu du code du caractère (les champs vides des fiches de Maximilien CRM contenaient des <code>ÿ</code>) ; <code>With F(I)^ Do</code>, où <code>F</code> est une fonction qui rend un pointeur, n'était pas reconnu et les champs étaient pris pour des variables globales (Acrodoc l'emploie 29 fois). Le <code>FindNext</code> d'Acrodoc (recherche du texte suivant), du même nom que <code>FindNext(SR)</code> de l'unité DOS, est renommé.
 
+<h3>Bloc-notes (APPS/NOTEPAD.PAS)</h3>
+
+Le dossier <b>Productivité</b> a maintenant un <b>Bloc-notes</b> (NOTEPAD.EXE, avant Maximilien CRM) : celui de Pasdows 95, une application intégrée au noyau de Pasdows (<code>KERNEL/VMM32.PAS</code>), porté vers l'API d'OS/2 et compilé par OS2PC en un seul fichier source, <code>APPS/NOTEPAD.PAS</code>. Les fenêtres internes, la barre de menus, les boîtes Ouvrir, Enregistrer sous et Rechercher dessinées, le presse-papiers et les boîtes de message du noyau de Pasdows sont remplacés par les composants de Presentation Manager :
+
+<img width="640" height="480" alt="OS/2-0 : le Bloc-notes, boîte Rechercher de PM" src="IMAGE/BLOCNOTES.png" />
+
+<table>
+	<tr><th>Élément</th><th>Pasdows 95</th><th>OS/2-0 (Presentation Manager)</th></tr>
+	<tr><td>Fenêtre</td><td>Fenêtre interne du noyau</td><td>WinCreateStdWindow : titre, menu système, réduction, agrandissement, liste des fenêtres, bordure de taille, barres de défilement de PM (verticale et horizontale)</td></tr>
+	<tr><td>Menus</td><td>Barre de menus dessinée</td><td>Gabarit de menu et WinCreateMenu : Fichier, Édition, Recherche, Aide ; mnémoniques, raccourcis, choix grisés à l'ouverture du menu (WM_INITMENU)</td></tr>
+	<tr><td>Ouvrir, Enregistrer sous</td><td>Boîtes dessinées</td><td>Boîte de PM : champ du nom (WC_ENTRYFIELD), répertoire, liste des répertoires et des fichiers (WC_LISTBOX, DosFindFirst), masque, boutons</td></tr>
+	<tr><td>Rechercher</td><td>Boîte dessinée</td><td>Boîte de PM : champ de saisie, case Respecter la casse, boutons Suivant et Annuler ; F3 cherche encore</td></tr>
+	<tr><td>Presse-papiers, messages</td><td>Du noyau de Pasdows</td><td>Presse-papiers de PM (CF_TEXT) ; WinMessageBox (À propos, « Voulez-vous enregistrer les modifications ? » avec Oui, Non et Annuler)</td></tr>
+	<tr><td>Fichiers</td><td>API du noyau</td><td>DosOpen, DosRead, DosWrite (CR LF ; LF seul et Ctrl+Z acceptés à la lecture)</td></tr>
+</table>
+
+Texte jusqu'à 256 Ko, sélection à la souris ou avec Maj et les flèches, Annuler (un second Annuler rétablit), Couper, Copier, Coller, Supprimer, Sélectionner tout, Heure/Date (F5), Rechercher (Ctrl+F) et Suivant (F3). Le bureau ouvre les fichiers .TXT, .INI, .LOG, .PAS, .CFG et .SYS avec le Bloc-notes (icône de bloc à spirale), et <code>NOTEPAD fichier</code> l'ouvre depuis l'invite de commandes. Ce travail a corrigé la constante <code>MB_YESNOCANCEL</code> (5 ; la valeur 3 donnait Abandonner, Réessayer, Ignorer) dans le Bloc-notes, Lecteur MP3, Pascal Developer, Audio numérique, Maximilien CRM, Sample Accounting et Acrodoc.
+
+<h3>Bureau : menu Nouveau et fenêtres redimensionnables</h3>
+
+Le menu contextuel du bureau (clic droit sur le fond, ou Maj+F10) et celui d'un dossier ont un sous-menu <b>Nouveau</b> : <b>Dossier</b> (« Nouveau dossier »), <b>Document texte</b> (« Nouveau document.TXT », ouvert par le Bloc-notes) et <b>Document HTML</b> (« Nouvelle page.HTML », une page HTML minimale, ouverte par le Navigateur Web). Un numéro est ajouté si le nom existe déjà.
+
+<img width="640" height="480" alt="OS/2-0 : menu contextuel du bureau, sous-menu Nouveau" src="IMAGE/BUREAU_NOUVEAU.png" />
+
+Les fenêtres à bordure de taille (FCF_SIZEBORDER) se redimensionnent maintenant à la souris : <b>PMWIN</b> reconnaît le bord gauche, droit, haut ou bas et les quatre coins (16 pels) d'un cadre, capture la souris et suit le glissement par WinSetWindowPos (taille d'au moins 100 x 60 pels) ; la fenêtre cliente reçoit WM_SIZE et se redessine.
+
 <h3>Calculatrice (CALC.PAS)</h3>
 
 OS/2 Warp 3 n'avait pas de calculatrice. OS/2-0 en a une : celle de Pasdows 95 (<code>APPS/CALC.PAS</code>, programme Win32), portée vers l'API d'OS/2 et l'apparence de Warp. Elle est dans le nouveau dossier <b>Productivité</b> de Système OS/2 (objet <b>Calculatrice</b>) ; <code>CALC</code> à l'invite de commandes la lance aussi. Le programme d'installation la copie toujours.
@@ -1494,6 +1528,51 @@ La boîte <b>À propos</b> montre Blaise Pascal écrivant OS/2 à la plume (imag
 <img width="800" height="600" alt="OS/2-0 : Pascal Developer, boîte À propos (Blaise Pascal écrivant OS/2)" src="IMAGE/PASDEV_APROPOS.png" />
 
 Pour que OS2PC se compile lui-même et produise un OS2PC.EXE qui fonctionne sous OS/2-0, le compilateur a été corrigé : grandes tables allouées au démarrage (DosAllocMem), variables globales d'un type alias de <code>String</code>, <code>Pos</code> sur des chaînes Pascal (<code>Pos(#0, S)</code>), procédures imbriquées appelées par une procédure sœur (lien statique), variables portant le nom d'une fonction prédéfinie (<code>Mem</code>), <code>Move</code> avec recouvrement, procédure du programme prioritaire sur une prédéfinie du même nom (<code>InsLine</code> de Crt), caractère <code>#0</code> conservé par le lexeur. OS2PC.EXE produit les mêmes fichiers, octet pour octet, que le compilateur construit par Free Pascal (HELLO, TREE, KLONDIKE, BONJOUR, et PASDEV lui-même). OS2PC écrit le fichier .EXE par un tampon de 64 Ko : il l'écrivait octet par octet, et sous OS/2-0 chaque écriture devenait un DosWrite puis une écriture de secteur du disque (HPFS.IFS) ; compiler BONJOUR.PAS sur le disque dur faisait plus de 60 millions d'accès au contrôleur IDE et 817 000 lectures de l'horloge (sous VirtualBox au-dessus de Hyper-V, autant de sorties de la machine virtuelle : la compilation semblait figée), contre 2,2 millions (surtout le chargement d'OS2PC.EXE) et 45 maintenant ; les fichiers produits sont identiques octet pour octet. Ses tables n'ont <b>aucune taille maximale</b> : elles commencent petites et grandissent à la demande, tant qu'il reste de la mémoire (jetons, symboles, types, champs de record, procédures, données, constantes typées, commutateurs <code>{$I}</code> et <code>{$R}</code>, code machine, étiquettes, adresses à corriger, importations, exportations, relocalisations). Les tables d'enregistrements sont des tableaux de pointeurs vers des fiches allouées par blocs et jamais déplacées : seul le tableau des pointeurs grandit, si bien qu'une affectation comme <code>TypeTab^[T]^.Base := ParseType(...)</code> reste juste même si la fonction appelée ajoute des types (le code produit par OS2PC calcule l'adresse de gauche avant l'appel), et qu'aucun grand bloc contigu n'est nécessaire. Avant, OS2PC.EXE réservait environ 40 Mo au départ et avait des limites fixes (4 096 symboles, 384 types, 64 champs par record, 512 Ko de code, 8 192 étiquettes, 16 384 adresses à corriger…), au-delà desquelles certaines entrées étaient ignorées sans erreur. Maintenant, 64 Mo suffisent pour compiler PASDEV.PAS (4 000 lignes) dans OS/2-0, et un programme d'essai de 15 700 lignes (337 000 jetons, 6 600 symboles, plus de 700 types, un record de 100 champs, 1,6 Mo de code) se compile avec 256 Mo ; le compilateur construit par Free Pascal produit, pour tous les programmes du système, les mêmes fichiers octet pour octet qu'avant. Deux défauts faisaient échouer la compilation, dans OS/2-0, de programmes ordinaires (dès que la table des procédures dépassait 64 entrées, ou dès la 17e fonction externe), par exemple 421.PAS téléchargé par « Télécharger le code source d'OS2-Zero » : la compilation semblait ne jamais finir, ou finissait sur une fausse erreur « identificateur déjà déclaré ». D'abord, les petits blocs de <code>GetMem</code> et <code>New</code> de tous les programmes venaient du tas du noyau (quelques Mo partagés par tout le système), qu'OS2PC.EXE épuisait : <code>GetMem</code> rendait alors <code>Nil</code> sans erreur. Chaque processus prend maintenant au plus 256 Ko du tas du noyau ; ses autres petits blocs viennent de ses propres arènes, de la mémoire physique au-delà de 16 Mo (comme les grands blocs), découpées comme le tas du noyau et rendues à la fin du processus. Ensuite, OS2PC agrandissait ses tables de chaînes (<code>String[63]</code>, 64 octets avec Free Pascal) avec une taille d'élément écrite en dur (64), alors que le code produit par OS2PC donne 256 octets à toute chaîne courte : OS2PC.EXE écrivait au-delà de ces tables à partir de la 17e fonction externe. Les tailles s'écrivent maintenant <code>SizeOf(TProcStr)</code>, et OS2PC.EXE compile 421.PAS et FREECELL.PAS en des fichiers identiques, octet pour octet, à ceux du compilateur construit par Free Pascal.
+
+<h3>OS2-Zero Debugger (APPS/OS2DBG.PAS)</h3>
+
+Le dossier <b>Developer Kit</b> contient <b>OS2-Zero Debugger</b> (OS2DBG.EXE), un débogueur des programmes d'OS/2-0 dans l'esprit de la fenêtre CPU de Turbo Debugger, mais avec l'interface graphique d'OS/2 : fenêtre de Presentation Manager à bordure de taille, barre de menus (Fichier, Exécution, Points d'arrêt, Données, Aide), barre d'outils de boutons de PM, barre d'état, boîtes Ouvrir et Aller à l'adresse de PM, et quatre volets à barre de défilement de PM dont l'en-tête actif prend la couleur d'une barre de titre.
+
+<img width="640" height="480" alt="OS/2-0 : le dossier Developer Kit et l'objet OS2-Zero Debugger" src="IMAGE/DEVKIT_DEBUGGER.png" />
+
+<img width="640" height="480" alt="OS2-Zero Debugger : point d'arrêt sur CLIENTPROC du Bloc-notes (désassemblage coloré, registres, mémoire, pile)" src="IMAGE/OS2DBG.png" />
+
+<table>
+	<tr>
+		<td align="center"><img src="IMAGE/OS2DBG_RETOUR.png" width="400" alt="OS2-Zero Debugger : jusqu'au retour dans PMWIN"><br><i>Alt+F8 : retour de CLIENTPROC dans PMWIN.DLL (point d'arrêt matériel)</i></td>
+		<td align="center"><img src="IMAGE/OS2DBG_EXCEPTION.png" width="400" alt="OS2-Zero Debugger : exception"><br><i>Exception (division par zéro) vue avant la fin du programme</i></td>
+	</tr>
+</table>
+
+<table>
+	<tr><th>Volet</th><th>Contenu</th></tr>
+	<tr><td>Code</td><td>Désassemblage x86 32 bits en syntaxe Intel (instructions générales, système et du coprocesseur), colonnes adresse, octets et instruction ; <b>coloration syntaxique</b> : instructions en bleu, sauts, appels et retours en rouge foncé, registres en magenta, nombres en vert, symboles en brun, mots clés (<code>dword ptr</code>, <code>rep</code>, <code>offset</code>) en gris ; étiquettes des procédures ; ligne d'EIP surlignée en jaune avec une flèche ; points d'arrêt en rouge avec une pastille ; à la ligne d'EIP, un saut conditionnel indique « saut effectué ↑/↓ » ou « pas de saut » d'après EFLAGS ; destination d'un saut ou d'un appel nommée en commentaire.</td></tr>
+	<tr><td>Registres</td><td>EAX à EIP, EFLAGS, CS, DS, ES, FS (et CR2 après un défaut de page), drapeaux c z s o p a i d t ; une valeur changée par le dernier pas ou la dernière exécution est en rouge. Entrée ou double clic : modifier le registre (boîte de saisie de PM) ; Espace ou double clic sur un drapeau : l'inverser.</td></tr>
+	<tr><td>Mémoire</td><td>16 octets par ligne (8 dans une fenêtre étroite) en hexadécimal et en ASCII, à partir de la section de données du programme ; les octets changés depuis la dernière reprise sont en rouge.</td></tr>
+	<tr><td>Pile</td><td>Doubles mots à partir d'ESP (ligne jaune), ESP et EBP marqués ; une adresse de retour est nommée (<code>CLIENTPROC+1Ah</code>, ou le nom d'une fonction exportée d'une DLL). Entrée ou double clic : montrer la valeur dans le volet Code ou Mémoire.</td></tr>
+</table>
+
+<table>
+	<tr><th>Commande</th><th>Touche</th><th>Effet</th></tr>
+	<tr><td>Ouvrir un programme</td><td>Ctrl+O</td><td>Lance le programme sous le débogueur (DosExecPgm, EXEC_TRACE) ; il s'arrête à son point d'entrée. <code>OS2DBG programme [arguments]</code> le fait au démarrage ; Fichier → Arguments change les arguments.</td></tr>
+	<tr><td>Exécuter</td><td>F9</td><td>Jusqu'au prochain point d'arrêt, à une exception ou à la fin du programme</td></tr>
+	<tr><td>Pas à pas (entrer)</td><td>F7</td><td>Une instruction (drapeau TF), en entrant dans les appels, y compris dans les DLL</td></tr>
+	<tr><td>Pas (sauter les appels)</td><td>F8</td><td>Saute <code>call</code>, <code>int</code>, <code>loop</code> et les instructions <code>rep</code></td></tr>
+	<tr><td>Jusqu'au curseur</td><td>F4</td><td>Jusqu'à la ligne choisie</td></tr>
+	<tr><td>Jusqu'au retour</td><td>Alt+F8</td><td>Jusqu'à l'adresse de retour de la procédure (cadre EBP)</td></tr>
+	<tr><td>Pause</td><td>F12</td><td>Arrête le programme qui s'exécute</td></tr>
+	<tr><td>Point d'arrêt</td><td>F2, clic dans la marge, double clic</td><td>Pose ou retire un point d'arrêt (INT 3) ; liste et suppression de tous par le menu Points d'arrêt</td></tr>
+	<tr><td>Redémarrer, Terminer</td><td>Ctrl+F2, Alt+F2</td><td>Relance le programme (les points d'arrêt sont gardés) ou le termine</td></tr>
+	<tr><td>Aller à l'adresse</td><td>Ctrl+G</td><td>Dans le volet actif : adresse hexadécimale, registre, symbole (<code>CLIENTPROC</code>, <code>WinGetMsg</code>), avec + et -</td></tr>
+	<tr><td>Origine</td><td>Ctrl+E</td><td>Revient à EIP</td></tr>
+	<tr><td>Volet suivant</td><td>Tab, Maj+Tab</td><td>Code, Registres, Mémoire, Pile</td></tr>
+</table>
+
+Les <b>symboles</b> viennent de la table des importations du programme (les appels <code>call dword ptr [PMWIN.WinGetMsg]</code> et les fonctions des DLL où l'on entre en pas à pas), de la table des exportations de chaque DLL utilisée (lue en mémoire) et de la carte <code>.MAP</code> du programme, si elle est à côté de lui : <code>OS2PC -GD PROG.PAS</code> la produit (procédures et fonctions). Une exception du programme (division par zéro, protection générale, défaut de page…) est montrée avant la fin du programme, avec son nom et l'instruction fautive ; reprendre l'exécution le termine.
+
+Le <b>noyau</b> donne au débogueur ce qu'il faut (<code>KrnTaskCtl</code> 60 à 70, que DOSCALLS appelle pour <code>DosExecPgm</code> avec <code>EXEC_TRACE</code> ou <code>EXEC_ASYNCRESULTDB</code>) : le programme lancé est suivi en pas à pas (drapeau TF) jusqu'à son point d'entrée, où sa tâche est mise à l'arrêt (nouvel état de tâche que l'ordonnanceur saute) ; INT 1 et INT 3 d'un programme débogué arrêtent sa tâche au lieu de le terminer, et une exception le garde arrêté jusqu'à ce que le débogueur le laisse finir. Le débogueur lit l'état, les registres du cadre d'interruption (avec ou sans code d'erreur), lit et écrit la mémoire du programme (sa fenêtre de 4 Mo est projetée le temps de la copie), le modifie, le reprend en pas à pas ou non, l'arrête (TF posé dans les drapeaux sauvés de ses tâches) et le termine ; le programme débogué meurt avec son débogueur. Les DLL étant partagées par tous les processus, un arrêt temporaire dans une DLL (F4, F8 ou Alt+F8 vers PMWIN) n'écrit pas INT 3 dans leur code, ce qui tuerait les autres programmes : c'est un <b>point d'arrêt matériel</b> (DR0, DR7) que le noyau charge seulement quand il passe au programme débogué, et qu'il retire quand il est atteint (DR6).
+
+Écrire le débogueur a montré qu'un nom de variable identique à une constante prédéfinie d'OS2PC (<code>MONO</code> de l'unité Graph) est pris pour la constante : la variable s'appelle autrement.
 
 <h3>LaunchPad (LAUNCHPAD.PAS)</h3>
 

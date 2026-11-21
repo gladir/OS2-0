@@ -282,6 +282,9 @@ Var
   KpT, KpFs, KpCh, KpVk, KpSc : Array[0..MaxQ * 16 - 1] Of LongInt;
   { --- etat global --- }
   FocusWin, ActiveWin, CaptureWin, SysModalWin, LockUpdWin, VisLock : LongInt;
+  { redimensionnement d'un cadre a la souris : bords saisis (TF_LEFT 1,
+    TF_TOP 2, TF_RIGHT 4, TF_BOTTOM 8), position de depart }
+  SizeEdge, SizeMX, SizeMY, SizeX, SizeY, SizeCX, SizeCY : LongInt;
   { liste deroulante d'un champ combine (une a la fois) : champ, liste,
     remplissage en cours }
   DropCombo, DropList, DropFill : LongInt;
@@ -7643,12 +7646,77 @@ Begin
   EndP(K);
 End;
 
+{ bords d'un cadre a bordure de taille sous le point X, Y (coordonnees du
+  cadre, Y vers le haut) : TF_LEFT 1, TF_TOP 2, TF_RIGHT 4, TF_BOTTOM 8 ;
+  pres d'un coin (16 points), les deux bords du coin }
+Function FrameSizeHit(I, X, Y : LongInt) : LongInt;
+Var B, E, C : LongInt;
+Begin
+  FrameSizeHit := 0;
+  If Not (((WStyle[I] And FS_SIZEBORDER) <> 0) Or ((WS0[I] And FCF_SIZEBORDER) <> 0)) Then Exit;
+  If (WStyle[I] And (WS_MAXIMIZED Or WS_MINIMIZED)) <> 0 Then Exit;
+  If GMode <> 0 Then B := GBorderW(I) + 1 Else B := 8;
+  C := 16;
+  E := 0;
+  If X < B Then E := E Or 1;
+  If X >= WCX[I] - B Then E := E Or 4;
+  If Y < B Then E := E Or 8;
+  If Y >= WCY[I] - B Then E := E Or 2;
+  If E = 0 Then Exit;
+  { coins : le long d'un bord, pres de l'extremite }
+  If (E And 5) <> 0 Then
+  Begin
+    If Y < C Then E := E Or 8;
+    If Y >= WCY[I] - C Then E := E Or 2;
+  End;
+  If (E And 10) <> 0 Then
+  Begin
+    If X < C Then E := E Or 1;
+    If X >= WCX[I] - C Then E := E Or 4;
+  End;
+  FrameSizeHit := E;
+End;
+
 Function FrameProc(I, Msg, Mp1, Mp2 : LongInt) : LongInt;
-Var H, C, J, Ti, R, N : LongInt; Tr : Array[0..19] Of LongInt;
+Var H, C, J, Ti, R, N, X1, Y1, X2, Y2 : LongInt; Tr : Array[0..19] Of LongInt;
 Begin
   FrameProc := 0;
   H := HwOf(I);
   Case Msg Of
+    WM_BUTTON1DOWN :
+      Begin
+        { bordure de taille : la fenetre suit la souris (bord ou coin) }
+        FrameProc := DefWP(H, Msg, Mp1, Mp2);
+        SizeEdge := FrameSizeHit(I, (Lo16(Mp1) Xor $8000) - $8000, (Hi16(Mp1) Xor $8000) - $8000);
+        If SizeEdge <> 0 Then
+        Begin
+          SizeMX := MouseX; SizeMY := MouseY;
+          SizeX := WX[I]; SizeY := WY[I]; SizeCX := WCX[I]; SizeCY := WCY[I];
+          CaptureWin := I;
+          FrameProc := 1;
+        End;
+      End;
+    WM_MOUSEMOVE :
+      If (SizeEdge <> 0) And (CaptureWin = I) Then
+      Begin
+        X1 := SizeX; Y1 := SizeY; X2 := SizeX + SizeCX; Y2 := SizeY + SizeCY;
+        If (SizeEdge And 1) <> 0 Then X1 := MinI(X1 + MouseX - SizeMX, X2 - 100);
+        If (SizeEdge And 4) <> 0 Then X2 := MaxI(X2 + MouseX - SizeMX, X1 + 100);
+        If (SizeEdge And 8) <> 0 Then Y1 := MinI(Y1 + MouseY - SizeMY, Y2 - 60);
+        If (SizeEdge And 2) <> 0 Then Y2 := MaxI(Y2 + MouseY - SizeMY, Y1 + 60);
+        If (X1 <> WX[I]) Or (Y1 <> WY[I]) Or (X2 - X1 <> WCX[I]) Or (Y2 - Y1 <> WCY[I]) Then
+          Dummy := WinSetWindowPos(H, 0, X1, Y1, X2 - X1, Y2 - Y1, SWP_MOVE Or SWP_SIZE);
+        FrameProc := 1;
+      End
+      Else FrameProc := DefWP(H, Msg, Mp1, Mp2);
+    WM_BUTTON1UP :
+      If (SizeEdge <> 0) And (CaptureWin = I) Then
+      Begin
+        SizeEdge := 0;
+        CaptureWin := 0;
+        FrameProc := 1;
+      End
+      Else FrameProc := DefWP(H, Msg, Mp1, Mp2);
     WM_CREATE :
       If Mp1 <> 0 Then CreateFrameCtls(I, RdL(Mp1 + 2), RdW(Mp1 + 6), RdW(Mp1 + 8));
     WM_PAINT :
