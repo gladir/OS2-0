@@ -261,6 +261,20 @@ Type
     LxEip     : LongInt;     { point d'entree }
     LxTib     : LongInt;     { bloc d'information de tache (FS:0) }
     LxFs      : LongInt;     { selecteur de FS }
+    { debogage (OS2-Zero Debugger, KrnTaskCtl 60 a 69) : debogueur (indice
+      + 1, 0 : aucun), point d'entree ou s'arreter au depart, cadre de la
+      derniere interruption (registres sur la pile du fil arrete), evenement
+      (0 depart, 1 pas a pas ou arret, 3 point d'arret, autre : exception),
+      tache arretee, pas a pas demande a la reprise, CR2 }
+    DbgOwner  : LongInt;
+    DbgEntry  : LongInt;
+    DbgFrame  : LongInt;
+    DbgEvent  : LongInt;
+    DbgTask   : LongInt;
+    DbgStep   : Boolean;
+    DbgCr2    : LongInt;
+    DbgEOff   : LongInt;      { 4 : code d'erreur empile avant EIP }
+    DbgHw     : LongInt;      { point d'arret materiel temporaire (DR0) }
   End;
 
 Var
@@ -279,6 +293,9 @@ Var
   Idt              : Array[0..255] Of TGate;
   IdtPtr           : TDescPtr;
   TrapFrame        : LongInt;
+  DbgArm           : LongInt;       { debogueur (indice + 1) du prochain processus lance }
+  DrOn             : Boolean;       { DR7 arme (point d'arret materiel) }
+  DbgBuf           : Array[0..4095] Of Byte;   { copie de la memoire d'un processus debogue }
 
   { Minuterie }
   Ticks            : LongInt;
@@ -696,6 +713,11 @@ Const
 
 { Ecran TRAP (a la maniere d'OS/2) puis fin du processus fautif ou arret.
   Frame : valeur de EBP de la procedure Interrupt (PUSHAD en EBP+4). }
+{ debogage : pas a pas (INT 1) et point d'arret (INT 3) d'un programme
+  debogue ; exception d'un programme debogue (montree au debogueur) }
+Function DbgTrap(Vec : LongInt) : Boolean; Forward;
+Procedure DbgHold(F, Vec : LongInt); Forward;
+
 Procedure Trap(Vec : LongInt; HasErr : Boolean);
 Var F, Eip, Err, FaultAdr, K : LongInt; Nm : String;
 Begin
@@ -718,6 +740,12 @@ Begin
     Eip := MemL[0:F + 36];
   End;
   If Vec <= 19 Then Nm := ExcNames[Vec] Else Nm := 'Exception';
+  { programme debogue : le debogueur voit l'exception avant la fin }
+  If (CurProc >= 0) And (Procs[CurProc].DbgOwner <> 0) Then
+  Begin
+    Procs[CurProc].DbgEOff := Ord(HasErr) * 4;
+    DbgHold(F, Vec);
+  End;
   If SplOn And (CurProc < 0) Then SplToText;
   If CurProc >= 0 Then
   Begin
@@ -786,9 +814,9 @@ Begin
 End;
 
 Procedure Exc00; Interrupt; Begin Trap(0, False) End;
-Procedure Exc01; Interrupt; Begin Trap(1, False) End;
+Procedure Exc01; Interrupt; Begin If Not DbgTrap(1) Then Trap(1, False) End;
 Procedure Exc02; Interrupt; Begin Trap(2, False) End;
-Procedure Exc03; Interrupt; Begin Trap(3, False) End;
+Procedure Exc03; Interrupt; Begin If Not DbgTrap(3) Then Trap(3, False) End;
 Procedure Exc04; Interrupt; Begin Trap(4, False) End;
 Procedure Exc05; Interrupt; Begin Trap(5, False) End;
 Procedure Exc06; Interrupt; Begin Trap(6, False) End;
@@ -2176,12 +2204,35 @@ End;
 
 { Installer la fenetre du processus Pid (ou aucune si Pid < 0) }
 Procedure MapWindow(Pid : LongInt);
+Var A : LongInt;
 Begin
   If (Pid >= 0) And Procs[Pid].Used Then
     MemL[0:PageDir + 4] := Procs[Pid].PageTable Or $07
   Else
     MemL[0:PageDir + 4] := 0;
   FlushTlb;
+  { point d'arret materiel d'un programme debogue (code partage des DLL,
+    ou INT 3 tuerait les autres processus) : DR0 et DR7 seulement pendant
+    que ce processus s'execute }
+  If (Pid >= 0) And Procs[Pid].Used And (Procs[Pid].DbgHw <> 0) Then
+  Begin
+    A := Procs[Pid].DbgHw;
+    asm
+      mov eax,A
+      db 0Fh,23h,0C0h
+      mov eax,1
+      db 0Fh,23h,0F8h
+    end;
+    DrOn := True;
+  End
+  Else If DrOn Then
+  Begin
+    asm
+      xor eax,eax
+      db 0Fh,23h,0F8h
+    end;
+    DrOn := False;
+  End;
 End;
 
 { Construire la table de pages d'un processus dans le bloc Alloc (8 Ko) :
@@ -7417,6 +7468,18 @@ Begin
   F := TkFn[CurTask]; A := TkArg[CurTask];
   If TkTid[CurTask] = 1 Then
   Begin
+    { programme debogue : pas a pas (TF) jusqu'a son point d'entree, ou
+      DbgTrap l'arrete pour le debogueur }
+    If (CurProc >= 0) And (Procs[CurProc].DbgOwner <> 0) And (Procs[CurProc].DbgEntry <> 0) Then
+    Begin
+      asm
+        pushfd
+        pop eax
+        or eax,256
+        push eax
+        popfd
+      end;
+    End;
     asm
       mov eax,F
       call eax
@@ -7478,6 +7541,17 @@ Var Ok : Boolean;
 Begin
   Procs[Pid].Running := True;
   Procs[Pid].NextTid := 2;
+  { OS2-Zero Debugger : le processus lance apres KrnTaskCtl 60 est debogue
+    et s'arrete a son point d'entree }
+  Procs[Pid].DbgOwner := 0; Procs[Pid].DbgEntry := 0; Procs[Pid].DbgEvent := -1;
+  Procs[Pid].DbgFrame := 0; Procs[Pid].DbgTask := -1; Procs[Pid].DbgStep := False;
+  Procs[Pid].DbgEOff := 0; Procs[Pid].DbgHw := 0;
+  If (DbgArm <> 0) And (DbgArm - 1 = CurProc) Then
+  Begin
+    Procs[Pid].DbgOwner := DbgArm;
+    If Procs[Pid].IsLx Then Procs[Pid].DbgEntry := Procs[Pid].LxEip Else Procs[Pid].DbgEntry := ProcEntry[Pid];
+  End;
+  DbgArm := 0;
   Ok := NewTask(Pid, ProcEntry[Pid], 0, ProcStack[Pid], 0, 1) >= 0;
   If Not Ok Then Procs[Pid].Running := False;
   StartProcess := Ok;
@@ -7501,11 +7575,16 @@ End;
 
 { Fin du processus courant : ses ressources sont rendues, ses fils
   arretes ; la tache passe la main et ne reprend jamais. }
+Procedure KillOther(P, Code : LongInt); Forward;
+
 Procedure KillCurrentProcess(Code : LongInt);
 Var Pid, I : LongInt;
 Begin
   Pid := CurProc;
   If Pid < 0 Then Exit;
+  { debogueur qui se termine : ses programmes debogues aussi }
+  For I := 0 To MaxProcs - 1 Do
+    If Procs[I].Used And Procs[I].Running And (Procs[I].DbgOwner = Pid + 1) And (I <> Pid) Then KillOther(I, 1);
   If VmOn And (Pid = VmPid) Then DosStop;
   NeKill(Pid);
   If Procs[Pid].IsLx And (Procs[Pid].LxFs <> 0) Then
@@ -7542,7 +7621,7 @@ Begin
   end;
   Procs[Pid].Running := False;
   For I := 1 To MaxTasks - 1 Do
-    If (TkUsed[I] = 1) And (TkProc[I] = Pid) Then
+    If ((TkUsed[I] = 1) Or (TkUsed[I] = 3)) And (TkProc[I] = Pid) Then
     Begin
       TkUsed[I] := 2;
       Dec(NTasks);
@@ -7735,7 +7814,7 @@ Begin
   Procs[P].ExitCode := Code;
   Procs[P].Running := False;
   For K := 1 To MaxTasks - 1 Do
-    If (TkUsed[K] = 1) And (TkProc[K] = P) Then
+    If ((TkUsed[K] = 1) Or (TkUsed[K] = 3)) And (TkProc[K] = P) Then
     Begin
       TkUsed[K] := 2;
       Dec(NTasks);
@@ -7745,9 +7824,282 @@ Begin
   end;
 End;
 
+{ ==================================================================== }
+{ Debogage (OS2-Zero Debugger)                                          }
+{ ==================================================================== }
+{ Le programme debogue s'execute en anneau 0 sur sa propre pile : une
+  interruption (INT 1 pas a pas, INT 3 point d'arret, exception) laisse
+  ses registres dans le cadre F de la procedure Interrupt (F+0 DS, F+4
+  EDI, F+8 ESI, F+12 EBP, F+20 EBX, F+24 EDX, F+28 ECX, F+32 EAX, F+36
+  EIP, F+40 CS, F+44 EFLAGS ; ESP = F+48). Son fil est alors arrete (etat
+  3 : l'ordonnanceur ne le reprend pas) jusqu'a ce que le debogueur le
+  relance (KrnTaskCtl 66), en pas a pas (TF) ou non. La memoire du
+  programme est lue et ecrite par le noyau avec la fenetre de ce
+  processus (00400000h), le reste de la memoire etant commun. }
+
+{ arreter le fil courant (programme debogue) jusqu'a sa reprise }
+Procedure DbgHold(F, Vec : LongInt);
+Var P, A : LongInt;
+Begin
+  P := CurProc;
+  asm
+    mov eax,cr2
+    mov A,eax
+  end;
+  Procs[P].DbgFrame := F; Procs[P].DbgEvent := Vec; Procs[P].DbgTask := CurTask;
+  Procs[P].DbgCr2 := A;
+  asm
+    cli
+  end;
+  TkUsed[CurTask] := 3;
+  asm
+    sti
+  end;
+  While (TkUsed[CurTask] = 3) And Procs[P].Running Do Yield;
+  Procs[P].DbgEvent := -1;
+  Procs[P].DbgFrame := 0;
+End;
+
+Function DbgTrap(Vec : LongInt) : Boolean;
+Var F, P, Eip, D6 : LongInt;
+Begin
+  DbgTrap := False;
+  P := CurProc;
+  If (P < 0) Or (Procs[P].DbgOwner = 0) Then Exit;
+  asm
+    mov eax,[ebp]
+    mov F,eax
+  end;
+  F := F + 8;
+  DbgTrap := True;
+  Eip := MemL[0:F + 36];
+  If Vec = 1 Then
+  Begin
+    { DR6 : point d'arret materiel (B0) atteint ? }
+    asm
+      db 0Fh,21h,0F0h
+      mov D6,eax
+      xor eax,eax
+      db 0Fh,23h,0F0h
+    end;
+    If ((D6 And 1) <> 0) And (Procs[P].DbgHw <> 0) Then
+    Begin
+      Procs[P].DbgHw := 0;
+      asm
+        xor eax,eax
+        db 0Fh,23h,0F8h
+      end;
+      DrOn := False;
+      Vec := 3;
+    End
+    { depart : pas a pas jusqu'au point d'entree du programme }
+    Else If Procs[P].DbgEntry <> 0 Then
+    Begin
+      If Eip <> Procs[P].DbgEntry Then Exit;
+      Procs[P].DbgEntry := 0;
+      Vec := 256;         { evenement 256 : point d'entree atteint }
+    End;
+    MemL[0:F + 44] := MemL[0:F + 44] And Not $100;
+  End
+  Else MemL[0:F + 36] := Eip - 1;
+  Procs[P].DbgEOff := 0;      { INT 3 : EIP sur l'instruction CCh }
+  DbgHold(F, Vec);
+  If Procs[P].DbgStep Then MemL[0:F + 44] := MemL[0:F + 44] Or $100
+  Else MemL[0:F + 44] := MemL[0:F + 44] And Not $100;
+End;
+
+{ adresse A lisible ou modifiable dans le processus P (N octets) }
+Function DbgAddrOk(P, A, N : LongInt) : Boolean;
+Begin
+  DbgAddrOk := False;
+  If (N <= 0) Or (A < $1000) Then Exit;
+  { fenetre du processus : l'image seulement (la pile est hors fenetre) }
+  If (A >= $00400000) And (A < $00800000) Then
+    DbgAddrOk := A + N <= $00400000 + Procs[P].ImageSize
+  Else
+    DbgAddrOk := (A + N <= MemUseKb * 1024) And Not ((A < $00800000) And (A + N > $00400000));
+End;
+
+{ copie entre la memoire du processus P (adresse A) et DbgBuf }
+Procedure DbgCopy(P, A, N : LongInt; ToBuf : Boolean);
+Begin
+  asm
+    cli
+  end;
+  MapWindow(P);
+  If ToBuf Then MoveMem(A, LongInt(@DbgBuf), N) Else MoveMem(LongInt(@DbgBuf), A, N);
+  MapWindow(CurProc);
+  asm
+    sti
+  end;
+End;
+
+{ processus debogue par l'appelant (numero de processus S) ; -1 sinon }
+Function DbgProc(S : LongInt) : LongInt;
+Var P : LongInt;
+Begin
+  P := ProcBySerial(S);
+  If (P >= 0) And (Procs[P].DbgOwner <> CurProc + 1) Then P := -1;
+  DbgProc := P;
+End;
+
+{ KrnTaskCtl 60 a 69 : 60 armer (le prochain processus lance par l'appelant
+  est debogue) ; 61 etat (0 s'execute, 1 arrete : evenement en P2 (256 point
+  d'entree, 1 pas, 3 point d'arret, sinon exception), 2
+  termine : code de sortie en P2) ; 62 registres (16 x 4 octets en P2 :
+  EAX EBX ECX EDX ESI EDI EBP ESP EIP EFLAGS CS DS ES FS evenement CR2) ;
+  63 changer les registres (memes 10 premiers) ; 64 lire, 65 ecrire la
+  memoire (P2 : adresse, longueur, tampon) ; 66 reprendre (P2 : 1 pas a pas) ;
+  67 arreter ; 68 terminer ; 69 informations (entree, base, taille, LX) ;
+  70 point d'arret materiel temporaire en P2 (0 : aucun ; une DLL partagee) }
+Function KrnDebug(Op, P1, P2 : LongInt) : LongInt;
+Var P, F, A, N, B, K, T, E : LongInt;
+Begin
+  KrnDebug := -1;
+  If Op = 60 Then
+  Begin
+    If CurProc >= 0 Then DbgArm := CurProc + 1;
+    KrnDebug := 0;
+    Exit;
+  End;
+  P := DbgProc(P1);
+  If P < 0 Then Exit;
+  KrnDebug := 0;
+  Case Op Of
+    61 :
+      If Not Procs[P].Running Then
+      Begin
+        KrnDebug := 2;
+        If P2 <> 0 Then MemL[0:P2] := Procs[P].ExitCode;
+      End
+      Else If (Procs[P].DbgTask >= 0) And (TkUsed[Procs[P].DbgTask] = 3) Then
+      Begin
+        KrnDebug := 1;
+        If P2 <> 0 Then MemL[0:P2] := Procs[P].DbgEvent;
+      End;
+    62, 63 :
+      Begin
+        F := Procs[P].DbgFrame;
+        If (F = 0) Or (P2 = 0) Or (Procs[P].DbgTask < 0) Or (TkUsed[Procs[P].DbgTask] <> 3) Then
+        Begin
+          KrnDebug := -1;
+          Exit;
+        End;
+        If Op = 62 Then
+        Begin
+          DbgCopy(P, F - 4, 56, True);
+          B := LongInt(@DbgBuf) + 4;                { B = F }
+          E := Procs[P].DbgEOff;
+          MemL[0:P2] := MemL[0:B + 32];             { EAX }
+          MemL[0:P2 + 4] := MemL[0:B + 20];         { EBX }
+          MemL[0:P2 + 8] := MemL[0:B + 28];         { ECX }
+          MemL[0:P2 + 12] := MemL[0:B + 24];        { EDX }
+          MemL[0:P2 + 16] := MemL[0:B + 8];         { ESI }
+          MemL[0:P2 + 20] := MemL[0:B + 4];         { EDI }
+          MemL[0:P2 + 24] := MemL[0:B + 12];        { EBP }
+          MemL[0:P2 + 28] := F + 48 + E;                { ESP }
+          MemL[0:P2 + 32] := MemL[0:B + 36 + E];        { EIP }
+          MemL[0:P2 + 36] := MemL[0:B + 44 + E];        { EFLAGS }
+          MemL[0:P2 + 40] := MemL[0:B + 40 + E] And $FFFF;   { CS }
+          MemL[0:P2 + 44] := MemL[0:B] And $FFFF;   { DS }
+          MemL[0:P2 + 48] := MemL[0:B - 4] And $FFFF;    { ES }
+          MemL[0:P2 + 52] := TkFs[Procs[P].DbgTask] And $FFFF;
+          MemL[0:P2 + 56] := Procs[P].DbgEvent;
+          MemL[0:P2 + 60] := Procs[P].DbgCr2;
+        End
+        Else
+        Begin
+          DbgCopy(P, F - 4, 56, True);
+          B := LongInt(@DbgBuf) + 4;
+          E := Procs[P].DbgEOff;
+          MemL[0:B + 32] := MemL[0:P2];
+          MemL[0:B + 20] := MemL[0:P2 + 4];
+          MemL[0:B + 28] := MemL[0:P2 + 8];
+          MemL[0:B + 24] := MemL[0:P2 + 12];
+          MemL[0:B + 8] := MemL[0:P2 + 16];
+          MemL[0:B + 4] := MemL[0:P2 + 20];
+          MemL[0:B + 12] := MemL[0:P2 + 24];
+          MemL[0:B + 36 + E] := MemL[0:P2 + 32];
+          MemL[0:B + 44 + E] := (MemL[0:P2 + 36] And $00000CD5) Or (MemL[0:B + 44 + E] And Not $00000CD5);
+          DbgCopy(P, F - 4, 56, False);
+        End;
+      End;
+    64, 65 :
+      Begin
+        If P2 = 0 Then Begin KrnDebug := -1; Exit; End;
+        A := MemL[0:P2]; N := MemL[0:P2 + 4]; B := MemL[0:P2 + 8];
+        If (N < 0) Or (N > 4096) Or (B = 0) Or Not DbgAddrOk(P, A, N) Then
+        Begin
+          KrnDebug := -1;
+          Exit;
+        End;
+        If Op = 64 Then
+        Begin
+          DbgCopy(P, A, N, True);
+          MoveMem(LongInt(@DbgBuf), B, N);
+        End
+        Else
+        Begin
+          MoveMem(B, LongInt(@DbgBuf), N);
+          DbgCopy(P, A, N, False);
+        End;
+        KrnDebug := N;
+      End;
+    66 :
+      If (Procs[P].DbgTask >= 0) And (TkUsed[Procs[P].DbgTask] = 3) Then
+      Begin
+        Procs[P].DbgStep := P2 <> 0;
+        asm
+          cli
+        end;
+        TkUsed[Procs[P].DbgTask] := 1;
+        asm
+          sti
+        end;
+      End
+      Else KrnDebug := -1;
+    67 :
+      Begin
+        { les fils qui s'executent : TF dans les drapeaux sauves par
+          CtxSwitch (FNSAVE 108 octets, PUSHAD 32, puis EFLAGS) }
+        asm
+          cli
+        end;
+        For T := 1 To MaxTasks - 1 Do
+          If (TkUsed[T] = 1) And (TkProc[T] = P) And (T <> CurTask) Then
+          Begin
+            MapWindow(P);
+            K := TkEsp[T] + 140;
+            MemL[0:K] := MemL[0:K] Or $100;
+            MapWindow(CurProc);
+          End;
+        asm
+          sti
+        end;
+      End;
+    68 : If Procs[P].Running Then KillOther(P, 1);
+    70 : Procs[P].DbgHw := P2;
+    69 :
+      If P2 <> 0 Then
+      Begin
+        If Procs[P].IsLx Then MemL[0:P2] := Procs[P].LxEip Else MemL[0:P2] := ProcEntry[P];
+        MemL[0:P2 + 4] := $00400000;
+        MemL[0:P2 + 8] := Procs[P].ImageSize;
+        MemL[0:P2 + 12] := Procs[P].PhysSize;
+        MemL[0:P2 + 16] := Ord(Procs[P].IsLx);
+        MemL[0:P2 + 20] := Procs[P].Serial;
+      End;
+  End;
+End;
+
 Function KrnTaskCtl(Op, P1, P2, P3 : LongInt) : LongInt;
 Var P, S, Sz, T0, K : LongInt;
 Begin
+  If (Op >= 60) And (Op <= 70) Then
+  Begin
+    KrnTaskCtl := KrnDebug(Op, P1, P2);
+    Exit;
+  End;
   KrnTaskCtl := 0;
   Case Op Of
     0 : Yield;

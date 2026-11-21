@@ -5035,6 +5035,9 @@ Begin
   FillB(LongInt(@StartInfo), 68, 0);
   StartInfo[0] := 68;
   FillB(LongInt(@ProcInfo), 16, 0);
+  { EXEC_TRACE, EXEC_ASYNCRESULTDB : l'enfant est debogue par l'appelant
+    (il s'arrete a son point d'entree ; KrnTaskCtl 60 a 69) }
+  If (Flags = 3) Or (Flags = EXEC_ASYNCRESULTDB) Then A := KTaskCtl(60, 0, 0, 0);
   If KCreateProcessA(0, Z(Cmd, 1), 0, 0, 1, 0, 0, 0, LongInt(@StartInfo), LongInt(@ProcInfo)) = 0 Then
   Begin
     R := KErr;

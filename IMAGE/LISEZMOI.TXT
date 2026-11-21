@@ -1345,6 +1345,31 @@ certificat non verifie)") ; proxy HTTP facultatif (Options - Proxy, ou
 SET HTTP_PROXY=hote:port : tunnel CONNECT). SET BROWSER_TRACE=1
 copie la console et les etapes du chargement sur la sortie standard.
 
+Bloc-notes (NOTEPAD.EXE, dossier Productivite)
+----------------------------------------------
+Le Bloc-notes de Pasdows 95 porte vers l'API d'OS/2 (source
+APPS\NOTEPAD.PAS). Bureau - Productivite - Bloc-notes, NOTEPAD fichier
+a l'invite, ou double clic sur un fichier .TXT, .INI, .LOG, .PAS, .CFG
+ou .SYS.
+  - fenetre de PM a bordure de taille, barres de defilement de PM ;
+  - menus Fichier (Nouveau Ctrl+N, Ouvrir Ctrl+O, Enregistrer Ctrl+S,
+    Enregistrer sous, Quitter), Edition (Annuler Ctrl+Z, Couper Ctrl+X,
+    Copier Ctrl+C, Coller Ctrl+V, Supprimer, Selectionner tout Ctrl+A,
+    Heure/Date F5), Recherche (Rechercher Ctrl+F, Suivant F3), Aide ;
+  - boites Ouvrir, Enregistrer sous et Rechercher de PM ; presse-papiers
+    de PM (CF_TEXT) ; question Oui/Non/Annuler avant de perdre un texte
+    modifie ;
+  - texte jusqu'a 256 Ko ; CR LF dans les fichiers (LF seul et Ctrl+Z
+    acceptes a la lecture).
+
+Bureau : menu Nouveau et fenetres redimensionnables
+---------------------------------------------------
+Le menu contextuel du bureau (bouton 2 sur le fond, ou Maj+F10) et celui
+d'un dossier ont un sous-menu Nouveau : Dossier, Document texte
+(Nouveau document.TXT) et Document HTML (Nouvelle page.HTML).
+Les fenetres a bordure de taille se redimensionnent a la souris par
+leurs bords et leurs coins.
+
 Calculatrice (CALC.EXE, dossier Productivite)
 ---------------------------------------------
 OS/2 Warp 3 n'avait pas de calculatrice : celle de Pasdows 95 (source
@@ -1516,6 +1541,30 @@ C:\SOURCE\OS2-0\, sans les donnees de Git (source GETSRC.PAS).
 L'API de GitHub permet 60 demandes par heure sans jeton : SET
 GITHUB_TOKEN=... pour davantage. Proxy : SET HTTP_PROXY=hote:port.
 Il faut la carte reseau (DHCP) et le composant reseau TCP/IP.
+
+OS2-Zero Debugger (OS2DBG.EXE, dossier Developer Kit)
+----------------------------------------------------
+Debogueur des programmes d'OS/2-0 dans l'esprit de Turbo Debugger, avec
+l'interface de Presentation Manager (source APPS\OS2DBG.PAS). Bureau -
+Developer Kit - OS2-Zero Debugger, ou OS2DBG programme [arguments].
+  - volets Code (desassembleur x86 32 bits colore : instructions,
+    sauts et appels, registres, nombres, symboles, mots cles ; ligne
+    d'EIP en jaune, points d'arret en rouge), Registres (valeurs
+    changees en rouge, drapeaux), Memoire (hexadecimal et ASCII) et
+    Pile (adresses de retour nommees) ; barre d'outils de boutons de
+    PM, barres de defilement de PM, barre d'etat ;
+  - F9 executer, F7 pas a pas, F8 pas (sauter les appels), F4 jusqu'au
+    curseur, Alt+F8 jusqu'au retour, F12 pause, F2 point d'arret,
+    Ctrl+F2 redemarrer, Alt+F2 terminer, Ctrl+G aller a l'adresse
+    (hexadecimal, registre, symbole), Ctrl+E origine (EIP), Ctrl+O
+    ouvrir, Tab volet suivant ; Entree modifie un registre ;
+  - symboles : importations et exportations des DLL, et carte .MAP du
+    programme (OS2PC -GD PROG.PAS) ;
+  - les exceptions du programme sont montrees avant sa fin.
+Le programme est lance par DosExecPgm (EXEC_TRACE) et s'arrete a son
+point d'entree ; le noyau (KrnTaskCtl 60 a 70) donne ses registres et
+sa memoire. Un arret temporaire dans une DLL partagee utilise un point
+d'arret materiel (DR0) pour ne pas toucher les autres programmes.
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------

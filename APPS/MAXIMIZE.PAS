@@ -5490,7 +5490,7 @@ Begin
   1: If PmBox(APP_NAME,Msg,MB_YESNO Or MB_ICONQUESTION)=MBID_YES Then R:=1
      Else R:=2;
   Else Begin
-   R:=PmBox(APP_NAME,Msg,3 Or MB_ICONQUESTION);
+   R:=PmBox(APP_NAME,Msg,5 Or MB_ICONQUESTION);
    If R=MBID_YES Then R:=1 Else If R=7 Then R:=2 Else R:=3;
   End;
  End;

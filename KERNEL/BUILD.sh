@@ -65,7 +65,9 @@
 #  3e. compile APPS/MAXIMIZE.PAS (Maximilien CRM), APPS/SIMPLY.PAS
 #     (Sample Accounting), APPS/ACROBAT.PAS (Acrodoc), APPS/NEWS.PAS
 #     (News Master) et APPS/POWERPNT.PAS (PresentPoint) du depot OFFICE-0
-#     (dossier Productivite du bureau) ;
+#     et APPS/NOTEPAD.PAS (Bloc-notes de Pasdows 95) (dossier Productivite
+#     du bureau), APPS/OS2DBG.PAS (OS2-Zero Debugger, dossier Developer
+#     Kit) ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS, PAYSAGE.BMP pour Paint,
@@ -167,8 +169,8 @@ for B in ASTRO SIMUPLAN CS3DA ELEMENTS CHEMDRAW; do
 done
 # modele du corps humain et physiologie de l'Anatomie 3D (a cote de CS3DA.EXE)
 cp "$ROOT/APPS/HUMAN.C3D" "$ROOT/APPS/PHYSIO.CFG" "$W/cd/"
-echo "== Productivite (OS2PC : APPS/MAXIMIZE.PAS, SIMPLY.PAS, ACROBAT.PAS, NEWS.PAS et POWERPNT.PAS)"
-for B in MAXIMIZE SIMPLY ACROBAT NEWS POWERPNT; do
+echo "== Productivite et Developer Kit (OS2PC : APPS/MAXIMIZE.PAS, SIMPLY.PAS, ACROBAT.PAS, NEWS.PAS, POWERPNT.PAS, NOTEPAD.PAS et OS2DBG.PAS)"
+for B in MAXIMIZE SIMPLY ACROBAT NEWS POWERPNT NOTEPAD OS2DBG; do
   "$W/os2pc" -Q "$ROOT/APPS/$B.PAS" "$W/cd/$B.EXE" > "$W/$B.log" 2>&1 || { cat "$W/$B.log"; exit 1; }
   echo "   $B.EXE"
 done
