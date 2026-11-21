@@ -14449,7 +14449,11 @@ Begin
             ParseExpr(PI);      { count dans EAX }
             EmitInstr('PUSH EAX');
             EPMatch(',');
-            ParseExpr(PI);      { value dans EAX }
+            { value dans EAX : contexte Char, 'x' est le code du caractere
+              (pas l'adresse d'une chaine) }
+            WantCharLit := True;
+            ParseExpr(PI);
+            WantCharLit := False;
             EmitInstr('POP ECX');   { count }
             EmitInstr('POP EDI');   { dest }
             EmitInstr('CLD');
@@ -24883,6 +24887,45 @@ Begin
     FatalError('":=" attendu apres ' + Up + '(...)^');
 End;
 
+{ With F(args)^ Do : F est une fonction qui rend un pointeur type ;
+  EAX = adresse de l enregistrement pointe, T = son type (suffixes
+  .champ [index] ^ acceptes) ; EP sur F au depart }
+Function WithFuncPtrW32(PI : LongInt; Var T : LongInt) : Boolean;
+Var
+  LI, J, Depth : LongInt;
+  Up : TString;
+Begin
+  WithFuncPtrW32 := False;
+  If EPAtEnd Then Exit;
+  If TokenPool^[EP]^.Kind <> TK_IDENT Then Exit;
+  If Not TokIsPunct(EP + 1, '(') Then Exit;
+  Up := StrUpperCase(TokenPool^[EP]^.Val);
+  If (FindLocal(PI, Up) >= 0) Or (FindParam(PI, Up) >= 0) Or (TypeFindByName(Up) >= 0) Then Exit;
+  LI := 0;
+  While (LI < ProcCount) And (ProcTab^[LI]^.Name <> Up) Do
+    Inc(LI);
+  If LI >= ProcCount Then Exit;
+  T := ProcTab^[LI]^.RetTypeIdx;
+  If Not ((T >= 0) And (T < TypeCount) And (TypeTab^[T]^.Kind = TYK_POINTER)) Then Exit;
+  { F(...) suivi de ^ }
+  J := EP + 2; Depth := 1;
+  While (J < EPEnd) And (Depth > 0) Do
+  Begin
+    If TokIsPunct(J, '(') Then Inc(Depth)
+    Else If TokIsPunct(J, ')') Then Dec(Depth);
+    Inc(J);
+  End;
+  If Not ((J < EPEnd) And (TokenPool^[J]^.Kind = TK_OP) And (TokenPool^[J]^.Val = '^')) Then Exit;
+  Inc(EP);
+  ParseFuncCall(PI, Up);
+  If (Not EPAtEnd) And (TokenPool^[EP]^.Kind = TK_OP) And (TokenPool^[EP]^.Val = '^') Then Inc(EP);
+  T := TypeTab^[T]^.BaseTypeIdx;
+  If T >= 0 Then T := TypeResolve(T);
+  ParseLValueSuffixW32(PI, T);
+  If T >= 0 Then T := TypeResolve(T);
+  WithFuncPtrW32 := True;
+End;
+
 
 { ------------------------------------------------------------ }
 { Try ... Except ... End / Try ... Finally ... End               }
@@ -25130,7 +25173,9 @@ Begin
       Begin
         WI := 0;
         Repeat
-          If Not ParseLValueAddrW32(PI, TIdx) Then Break;
+          { With F(args)^ Do : pointeur rendu par une fonction }
+          If Not WithFuncPtrW32(PI, TIdx) Then
+            If Not ParseLValueAddrW32(PI, TIdx) Then Break;
           If WithDepth < 8 Then
           Begin
             WithVarPI[WithDepth]   := PI;

@@ -62,6 +62,10 @@
 #     du depot BIOLOGIE-0, APPS/ELEMENTS.PAS (Table des elements) et
 #     APPS/CHEMDRAW.PAS (Dessin de chimie) du depot QCHIMIE (dossier
 #     Science du bureau) ;
+#  3e. compile APPS/MAXIMIZE.PAS (Maximilien CRM), APPS/SIMPLY.PAS
+#     (Sample Accounting), APPS/ACROBAT.PAS (Acrodoc), APPS/NEWS.PAS
+#     (News Master) et APPS/POWERPNT.PAS (PresentPoint) du depot OFFICE-0
+#     (dossier Productivite du bureau) ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS, PAYSAGE.BMP pour Paint,
@@ -163,6 +167,11 @@ for B in ASTRO SIMUPLAN CS3DA ELEMENTS CHEMDRAW; do
 done
 # modele du corps humain et physiologie de l'Anatomie 3D (a cote de CS3DA.EXE)
 cp "$ROOT/APPS/HUMAN.C3D" "$ROOT/APPS/PHYSIO.CFG" "$W/cd/"
+echo "== Productivite (OS2PC : APPS/MAXIMIZE.PAS, SIMPLY.PAS, ACROBAT.PAS, NEWS.PAS et POWERPNT.PAS)"
+for B in MAXIMIZE SIMPLY ACROBAT NEWS POWERPNT; do
+  "$W/os2pc" -Q "$ROOT/APPS/$B.PAS" "$W/cd/$B.EXE" > "$W/$B.log" 2>&1 || { cat "$W/$B.log"; exit 1; }
+  echo "   $B.EXE"
+done
 echo "== OS2PC.EXE (compilateur natif : OS2PC.PAS compile par OS2PC) et exemples de Pascal Developer"
 "$W/os2pc" -Q "$ROOT/TOOLS/OS2PC.PAS" "$W/cd/OS2PC.EXE"
 cp "$ROOT"/IMAGE/EXEMPLES/*.PAS "$W/cd/"
