@@ -27,7 +27,8 @@ REM DIGAUDIO.PAS, Audio numerique, MP3PLAY.PAS, Lecteur MP3 (tout en un fichier,
 REM exemple IMAGE\MUSIQUE\*.MP3), et NOTATOR.PAS, Notator for OS2-Zero (porte
 REM d'OFFICE-0, exemples .SON et .MID de IMAGE\NOTATOR), du dossier Multimedia, TASKMGR.PAS,
 REM Gestionnaire des taches, du dossier Systeme OS/2, BROWSER.PAS,
-REM Navigateur Web, du bureau et du dossier Systeme OS/2, PASDEV.PAS,
+REM Navigateur Web, du bureau et du dossier Systeme OS/2 (les dossiers Productivite, Jeux,
+REM Multimedia et Loisirs sont sur le bureau), PASDEV.PAS,
 REM Pascal Developer, et GETSRC.PAS, Telecharger le code source d'OS2-Zero (GitHub), du dossier
 REM Developer Kit, CALC.PAS, Calculatrice, et
 REM EXPLORER.PAS, Explorateur OS2-0, et OUTLINK.PAS, Outlink (client de messagerie
@@ -41,6 +42,13 @@ FOR %%F IN (..\*.PAS) DO ..\BUILD\OS2PC -Q %%F ..\BUILD\CD\%%~nF.EXE
 ECHO == Paint (OS2PC : APPS\PAINT.PAS, porte de Pasdows 95)
 ..\BUILD\OS2PC -Q ..\APPS\PAINT.PAS ..\BUILD\CD\PAINT.EXE
 IF ERRORLEVEL 1 GOTO ERREUR
+ECHO == Loisirs (OS2PC : APPS\ASTROMAN.PAS et APPS\REVES.PAS, portes du depot Mystix)
+REM Astromancie (interpretation de l'astrologie) et Onirologie (interpretation des reves),
+REM dossier Loisirs du bureau
+..\BUILD\OS2PC -Q ..\APPS\ASTROMAN.PAS ..\BUILD\CD\ASTROMAN.EXE
+IF ERRORLEVEL 1 GOTO ERREUR
+..\BUILD\OS2PC -Q ..\APPS\REVES.PAS ..\BUILD\CD\REVES.EXE
+IF ERRORLEVEL 1 GOTO ERREUR
 REM nom 8.3 sur le CD-ROM (ISO 9660 niveau 1)
 IF EXIST ..\BUILD\CD\LAUNCHPAD.EXE MOVE /Y ..\BUILD\CD\LAUNCHPAD.EXE ..\BUILD\CD\LAUNCHPD.EXE > NUL
 ECHO == OS2PC.EXE (compilateur natif : OS2PC.PAS compile par OS2PC) et exemples de Pascal Developer
@@ -51,6 +59,7 @@ COPY ..\IMAGE\EXEMPLES\*.BMP ..\BUILD\CD > NUL
 COPY ..\IMAGE\EXEMPLES\*.GAT ..\BUILD\CD > NUL
 COPY ..\IMAGE\EXEMPLES\*.PDF ..\BUILD\CD > NUL
 COPY ..\IMAGE\EXEMPLES\*.XLC ..\BUILD\CD > NUL
+COPY ..\IMAGE\EXEMPLES\REVE.TXT ..\BUILD\CD > NUL
 ECHO == Bibliotheques DOSCALLS.DLL, FKA.DLL, HPFS.IFS, NTFS.IFS, VIOCALLS.DLL, MOUCALLS.DLL, NLS.DLL, KBDCALLS.DLL, MONCALLS.DLL, MSG.DLL, NAMPIPES.DLL, SESMGR.DLL, QUECALLS.DLL, SPOOLCP.DLL, RMINFO.DLL, OS2SM.DLL, HELPMGR.DLL, LIBUNI.DLL, PMDRAG.DLL, PMWIN.DLL, PMGPI.DLL, PMMERGE.DLL, PMPIC.DLL, PMSHAPI.DLL, PMSPL.DLL, PMVIOP.DLL, API16.DLL, PMWP.DLL et PMCTLS.DLL
 ..\BUILD\OS2PC -Q ..\DLL\DOSCALLS.PAS ..\BUILD\CD\DOSCALLS.DLL
 IF ERRORLEVEL 1 GOTO ERREUR

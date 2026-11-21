@@ -19,7 +19,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
               INVADERS.EXE, FREECELL.EXE, MISSILE.EXE, L25.EXE,
-              DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
+              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
               (et ses exemples .SON, .MID et
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE, GETSRC.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
@@ -113,6 +113,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC MISSILE.PAS                         -> MISSILE.EXE (Commandement des missiles)
   OS2PC L25.PAS                             -> L25.EXE (L25)
   OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
+  OS2PC APPS\ASTROMAN.PAS                   -> ASTROMAN.EXE (Astromancie)
+  OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
   OS2PC DIGAUDIO.PAS                        -> DIGAUDIO.EXE (Audio numerique)
   OS2PC MP3PLAY.PAS                         -> MP3PLAY.EXE (Lecteur MP3)
   OS2PC NOTATOR.PAS                         -> NOTATOR.EXE (Notator for OS2-Zero)
@@ -700,7 +702,9 @@ Bureau (PMSHELL.EXE)
 PMSHELL.EXE (Workplace Shell) est lance au demarrage
 (PROTSHELL=C:\PMSHELL.EXE). Bureau en 640 x 480 x 16 couleurs avec les
 objets Systeme OS/2, Lecteurs, Invite de commandes OS/2, Liste des
-fenetres, Modeles, Broyeur, Arret et Fenetre OS/2, puis le contenu de C:\DESKTOP (ou
+fenetres, Modeles, Broyeur, Arret, Fenetre OS/2 et Navigateur Web, les
+dossiers Developer Kit, Productivite, Jeux, Multimedia et Loisirs, puis
+le contenu de C:\DESKTOP (ou
 D:\DESKTOP si C: est en lecture seule) et les raccourcis ; dossiers
 Systeme OS/2, Lecteurs, Modeles et repertoires (programmes, fichiers de
 commandes, fichiers de donnees ; visionneuse de texte). Pas de limite
@@ -710,7 +714,7 @@ au nombre de fenetres ni d'objets par dossier.
   Glisser-deposer (bouton 2, ou bouton 1 dans un dossier) : sur un
   dossier = deplacer (Ctrl = copier) ; sur le Broyeur = supprimer ; sur
   le LaunchPad = l'y ajouter ; Ctrl+Maj = creer un raccourci.
-  Un objet programme d'un dossier du systeme (Jeux, Productivite...) ou
+  Un objet programme d'un dossier du systeme (Jeux, Loisirs...) ou
   pose sur le bureau n'est jamais deplace ni supprime : le deposer
   ailleurs cree un raccourci (son executable reste en place).
   Raccourcis (shadows) : menu "Creer un raccourci" ; Modeles : Dossier,
@@ -774,7 +778,7 @@ apparence de l'installation de Warp 3) :
     libre, creer une partition HPFS (taille en Mo), supprimer, choisir ;
   Formatage HPFS (nom du volume) ou conservation des fichiers ;
   Composants : bureau et LaunchPad, utilitaires, programmes d'essai,
-    disque virtuel, jeux, multimedia, reseau TCP/IP ;
+    disque virtuel, jeux et loisirs, multimedia, reseau TCP/IP ;
   Transfert des fichiers (barre aux logos OS/2), CONFIG.SYS du disque,
     zone d'amorcage et MBR ; Redemarrer.
 Tab et Maj+Tab : controle suivant ; F1 : aide. Parametres : /AUTO
@@ -831,8 +835,39 @@ met COUNTRY= dans l'environnement ; DOSCALLS.DLL le relit a chaque
 DosQueryCtryInfo. Les champs combines de PMWIN deroulent leur liste au
 clic.
 
-Jeux (dossier Systeme OS/2, Jeux)
----------------------------------
+Loisirs (dossier Loisirs du bureau)
+-----------------------------------
+Deux applications portees du depot Mystix (Turbo Pascal, BGI 640 x 480)
+vers Presentation Manager ; sources dans APPS (un seul fichier chacune :
+moteur, textes, dictionnaire et interface). Fenetre de PM avec la barre
+de menus d'OS/2 (construite a partir des menus d'origine, dans la langue
+de LANGUAGE= : FR, EN, DE, ES, IT ; F10, Alt + lettre, F1 a F9),
+pages sur fond blanc, barres d'information et d'etat grises, boites de
+dialogue et barres de defilement d'OS/2, messages par WinMessageBox ; la
+fenetre tient dans un ecran de 640 x 480.
+  Astromancie (ASTROMAN.EXE ; source APPS\ASTROMAN.PAS) :
+  interpretation de l'astrologie (clone graphique d'URRIS, 1985).
+  Nouvel horoscope F2 (ville retrouvee dans l'atlas integre : latitude,
+  longitude, decalage horaire), calepin F3 (ASTROMAN.CAL), date F4,
+  theme natal F5, maisons F6, carte du ciel F7 (T : planetes du jour),
+  theme du jour F8, previsions F9, tarot astrologique, dominante,
+  ascendant, detail d'une planete (1-9, 0) ou d'une maison, comparaison
+  de deux themes, exportation de la page (ASTROMAN.TXT), guide F1.
+  ASTROMAN /TEST j m a h mn decalage lond lonm ouest latd latm sud jj mj
+  aj : positions et interpretation en mode texte.
+  Onirologie (REVES.EXE ; source APPS\REVES.PAS) : interpretation des
+  reves. Editeur du recit F5 (Tab : accent ; mots-cles surlignes),
+  proprietes du reve, dictionnaire integre de 442 symboles et 17831
+  mots-cles en cinq langues, sens du reve F9, rapport F6, tonalite et
+  emotions F7 (camembert, jauge, evolution), themes et domaines F8,
+  classification, archetypes, dictionnaire, journal des reves
+  (REVES.JNL) et statistiques, importation et exportation de textes.
+  REVES recit.txt ouvre un recit (exemple : REVE.TXT) ;
+  REVES /TEST recit.txt et REVES /RAPPORT recit.txt : analyse en mode
+  texte (memes resultats que l'original compile par Free Pascal).
+
+Jeux (dossier Jeux du bureau)
+-----------------------------
 Jeux de Presentation Manager (realisations originales des jeux
 traditionnels, composant Jeux de l'installation) :
   Solitaire - Klondike (KLONDIKE.EXE) : patience Klondike ; glisser ou
@@ -999,8 +1034,8 @@ Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique,
 Bataille, Invasion de l'espace, FreeCell, Commandement des missiles) :
 donne reproductible.
 
-Multimedia (dossier Systeme OS/2, Multimedia)
----------------------------------------------
+Multimedia (dossier Multimedia du bureau)
+-----------------------------------------
 Audio numerique (DIGAUDIO.EXE, "Digital Audio" de MMPM/2) : jouer,
 enregistrer et modifier des sons WAV (PCM 8 ou 16 bits, mono ou
 stereo, 3 Mo au plus) ; forme d'onde, selection, couper, copier,
@@ -1235,7 +1270,7 @@ Calculatrice (CALC.EXE, dossier Productivite)
 ---------------------------------------------
 OS/2 Warp 3 n'avait pas de calculatrice : celle de Pasdows 95 (source
 CALC.PAS) est portee vers l'API d'OS/2 (PMWIN, PMGPI) et l'apparence de
-Warp. Systeme OS/2 - Productivite - Calculatrice (ou CALC a l'invite).
+Warp. Bureau - Productivite - Calculatrice (ou CALC a l'invite).
   - mode Standard : chiffres, virgule, +/-, + - * /, racine carree
     (sqrt), pourcentage, 1/x, egal (repete la derniere operation),
     memoire MC, MR, MS, M+ (indicateur M), Retour, CE, C ; double
@@ -1255,7 +1290,7 @@ Explorateur OS2-0 (EXPLORER.EXE, dossier Productivite)
 ------------------------------------------------------
 Explorateur de fichiers a deux volets dans le style de Windows 95, porte
 de l'Explorateur Pasdows (source EXPLORER.PAS). Application de PM
-independante : le Workplace Shell ne change pas. Systeme OS/2 -
+independante : le Workplace Shell ne change pas. Bureau -
 Productivite - Explorateur OS2-0, ou bouton 2 sur le bureau -
 Explorateur OS2-0 (entre Gestionnaire des taches et Navigateur Web), ou
 EXPLORER [dossier] a l'invite.
@@ -1280,7 +1315,7 @@ EXPLORER [dossier] a l'invite.
 Paint (PAINT.EXE, dossier Productivite)
 ---------------------------------------
 Programme de dessin bitmap porte de Pasdows 95 (source APPS\PAINT.PAS,
-issu de CloneDRAW). Systeme OS/2 - Productivite - Paint, ou PAINT
+issu de CloneDRAW). Bureau - Productivite - Paint, ou PAINT
 [fichier] a l'invite ; une image (.BMP, .PCX, .GIF, .PNG, .JPG...)
 ouverte depuis un dossier du bureau ou l'Explorateur OS2-0 s'ouvre aussi
 dans Paint. Exemple : PAINT PAYSAGE.BMP.
@@ -1301,7 +1336,7 @@ compilateur de Pasdows 95 (un descendant d'OS2PC) et fusionnee dans OS2PC.
 WorDium (WORDIUM.EXE, dossier Productivite)
 -------------------------------------------
 Traitement de texte porte de WORD.PAS du depot OFFICE-0 (source
-WORDIUM.PAS). Systeme OS/2 - Productivite - WorDium, ou WORDIUM
+WORDIUM.PAS). Bureau - Productivite - WorDium, ou WORDIUM
 [/CLASSICMENU | /RUBANMENU] [document] a l'invite (WORDIUM /? : aide) ;
 un document (.DOCX, .DOC, .PDF, .GAT, .GPX, .WPD) ouvert depuis un
 dossier du bureau ou l'Explorateur OS2-0 s'ouvre aussi dans WorDium.
@@ -1328,7 +1363,7 @@ Exemples : WORDIUM MONSTER.GAT, WORDIUM LETTRE.PDF.
 Excelsior (EXCELSIO.EXE, dossier Productivite)
 ----------------------------------------------
 Tableur porte de EXCEL.PAS du depot OFFICE-0 (source EXCELSIO.PAS).
-Systeme OS/2 - Productivite - Excelsior, ou EXCELSIO [/CLASSICMENU |
+Bureau - Productivite - Excelsior, ou EXCELSIO [/CLASSICMENU |
 /RUBANMENU] [classeur] a l'invite (EXCELSIO /? : aide) ; un classeur
 (.XLC, .XLS, .XLSX) ouvert depuis un dossier du bureau ou l'Explorateur
 OS2-0 s'ouvre aussi dans Excelsior. Exemple : EXCELSIO BUDGET.XLC.
@@ -1356,7 +1391,7 @@ OS2-0 s'ouvre aussi dans Excelsior. Exemple : EXCELSIO BUDGET.XLC.
 Outlink (OUTLINK.EXE, dossier Productivite)
 -------------------------------------------
 Client de messagerie dans l'esprit d'Outlook, porte de OUTLOOK.PAS du
-depot OFFICE-0 (source OUTLINK.PAS). Systeme OS/2 - Productivite -
+depot OFFICE-0 (source OUTLINK.PAS). Bureau - Productivite -
 Outlink, ou OUTLINK [/ACCOUNTS:fichier] a l'invite (OUTLINK /? : aide).
 Il faut le composant Reseau TCP/IP (TCPIP32.DLL, TLS32.DLL).
   - fenetre de Presentation Manager : barre de titre et barre de menus

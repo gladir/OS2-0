@@ -38,8 +38,9 @@ Program INSTALL;
        volume, ou conservation des fichiers d'une partition HPFS ou NTFS
        existante ;
     5. Composants : bureau et LaunchPad, utilitaires, programmes
-       d'essai, disque virtuel, jeux (Solitaire - Klondike, Echecs,
-       Mahjongg, Sudoku : dossier Jeux de Systeme OS/2), multimedia (Audio
+       d'essai, disque virtuel, jeux et loisirs (Solitaire - Klondike,
+       Echecs, Mahjongg, Sudoku... : dossier Jeux du bureau ; Astromancie
+       et Onirologie : dossier Loisirs du bureau), multimedia (Audio
        numerique, Lecteur MP3, MDM.DLL, pilotes des cartes son, sons), reseau TCP/IP
        (TCPIP32.DLL, pilotes E1000 et PCNET, IFCONFIG, PING, HOST,
        WGET, messagerie Outlink) ;
@@ -1080,7 +1081,8 @@ Begin
           (U = 'ASTEROID.EXE') Or (U = 'BADUGI.EXE') Or (U = 'TTT.EXE') Or (U = 'BASEBALL.EXE') Or
           (U = 'EXCAVAT.EXE') Or (U = 'PINBALL.EXE') Or (U = 'BARBU.EXE') Or
           (U = 'BREAKOUT.EXE') Or (U = 'BATAILLE.EXE') Or (U = 'INVADERS.EXE') Or
-          (U = 'FREECELL.EXE') Or (U = 'MISSILE.EXE') Or (U = 'L25.EXE') Then
+          (U = 'FREECELL.EXE') Or (U = 'MISSILE.EXE') Or (U = 'L25.EXE') Or
+          (U = 'ASTROMAN.EXE') Or (U = 'REVES.EXE') Then
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or
@@ -1222,12 +1224,12 @@ Begin
                     'Virtuelle Platte im Speicher (4 MB)', 'Disco virtual en memoria (4 MB)',
                     'Disco virtuale in memoria (4 MB)', 'Disk virtual n'#137' kujtes'#137' (4 MB)'), OptRam <> 0,
                     BS_AUTOCHECKBOX);
-        Hw := Check(30, Y + 130, ID_CGAMES, L('Vingt jeux (Klondike, Echecs, Backgammon, Billard...)',
-                    'Twenty games (Klondike, Chess, Backgammon, Pool...)',
-                    'Zwanzig Spiele (Klondike, Schach, Backgammon...)',
-                    'Veinte juegos (Klondike, Ajedrez, Backgammon...)',
-                    'Venti giochi (Klondike, Scacchi, Backgammon...)',
-                    'Nj'#137'zet loj'#137'ra (Klondike, Shah...)'), OptGames <> 0, BS_AUTOCHECKBOX);
+        Hw := Check(30, Y + 130, ID_CGAMES, L('Jeux et loisirs (Klondike, Echecs, Astromancie, Onirologie...)',
+                    'Games and leisure (Klondike, Chess, Astromancie, Onirologie...)',
+                    'Spiele und Freizeit (Klondike, Schach, Astromancie...)',
+                    'Juegos y ocio (Klondike, Ajedrez, Astromancie...)',
+                    'Giochi e svago (Klondike, Scacchi, Astromancie...)',
+                    'Loj'#137'ra dhe kalim kohe (Klondike, Shah...)'), OptGames <> 0, BS_AUTOCHECKBOX);
         Hw := Check(30, Y + 156, ID_CMM, L('Multim'#130'dia (Audio num'#130'rique, Lecteur MP3, Notator, cartes son)',
                     'Multimedia (Digital Audio, MP3 Player, Notator, sound cards)',
                     'Multimedia (Digital Audio, MP3-Player, Notator, Soundkarten)',

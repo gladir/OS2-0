@@ -21,7 +21,9 @@ Program PMSHELL;
   contient PMSHELL, LAUNCHPAD = 0).
 
   Bureau : objets Systeme OS/2, Lecteurs, Invite de commandes OS/2,
-  Liste des fenetres, Modeles, Broyeur, Arret et Fenetre OS/2, puis le contenu du
+  Liste des fenetres, Modeles, Broyeur, Arret, Fenetre OS/2, Navigateur Web,
+  dossiers Developer Kit, Productivite, Jeux, Multimedia et Loisirs
+  (Astromancie, Onirologie), puis le contenu du
   repertoire du bureau (C:\DESKTOP, ou D:\DESKTOP quand C: est le CD-ROM : les
   objets crees ou deposes sur le bureau) et les
   raccourcis du bureau. Les icones du bureau se deplacent a la souris
@@ -162,8 +164,10 @@ Const
   IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62; IC_INVADERS = 63;
   IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
   IC_MP3PLAY = 68; OB_MP3 = 36;
+  OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
+  VK_LEISURE = 13;
   { controles du carnet des parametres }
   WC_BUTTON = $FFFF0003; WC_STATIC = $FFFF0005;
   BS_PUSHBUTTON = 0; BS_AUTOCHECKBOX = 2; BS_AUTORADIOBUTTON = 4; SS_TEXT = 1; SS_GROUPBOX = 2;
@@ -1016,7 +1020,7 @@ Begin
     OB_COUNTRY : Icon := IC_GLOBE;
     OB_COLORS : Icon := IC_PALETTE;
     OB_LANG : Icon := IC_LANG;
-    OB_GAMES, OB_MMFOLDER, OB_DEVKIT, OB_PRODUCT : Icon := IC_FOLDER;
+    OB_GAMES, OB_MMFOLDER, OB_DEVKIT, OB_PRODUCT, OB_LEISURE : Icon := IC_FOLDER;
   Else
     Icon := IC_FILE;
   End;
@@ -1176,6 +1180,14 @@ Begin
           Dummy := NewItem(V, IC_WEB, OB_GAME, 'Navigateur Web', BrowserPath);
         If PasDevPath <> '' Then
           Dummy := NewItem(V, IC_FOLDER, OB_DEVKIT, 'Developer Kit', '');
+        { dossiers des applications, directement sur le bureau }
+        If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Or
+           (WordiumPath <> '') Or (ExcelsiorPath <> '') Then
+          Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
+        Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
+        Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
+        If FileExists('C:\ASTROMAN.EXE') Or FileExists('C:\REVES.EXE') Then
+          Dummy := NewItem(V, IC_FOLDER, OB_LEISURE, 'Loisirs', '');
         { fichiers et dossiers du repertoire du bureau, puis raccourcis }
         AddSorted(V, DeskDir);
         AddShadows(V, 'BUREAU');
@@ -1200,11 +1212,6 @@ Begin
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
-        If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Or
-           (WordiumPath <> '') Or (ExcelsiorPath <> '') Then
-          Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
-        Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
-        Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
         Dummy := NewItem(V, IC_CMD, OB_DOSWIN, 'Fenetre DOS', '');
         Dummy := NewItem(V, IC_CMD, OB_DOSFS, 'DOS plein ecran', '');
       End;
@@ -1286,6 +1293,16 @@ Begin
         If WordiumPath <> '' Then Dummy := NewItem(V, IC_WORDIUM, OB_GAME, 'WorDium', WordiumPath);
         { Excelsior : tableur (EXCEL.PAS d'OFFICE-0) ; XLC, XLS, XLSX }
         If ExcelsiorPath <> '' Then Dummy := NewItem(V, IC_EXCELSIOR, OB_GAME, 'Excelsior', ExcelsiorPath);
+      End;
+    VK_LEISURE :
+      Begin
+        { Loisirs : Astromancie (interpretation de l'astrologie, ASTROMAN.PAS)
+          et Onirologie (interpretation des reves, REVES.PAS), portes du
+          depot Mystix }
+        If FileExists('C:\ASTROMAN.EXE') Then
+          Dummy := NewItem(V, IC_ASTRO, OB_GAME, 'Astromancie', 'C:\ASTROMAN.EXE');
+        If FileExists('C:\REVES.EXE') Then
+          Dummy := NewItem(V, IC_DREAMS, OB_GAME, 'Onirologie', 'C:\REVES.EXE');
       End;
     VK_DEVKIT :
       Begin
@@ -2159,6 +2176,62 @@ Begin
         GLn(Hps, X + 21, Y + 18, X + 29, Y + 20, CLR_DARKBLUE);
         GLn(Hps, X + 21, Y + 17, X + 29, Y + 19, CLR_DARKBLUE);
         GLn(Hps, X + 21, Y + 15, X + 29, Y + 17, CLR_DARKBLUE);
+      End;
+    IC_ASTRO :
+      Begin
+        { Astromancie : roue du zodiaque (ciel nocturne, anneau dore a
+          douze secteurs, soleil au centre) }
+        For K := -13 To 13 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 169 Do Inc(R);
+          GLn(Hps, X + 15 - R, Y + 15 + K, X + 15 + R, Y + 15 + K, CLR_DARKBLUE);
+          GLn(Hps, X + 15 - R, Y + 15 + K, X + 15 - R, Y + 15 + K, CLR_YELLOW);
+          GLn(Hps, X + 15 + R, Y + 15 + K, X + 15 + R, Y + 15 + K, CLR_YELLOW);
+        End;
+        For K := -9 To 9 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 81 Do Inc(R);
+          GLn(Hps, X + 15 - R, Y + 15 + K, X + 15 - R, Y + 15 + K, CLR_YELLOW);
+          GLn(Hps, X + 15 + R, Y + 15 + K, X + 15 + R, Y + 15 + K, CLR_YELLOW);
+        End;
+        GLn(Hps, X + 15, Y + 24, X + 15, Y + 28, CLR_YELLOW);
+        GLn(Hps, X + 15, Y + 2, X + 15, Y + 6, CLR_YELLOW);
+        GLn(Hps, X + 2, Y + 15, X + 6, Y + 15, CLR_YELLOW);
+        GLn(Hps, X + 24, Y + 15, X + 28, Y + 15, CLR_YELLOW);
+        GLn(Hps, X + 21, Y + 21, X + 24, Y + 24, CLR_YELLOW);
+        GLn(Hps, X + 6, Y + 6, X + 9, Y + 9, CLR_YELLOW);
+        GLn(Hps, X + 6, Y + 24, X + 9, Y + 21, CLR_YELLOW);
+        GLn(Hps, X + 21, Y + 9, X + 24, Y + 6, CLR_YELLOW);
+        GBox(Hps, X + 13, Y + 13, X + 17, Y + 17, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 14, Y + 12, X + 16, Y + 18, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 12, Y + 14, X + 18, Y + 16, CLR_YELLOW, DRO_FILL);
+        GLn(Hps, X + 10, Y + 19, X + 10, Y + 19, CLR_WHITE);
+        GLn(Hps, X + 20, Y + 11, X + 20, Y + 11, CLR_WHITE);
+        GLn(Hps, X + 19, Y + 20, X + 19, Y + 20, CLR_WHITE);
+      End;
+    IC_DREAMS :
+      Begin
+        { Onirologie : croissant de lune et etoiles dans un ciel de nuit }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_DARKBLUE, CLR_BLACK);
+        For K := -10 To 10 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 100 Do Inc(R);
+          GLn(Hps, X + 13 - R, Y + 15 + K, X + 13 + R, Y + 15 + K, CLR_YELLOW);
+        End;
+        For K := -9 To 9 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 81 Do Inc(R);
+          GLn(Hps, X + 18 - R, Y + 18 + K, MinI(X + 18 + R, X + 28), Y + 18 + K, CLR_DARKBLUE);
+        End;
+        GLn(Hps, X + 23, Y + 8, X + 27, Y + 8, CLR_WHITE);
+        GLn(Hps, X + 25, Y + 6, X + 25, Y + 10, CLR_WHITE);
+        GLn(Hps, X + 21, Y + 25, X + 23, Y + 25, CLR_YELLOW);
+        GLn(Hps, X + 22, Y + 24, X + 22, Y + 26, CLR_YELLOW);
+        GLn(Hps, X + 26, Y + 18, X + 26, Y + 18, CLR_WHITE);
       End;
     IC_WAVE :
       Begin
@@ -3281,6 +3354,7 @@ Begin
     OB_PRODUCT : OpenFolder(VK_PRODUCT, '', 'Productivite');
     OB_GAME : RunPm(It(K)^.Path, '');
     OB_MMFOLDER : OpenFolder(VK_MM, '', 'Multimedia');
+    OB_LEISURE : OpenFolder(VK_LEISURE, '', 'Loisirs');
     OB_SOUND :
       If FileExists('C:\DIGAUDIO.EXE') Then RunPm('C:\DIGAUDIO.EXE', It(K)^.Path) Else OpenViewer(It(K)^.Path);
     OB_SONG : RunPm('C:\NOTATOR.EXE', It(K)^.Path);
