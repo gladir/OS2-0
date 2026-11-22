@@ -6965,11 +6965,11 @@ Begin
   If DlgCreate('Gestionnaire de sites', 630, 446) = 0 Then Exit;
   DlgDef := IdConn;
   P := DlgWnd;
-  Lbl(P, 'S'#233'lectionnez une entr'#233'e :', 8, 8, 184);
+  Lbl(P, 'S'#233'lectionnez une entr'#233'e :', 8, 8, 190);
   SmCtl[IdList] := Ctl(P, 'LISTBOX', '', WS_BORDER Or WS_VSCROLL Or LBS_NOTIFY Or WS_TABSTOP, 8, 26, 184, 278, IdList);
-  SmCtl[IdNew] := Ctl(P, 'BUTTON', 'Nouveau site', WS_TABSTOP, 8, 310, 90, 26, IdNew);
-  SmCtl[IdDup] := Ctl(P, 'BUTTON', 'Dupliquer', WS_TABSTOP, 102, 310, 90, 26, IdDup);
-  SmCtl[IdDel] := Ctl(P, 'BUTTON', 'Supprimer', WS_TABSTOP, 8, 340, 90, 26, IdDel);
+  SmCtl[IdNew] := Ctl(P, 'BUTTON', 'Nouveau site', WS_TABSTOP, 8, 310, 184, 26, IdNew);
+  SmCtl[IdDup] := Ctl(P, 'BUTTON', 'Dupliquer', WS_TABSTOP, 8, 340, 90, 26, IdDup);
+  SmCtl[IdDel] := Ctl(P, 'BUTTON', 'Supprimer', WS_TABSTOP, 102, 340, 90, 26, IdDel);
   Dummy := Ctl(P, 'BUTTON', 'G'#233'n'#233'ral', BS_GROUPBOX, 198, 4, 426, 278, 0);
   Lbl(P, 'Nom :', 208, 28, 140);
   SmCtl[IdName] := Ctl(P, 'EDIT', '', WS_BORDER Or ES_AUTOHSCROLL Or WS_TABSTOP, 350, 26, 264, 20, IdName);
@@ -6978,9 +6978,9 @@ Begin
                          224, 72, 390, 18, IdProtoF);
   SmCtl[IdProtoS] := Ctl(P, 'BUTTON', 'SFTP - SSH File Transfer Protocol', BS_AUTORADIOBUTTON, 224, 92, 390, 18, IdProtoS);
   Lbl(P, 'H'#244'te :', 208, 120, 140);
-  SmCtl[IdHost] := Ctl(P, 'EDIT', '', WS_BORDER Or ES_AUTOHSCROLL Or WS_TABSTOP, 350, 118, 166, 20, IdHost);
-  Lbl(P, 'Port :', 522, 120, 46);
-  SmCtl[IdPort] := Ctl(P, 'EDIT', '', WS_BORDER Or WS_TABSTOP, 568, 118, 46, 20, IdPort);
+  SmCtl[IdHost] := Ctl(P, 'EDIT', '', WS_BORDER Or ES_AUTOHSCROLL Or WS_TABSTOP, 350, 118, 156, 20, IdHost);
+  Lbl(P, 'Port :', 512, 120, 48);
+  SmCtl[IdPort] := Ctl(P, 'EDIT', '', WS_BORDER Or WS_TABSTOP, 560, 118, 54, 20, IdPort);
   Lbl(P, 'Authentification :', 208, 146, 140);
   SmCtl[IdAnon] := Ctl(P, 'BUTTON', 'Anonyme', BS_AUTORADIOBUTTON Or WS_GROUP Or WS_TABSTOP, 350, 144, 96, 18, IdAnon);
   SmCtl[IdNormal] := Ctl(P, 'BUTTON', 'Normale', BS_AUTORADIOBUTTON, 452, 144, 96, 18, IdNormal);

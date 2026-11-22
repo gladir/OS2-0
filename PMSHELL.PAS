@@ -1407,8 +1407,6 @@ Begin
           editeur PDF), News Master (NEWS.PAS, mise en page de journaux) et
           PresentPoint (POWERPNT.PAS, presentations) }
         { Bloc-notes : editeur de texte (Bloc-notes de Pasdows 95) }
-        If FileExists('C:\NOTEPAD.EXE') Then
-          Dummy := NewItem(V, IC_NOTEPAD, OB_GAME, 'Bloc-notes', 'C:\NOTEPAD.EXE');
         If FileExists('C:\MAXIMIZE.EXE') Then
           Dummy := NewItem(V, IC_CRM, OB_GAME, 'Maximilien CRM', 'C:\MAXIMIZE.EXE');
         If FileExists('C:\SIMPLY.EXE') Then
@@ -1419,6 +1417,9 @@ Begin
           Dummy := NewItem(V, IC_NEWS, OB_GAME, 'News Master', 'C:\NEWS.EXE');
         If FileExists('C:\POWERPNT.EXE') Then
           Dummy := NewItem(V, IC_PRESENT, OB_GAME, 'PresentPoint', 'C:\POWERPNT.EXE');
+        { Bloc-notes en dernier : les objets precedents gardent leur place }
+        If FileExists('C:\NOTEPAD.EXE') Then
+          Dummy := NewItem(V, IC_NOTEPAD, OB_GAME, 'Bloc-notes', 'C:\NOTEPAD.EXE');
       End;
     VK_LEISURE :
       Begin

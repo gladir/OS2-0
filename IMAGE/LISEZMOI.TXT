@@ -28,7 +28,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
-              GLTEST.EXE, DEMARRE.WAV,
+              GLTEST.EXE, FTPCLI.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -1158,6 +1158,18 @@ ouvert depuis un dossier du bureau s'ouvre dans le Lecteur MP3. Un fil
 decode en avance (anneau de 3 s, MDMSTREAM/MDMFEED) et cede le
 processeur par DosSleep(0) apres chaque trame : la fenetre reste
 active. Exemple : AURORE.MP3 (composition originale synthetisee).
+
+Client FTP (FTPCLI.EXE, dossier Outils reseau)
+----------------------------------------------
+Client FTP et SFTP (SSH-2) porte de Pasdows 95 (source APPS\FTPCLI.PAS).
+Connexion rapide (hote, identifiant, mot de passe, port : 21 pour FTP,
+22 ou sftp://hote pour SFTP) ou Fichier - Gestionnaire de sites
+(sitemanager.xml de FileZilla 3, import et export). Panneaux Site local et
+Site distant, file d'attente (en attente, echoues, reussis), dossiers
+recursifs, droits d'acces (chmod), commande personnalisee. Double-clic
+ou Entree : transferer ; bouton 2 : menus. Sites, historique et cles
+d'hote : C:\RESEAU\ (D:\RESEAU\ au demarrage du CD-ROM).
+  OS2PC APPS\FTPCLI.PAS                     -> FTPCLI.EXE
 
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
 ---------------------------------------------------------------------
