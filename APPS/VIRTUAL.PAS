@@ -4806,13 +4806,9 @@ Procedure BootTest(Path, Keys : String; Wait : LongInt);
 Var T0, K, Step : LongInt; Err, S : String;
 Begin
   LoadFonts;
-  NVm := 0;
-  If VmFromDisk(Path) < 0 Then
-  Begin
-    Vms[0].Used := True; Vms[0].Name := BaseOf(Path); Vms[0].OsType := 'DOS'; Vms[0].Hd0 := Path; Vms[0].Hd1 := '';
-    Vms[0].Fd := ''; Vms[0].BootFd := 0; Vms[0].Vbox := '';
-    NVm := 1;
-  End;
+  Vms[0].Used := True; Vms[0].Name := BaseOf(Path); Vms[0].OsType := 'DOS'; Vms[0].Hd0 := Path; Vms[0].Hd1 := '';
+  Vms[0].Fd := ''; Vms[0].BootFd := 0; Vms[0].Vbox := '';
+  NVm := 1;
   Vms[0].MemMb := 32;
   If Not VmOpen(0, Err) Then
   Begin
@@ -4835,6 +4831,7 @@ Begin
       ' services, disque ' + IStr(DkReads[0]) + ' lectures ' + IStr(DkWrites[0]) + ' ecritures, mode ' +
       Hex(BdaB($49), 2));
   If VmMsg <> '' Then Log('VIRTUAL : ' + VmMsg);
+  If DbgLine <> '' Then Log('VIRTUAL : port E9h "' + DbgLine + '"');
   S := '';
   For K := 0 To 255 Do If SvcCnt[K] > 0 Then S := S + ' ' + Hex(K, 2) + 'h:' + IStr(SvcCnt[K]);
   Log('VIRTUAL : services' + S);
