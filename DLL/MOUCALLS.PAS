@@ -36,6 +36,10 @@ Library MOUCALLS;
   pfWait...) designe un LongInt ; les structures gardent leur
   disposition d'OS/2 (champs USHORT de 16 bits) :
     MOUEVENTINFO  fs (2), Time (4, ms), row (2), col (2)
+  Molette (souris IntelliMouse, paquets de 4 octets du noyau) : extension
+  d'OS/2-0, bits 0100h (rotation vers le haut) et 0200h (vers le bas) de
+  fs et du masque des evenements (MouSetEventMask) ; un evenement par cran,
+  seulement si le masque les demande (PMWIN.DLL : WM_VSCROLL).
     MOUQUEINFO    cEvents, cmaxEvents
     PTRLOC        row, col
     PTRSHAPE      cb, col, row, colHot, rowHot (mode texte : masques ET
@@ -403,6 +407,11 @@ Begin
   End;
 End;
 
+Function MinW(A, B : LongInt) : LongInt;
+Begin
+  If A < B Then MinW := A Else MinW := B;
+End;
+
 { Acceleration : seuils en mickeys par paquet }
 Function Accel(D : LongInt) : LongInt;
 Var A : LongInt;
@@ -528,7 +537,7 @@ End;
 
 { Traiter les paquets en attente dans le noyau }
 Procedure Poll;
-Var Dx, Dy, B, T, Fs, OldR, OldC, Ax, Ay, Px, Py : LongInt; Moved : Boolean;
+Var Dx, Dy, B, T, Fs, OldR, OldC, Ax, Ay, Px, Py, Wz, K : LongInt; Moved : Boolean;
 Begin
   If Not Present Then Exit;
   ModeCheck;
@@ -536,6 +545,10 @@ Begin
   While KrnMouRead(LongInt(@Pk)) <> 0 Do
   Begin
     Dx := Accel(Pk[0]); Dy := Accel(Pk[1]); B := Pk[2]; T := Pk[3];
+    { molette : bits 8 a 15 (signes) ; boutons : bits 0 a 2 }
+    Wz := (B Shr 8) And 255;
+    If Wz >= 128 Then Wz := Wz - 256;
+    B := B And 7;
     Px := PosX; Py := PosY;
     If VBoxAbs(Ax, Ay, B) Then
     Begin
@@ -576,6 +589,10 @@ Begin
         Enqueue(Fs, T, CurRow, CurCol);
     End;
     Buttons := B;
+    { molette : un evenement par cran (vers le haut : Z negatif) }
+    If (Wz <> 0) And (OpenCount > 0) And ((EvMask And $0300) <> 0) Then
+      For K := 1 To MinW(Abs(Wz), 8) Do
+        If Wz < 0 Then Enqueue($0100, T, CurRow, CurCol) Else Enqueue($0200, T, CurRow, CurCol);
   End;
   If (CurRow <> OldR) Or (CurCol <> OldC) Then Refresh;
 End;
@@ -983,7 +1000,7 @@ Begin
   If R = NO_ERROR Then
   Begin
     M := RdL(PMask);
-    If (M And Not $7F) <> 0 Then R := ERROR_MOUSE_INV_MASK
+    If (M And Not $037F) <> 0 Then R := ERROR_MOUSE_INV_MASK
     Else
     Begin
       Poll;

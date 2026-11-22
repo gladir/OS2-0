@@ -175,7 +175,7 @@ Const
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
-  OB_NETTOOLS = 41; IC_FTPCLI = 83; IC_SSHCLI = 84;
+  OB_NETTOOLS = 41; IC_FTPCLI = 83; IC_SSHCLI = 84; IC_MSTSC = 85;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1461,7 +1461,7 @@ Begin
         If FileExists('C:\ASTRO.EXE') Or FileExists('C:\SIMUPLAN.EXE') Or FileExists('C:\CS3DA.EXE') Or
            FileExists('C:\ELEMENTS.EXE') Or FileExists('C:\CHEMDRAW.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_SCIENCE, 'Science', '');
-        If FileExists('C:\FTPCLI.EXE') Or FileExists('C:\SSHCLI.EXE') Then
+        If FileExists('C:\FTPCLI.EXE') Or FileExists('C:\SSHCLI.EXE') Or FileExists('C:\MSTSC.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_NETTOOLS, 'Outils r'#130'seau', '');
         { fichiers et dossiers du repertoire du bureau, puis raccourcis }
         AddSorted(V, DeskDir);
@@ -1603,12 +1603,15 @@ Begin
       End;
     VK_NETTOOLS :
       Begin
-        { Outils reseau : Client FTP (FTP et SFTP) et Client SSH, portes de
-          Pasdows 95 (APPS/FTPCLI.PAS, APPS/SSHCLI.PAS) }
+        { Outils reseau : Client FTP (FTP et SFTP), Client SSH et Connexion
+          Bureau a distance (RDP), portes de Pasdows 95 (APPS/FTPCLI.PAS,
+          APPS/SSHCLI.PAS, APPS/MSTSC.PAS) }
         If FileExists('C:\FTPCLI.EXE') Then
           Dummy := NewItem(V, IC_FTPCLI, OB_GAME, 'Client FTP', 'C:\FTPCLI.EXE');
         If FileExists('C:\SSHCLI.EXE') Then
           Dummy := NewItem(V, IC_SSHCLI, OB_GAME, 'Client SSH', 'C:\SSHCLI.EXE');
+        If FileExists('C:\MSTSC.EXE') Then
+          Dummy := NewItem(V, IC_MSTSC, OB_GAME, 'Connexion Bureau a distance', 'C:\MSTSC.EXE');
       End;
     VK_SCIENCE :
       Begin
@@ -2871,6 +2874,20 @@ Begin
         FBox(Hps, X + 20, Y + 1, X + 30, Y + 9, CLR_YELLOW, CLR_BLACK);
         GBox(Hps, X + 22, Y + 9, X + 28, Y + 14, CLR_BLACK, DRO_OUTLINE);
         GLn(Hps, X + 25, Y + 3, X + 25, Y + 6, CLR_BLACK);
+      End;
+    IC_MSTSC :
+      Begin
+        { ecran distant (bureau cyan dans un moniteur) devant un petit
+          ordinateur, relies par un cable }
+        FBox(Hps, X + 9, Y + 11, X + 30, Y + 29, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 11, Y + 14, X + 28, Y + 27, CLR_DARKCYAN, DRO_FILL);
+        GBox(Hps, X + 11, Y + 25, X + 28, Y + 27, CLR_DARKBLUE, DRO_FILL);
+        GBox(Hps, X + 13, Y + 16, X + 17, Y + 19, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 15, Y + 8, X + 24, Y + 10, CLR_PALEGRAY, DRO_FILL);
+        FBox(Hps, X + 1, Y + 1, X + 13, Y + 12, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 4, X + 11, Y + 10, CLR_BLUE, DRO_FILL);
+        GLn(Hps, X + 13, Y + 6, X + 19, Y + 6, CLR_DARKGREEN);
+        GLn(Hps, X + 19, Y + 6, X + 19, Y + 8, CLR_DARKGREEN);
       End;
     IC_DEBUGGER :
       Begin
@@ -6773,6 +6790,8 @@ Begin
       If ViewKey(V, Mp1, Mp2) Then ViewProc := 1
       Else ViewProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
     WM_VSCROLL :
+      If Vw(V)^.Kind = VK_DESK Then ViewProc := 1   { molette : le bureau ne defile pas }
+      Else
       Begin
         Sc := Hi16(Mp2);
         Case Sc Of
