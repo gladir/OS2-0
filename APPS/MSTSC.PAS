@@ -3341,7 +3341,7 @@ Begin
   { le focus peut etre sur un enfant du controle (champ de la liste
     deroulante) : on remonte les parents }
   N := 0;
-  While (K < 0) And (F > 1) And (N < 4) Do
+  While (K < 0) And (F <> 0) And (F <> 1) And (N < 4) Do
   Begin
     For I := 0 To TabN - 1 Do If TabCtl[I] = F Then K := I;
     If K < 0 Then F := WinQueryWindow(F, 5);
@@ -3932,7 +3932,6 @@ Begin
   Dummy := WinQueryWindowRect(H, LongInt(@Rc));
   PaintH := Rc[3];
   Dummy := GpiCreateLogColorTable(Hps, 0, 3, 0, 0, 0);
-  Dummy := GpiSetBackMix(Hps, 2);
   Bar(Hps, 0, 66, Rc[2], Rc[3], ClrFace);
   Bar(Hps, 0, 0, Rc[2], 64, ClrNavy);
   For I := 0 To 5 Do Bar(Hps, 330 + I * 14, 10 + I * 9, Rc[2], 64, $000090 + I * $10);
@@ -4037,7 +4036,7 @@ End;
 
 Procedure Lbl(T : String; Y : LongInt);
 Begin
-  Gray(Ctl(DlgWnd, WC_STATIC, T, SS_TEXT Or DT_VCENTER, 16, Y, 150, 22, 0));
+  Gray(Ctl(DlgWnd, WC_STATIC, T, SS_TEXT Or DT_VCENTER, 12, Y, 158, 22, 0));
 End;
 
 Var
