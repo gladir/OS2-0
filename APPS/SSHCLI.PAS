@@ -9806,6 +9806,15 @@ Begin
     End;
     WM_MOUSEMOVE :
     Begin
+      If (Kind <> KdMain) And (TbHot >= 0) Then
+      Begin
+        { la souris a quitte la barre d'outils : bulle effacee }
+        BigLock;
+        TbHot := -1;
+        SetTip('');
+        Dummy := Inval(MainWnd, 0);
+        BigUnlock;
+      End;
       Dummy := CallUi(Kind, H, EvMove, 0, MousePos(H, Mp1));
       PmProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
     End;
