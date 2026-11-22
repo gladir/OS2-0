@@ -2714,7 +2714,7 @@ Begin
         Len := B0 And $0F;
         If Len = 0 Then Begin Len := GB(S + 1) + 16; Adv := 2; End;
       End;
-      $RlD :
+      $D :
       Begin
         Len := B0 And $0F;
         If Len = 0 Then Begin Len := GB(S + 1) + 1; Adv := 2; End
@@ -2773,9 +2773,9 @@ Begin
         Px := RdPx(S, Bp); S := S + Bp;
         While Len > 0 Do Begin RlPut(Px); Dec(Len); End;
       End;
-      2, $F2, $RlD, $F7 :
+      2, $F2, $D, $F7 :
       Begin
-        If (Code = $RlD) Or (Code = $F7) Then
+        If (Code = $D) Or (Code = $F7) Then
         Begin
           RlFg := RdPx(S, Bp); S := S + Bp;
         End;
