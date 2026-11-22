@@ -93,7 +93,7 @@ Const
   CWant = 600; CHWant = 436;
   RINGMAX = 589824;                               { anneau : 3 s a 48 kHz stereo 16 bits }
   NSPEC = 20;                                     { barres du spectre }
-  NSNAP = 64;                                     { instantanes du spectre }
+  NSNAP = 192;                                    { instantanes du spectre (anneau de 3 s) }
   { zones de la fenetre (coordonnees de haut en bas) }
   DX0 = 8; DY0 = 8; DY1 = 95;                     { afficheur }
   PY0 = 102; PY1 = 124;                           { barre de position }
