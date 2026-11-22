@@ -20,7 +20,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
               INVADERS.EXE, FREECELL.EXE, MISSILE.EXE, L25.EXE, BUBBLE.EXE,
               BLACKJAK.EXE, BLOX.EXE, GOLF.EXE, FROGGER.EXE, HANGMAN.EXE,
-              LIGHTS.EXE,
+              LIGHTS.EXE, LUNAR.EXE, BOSTON.EXE, CANNONBA.EXE, BINGO.EXE,
+              CRAPS.EXE, ROULETTE.EXE, XIANGQI.EXE, TTT3D.EXE, PATIENCE.EXE,
               ASTROMAN.EXE, REVES.EXE (et REVE.TXT), ASTRO.EXE, SIMUPLAN.EXE,
               CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
               DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
@@ -125,6 +126,15 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC FROGGER.PAS                         -> FROGGER.EXE (Grenouille)
   OS2PC HANGMAN.PAS                         -> HANGMAN.EXE (Bonhomme pendu)
   OS2PC LIGHTS.PAS                          -> LIGHTS.EXE (Lights)
+  OS2PC LUNAR.PAS                           -> LUNAR.EXE (Alunissage)
+  OS2PC BOSTON.PAS                          -> BOSTON.EXE (Boston)
+  OS2PC CANNONBA.PAS                        -> CANNONBA.EXE (Cannonball)
+  OS2PC BINGO.PAS                           -> BINGO.EXE (Bingo)
+  OS2PC CRAPS.PAS                           -> CRAPS.EXE (Craps)
+  OS2PC ROULETTE.PAS                        -> ROULETTE.EXE (Roulette)
+  OS2PC XIANGQI.PAS                         -> XIANGQI.EXE (Xiangqi)
+  OS2PC TTT3D.PAS                           -> TTT3D.EXE (Tic-Tac-Toe 3D)
+  OS2PC PATIENCE.PAS                        -> PATIENCE.EXE (Patience)
   OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
   OS2PC APPS\ASTROMAN.PAS                   -> ASTROMAN.EXE (Astromancie)
   OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
@@ -1148,6 +1158,25 @@ traditionnels, composant Jeux de l'installation) :
   Lights (LIGHTS.EXE) : eteindre toutes les lampes (une lampe inverse ses
   voisines) ; annuler, indice, solution, minimum exact. Porte de
   LIGHTS.PAS (7iles). /SEED:n, /LEVEL:n, /AUTO, /TEST.
+  Alunissage (LUNAR.EXE) : poser le module lunaire sur une piste
+  (moteur, propulseurs, carburant ; pistes x1 a x5). Porte de LUNAR.PAS.
+  Boston (BOSTON.EXE) : jeu de levees a quatre avec encheres de 5 a 13
+  levees ; demandeur seul contre trois. Porte de BOSTON.PAS.
+  Cannonball (CANNONBA.EXE) : l'homme-canon du cirque, angle, puissance,
+  filet a deplacer ; spectacles de 10 artistes. Porte de CANNONBA.PAS.
+  Bingo (BINGO.EXE) : bingo a 75 boules contre 1 a 3 ordinateurs, on
+  marque et on crie BINGO soi-meme. Porte de BINGO.PAS.
+  Craps (CRAPS.EXE) : des de casino, ligne de passe, Ne passe pas, champ,
+  cote. Porte de CRAPS.PAS.
+  Roulette (ROULETTE.EXE) : roulette europeenne, cylindre qui tourne,
+  tapis complet. Porte de ROULETTE.PAS.
+  Xiangqi (XIANGQI.EXE) : echecs chinois contre l'ordinateur (alpha-beta,
+  trois niveaux) ou a deux. Porte de XIANGQI.PAS.
+  Tic-Tac-Toe 3D (TTT3D.EXE) : morpion dans un cube 4x4x4 (76 lignes) ou
+  3x3x3. Porte de TTT3D.PAS.
+  Patience (PATIENCE.EXE) : solitaire a rang de base, reserves, pioche
+  trois par trois ou une a une. Porte de PATIENCE.PAS.
+  Tous : /SEED:n, /AUTO, /NOSOUND, /TEST (7iles).
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
 Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,

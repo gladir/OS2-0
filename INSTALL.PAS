@@ -1084,6 +1084,8 @@ Begin
           (U = 'FREECELL.EXE') Or (U = 'MISSILE.EXE') Or (U = 'L25.EXE') Or (U = 'BUBBLE.EXE') Or
           (U = 'BLACKJAK.EXE') Or (U = 'BLOX.EXE') Or (U = 'GOLF.EXE') Or (U = 'FROGGER.EXE') Or (U = 'HANGMAN.EXE') Or
           (U = 'LIGHTS.EXE') Or
+          (U = 'LUNAR.EXE') Or (U = 'BOSTON.EXE') Or (U = 'CANNONBA.EXE') Or (U = 'BINGO.EXE') Or (U = 'CRAPS.EXE') Or
+          (U = 'ROULETTE.EXE') Or (U = 'XIANGQI.EXE') Or (U = 'TTT3D.EXE') Or (U = 'PATIENCE.EXE') Or
           (U = 'ASTROMAN.EXE') Or (U = 'REVES.EXE') Then
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'GLTEST.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or

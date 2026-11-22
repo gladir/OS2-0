@@ -27,7 +27,10 @@
 #     L25.PAS (L25, parcours du cavalier), BUBBLE.PAS (Bubble Shooter, porte
 #     du prototype BS.PAS de 7iles), BLACKJAK.PAS (BlackJack), BLOX.PAS
 #     (Blox), GOLF.PAS (Golf, cartes), FROGGER.PAS (Grenouille), HANGMAN.PAS
-#     (Bonhomme pendu), LIGHTS.PAS (Lights), et
+#     (Bonhomme pendu), LIGHTS.PAS (Lights), LUNAR.PAS (Alunissage), BOSTON.PAS
+#     (Boston), CANNONBA.PAS (Cannonball), BINGO.PAS (Bingo), CRAPS.PAS (Craps),
+#     ROULETTE.PAS (Roulette), XIANGQI.PAS (Xiangqi), TTT3D.PAS (Tic-Tac-Toe
+#     3D), PATIENCE.PAS (Patience), et
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), MP3PLAY.PAS
 #     (Lecteur MP3 : decodeur, liste de lecture et egaliseur dans le meme
 #     fichier, dossier Multimedia ; son exemple IMAGE/MUSIQUE/*.MP3 est

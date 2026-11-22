@@ -178,7 +178,8 @@ Const
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
   OB_NETTOOLS = 41; IC_FTPCLI = 83; IC_SSHCLI = 84; IC_MSTSC = 85; IC_BUBBLE = 86;
   IC_BLACKJAK = 87; IC_BLOX = 88; IC_GOLF = 89; IC_FROGGER = 90; IC_HANGMAN = 91; IC_LIGHTS = 92;
-  IC_VIRTUAL = 93;
+  IC_VIRTUAL = 93; IC_LUNAR = 94; IC_BOSTON = 95; IC_CANNONBA = 96; IC_BINGO = 97; IC_CRAPS = 98;
+  IC_ROULETTE = 99; IC_XIANGQI = 100; IC_TTT3D = 101; IC_PATIENCE = 102;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1468,12 +1469,12 @@ Begin
   If Pos('.', B) > 0 Then B := Copy(B, 1, Pos('.', B) - 1);
   B := ' ' + B + ' ';
   GameGenre := 0;
-  If Pos(B, ' KLONDIKE FREECELL POKER BACCARAT BADUGI BARBU BATAILLE BLACKJAK GOLF ') > 0 Then GameGenre := 1
-  Else If Pos(B, ' ECHECS OTHELLO CHECKERS BACKGAM BATTLE POWER4 TTT L25 ') > 0 Then GameGenre := 2
+  If Pos(B, ' KLONDIKE FREECELL POKER BACCARAT BADUGI BARBU BATAILLE BLACKJAK GOLF BOSTON PATIENCE ') > 0 Then GameGenre := 1
+  Else If Pos(B, ' ECHECS OTHELLO CHECKERS BACKGAM BATTLE POWER4 TTT L25 XIANGQI TTT3D ') > 0 Then GameGenre := 2
   Else If Pos(B, ' MAHJONGG SUDOKU HEX2048 SOKOBAN HANOIS LIGHTS HANGMAN TILEMAN ') > 0 Then GameGenre := 3
-  Else If Pos(B, ' CENTIPED ASTEROID EXCAVAT PINBALL BREAKOUT INVADERS MISSILE BUBBLE BLOX FROGGER BABY ') > 0 Then
+  Else If Pos(B, ' CENTIPED ASTEROID EXCAVAT PINBALL BREAKOUT INVADERS MISSILE BUBBLE BLOX FROGGER BABY LUNAR CANNONBA ') > 0 Then
     GameGenre := 4
-  Else If Pos(B, ' YATHZEE 421 BASEBALL BILLARD ') > 0 Then GameGenre := 5;
+  Else If Pos(B, ' YATHZEE 421 BASEBALL BILLARD BINGO CRAPS ROULETTE ') > 0 Then GameGenre := 5;
 End;
 
 Function SortCat(K : LongInt) : LongInt;
@@ -1692,6 +1693,15 @@ Begin
         If FileExists('C:\HANGMAN.EXE') Then
           Dummy := NewItem(V, IC_HANGMAN, OB_GAME, 'Bonhomme pendu', 'C:\HANGMAN.EXE');
         If FileExists('C:\LIGHTS.EXE') Then Dummy := NewItem(V, IC_LIGHTS, OB_GAME, 'Lights', 'C:\LIGHTS.EXE');
+        If FileExists('C:\LUNAR.EXE') Then Dummy := NewItem(V, IC_LUNAR, OB_GAME, 'Alunissage', 'C:\LUNAR.EXE');
+        If FileExists('C:\BOSTON.EXE') Then Dummy := NewItem(V, IC_BOSTON, OB_GAME, 'Boston', 'C:\BOSTON.EXE');
+        If FileExists('C:\CANNONBA.EXE') Then Dummy := NewItem(V, IC_CANNONBA, OB_GAME, 'Cannonball', 'C:\CANNONBA.EXE');
+        If FileExists('C:\BINGO.EXE') Then Dummy := NewItem(V, IC_BINGO, OB_GAME, 'Bingo', 'C:\BINGO.EXE');
+        If FileExists('C:\CRAPS.EXE') Then Dummy := NewItem(V, IC_CRAPS, OB_GAME, 'Craps', 'C:\CRAPS.EXE');
+        If FileExists('C:\ROULETTE.EXE') Then Dummy := NewItem(V, IC_ROULETTE, OB_GAME, 'Roulette', 'C:\ROULETTE.EXE');
+        If FileExists('C:\XIANGQI.EXE') Then Dummy := NewItem(V, IC_XIANGQI, OB_GAME, 'Xiangqi', 'C:\XIANGQI.EXE');
+        If FileExists('C:\TTT3D.EXE') Then Dummy := NewItem(V, IC_TTT3D, OB_GAME, 'Tic-Tac-Toe 3D', 'C:\TTT3D.EXE');
+        If FileExists('C:\PATIENCE.EXE') Then Dummy := NewItem(V, IC_PATIENCE, OB_GAME, 'Patience', 'C:\PATIENCE.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -3154,6 +3164,227 @@ Begin
         GLn(Hps, X + 14, Y + 11, X + 19, Y + 11, CLR_GREEN);
         GLn(Hps, X + 14, Y + 8, X + 16, Y + 8, CLR_GREEN);
         GLn(Hps, X + 5, Y + 23, X + 12, Y + 23, CLR_WHITE);
+      End;
+    IC_LUNAR :
+      Begin
+        { ciel noir etoile, Terre, sol gris et sa piste balisee, module
+          lunaire dore sur sa flamme }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_BLACK, CLR_DARKGRAY);
+        GBox(Hps, X + 4, Y + 26, X + 4, Y + 26, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 12, Y + 28, X + 12, Y + 28, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 8, Y + 20, X + 8, Y + 20, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 27, Y + 15, X + 27, Y + 15, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 18, Y + 27, X + 18, Y + 27, CLR_PALEGRAY, DRO_FILL);
+        GDisc(Hps, X + 25, Y + 24, 3, CLR_BLUE);
+        GLn(Hps, X + 24, Y + 25, X + 25, Y + 26, CLR_GREEN);
+        GLn(Hps, X + 22, Y + 23, X + 22, Y + 25, CLR_CYAN);
+        GBox(Hps, X + 2, Y + 2, X + 29, Y + 6, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 2, Y + 7, X + 7, Y + 8, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 3, Y + 9, X + 5, Y + 10, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 23, Y + 7, X + 29, Y + 9, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 25, Y + 10, X + 29, Y + 12, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 3, Y + 3, X + 7, Y + 3, CLR_DARKGRAY);
+        GLn(Hps, X + 21, Y + 4, X + 26, Y + 4, CLR_DARKGRAY);
+        GBox(Hps, X + 10, Y + 6, X + 21, Y + 7, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 10, Y + 8, X + 10, Y + 9, CLR_RED, DRO_FILL);
+        GBox(Hps, X + 21, Y + 8, X + 21, Y + 9, CLR_GREEN, DRO_FILL);
+        GLn(Hps, X + 15, Y + 13, X + 15, Y + 9, CLR_YELLOW);
+        GLn(Hps, X + 16, Y + 13, X + 16, Y + 10, CLR_RED);
+        GLn(Hps, X + 12, Y + 14, X + 10, Y + 11, CLR_PALEGRAY);
+        GLn(Hps, X + 19, Y + 14, X + 21, Y + 11, CLR_PALEGRAY);
+        GLn(Hps, X + 9, Y + 11, X + 11, Y + 11, CLR_WHITE);
+        GLn(Hps, X + 20, Y + 11, X + 22, Y + 11, CLR_WHITE);
+        GBox(Hps, X + 12, Y + 14, X + 19, Y + 17, CLR_YELLOW, DRO_FILL);
+        GLn(Hps, X + 12, Y + 14, X + 19, Y + 14, CLR_BROWN);
+        GLn(Hps, X + 19, Y + 14, X + 19, Y + 17, CLR_BROWN);
+        GBox(Hps, X + 13, Y + 18, X + 18, Y + 21, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 13, Y + 21, X + 18, Y + 21, CLR_WHITE);
+        GBox(Hps, X + 14, Y + 19, X + 15, Y + 20, CLR_DARKBLUE, DRO_FILL);
+        GLn(Hps, X + 18, Y + 22, X + 20, Y + 24, CLR_PALEGRAY);
+      End;
+    IC_CANNONBA :
+      Begin
+        { chapiteau raye rouge et blanc, piste de sciure, canon bleu sur sa
+          roue, trajectoire en pointilles, artiste en vol, filet }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_RED, CLR_BLACK);
+        For K := 0 To 3 Do GBox(Hps, X + 3 + K * 8, Y + 9, X + 6 + K * 8, Y + 29, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 2, Y + 26, X + 29, Y + 29, CLR_DARKRED, DRO_FILL);
+        GLn(Hps, X + 2, Y + 26, X + 29, Y + 26, CLR_YELLOW);
+        GBox(Hps, X + 2, Y + 2, X + 29, Y + 8, CLR_BROWN, DRO_FILL);
+        GLn(Hps, X + 2, Y + 8, X + 29, Y + 8, CLR_YELLOW);
+        For K := 0 To 2 Do GLn(Hps, X + 4 + K, Y + 9 - K, X + 12 + K, Y + 17 - K, CLR_BLUE);
+        GLn(Hps, X + 5, Y + 11, X + 13, Y + 19, CLR_CYAN);
+        GLn(Hps, X + 12, Y + 15, X + 15, Y + 18, CLR_YELLOW);
+        GDisc(Hps, X + 6, Y + 7, 3, CLR_BROWN);
+        GDisc(Hps, X + 6, Y + 7, 1, CLR_YELLOW);
+        GBox(Hps, X + 16, Y + 21, X + 16, Y + 21, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 19, Y + 23, X + 19, Y + 23, CLR_YELLOW, DRO_FILL);
+        GLn(Hps, X + 21, Y + 22, X + 24, Y + 23, CLR_BLUE);
+        GLn(Hps, X + 21, Y + 21, X + 24, Y + 22, CLR_BLUE);
+        GDisc(Hps, X + 25, Y + 23, 1, CLR_YELLOW);
+        GLn(Hps, X + 21, Y + 5, X + 21, Y + 12, CLR_PALEGRAY);
+        GLn(Hps, X + 29, Y + 5, X + 29, Y + 12, CLR_PALEGRAY);
+        GLn(Hps, X + 21, Y + 12, X + 29, Y + 12, CLR_WHITE);
+        GLn(Hps, X + 22, Y + 11, X + 28, Y + 11, CLR_PALEGRAY);
+        GLn(Hps, X + 20, Y + 4, X + 30, Y + 4, CLR_DARKRED);
+      End;
+    IC_BOSTON :
+      Begin
+        { tapis vert, une levee : quatre cartes en croix (trefle en haut,
+          coeur a droite, carreau en bas, pique a gauche) }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKGREEN, CLR_BLACK);
+        FBox(Hps, X + 2, Y + 10, X + 10, Y + 20, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 6, Y + 18, X + 6, Y + 18, CLR_BLACK); GLn(Hps, X + 5, Y + 17, X + 7, Y + 17, CLR_BLACK);
+        GLn(Hps, X + 4, Y + 16, X + 8, Y + 16, CLR_BLACK); GLn(Hps, X + 4, Y + 15, X + 8, Y + 15, CLR_BLACK);
+        GLn(Hps, X + 4, Y + 14, X + 5, Y + 14, CLR_BLACK); GLn(Hps, X + 7, Y + 14, X + 8, Y + 14, CLR_BLACK);
+        GLn(Hps, X + 6, Y + 13, X + 6, Y + 13, CLR_BLACK); GLn(Hps, X + 5, Y + 12, X + 7, Y + 12, CLR_BLACK);
+        FBox(Hps, X + 10, Y + 20, X + 20, Y + 29, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 14, Y + 27, X + 16, Y + 27, CLR_BLACK); GLn(Hps, X + 14, Y + 26, X + 16, Y + 26, CLR_BLACK);
+        GLn(Hps, X + 12, Y + 25, X + 13, Y + 25, CLR_BLACK); GLn(Hps, X + 15, Y + 25, X + 15, Y + 22, CLR_BLACK);
+        GLn(Hps, X + 17, Y + 25, X + 18, Y + 25, CLR_BLACK); GLn(Hps, X + 12, Y + 24, X + 18, Y + 24, CLR_BLACK);
+        GLn(Hps, X + 12, Y + 23, X + 13, Y + 23, CLR_BLACK); GLn(Hps, X + 17, Y + 23, X + 18, Y + 23, CLR_BLACK);
+        GLn(Hps, X + 14, Y + 21, X + 16, Y + 21, CLR_BLACK);
+        FBox(Hps, X + 21, Y + 10, X + 29, Y + 20, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 23, Y + 17, X + 24, Y + 17, CLR_RED); GLn(Hps, X + 26, Y + 17, X + 27, Y + 17, CLR_RED);
+        GLn(Hps, X + 23, Y + 16, X + 27, Y + 16, CLR_RED); GLn(Hps, X + 23, Y + 15, X + 27, Y + 15, CLR_RED);
+        GLn(Hps, X + 24, Y + 14, X + 26, Y + 14, CLR_RED); GLn(Hps, X + 25, Y + 13, X + 25, Y + 13, CLR_RED);
+        FBox(Hps, X + 10, Y + 2, X + 20, Y + 11, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 15, Y + 10, X + 15, Y + 10, CLR_RED); GLn(Hps, X + 14, Y + 9, X + 16, Y + 9, CLR_RED);
+        GLn(Hps, X + 13, Y + 8, X + 17, Y + 8, CLR_RED); GLn(Hps, X + 12, Y + 7, X + 18, Y + 7, CLR_RED);
+        GLn(Hps, X + 13, Y + 6, X + 17, Y + 6, CLR_RED); GLn(Hps, X + 14, Y + 5, X + 16, Y + 5, CLR_RED);
+        GLn(Hps, X + 15, Y + 4, X + 15, Y + 4, CLR_RED);
+      End;
+    IC_BINGO :
+      Begin
+        { carton de bingo : bandeau des cinq boules B I N G O, grille,
+          diagonale marquee a l'encreur, case libre etoilee }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_WHITE, CLR_BLACK);
+        GBox(Hps, X + 2, Y + 24, X + 29, Y + 29, CLR_DARKBLUE, DRO_FILL);
+        GDisc(Hps, X + 5, Y + 26, 2, CLR_BLUE);
+        GDisc(Hps, X + 10, Y + 26, 2, CLR_RED);
+        GDisc(Hps, X + 16, Y + 26, 2, CLR_WHITE);
+        GDisc(Hps, X + 21, Y + 26, 2, CLR_GREEN);
+        GDisc(Hps, X + 26, Y + 26, 2, CLR_YELLOW);
+        For K := 0 To 5 Do
+        Begin
+          GLn(Hps, X + 3 + K * 5, Y + 3, X + 3 + K * 5, Y + 23, CLR_PALEGRAY);
+          GLn(Hps, X + 3, Y + 3 + K * 4, X + 28, Y + 3 + K * 4, CLR_PALEGRAY);
+        End;
+        For K := 0 To 4 Do
+          If K <> 2 Then
+          Begin
+            GDisc(Hps, X + 5 + K * 5, Y + 21 - K * 4, 1, CLR_PINK);
+            GLn(Hps, X + 6 + K * 5, Y + 20 - K * 4, X + 6 + K * 5, Y + 22 - K * 4, CLR_PINK);
+          End;
+        GLn(Hps, X + 13, Y + 13, X + 17, Y + 13, CLR_YELLOW);
+        GLn(Hps, X + 15, Y + 11, X + 15, Y + 15, CLR_YELLOW);
+      End;
+    IC_CRAPS :
+      Begin
+        { tapis vert, ligne de passe, deux des rouges (5 et 6) et un jeton }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKGREEN, CLR_BLACK);
+        GLn(Hps, X + 2, Y + 4, X + 29, Y + 4, CLR_WHITE);
+        FBox(Hps, X + 3, Y + 13, X + 15, Y + 25, CLR_RED, CLR_DARKRED);
+        GBox(Hps, X + 5, Y + 22, X + 6, Y + 23, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 12, Y + 22, X + 13, Y + 23, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 8, Y + 18, X + 9, Y + 19, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 5, Y + 15, X + 6, Y + 16, CLR_WHITE, DRO_FILL);
+        GBox(Hps, X + 12, Y + 15, X + 13, Y + 16, CLR_WHITE, DRO_FILL);
+        FBox(Hps, X + 16, Y + 5, X + 28, Y + 17, CLR_RED, CLR_DARKRED);
+        For K := 0 To 2 Do
+        Begin
+          GBox(Hps, X + 18, Y + 13 - K * 3, X + 19, Y + 14 - K * 3, CLR_WHITE, DRO_FILL);
+          GBox(Hps, X + 25, Y + 13 - K * 3, X + 26, Y + 14 - K * 3, CLR_WHITE, DRO_FILL);
+        End;
+        GDisc(Hps, X + 8, Y + 7, 4, CLR_BLUE);
+        GDisc(Hps, X + 8, Y + 7, 2, CLR_WHITE);
+        GDisc(Hps, X + 8, Y + 7, 1, CLR_BLUE);
+      End;
+    IC_ROULETTE :
+      Begin
+        { cylindre de roulette vu de dessus : jante de bois, piste, cases
+          rouges et noires (zero vert), cone et croisillon dores, bille }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKGREEN, CLR_BLACK);
+        GDisc(Hps, X + 16, Y + 16, 14, CLR_BLACK);
+        GDisc(Hps, X + 16, Y + 16, 13, CLR_BROWN);
+        GDisc(Hps, X + 16, Y + 16, 11, CLR_PALEGRAY);
+        GDisc(Hps, X + 16, Y + 16, 9, CLR_BLACK);
+        GDisc(Hps, X + 23, Y + 16, 2, CLR_RED);
+        GDisc(Hps, X + 11, Y + 21, 2, CLR_RED);
+        GDisc(Hps, X + 11, Y + 11, 2, CLR_RED);
+        GDisc(Hps, X + 21, Y + 11, 2, CLR_RED);
+        GDisc(Hps, X + 16, Y + 23, 2, CLR_GREEN);
+        GDisc(Hps, X + 16, Y + 16, 5, CLR_BROWN);
+        GLn(Hps, X + 12, Y + 16, X + 20, Y + 16, CLR_YELLOW);
+        GLn(Hps, X + 16, Y + 12, X + 16, Y + 20, CLR_YELLOW);
+        GDisc(Hps, X + 16, Y + 16, 1, CLR_WHITE);
+        GDisc(Hps, X + 24, Y + 23, 1, CLR_WHITE);
+      End;
+    IC_XIANGQI :
+      Begin
+        { plateau de bois : colonnes coupees par la riviere, palais,
+          une piece rouge et une piece noire en ivoire }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_YELLOW, CLR_BROWN);
+        For K := 0 To 4 Do
+        Begin
+          GLn(Hps, X + 4 + K * 6, Y + 4, X + 4 + K * 6, Y + 13, CLR_BROWN);
+          GLn(Hps, X + 4 + K * 6, Y + 18, X + 4 + K * 6, Y + 27, CLR_BROWN);
+        End;
+        GLn(Hps, X + 4, Y + 13, X + 4, Y + 18, CLR_BROWN);
+        GLn(Hps, X + 28, Y + 13, X + 28, Y + 18, CLR_BROWN);
+        For K := 0 To 2 Do
+        Begin
+          GLn(Hps, X + 4, Y + 4 + K * 9 Div 2, X + 28, Y + 4 + K * 9 Div 2, CLR_BROWN);
+          GLn(Hps, X + 4, Y + 18 + K * 9 Div 2, X + 28, Y + 18 + K * 9 Div 2, CLR_BROWN);
+        End;
+        GLn(Hps, X + 10, Y + 4, X + 22, Y + 13, CLR_BROWN);
+        GLn(Hps, X + 22, Y + 4, X + 10, Y + 13, CLR_BROWN);
+        GLn(Hps, X + 10, Y + 18, X + 22, Y + 27, CLR_BROWN);
+        GLn(Hps, X + 22, Y + 18, X + 10, Y + 27, CLR_BROWN);
+        GDisc(Hps, X + 10, Y + 8, 4, CLR_BROWN);
+        GDisc(Hps, X + 10, Y + 8, 3, CLR_WHITE);
+        GDisc(Hps, X + 10, Y + 8, 1, CLR_RED);
+        GDisc(Hps, X + 22, Y + 22, 4, CLR_BROWN);
+        GDisc(Hps, X + 22, Y + 22, 3, CLR_WHITE);
+        GDisc(Hps, X + 22, Y + 22, 1, CLR_BLACK);
+      End;
+    IC_TTT3D :
+      Begin
+        { trois plateaux de verre empiles, billes rouges alignees en
+          diagonale d'un plateau a l'autre (trait jaune), billes bleues }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKBLUE, CLR_BLACK);
+        For K := 0 To 2 Do
+        Begin
+          GLn(Hps, X + 3, Y + 3 + K * 9, X + 21, Y + 3 + K * 9, CLR_CYAN);
+          GLn(Hps, X + 10, Y + 9 + K * 9, X + 28, Y + 9 + K * 9, CLR_CYAN);
+          GLn(Hps, X + 3, Y + 3 + K * 9, X + 10, Y + 9 + K * 9, CLR_CYAN);
+          GLn(Hps, X + 21, Y + 3 + K * 9, X + 28, Y + 9 + K * 9, CLR_CYAN);
+        End;
+        GLn(Hps, X + 8, Y + 6, X + 23, Y + 24, CLR_YELLOW);
+        GDisc(Hps, X + 8, Y + 6, 2, CLR_RED);
+        GDisc(Hps, X + 15, Y + 15, 2, CLR_RED);
+        GDisc(Hps, X + 23, Y + 24, 2, CLR_RED);
+        GDisc(Hps, X + 18, Y + 6, 2, CLR_BLUE);
+        GDisc(Hps, X + 22, Y + 15, 2, CLR_BLUE);
+        GDisc(Hps, X + 12, Y + 24, 2, CLR_BLUE);
+      End;
+    IC_PATIENCE :
+      Begin
+        { tapis vert : dos bordeaux a cadre dore et deux cartes en
+          eventail (coeur rouge, pique noir) }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKGREEN, CLR_BLACK);
+        FBox(Hps, X + 3, Y + 9, X + 13, Y + 26, CLR_DARKRED, CLR_BLACK);
+        GBox(Hps, X + 5, Y + 11, X + 11, Y + 24, CLR_YELLOW, DRO_OUTLINE);
+        FBox(Hps, X + 10, Y + 6, X + 20, Y + 24, CLR_WHITE, CLR_BLACK);
+        GDisc(Hps, X + 13, Y + 17, 2, CLR_RED);
+        GDisc(Hps, X + 17, Y + 17, 2, CLR_RED);
+        For K := 0 To 3 Do GLn(Hps, X + 12 + K, Y + 15 - K, X + 18 - K, Y + 15 - K, CLR_RED);
+        FBox(Hps, X + 18, Y + 3, X + 28, Y + 21, CLR_WHITE, CLR_BLACK);
+        For K := 0 To 3 Do GLn(Hps, X + 23 - K, Y + 16 - K, X + 23 + K, Y + 16 - K, CLR_BLACK);
+        GDisc(Hps, X + 21, Y + 12, 2, CLR_BLACK);
+        GDisc(Hps, X + 25, Y + 12, 2, CLR_BLACK);
+        GLn(Hps, X + 23, Y + 11, X + 23, Y + 7, CLR_BLACK);
+        GLn(Hps, X + 21, Y + 7, X + 25, Y + 7, CLR_BLACK);
       End;
     IC_LIGHTS :
       Begin
