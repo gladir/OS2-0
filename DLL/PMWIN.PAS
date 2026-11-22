@@ -59,7 +59,8 @@ Library PMWIN;
   (convention Pascal : parametres empiles de gauche a droite, pile
   nettoyee par la fonction) ; ailleurs (point d'entree exporte d'une DLL,
   convention _System). Les procedures des classes du systeme sont le
-  point d'entree interne WINSYSCLASSPROC (ordinal 1000) ; WINQUERYPSINFO
+  point d'entree interne WINSYSCLASSPROC (ordinal 1000) ; WINQUERYOBSCURING
+  (1011 : fenetres au-dessus d'un espace obtenu par WinGetPS) ; WINQUERYPSINFO
   (ordinal 1001, interne) decrit un HPS pour PMGPI.DLL, WINQUERYSCREENTEXT
   (1002, interne) rend le texte ecrit a l'ecran (programmes d'essai) et
   WINHIDEOVERLAYS (1003, interne) retire le pointeur et le curseur avant
@@ -13413,6 +13414,53 @@ Begin
   WinQueryPSInfo := 1;
 End;
 
+{ WINQUERYOBSCURING (ordinal 1011, interne : PMGPI.DLL) : (hps ou hwnd, p,
+  max, 0) -> nombre de rectangles (pels de l'ecran, 16 octets chacun en p) des
+  fenetres dessinees au-dessus de celle de l'espace (menus, autres
+  fenetres ; pas ses propres enfants) qui recouvrent sa zone visible.
+  Seulement pour un espace obtenu hors de WM_PAINT (WinGetPS, WinGetClipPS,
+  contexte de fenetre) : PMGPI dessine autour, comme le decoupage d'OS/2,
+  au lieu d'ecraser un menu ouvert par-dessus une animation. Les espaces
+  de WinBeginPaint restent dessines par-dessous puis recouverts (les
+  fenetres placees au-dessus sont redessinees apres). }
+Function WinQueryObscuring(H, P, Max, Rsv : LongInt) : LongInt;
+Var K, I, J, N, Q, X1, Y1, X2, Y2, A1, B1, A2, B2 : LongInt; Found : Boolean;
+Begin
+  WinQueryObscuring := 0;
+  If (P = 0) Or (Max <= 0) Then Exit;
+  If (H And $FFFF0000) = $50530000 Then
+  Begin
+    K := H - $50530001;
+    If (K < 0) Or (K >= MaxPS) Then Exit;
+    If (PsUse[K] = 0) Or (PsKind[K] <> 1) Then Exit;
+    I := PsWin[K];
+    X1 := PsX1[K]; Y1 := PsY1[K]; X2 := PsX2[K]; Y2 := PsY2[K];
+  End
+  Else
+  Begin
+    I := WIdx(H);
+    If I < 0 Then Exit;
+    If Not VisRect(I, X1, Y1, X2, Y2) Then Exit;
+  End;
+  If (I <= 1) Or (X1 >= X2) Or (Y1 >= Y2) Then Exit;
+  BuildPOrd;
+  Found := False; N := 0;
+  For Q := 0 To PCnt - 1 Do
+  Begin
+    J := POrd[Q];
+    If Found And (J > 1) And (N < Max) Then
+      If Not IsChildOf(J, I) Then
+        If VisRect(J, A1, B1, A2, B2) Then
+          If (A1 < X2) And (A2 > X1) And (B1 < Y2) And (B2 > Y1) Then
+          Begin
+            WrL(P + N * 16, A1); WrL(P + N * 16 + 4, B1); WrL(P + N * 16 + 8, A2); WrL(P + N * 16 + 12, B2);
+            Inc(N);
+          End;
+    If J = I Then Found := True;
+  End;
+  WinQueryObscuring := N;
+End;
+
 { ==================================================================== }
 { Initialisation                                                        }
 { ==================================================================== }
@@ -15790,7 +15838,8 @@ exports
   WinSetScreenMode Index 1007 Name 'WINSETSCREENMODE',
   WinQueryScreenMode Index 1008 Name 'WINQUERYSCREENMODE',
   WinSetPointerStyle Index 1009 Name 'WINSETPOINTERSTYLE',
-  WinQueryShadow Index 1010 Name 'WINQUERYSHADOW';
+  WinQueryShadow Index 1010 Name 'WINQUERYSHADOW',
+  WinQueryObscuring Index 1011 Name 'WINQUERYOBSCURING';
 
 Var
   InitI : LongInt;

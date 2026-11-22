@@ -283,7 +283,8 @@ Var
   { divers }
   Arena : Array[0..ArenaSize - 1] Of Byte;
   Recording, Replaying, ReplayDepth, LastErr : LongInt;
-  PmMod, PmErrFn, PmInfoFn, PmFromDc, PmHideFn, PmShadFn : LongInt;
+  PmMod, PmErrFn, PmInfoFn, PmFromDc, PmHideFn, PmShadFn, PmObsFn : LongInt;
+  ObsBuf : Array[0..MaxClipR * 4 - 1] Of LongInt;      { fenetres au-dessus (PMWIN 1011) }
   NameZ : Array[0..259] Of Byte;
   Scratch : Array[0..1023] Of Byte;
   Dummy : LongInt;
@@ -1418,6 +1419,58 @@ Begin
   ClipN := N;
 End;
 
+{ retirer un rectangle (pels de l'ecran) de la liste de decoupage : chaque
+  rectangle touche est remplace par ses parties hors de lui (au plus 4) }
+Var
+  SbN : LongInt;
+  SbX1, SbY1, SbX2, SbY2 : Array[0..MaxClipR - 1] Of LongInt;
+
+Procedure SbKeep(A1, B1, A2, B2 : LongInt);
+Begin
+  If (A1 < A2) And (B1 < B2) And (SbN < MaxClipR) Then
+  Begin
+    SbX1[SbN] := A1; SbY1[SbN] := B1; SbX2[SbN] := A2; SbY2[SbN] := B2;
+    Inc(SbN);
+  End;
+End;
+
+Procedure ClipSubtract(X1, Y1, X2, Y2 : LongInt);
+Var I : LongInt;
+Begin
+  SbN := 0;
+  For I := 0 To ClipN - 1 Do
+    If (X1 >= ClipX2[I]) Or (X2 <= ClipX1[I]) Or (Y1 >= ClipY2[I]) Or (Y2 <= ClipY1[I]) Then
+      SbKeep(ClipX1[I], ClipY1[I], ClipX2[I], ClipY2[I])
+    Else
+    Begin
+      SbKeep(ClipX1[I], ClipY1[I], ClipX2[I], MinI(Y1, ClipY2[I]));                     { dessous }
+      SbKeep(ClipX1[I], MaxI(Y2, ClipY1[I]), ClipX2[I], ClipY2[I]);                     { dessus }
+      SbKeep(ClipX1[I], MaxI(Y1, ClipY1[I]), MinI(X1, ClipX2[I]), MinI(Y2, ClipY2[I]));  { gauche }
+      SbKeep(MaxI(X2, ClipX1[I]), MaxI(Y1, ClipY1[I]), ClipX2[I], MinI(Y2, ClipY2[I]));  { droite }
+    End;
+  For I := 0 To SbN - 1 Do
+  Begin
+    ClipX1[I] := SbX1[I]; ClipY1[I] := SbY1[I]; ClipX2[I] := SbX2[I]; ClipY2[I] := SbY2[I];
+  End;
+  ClipN := SbN;
+End;
+
+{ espace de presentation de PM obtenu hors de WM_PAINT (WinGetPS, contexte
+  de fenetre) : ne pas dessiner sur les fenetres placees au-dessus (menu
+  ouvert sur une animation...) ; PMWIN, ordinal 1011 }
+Procedure ClipObscured(H : LongInt);
+Var N, I : LongInt;
+Begin
+  If PmMod = 0 Then Exit;
+  If PmObsFn = 0 Then
+    If DcQueryProcAddr(PmMod, 1011, 0, LongInt(@PmObsFn)) <> 0 Then PmObsFn := -1;
+  If PmObsFn = -1 Then Exit;
+  N := CallSys4(PmObsFn, H, LongInt(@ObsBuf[0]), MaxClipR, 0);
+  If (N <= 0) Or (N > MaxClipR) Then Exit;
+  For I := 0 To N - 1 Do
+    ClipSubtract(ObsBuf[I * 4], ObsBuf[I * 4 + 1], ObsBuf[I * 4 + 2], ObsBuf[I * 4 + 3]);
+End;
+
 Function RgIdx(H : LongInt) : LongInt; Forward;
 Procedure LimitClip(K : LongInt); Forward;
 
@@ -1443,6 +1496,7 @@ Begin
       TgOffX := Info[1]; TgOffY := Info[2];
       ClipSet(0, 0, TgW, TgH);
       ClipRect(Info[3], Info[4], Info[5], Info[6]);
+      ClipObscured(Gps[K].PmHps);
       Ok := True;
     End;
   End
@@ -1476,6 +1530,7 @@ Begin
         Begin
           TgOffX := Info[1]; TgOffY := Info[2];
           ClipRect(Info[3], Info[4], Info[5], Info[6]);
+          ClipObscured(Wn);
         End
         Else Ok := False;
       End;
