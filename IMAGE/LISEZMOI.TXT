@@ -30,7 +30,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
-              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, DEMARRE.WAV,
+              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, VIRTUAL.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -1237,6 +1237,24 @@ Deconnecter. Molette de la souris ajoutee a OS/2-0 : souris PS/2
 IntelliMouse dans le noyau, evenements $0100/$0200 de MOUCALLS,
 WM_VSCROLL de PMWIN vers la fenetre sous le pointeur.
   OS2PC APPS\MSTSC.PAS                      -> MSTSC.EXE
+
+Virtualisation (VIRTUAL.EXE, dossier Systeme OS/2)
+---------------------------------------------------
+Gestionnaire de machines virtuelles a la facon de VirtualBox (source
+APPS\VIRTUAL.PAS), menus et apparence d'OS/2 : machines .vbox de
+VirtualBox, disques VHD (fixes, dynamiques), VDI, VMDK plats, IMG,
+disquettes. L'invite s'execute directement sur le processeur (KrnVirt du
+noyau) : AMD-V (SVM + NPT), Intel VT-x (VMX + EPT, invite sans
+restriction), sinon mode virtuel 8086 (plan B, sans HMA ni mode
+protege). Menu Machine > Information de virtualisation : methode et
+details techniques (CPUID, revision SVM/VMCS, ASID, EPT, VMCB/VMCS,
+tables, compteurs des sorties). BIOS, 8259A, 8254, 8042, CMOS, VGA
+(texte, CGA, 13h), A20 et disques sont dans VIRTUAL.EXE. Machines et
+disques copies dans C:\VMS trouves au demarrage. VIRTUAL /TEST : essais
+sur COM1 ; /BOOTTEST:disque /WAIT:n /KEYS:texte ; /TRACE ; /START:nom.
+Dans VirtualBox : cocher Activer VT-x/AMD-V imbrique pour la machine
+d'OS/2-0.
+  OS2PC APPS\VIRTUAL.PAS                    -> VIRTUAL.EXE
 
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
 ---------------------------------------------------------------------

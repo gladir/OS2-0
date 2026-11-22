@@ -259,6 +259,8 @@ echo "== Outils reseau (OS2PC : APPS/FTPCLI.PAS, Client FTP et SFTP, APPS/SSHCLI
 "$W/os2pc" -Q "$ROOT/APPS/FTPCLI.PAS" "$W/cd/FTPCLI.EXE"
 "$W/os2pc" -Q "$ROOT/APPS/SSHCLI.PAS" "$W/cd/SSHCLI.EXE"
 "$W/os2pc" -Q "$ROOT/APPS/MSTSC.PAS" "$W/cd/MSTSC.EXE"
+echo "== Virtualisation (OS2PC : APPS/VIRTUAL.PAS, machines de VirtualBox par AMD-V, Intel VT-x ou mode V86, KrnVirt du noyau)"
+"$W/os2pc" -Q "$ROOT/APPS/VIRTUAL.PAS" "$W/cd/VIRTUAL.EXE"
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"
 "$W/os2pc" -Q -CD "$ROOT/DLL/TESTVDM.PAS" "$W/cd/TESTVDM.EXE"
 cp "$ROOT"/IMAGE/SONS/*.WAV "$W/cd/"

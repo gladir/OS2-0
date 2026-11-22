@@ -178,6 +178,7 @@ Const
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
   OB_NETTOOLS = 41; IC_FTPCLI = 83; IC_SSHCLI = 84; IC_MSTSC = 85; IC_BUBBLE = 86;
   IC_BLACKJAK = 87; IC_BLOX = 88; IC_GOLF = 89; IC_FROGGER = 90; IC_HANGMAN = 91; IC_LIGHTS = 92;
+  IC_VIRTUAL = 93;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1610,6 +1611,8 @@ Begin
           Dummy := NewItem(V, IC_TASKMGR, OB_GAME, 'Gestionnaire des taches', TaskMgrPath);
         If BrowserPath <> '' Then
           Dummy := NewItem(V, IC_WEB, OB_GAME, 'Navigateur Web', BrowserPath);
+        If FileExists('C:\VIRTUAL.EXE') Then
+          Dummy := NewItem(V, IC_VIRTUAL, OB_GAME, 'Virtualisation', 'C:\VIRTUAL.EXE');
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
@@ -3139,6 +3142,18 @@ Begin
         GLn(Hps, X + 20, Y + 19, X + 20, Y + 20, CLR_BLACK);
         GLn(Hps, X + 22, Y + 19, X + 22, Y + 20, CLR_BLACK);
         GLn(Hps, X + 20, Y + 16, X + 22, Y + 16, CLR_DARKRED);
+      End;
+    IC_VIRTUAL :
+      Begin
+        { Virtualisation : deux ecrans, la machine invitee dans l'hote }
+        FBox(Hps, X + 1, Y + 9, X + 22, Y + 28, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 3, Y + 12, X + 20, Y + 26, CLR_DARKBLUE, DRO_FILL);
+        FBox(Hps, X + 10, Y + 2, X + 30, Y + 19, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 12, Y + 5, X + 28, Y + 17, CLR_BLACK, DRO_FILL);
+        GLn(Hps, X + 14, Y + 14, X + 22, Y + 14, CLR_GREEN);
+        GLn(Hps, X + 14, Y + 11, X + 19, Y + 11, CLR_GREEN);
+        GLn(Hps, X + 14, Y + 8, X + 16, Y + 8, CLR_GREEN);
+        GLn(Hps, X + 5, Y + 23, X + 12, Y + 23, CLR_WHITE);
       End;
     IC_LIGHTS :
       Begin

@@ -19564,7 +19564,8 @@ End;
     2 : executer (p1 = cadre) ; rend le code de sortie VXE_*
     3 : detruire la machine
     4 : police 8x16 de la carte VGA (p1 = tampon de 4096 octets)
-    5 : effacer les compteurs de sorties }
+    5 : effacer les compteurs de sorties
+    6 : ligne A20 de l'invite (p1 = 0 fermee, 1 ouverte) }
 
 Const
   VXM_NONE = 0; VXM_SVM = 1; VXM_VMX = 2; VXM_V86 = 3;
@@ -20143,6 +20144,8 @@ Var
   VxCr0Fix0, VxCr0Fix1, VxCr4Fix0, VxCr4Fix1 : LongInt;
   VxProcCtl : LongInt;
   VxOldCr0, VxOldCr4, VxVmxExitA : LongInt;
+  VxInvS, VxInvType : LongInt;
+  VxInvDesc : Array[0..3] Of LongInt;    { descripteur d'INVEPT (EPTP, 0) }
 
 Procedure VmxFlags(Var A : LongInt);
 Begin
@@ -20183,6 +20186,11 @@ Begin
   PutB(A, $0F); PutB(A, $78); PutB(A, $D0);         { vmread eax,edx }
   PutB(A, $A3); PutD(A, LongInt(@VxA));
   PutB(A, $C3);
+  { INVEPT type, [VxInvDesc] (tables EPT changees : ligne A20) }
+  VxInvS := A;
+  PutB(A, $A1); PutD(A, LongInt(@VxInvType));
+  PutB(A, $66); PutB(A, $0F); PutB(A, $38); PutB(A, $80); PutB(A, $05); PutD(A, LongInt(@VxInvDesc));
+  VmxFlags(A); PutB(A, $C3);
   { GDTR, IDTR, TR, FS, GS, SS de l'hote }
   VxSegS := A;
   PutB(A, $0F); PutB(A, $01); PutB(A, $05); PutD(A, LongInt(@VxGdtr));  { sgdt }
@@ -21158,6 +21166,39 @@ Begin
   VxCreate := VxMem;
 End;
 
+{ ligne A20 de l'invite (8042, port 92h, INT 15h 24xxh) : fermee, les
+  adresses 100000h-10FFFFh retombent sur 0-FFFFh comme sur un PC ; les
+  entrees des tables imbriquees (NPT) ou EPT de ces 16 pages changent, le
+  TLB de l'invite est vide a l'entree suivante }
+Function VxA20(On : LongInt) : LongInt;
+Var I, Pg, T : LongInt;
+Begin
+  VxA20 := 0;
+  If (VxMem = 0) Or (VxNpts = 0) Or (VxSize < $110000) Then Exit;
+  For I := 256 To 271 Do
+  Begin
+    If On <> 0 Then Pg := VxMem + I * 4096 Else Pg := VxMem + (I - 256) * 4096;
+    If VxMethod = VXM_SVM Then MemL[0:VxNpts + I * 4] := Pg Or 7
+    Else If VxMethod = VXM_VMX Then
+    Begin
+      MemL[0:VxNpts + I * 8] := Pg Or $37;
+      MemL[0:VxNpts + I * 8 + 4] := 0;
+    End;
+  End;
+  If VxMethod = VXM_SVM Then Mem[0:VxVmcb + $5C] := 1;
+  If VxMethod = VXM_VMX Then
+  Begin
+    VxInvDesc[0] := VxEpml4 Or 6 Or (3 Shl 3);
+    If (VxEptCap And $4000) = 0 Then VxInvDesc[0] := VxEpml4 Or (3 Shl 3);
+    VxInvDesc[1] := 0; VxInvDesc[2] := 0; VxInvDesc[3] := 0;
+    T := 1;
+    If (VxEptCap And $02000000) = 0 Then T := 2;
+    VxInvType := T;
+    VxCall(VxInvS);
+  End;
+  VxA20 := 1;
+End;
+
 Function KrnVirt(Op, P1, P2 : LongInt) : LongInt;
 Var I : LongInt;
 Begin
@@ -21170,11 +21211,18 @@ Begin
         End;
     1 : KrnVirt := VxCreate(P1, P2);
     2 : If (VxMethod <> VXM_NONE) And (P1 <> 0) Then
+        Begin
           Case VxMethod Of
-            VXM_SVM : KrnVirt := SvmRun(P1);
-            VXM_VMX : KrnVirt := VmxRun(P1);
-            VXM_V86 : KrnVirt := V86xRun(P1);
-          End
+            VXM_SVM : I := SvmRun(P1);
+            VXM_VMX : I := VmxRun(P1);
+          Else
+            I := V86xRun(P1);
+          End;
+          KrnVirt := I;
+          { un programme de PM n'est pas preempte : la tache de la machine
+            cede le processeur a la fin de sa tranche (30 ms) }
+          If (I = VXE_INTR) And (NTasks > 1) And (Ticks - SliceStart >= 3) Then Yield;
+        End
         Else KrnVirt := VXE_FAIL;
     3 : Begin
           If VxMethod <> VXM_NONE Then VxFreeAll;
@@ -21189,6 +21237,7 @@ Begin
           For I := 0 To 15 Do VxCnt[I] := 0;
           VxTotal := 0;
         End;
+    6 : KrnVirt := VxA20(P1);
   End;
 End;
 
