@@ -106,7 +106,8 @@ Program PMSHELL;
   PMWIN), Comete (pointeur comete), General (titre). Un seul carnet de
   parametres est ouvert a la fois.
 
-  Arret : apres confirmation, les fichiers sont ecrits (DosShutdown) et
+  Arret : apres confirmation, les fichiers sont ecrits (DosShutdown), puis
+  l'ordinateur est mis hors tension (KrnDiskCtl 16, ACPI) ; sinon
   l'ecran indique que l'ordinateur peut etre eteint ; Ctrl+Alt+Suppr
   redemarre alors l'ordinateur. }
 
@@ -3780,6 +3781,10 @@ Begin
   S := 'ou appuyer sur Ctrl+Alt+Suppr pour redemarrer.';
   Dummy := VioWrtCharStrAtt(Z(S), Length(S), 13, (80 - Length(S)) Div 2, LongInt(@At), 0);
   Dummy := VioSetCurPos(24, 79, 0);
+  { mise hors tension (ACPI, etat S5 : VirtualBox, VMware, QEMU et les PC
+    reels ferment la machine) ; si elle est impossible, le message reste }
+  Dummy := DosSleep(700);
+  Dummy := KDiskCtl(16, 0, 0);
   { Ctrl+Alt+Suppr est traite par le noyau (redemarrage) }
   Repeat
     If KbdCharIn(LongInt(@Ki), 0, 0) <> 0 Then Dummy := DosSleep(100);

@@ -743,7 +743,9 @@ programme en mode texte autre que l'invite de commandes, le noyau
 attend une touche. PMWIN.DLL : WINSUSPENDSCREEN
 (1004), WINRESUMESCREEN (1005), WINQUERYSCREENTAKEN (1006). STARTUP.CMD
 (C:\ ou D:\) est execute avant le bureau. Arret : confirmation,
-DosShutdown, puis Ctrl+Alt+Suppr pour redemarrer.
+DosShutdown, puis mise hors tension par l'ACPI (etat S5 : la fenetre de
+VirtualBox, VMware ou QEMU se ferme) ; sans ACPI, l'ecran indique que
+l'ordinateur peut etre eteint et Ctrl+Alt+Suppr redemarre.
 
 Ecran VESA et parametres du systeme
 -----------------------------------
