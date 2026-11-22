@@ -672,10 +672,11 @@ Begin
       Begin
         { cases ou tombe la bille, cloisons d'argent }
         V := PocketColor(N);
-        W := Round(1.6 * Sc);
+        W := MaxI(1, Round(0.6 * Sc));
         If (Off < W) Or (Off >= SlotU - W) Then V := C_SILVER + 3
-        Else If (Off < 2 * W) Or (Off >= SlotU - 2 * W) Then V := C_SILVER + 1;
-        If (R <= 55) And (V = PocketColor(N)) Then V := C_SILVER;
+        Else If (Off < W + Round(0.8 * Sc)) Or (Off >= SlotU - W - Round(0.8 * Sc)) Then V := C_SILVER + 1;
+        If (R <= 54) And (V = PocketColor(N)) Then V := C_SILVER;
+        If (R >= 65) And (V = PocketColor(N)) Then V := C_BLACK;
       End
       Else If R >= 50 Then V := C_SILVER + 2 - Ord(R = 50)
       Else If R >= 13 Then
@@ -710,8 +711,10 @@ Begin
         WPr[I] := R;
         A := Ang(X, Y);
         WPa[I] := Round(A * Circ / (2 * Pi)) Mod Circ;
-        { eclairage du cone : clair en haut a gauche }
-        If R > 0 Then L := Round(1.6 - 1.8 * (X + Y) / (D * 1.414)) Else L := 2;
+        { eclairage du cone : clair en haut a gauche, trame 2 x 2 pour
+          adoucir les paliers }
+        If R > 0 Then L := Trunc(1.7 - 1.9 * (X + Y) / (D * 1.414) + 0.125 + 0.25 * (((X And 1) * 2 + (Y And 1) * 3) Mod 4))
+        Else L := 2;
         If L < 0 Then L := 0;
         If L > 3 Then L := 3;
         WPl[I] := L;
@@ -1027,6 +1030,8 @@ Begin
       Frame2(X1 + 1, Y1 + 1, X2 - 1, Y2 - 1, C_GOLD);
       Frame2(X1 + 2, Y1 + 2, X2 - 2, Y2 - 2, C_YEL);
     End;
+    { sur les cases larges, la pile laisse voir l'inscription }
+    If K >= 40 Then Cx := X2 - 15;
     DrawStack(Cx, Cy + 1, Bets[K], W);
   End;
   If (State = S_RESULT) And (Bets[Winning] = 0) Then
@@ -1771,8 +1776,8 @@ Begin
   If IsRed(WheelOrder[1]) <> IsRed(WheelOrder[36]) Then Inc(Alt);
   Log('ROULETTE : TEST1 cylindre ' + IStr(A) + ' numeros ' + IStr(B) + ' rouges alternance ' + IStr(Alt) + '/36');
   If (A = 37) And (B = 18) And (Alt = 36) Then Inc(Ok);
-  { TEST2 : gains (17 : plein, rouge... non : 17 est noir ; impair,
-    manque, 2e douzaine, 2e colonne) et le zero }
+  { TEST2 : gains sur le 17 (plein, noir, impair, 2e douzaine, 2e
+    colonne gagnent, rouge perd) et sur le zero (seul le plein gagne) }
   For K := 0 To NSpot - 1 Do Bets[K] := 0;
   Bank := 0; Bets[17] := 10; Bets[46] := 10; Bets[45] := 10; Bets[41] := 10; Bets[38] := 10; Bets[47] := 10;
   Settle(17); A := Bank;

@@ -955,7 +955,10 @@ Begin
   If (State = S_PLAY) And (N = 0) Then
     FbTextSh(GX - 6, GY + 5 * Cell + 38, 'Ligne compl' + Chr(138) + 'te : criez BINGO !', C_YEL, 1)
   Else If (State = S_PLAY) And (N <= 2) And (NDrawn > 0) Then
-    FbTextSh(GX - 6, GY + 5 * Cell + 38, 'Il vous manque ' + IStr(N) + ' num' + Chr(130) + 'ro(s).', C_GREEN, 1)
+  Begin
+    If N = 1 Then S := 'Il vous manque 1 num' + Chr(130) + 'ro.' Else S := 'Il vous manque ' + IStr(N) + ' num' + Chr(130) + 'ros.';
+    FbTextSh(GX - 6, GY + 5 * Cell + 38, S, C_GREEN, 1);
+  End
   Else If State = S_OVER Then FbTextSh(GX - 6, GY + 5 * Cell + 38, 'Espace ou clic : manche suivante', C_DIM, 1)
   Else If AutoMark Then FbTextSh(GX - 6, GY + 5 * Cell + 38, 'Marquage automatique', C_DIM, 1)
   Else FbTextSh(GX - 6, GY + 5 * Cell + 38, 'Marquez vos num' + Chr(130) + 'ros, puis BINGO !', C_DIM, 1);
