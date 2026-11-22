@@ -1481,6 +1481,10 @@ OS2-Zero : copier sur le bureau, coller dans l'Explorateur (ou
 l'inverse). Un programme ou objet du systeme copie devient un raccourci
 au Coller ; il ne peut etre ni coupe, ni supprime, ni renomme (commandes
 grisees).
+Fond du bureau et des dossiers : Trier > Non trie (par defaut), Par
+ordre alphabetique, Par categorie (dossiers, jeux par genre : cartes,
+plateau, reflexion, arcade, des et sport ; programmes, documents par
+type, raccourcis) ; choix garde pour chaque dossier dans OS2.INI.
 Les fenetres a bordure de taille (dont les dossiers) se redimensionnent
 a la souris par leurs bords et leurs coins ; le pointeur devient une
 fleche de taille sur un bord ou un coin.

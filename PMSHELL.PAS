@@ -196,6 +196,7 @@ Const
   CM_EXPLORER = 117; CM_NEWDIR = 118; CM_NEWTXT = 119; CM_NEWHTML = 120;
   CM_NEWBMP = 121; CM_NEWCMD = 122; CM_CUT = 123; CM_COPY = 124; CM_PASTE = 125; CM_SELALL = 126;
   CM_RENAME = 127; CM_EDIT = 128; CM_EXPLHERE = 129; CM_PASTESH = 130; CM_CMDITEM = 131; CM_SELINV = 132;
+  CM_SORTNONE = 133; CM_SORTALPHA = 134; CM_SORTCAT = 135; MIA_CHECKED = $2000;
   { presse-papiers des objets : memoire partagee de l'Explorateur OS2-Zero
     (+0 : 1 copier, 2 couper ; +4 : nombre ; +16 : chemins ; +32768 : texte) }
   ClipName = '\SHAREMEM\EXPLORER.CLP'; ClipSz = 65536; ClipTxt = 32768;
@@ -224,6 +225,11 @@ Type
     Key : String[48];
   End;
   PEnt = ^TEnt;
+  { tables du tri des objets (allouees a la taille voulue) }
+  TLongs = Array[0..16383] Of LongInt;
+  PLongs = ^TLongs;
+  TStrs = Array[0..4095] Of String;
+  PStrs = ^TStrs;
 
 Var
   Hab, Hmq, Desk, MenuH, Creating, ScrW, ScrH, Dummy, I : LongInt;
@@ -1430,6 +1436,124 @@ Begin
   Else ShowMsg('Impossible de creer ' + Dir + S + '.', 'Nouveau', MB_OK Or MB_ERROR);
 End;
 
+{ ==================================================================== }
+{ Tri des objets d'une vue (menu contextuel : Trier)                     }
+{ ==================================================================== }
+{ 0 non trie (ordre d'origine), 1 ordre alphabetique, 2 par categorie
+  (dossiers, puis jeux par genre, programmes, documents par type,
+  raccourcis ; ordre alphabetique dans chaque categorie). Le choix de
+  chaque vue est garde dans OS2.INI (PMSHELL, "TRI vue"). }
+
+Function SortName(V : LongInt) : String;
+Begin
+  If Vw(V)^.Kind = VK_DESK Then SortName := 'TRI BUREAU'
+  Else If Vw(V)^.Kind = VK_DIR Then SortName := 'TRI ' + UpStr(Vw(V)^.Path)
+  Else SortName := 'TRI VUE' + IStr(Vw(V)^.Kind);
+End;
+
+Function SortMode(V : LongInt) : LongInt;
+Begin
+  SortMode := PrfInt('PMSHELL', SortName(V));
+End;
+
+{ genre d'un jeu (nom du programme) : 1 cartes, 2 plateau, 3 reflexion,
+  4 arcade, 5 des et sport ; 0 inconnu }
+Function GameGenre(P : String) : LongInt;
+Var B : String;
+Begin
+  B := UpStr(P);
+  While Pos('\', B) > 0 Do Delete(B, 1, Pos('\', B));
+  If Pos('.', B) > 0 Then B := Copy(B, 1, Pos('.', B) - 1);
+  B := ' ' + B + ' ';
+  GameGenre := 0;
+  If Pos(B, ' KLONDIKE FREECELL POKER BACCARAT BADUGI BARBU BATAILLE BLACKJAK GOLF ') > 0 Then GameGenre := 1
+  Else If Pos(B, ' ECHECS OTHELLO CHECKERS BACKGAM BATTLE POWER4 TTT L25 ') > 0 Then GameGenre := 2
+  Else If Pos(B, ' MAHJONGG SUDOKU HEX2048 SOKOBAN HANOIS LIGHTS HANGMAN TILEMAN ') > 0 Then GameGenre := 3
+  Else If Pos(B, ' CENTIPED ASTEROID EXCAVAT PINBALL BREAKOUT INVADERS MISSILE BUBBLE BLOX FROGGER BABY ') > 0 Then
+    GameGenre := 4
+  Else If Pos(B, ' YATHZEE 421 BASEBALL BILLARD ') > 0 Then GameGenre := 5;
+End;
+
+Function SortCat(K : LongInt) : LongInt;
+Var G : LongInt;
+Begin
+  If It(K)^.Shadow <> 0 Then
+  Begin
+    SortCat := 30;
+    Exit;
+  End;
+  Case It(K)^.Obj Of
+    OB_DIR, OB_SYS, OB_DRIVES, OB_TEMPLATES, OB_GAMES, OB_DEVKIT, OB_PRODUCT, OB_MMFOLDER, OB_LEISURE, OB_SCIENCE,
+    OB_NETTOOLS, OB_SETUP : SortCat := 0;
+    OB_GAME :
+      Begin
+        G := GameGenre(It(K)^.Path);
+        If G = 0 Then SortCat := 10 Else SortCat := G;
+      End;
+    OB_EXE, OB_BATCH : SortCat := 10;
+    OB_TEXT, OB_DATA : SortCat := 20;
+    OB_HTML : SortCat := 21;
+    OB_WORDDOC, OB_XLSDOC : SortCat := 22;
+    OB_IMAGE : SortCat := 23;
+    OB_SOUND, OB_SONG, OB_MP3 : SortCat := 24;
+  Else
+    SortCat := 10;
+  End;
+End;
+
+Function SortKey(K, Mode : LongInt) : String;
+Var C : LongInt;
+Begin
+  If Mode = 2 Then
+  Begin
+    C := SortCat(K);
+    SortKey := Chr(65 + C Div 10) + Chr(65 + C Mod 10) + UpStr(It(K)^.Name);
+  End
+  Else SortKey := UpStr(It(K)^.Name);
+End;
+
+{ ranger les objets de la vue V selon son mode de tri : les enregistrements
+  sont permutes entre les places qu'ils occupent dans la table }
+Procedure SortItems(V : LongInt);
+Var Mode, N, I, J, T, K : LongInt; Slot, Ord0 : PLongs; Keys : PStrs; Buf : Pointer;
+Begin
+  Mode := SortMode(V);
+  If (Mode <> 1) And (Mode <> 2) Then Exit;
+  N := 0;
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then Inc(N);
+  If N < 2 Then Exit;
+  GetMem(Pointer(Slot), N * 4); GetMem(Pointer(Ord0), N * 4); GetMem(Pointer(Keys), N * 256);
+  GetMem(Buf, N * SizeOf(TItem));
+  N := 0;
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
+    Begin
+      Slot^[N] := K; Ord0^[N] := N;
+      Keys^[N] := SortKey(K, Mode);
+      For I := 0 To SizeOf(TItem) - 1 Do WrB(LongInt(Buf) + N * SizeOf(TItem) + I, RdB(LongInt(It(K)) + I));
+      Inc(N);
+    End;
+  { tri par insertion (stable) des numeros selon les cles }
+  For I := 1 To N - 1 Do
+  Begin
+    T := Ord0^[I];
+    J := I - 1;
+    While (J >= 0) And (Keys^[Ord0^[J]] > Keys^[T]) Do
+    Begin
+      Ord0^[J + 1] := Ord0^[J];
+      Dec(J);
+    End;
+    Ord0^[J + 1] := T;
+  End;
+  For I := 0 To N - 1 Do
+    For J := 0 To SizeOf(TItem) - 1 Do
+      WrB(LongInt(It(Slot^[I])) + J, RdB(LongInt(Buf) + Ord0^[I] * SizeOf(TItem) + J));
+  FreeMem(Buf, N * SizeOf(TItem)); FreeMem(Pointer(Keys), N * 256);
+  FreeMem(Pointer(Ord0), N * 4); FreeMem(Pointer(Slot), N * 4);
+  Vw(V)^.Sel := -1;
+End;
+
 Procedure Populate(V : LongInt);
 Var D, L, K, Cd : LongInt;
 Begin
@@ -1681,6 +1805,7 @@ Begin
         AddShadows(V, UpStr(Vw(V)^.Path));
       End;
   End;
+  SortItems(V);
   Layout(V);
   If Vw(V)^.Kind <> VK_DESK Then UpdScroll(V);
 End;
@@ -3102,6 +3227,25 @@ Begin
   MenuAddX(Id, S, False);
 End;
 
+{ article coche (MIA_CHECKED) ou non }
+Procedure MenuAddC(Id : LongInt; S : String; Chk : Boolean);
+Begin
+  MenuAddX(Id, S, False);
+  If Chk Then WrW(LongInt(@MenuTpl) + MenuLen - Length(S) - 1 - 6 + 2, MIA_CHECKED);
+End;
+
+{ Trier : non trie, ordre alphabetique, par categorie }
+Procedure MenuSort(V : LongInt);
+Var M : LongInt;
+Begin
+  M := SortMode(V);
+  MenuSubBegin(198, '~Trier');
+  MenuAddC(CM_SORTNONE, '~Non trie', (M <> 1) And (M <> 2));
+  MenuAddC(CM_SORTALPHA, 'Par ordre ~alphabetique', M = 1);
+  MenuAddC(CM_SORTCAT, 'Par ~categorie', M = 2);
+  MenuSubEnd;
+End;
+
 { sous-menu : article MIS_SUBMENU puis son propre gabarit (MenuSubEnd) }
 Procedure MenuSubBegin(Id : LongInt; S : String);
 Begin
@@ -3204,6 +3348,7 @@ Begin
     MenuAdd(0, '');
     MenuAdd(CM_REFRESH, '~Actualiser' + Chr(9) + 'F5');
     MenuAdd(CM_ARRANGE, '~Reorganiser');
+    MenuSort(V);
     MenuAdd(0, '');
     MenuAdd(CM_WINLIST, '~Liste des fenetres');
     If TaskMgrPath <> '' Then MenuAdd(CM_TASKMGR, '~Gestionnaire des taches');
@@ -3226,6 +3371,7 @@ Begin
     End;
     MenuAdd(CM_SELALL, 'Selectionner ~tout' + Chr(9) + 'Ctrl+A');
     MenuAdd(CM_SELINV, '~Inverser la selection');
+    MenuSort(V);
     MenuAdd(0, '');
     MenuAdd(CM_REFRESH, '~Actualiser' + Chr(9) + 'F5');
     If Vw(V)^.Kind = VK_DIR Then
@@ -4771,6 +4917,21 @@ Begin
       Begin
         D := PasteDir(V, K);
         If D <> '' Then DoPaste(D, Cmd = CM_PASTESH) Else WinAlarm(HWND_DESKTOP, 0);
+      End;
+    CM_SORTNONE, CM_SORTALPHA, CM_SORTCAT :
+      Begin
+        If Cmd = CM_SORTALPHA Then PrfSet('PMSHELL', SortName(V), '1')
+        Else If Cmd = CM_SORTCAT Then PrfSet('PMSHELL', SortName(V), '2')
+        Else PrfSet('PMSHELL', SortName(V), '');
+        { bureau : les positions gardees sont oubliees (Reorganiser) }
+        If Vw(V)^.Kind = VK_DESK Then
+          For J := 0 To ItemCap - 1 Do
+            If (It(J)^.Use <> 0) And (It(J)^.View = V) Then
+              Dummy := PrfWriteProfileString(-1, Z('PMSHELL'), Z2('POS ' + It(J)^.Name), 0);
+        Populate(V);
+        Vw(V)^.Top := 0;
+        UpdScroll(V);
+        Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
       End;
     CM_SELALL : SelectAll(V);
     CM_SELINV : SelectInvert(V);
