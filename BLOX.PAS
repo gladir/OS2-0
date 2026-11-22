@@ -955,10 +955,10 @@ End;
 Procedure GhostBlock(X, Y, P : LongInt);
 Var B : LongInt;
 Begin
-  B := C_PIECE + P * 8 + 5;
-  Rect(X + 1, Y + 1, X + Cell - 2, Y + Cell - 2, B);
-  Rect(X + 1, Y + 1, X + Cell - 2, Y + 1, C_GHOST); Rect(X + 1, Y + Cell - 2, X + Cell - 2, Y + Cell - 2, C_GHOST);
-  Rect(X + 1, Y + 1, X + 1, Y + Cell - 2, C_GHOST); Rect(X + Cell - 2, Y + 1, X + Cell - 2, Y + Cell - 2, C_GHOST);
+  B := C_PIECE + P * 8;
+  Rect(X + 2, Y + 2, X + Cell - 3, Y + Cell - 3, B + 5);
+  Rect(X + 1, Y + 1, X + Cell - 2, Y + 1, B + 1); Rect(X + 1, Y + Cell - 2, X + Cell - 2, Y + Cell - 2, B + 3);
+  Rect(X + 1, Y + 1, X + 1, Y + Cell - 2, B + 1); Rect(X + Cell - 2, Y + 1, X + Cell - 2, Y + Cell - 2, B + 3);
 End;
 
 { titre en lettres faites de petits blocs }

@@ -19,6 +19,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               CENTIPED.EXE, ASTEROID.EXE, BADUGI.EXE, TTT.EXE, BASEBALL.EXE,
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
               INVADERS.EXE, FREECELL.EXE, MISSILE.EXE, L25.EXE, BUBBLE.EXE,
+              BLACKJAK.EXE, BLOX.EXE, GOLF.EXE, FROGGER.EXE, HANGMAN.EXE,
+              LIGHTS.EXE,
               ASTROMAN.EXE, REVES.EXE (et REVE.TXT), ASTRO.EXE, SIMUPLAN.EXE,
               CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
               DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
@@ -117,6 +119,12 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC MISSILE.PAS                         -> MISSILE.EXE (Commandement des missiles)
   OS2PC L25.PAS                             -> L25.EXE (L25)
   OS2PC BUBBLE.PAS                          -> BUBBLE.EXE (Bubble Shooter)
+  OS2PC BLACKJAK.PAS                        -> BLACKJAK.EXE (BlackJack)
+  OS2PC BLOX.PAS                            -> BLOX.EXE (Blox)
+  OS2PC GOLF.PAS                            -> GOLF.EXE (Golf)
+  OS2PC FROGGER.PAS                         -> FROGGER.EXE (Grenouille)
+  OS2PC HANGMAN.PAS                         -> HANGMAN.EXE (Bonhomme pendu)
+  OS2PC LIGHTS.PAS                          -> LIGHTS.EXE (Lights)
   OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
   OS2PC APPS\ASTROMAN.PAS                   -> ASTROMAN.EXE (Astromancie)
   OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
@@ -1120,6 +1128,26 @@ traditionnels, composant Jeux de l'installation) :
   tirs rates ; perdu quand les bulles passent la ligne rouge. Porte du
   prototype BS.PAS de 7iles (effacement des bulles corrige). /SEED:n,
   /LEVEL:n, /AUTO, /NOSOUND, /TEST.
+  BlackJack (BLACKJAK.EXE) : contre le croupier (tire jusqu'a 16),
+  sabot de 4 jeux, jetons et mises, Tirer, Rester, Doubler, BlackJack
+  paye 3 contre 2. Porte de BLACKJAK.PAS (7iles). /SEED:n, /AUTO, /TEST.
+  Blox (BLOX.EXE) : pieces de 4 blocs dans un puits de 10 x 20, avec des
+  briques deja posees au fond (une rangee de plus tous les 10 lignes) ;
+  pieces suivante et ombre, chute immediate (Espace), pause (P). Porte
+  de BLOX.PAS (7iles). /SEED:n, /LEVEL:n, /AUTO, /TEST.
+  Golf (GOLF.EXE) : Golf a six cartes contre l'ordinateur, paires de meme
+  rang a 0, parcours de 9 ou 3 trous. Porte de GOLF.PAS (7iles).
+  /SEED:n, /HOLES:n, /AUTO, /TEST.
+  Grenouille (FROGGER.EXE) : traverser la route puis la riviere (troncs,
+  tortues) jusqu'aux nenuphars ; vies, temps, mouche bonus, niveaux.
+  Porte de FROGGER.PAS (7iles). /SEED:n, /LEVEL:n, /AUTO, /TEST.
+  Bonhomme pendu (HANGMAN.EXE) : le pendu avec un bonhomme dessine en
+  style dessin anime (visage qui change), clavier de lettres cliquable,
+  niveaux Debutant, Chevalier, Roi. Porte de HANGMAN.PAS (7iles).
+  /SEED:n, /LEVEL:, /AUTO, /TEST.
+  Lights (LIGHTS.EXE) : eteindre toutes les lampes (une lampe inverse ses
+  voisines) ; annuler, indice, solution, minimum exact. Porte de
+  LIGHTS.PAS (7iles). /SEED:n, /LEVEL:n, /AUTO, /TEST.
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
 Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,
