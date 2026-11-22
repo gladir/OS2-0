@@ -32,10 +32,10 @@ Program LUNAR;
   vite, plus le pointage est eleve.
   Ce qui est corrige : la poussee dependait du nombre de touches dans le
   tampon du clavier (une touche = une impulsion, puis plus rien) ; le
-  carburant baissait d'une unite par touche quelle que soit la poussee ; un
-  module pose doucement hors de la piste n'explosait pas toujours et
-  l'explosion etait dessinee par-dessus le decor sans l'effacer ; le
-  contact avec le sol ne regardait que deux points de couleur ; la vitesse
+  carburant baissait d'une unite par touche quelle que soit la poussee ;
+  l'explosion etait dessinee par-dessus le decor sans jamais etre effacee ;
+  le contact avec le sol ne regardait que la couleur de deux points sous
+  les pieds (le module pouvait s'enfoncer dans une pente) ; la vitesse
   horizontale n'etait pas verifiee ; le jeu dependait de la vitesse de
   l'ordinateur (attente de 100 ms apres chaque image).
   Ce qui s'ajoute : un terrain different a chaque niveau, plusieurs pistes

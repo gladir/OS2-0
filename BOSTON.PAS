@@ -109,7 +109,7 @@ Var
   VoidS : Array[0..15] Of LongInt;           { joueur * 4 + couleur : coupe connue }
   CurBid, BidBy, Declarer, CLevel, Trump, Dealer, DealNo, NDeals, Leader, LeadSuit, NTrick, TrickNo : LongInt;
   LastWin, LastShow, Phase, CurP, Sel, Wait, Seed, AutoAll, SoundOn, TestMode, Fast, Tick : LongInt;
-  BLvl, BSuit, Redeals, Made, Failed, HumanMade : LongInt;
+  BLvl, BSuit, Redeals, Made, Failed, HumanMade, SumLvl : LongInt;
   { carte qui glisse vers le tapis }
   AnOn, AnC, AnK, AnX0, AnY0, AnX1, AnY1 : LongInt;
   FullBlit, Dirty, BackOk : LongInt;
@@ -967,9 +967,11 @@ Begin
   For S := 0 To 4 Do
   Begin
     E := Estimate(P, S);
-    Lm := (E - 1) Div 10;
+    Lm := (E + 4) Div 10;
     L := 5;
     While (L <= 13) And (BidVal(L, S) <= CurBid) Do Inc(L);
+    { on saute directement pres de ce que vaut la main }
+    If L <= Lm Then L := MaxI(L, Lm);
     If (L <= Lm) And (E > BestE) Then
     Begin
       Best := BidVal(L, S); BestE := E;
@@ -1742,7 +1744,7 @@ Procedure NewGame;
 Var P : LongInt;
 Begin
   For P := 0 To 3 Do Total[P] := 0;
-  DealNo := 1; Made := 0; Failed := 0; Redeals := 0; HumanMade := 0;
+  DealNo := 1; Made := 0; Failed := 0; Redeals := 0; HumanMade := 0; SumLvl := 0;
   Dealer := Rnd(4);
   StartDeal;
 End;
@@ -1779,6 +1781,7 @@ Procedure EndDeal;
 Var R : LongInt; S : String;
 Begin
   R := ScoreDeal;
+  SumLvl := SumLvl + CLevel;
   If R <> 0 Then Inc(Made) Else Inc(Failed);
   If (R <> 0) And (Declarer = 0) Then Inc(HumanMade);
   Phase := PH_END; Wait := 0;
@@ -2262,7 +2265,7 @@ Begin
   S := '';
   For P := 0 To 3 Do S := S + ' ' + IStr(Total[P]);
   Log('BOSTON : PARTIE donnes ' + IStr(Made + Failed) + ' reussies ' + IStr(Made) + ' chutees ' + IStr(Failed) +
-      ' redistributions ' + IStr(Redeals) + ' pointages' + S);
+      ' redistributions ' + IStr(Redeals) + ' levees demandees ' + IStr(SumLvl) + ' pointages' + S);
   If (Made + Failed = 8) And (Total[0] + Total[1] + Total[2] + Total[3] = 0) And (Phase = PH_OVER) Then Inc(Ok);
   Log('BOSTON : ' + IStr(Ok) + '/6 essais reussis');
 End;

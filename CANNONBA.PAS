@@ -1450,7 +1450,7 @@ Begin
   ODirty[0] := 1;
   PlaySnd(0);
   If AutoAll <> 0 Then Msg := 'Feu ! Le filet se place sous l''artiste.'
-  Else Msg := 'Feu ! Fl' + Chr(138) + 'ches gauche et droite (ou souris) : placez le filet sous l''artiste !';
+  Else Msg := 'Feu ! Gauche et droite (ou la souris) : placez le filet sous l''artiste !';
 End;
 
 Procedure Caught(Dx : LongInt);
@@ -1593,13 +1593,13 @@ Begin
           Else
           Begin
             Mx := AbsI(Dx) - NetW Div 2;
-            Msg := 'A c' + Chr(244) + 't' + Chr(130) + ' du filet de ' + IStr(Mx) + ' points...';
+            Msg := 'A c' + Chr(147) + 't' + Chr(130) + ' du filet, de ' + IStr(Mx) + ' pixels...';
           End;
         End
         Else If HYm >= (FloorY - 4) * 1000 Then
         Begin
           Dx := AbsI(HXm Div 1000 - NetX) - NetW Div 2;
-          Missed('Le filet ' + Chr(130) + 'tait ' + Chr(133) + ' ' + IStr(MaxI(1, Dx)) + ' points');
+          Missed('Le filet ' + Chr(130) + 'tait trop loin (' + IStr(MaxI(1, Dx)) + ' pixels)');
         End;
       End;
     S_CAUGHT :
