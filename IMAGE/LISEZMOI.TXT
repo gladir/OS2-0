@@ -28,7 +28,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
-              GLTEST.EXE, FTPCLI.EXE, DEMARRE.WAV,
+              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -1170,6 +1170,18 @@ recursifs, droits d'acces (chmod), commande personnalisee. Double-clic
 ou Entree : transferer ; bouton 2 : menus. Sites, historique et cles
 d'hote : C:\RESEAU\ (D:\RESEAU\ au demarrage du CD-ROM).
   OS2PC APPS\FTPCLI.PAS                     -> FTPCLI.EXE
+
+Client SSH (SSHCLI.EXE, dossier Outils reseau)
+----------------------------------------------
+Client SSH-2 porte de Pasdows 95 (source APPS\SSHCLI.PAS) : terminal
+xterm (couleurs 16/256/RVB, ecran alternatif, UTF-8, graphismes DEC,
+historique, selection, copier, coller), jusqu'a 8 sessions en onglets,
+MultiExec, panneau Sessions (sessions.xml), Outils (programmes d'OS/2-0,
+table ASCII, mots de passe), Macros (macros.xml) et SFTP. Connexion
+rapide : utilisateur@serveur:port puis Entree. Fichiers dans C:\RESEAU\
+(knownhosts.txt commun avec le Client FTP). TCPIP32.DLL : select
+(ordinal 12) et bsdselect (ordinal 32).
+  OS2PC APPS\SSHCLI.PAS                     -> SSHCLI.EXE
 
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
 ---------------------------------------------------------------------
