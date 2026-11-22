@@ -1551,14 +1551,18 @@ End;
 { ==================================================================== }
 { Le pilote assemble les paquets de 3 octets de la souris (boutons,
   deplacements X et Y en mickeys) dans une file ; MOUCALLS.DLL les lit
-  par KrnMouRead et gere position, evenements et pointeur. }
+  par KrnMouRead et gere position, evenements et pointeur. Une souris a
+  molette (protocole IntelliMouse : frequences 200, 100 puis 80, identite
+  3) envoie des paquets de 4 octets ; le 4e (deplacement Z, signe) est
+  rendu dans les bits 8 a 15 des boutons. }
 
 Const
   MouQSize = 128;
 
 Var
   MouOk      : Boolean;
-  MouPk      : Array[0..2] Of LongInt;
+  MouPk      : Array[0..3] Of LongInt;
+  MouPkLen   : LongInt;                 { 3, ou 4 avec la molette }
   MouIdx     : LongInt;
   MouQDx, MouQDy, MouQBtn, MouQTime : Array[0..MouQSize - 1] Of LongInt;
   MouHead, MouTail, MouLost : LongInt;
@@ -1583,7 +1587,7 @@ Begin
 End;
 
 Procedure IrqMouse; Interrupt;
-Var B, N, Dx, Dy : LongInt;
+Var B, N, Dx, Dy, Dz : LongInt;
 Begin
   If (Port[$64] And $21) = $21 Then
   Begin
@@ -1594,9 +1598,15 @@ Begin
     Begin
       MouPk[MouIdx] := B;
       Inc(MouIdx);
-      If MouIdx = 3 Then
+      If MouIdx >= MouPkLen Then
       Begin
         MouIdx := 0;
+        Dz := 0;
+        If MouPkLen = 4 Then
+        Begin
+          Dz := MouPk[3] And 255;
+          If Dz >= 128 Then Dz := Dz - 256;
+        End;
         Dx := MouPk[1];
         If (MouPk[0] And $10) <> 0 Then Dx := Dx - 256;
         Dy := MouPk[2];
@@ -1620,7 +1630,7 @@ Begin
             MouMTail := N;
           End;
         End
-        Else If Not MouPush(Dx, -Dy, MouPk[0] And 7, Ticks * 10) Then Inc(MouLost);
+        Else If Not MouPush(Dx, -Dy, (MouPk[0] And 7) Or ((Dz And 255) Shl 8), Ticks * 10) Then Inc(MouLost);
       End;
     End;
   End;
@@ -1662,10 +1672,10 @@ Begin
 End;
 
 Procedure InitMouse;
-Var Cb, Cb2, X : LongInt;
+Var Cb, Cb2, X, Id : LongInt;
 Begin
   MouOk := False;
-  MouIdx := 0; MouHead := 0; MouTail := 0; MouLost := 0;
+  MouIdx := 0; MouHead := 0; MouTail := 0; MouLost := 0; MouPkLen := 3;
   MouMonOn := False; MouMonPid := 0; MouMHead := 0; MouMTail := 0;
   asm
     cli
@@ -1683,8 +1693,21 @@ Begin
     MouWaitIn;
     Port[$60] := (Cb And Not $22) And $FF;
     If MouCmd($F6) Then                   { valeurs par defaut }
+    Begin
+      { molette (IntelliMouse) : frequences 200, 100, 80 puis identite ;
+        3 : paquets de 4 octets }
+      If MouCmd($F3) Then If MouCmd(200) Then
+        If MouCmd($F3) Then If MouCmd(100) Then
+          If MouCmd($F3) Then If MouCmd(80) Then
+            If MouCmd($F2) Then
+            Begin
+              Id := MouReadByte;
+              If Id = 3 Then MouPkLen := 4;
+            End;
+      If MouCmd($F3) Then X := Ord(MouCmd(100));
       If MouCmd($F4) Then                 { envoi des paquets }
         MouOk := True;
+    End;
     { octet en trop eventuel : attente courte (chaque lecture du port 64h
       est une sortie de la machine virtuelle sous VirtualBox/Hyper-V ;
       200 000 lectures retardaient le demarrage) }
@@ -1709,7 +1732,8 @@ End;
 
 { KrnMouRead(P) : paquet suivant de la souris dans P (deplacement X,
   deplacement Y vers le bas en mickeys, boutons : bit 0 gauche, bit 1
-  droit, bit 2 milieu, instant en ms) ; rend 1, ou 0 si la file est vide }
+  droit, bit 2 milieu, bits 8 a 15 : rotation de la molette, signee ;
+  instant en ms) ; rend 1, ou 0 si la file est vide }
 Function KrnMouRead(P : LongInt) : LongInt;
 Begin
   KrnMouRead := 0;
@@ -19745,6 +19769,7 @@ Begin
   TextAttr := $07;
   ConPutLn('Memoire : ' + IntStr(MemTotalKb) + ' Ko, tas du noyau : ' +
            IntStr((HeapEnd - HeapStart) Div 1024) + ' Ko, pagination active.');
+  If MouOk And (MouPkLen = 4) Then ConPutLn('Souris PS/2 a molette (IntelliMouse).');
   { carte video : modes VESA releves par le BIOS (INT 10h, 4F00h/4F01h) }
   If KrnVideo(0, 0, 0) <> 0 Then
     ConPutLn('Video : VESA (VBE ' + IntStr(VbeVer Shr 8) + '.' + IntStr(VbeVer And 255) + ', ' + IntStr(VbeMemKb) +

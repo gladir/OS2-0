@@ -415,6 +415,7 @@ Function KbdCharIn(PInfo, Wait, H : LongInt) : LongInt; External 'KBDCALLS' Name
 Function MouOpen(PDrv, PH : LongInt) : LongInt; External 'MOUCALLS' Name 'MouOpen';
 Function MouClose(H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouClose';
 Function MouReadEventQue(PEv, PWait, H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouReadEventQue';
+Function MouSetEventMask(PMask, H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouSetEventMask';
 Function MouGetPtrPos(PPos, H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouGetPtrPos';
 Function MouSetPtrPos(PPos, H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouSetPtrPos';
 Function MouDrawPtr(H : LongInt) : LongInt; External 'MOUCALLS' Name 'MouDrawPtr';
@@ -5199,6 +5200,20 @@ Begin
   QIdx := I;
 End;
 
+{ evenements de la souris demandes a MOUCALLS : deplacements et boutons
+  (7Fh) et les crans de la molette (0100h vers le haut, 0200h vers le
+  bas : extension d'OS/2-0) }
+Procedure MouWheelMask(H : LongInt);
+Var M : LongInt;
+Begin
+  M := $037F;
+  If MouSetEventMask(LongInt(@M), H) <> 0 Then
+  Begin
+    M := $7F;
+    Dummy := MouSetEventMask(LongInt(@M), H);
+  End;
+End;
+
 { souris de la file courante (ouverte a la demande) }
 Function CurMou : LongInt;
 Var Q, H : LongInt;
@@ -5208,7 +5223,11 @@ Begin
   If Q >= 0 Then
   Begin
     If QMou[Q] = 0 Then
-      If MouOpen(0, LongInt(@H)) = 0 Then QMou[Q] := H;
+      If MouOpen(0, LongInt(@H)) = 0 Then
+      Begin
+        QMou[Q] := H;
+        MouWheelMask(H);
+      End;
     H := QMou[Q];
   End
   Else If MouOpen(0, LongInt(@H)) <> 0 Then H := 0;
@@ -6299,7 +6318,11 @@ Begin
   If QMou[Q] = 0 Then
   Begin
     H := 0;
-    If MouOpen(0, LongInt(@H)) = 0 Then QMou[Q] := H;
+    If MouOpen(0, LongInt(@H)) = 0 Then
+    Begin
+      QMou[Q] := H;
+      MouWheelMask(H);
+    End;
   End;
   H := QMou[Q];
   If H = 0 Then Exit;
@@ -6321,6 +6344,18 @@ Begin
     Begin
       MouseX := RdW(LongInt(@Ev) + 8) * 8 + 4;
       MouseY := (ScrRows - 1 - RdW(LongInt(@Ev) + 6)) * 16 + 8;
+    End;
+    { molette : WM_VSCROLL (SB_LINEUP, SB_LINEDOWN ; mp1 = 0, sans barre
+      de defilement) a la fenetre sous le pointeur (ou a celle qui tient
+      la souris), comme les pilotes de souris a molette d'OS/2 }
+    If (Fs And $0300) <> 0 Then
+    Begin
+      If CaptureWin > 1 Then T := CaptureWin Else T := WinAtAbs(0, MouseX, MouseY, True);
+      If (T > 1) And (WUse[T] <> 0) And (WHmq[T] >= 0) And Not Disabled(T) And
+         ((SysModalWin <= 1) Or (T = SysModalWin) Or IsChildOf(T, SysModalWin)) Then
+        If (Fs And $0100) <> 0 Then Dummy := LongInt(QPut(WHmq[T], HwOf(T), WM_VSCROLL, 0, Mk2(0, SB_LINEUP)))
+        Else Dummy := LongInt(QPut(WHmq[T], HwOf(T), WM_VSCROLL, 0, Mk2(0, SB_LINEDOWN)));
+      Continue;
     End;
     Btn := 0;
     If (Fs And $06) <> 0 Then Btn := Btn Or 1;

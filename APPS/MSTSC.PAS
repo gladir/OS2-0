@@ -3675,9 +3675,18 @@ Begin
     WM_ERASEBACKGROUND : SessProc := 0;
     WM_SIZE : SetScrolls;
     WM_RDPDIRTY : TakeDirty;
-    WM_HSCROLL : ScrollTo(True, Hi16(Mp2), S16(Mp2));
+    WM_HSCROLL :
+      Begin
+        ScrollTo(True, Hi16(Mp2), S16(Mp2));
+        { le clavier reste a la session (pas a la barre de defilement) }
+        Dummy := WinSetFocus(HWND_DESKTOP, H);
+      End;
     WM_VSCROLL :
-      If Lo16(Mp1) = 31 Then ScrollTo(False, Hi16(Mp2), S16(Mp2))
+      If Lo16(Mp1) = 31 Then
+      Begin
+        ScrollTo(False, Hi16(Mp2), S16(Mp2));
+        Dummy := WinSetFocus(HWND_DESKTOP, H);
+      End
       Else
       Begin
         { molette de la souris (WM_VSCROLL sans barre de defilement) :
@@ -3910,6 +3919,8 @@ Begin
       FullScr := True;
     End;
   End;
+  { ecran de la session precedente efface }
+  If Fb <> 0 Then ZeroB(Fb, FbPitch * FbH);
   FbW := ReqW; FbH := ReqH;
   NetStop := False; Active := False; FirstAct := False; Connected := False;
   Licensed := False; Tc.Sock := -1; FragLen := 0;
