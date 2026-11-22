@@ -1081,7 +1081,7 @@ Begin
           (U = 'ASTEROID.EXE') Or (U = 'BADUGI.EXE') Or (U = 'TTT.EXE') Or (U = 'BASEBALL.EXE') Or
           (U = 'EXCAVAT.EXE') Or (U = 'PINBALL.EXE') Or (U = 'BARBU.EXE') Or
           (U = 'BREAKOUT.EXE') Or (U = 'BATAILLE.EXE') Or (U = 'INVADERS.EXE') Or
-          (U = 'FREECELL.EXE') Or (U = 'MISSILE.EXE') Or (U = 'L25.EXE') Or
+          (U = 'FREECELL.EXE') Or (U = 'MISSILE.EXE') Or (U = 'L25.EXE') Or (U = 'BUBBLE.EXE') Or
           (U = 'ASTROMAN.EXE') Or (U = 'REVES.EXE') Then
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'GLTEST.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or

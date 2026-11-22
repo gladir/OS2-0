@@ -176,7 +176,7 @@ Const
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
-  OB_NETTOOLS = 41; IC_FTPCLI = 83; IC_SSHCLI = 84; IC_MSTSC = 85;
+  OB_NETTOOLS = 41; IC_FTPCLI = 83; IC_SSHCLI = 84; IC_MSTSC = 85; IC_BUBBLE = 86;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1553,6 +1553,8 @@ Begin
         If FileExists('C:\MISSILE.EXE') Then
           Dummy := NewItem(V, IC_MISSILE, OB_GAME, 'Commandement des missiles', 'C:\MISSILE.EXE');
         If FileExists('C:\L25.EXE') Then Dummy := NewItem(V, IC_L25, OB_GAME, 'L25', 'C:\L25.EXE');
+        If FileExists('C:\BUBBLE.EXE') Then
+          Dummy := NewItem(V, IC_BUBBLE, OB_GAME, 'Bubble Shooter', 'C:\BUBBLE.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -2875,6 +2877,28 @@ Begin
         FBox(Hps, X + 20, Y + 1, X + 30, Y + 9, CLR_YELLOW, CLR_BLACK);
         GBox(Hps, X + 22, Y + 9, X + 28, Y + 14, CLR_BLACK, DRO_OUTLINE);
         GLn(Hps, X + 25, Y + 3, X + 25, Y + 6, CLR_BLACK);
+      End;
+    IC_BUBBLE :
+      Begin
+        { plafond gris, grappe de bulles en relief, canon et bulle suivante }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKBLUE, CLR_BLACK);
+        GBox(Hps, X + 2, Y + 27, X + 29, Y + 29, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 2, Y + 27, X + 29, Y + 27, CLR_DARKGRAY);
+        GDisc(Hps, X + 6, Y + 22, 4, CLR_DARKRED);    GDisc(Hps, X + 5, Y + 23, 3, CLR_RED);
+        GLn(Hps, X + 4, Y + 24, X + 5, Y + 24, CLR_WHITE);
+        GDisc(Hps, X + 15, Y + 22, 4, CLR_BROWN);     GDisc(Hps, X + 14, Y + 23, 3, CLR_YELLOW);
+        GLn(Hps, X + 13, Y + 24, X + 14, Y + 24, CLR_WHITE);
+        GDisc(Hps, X + 24, Y + 22, 4, CLR_DARKGREEN); GDisc(Hps, X + 23, Y + 23, 3, CLR_GREEN);
+        GLn(Hps, X + 22, Y + 24, X + 23, Y + 24, CLR_WHITE);
+        GDisc(Hps, X + 10, Y + 15, 4, CLR_DARKCYAN);  GDisc(Hps, X + 9, Y + 16, 3, CLR_CYAN);
+        GLn(Hps, X + 8, Y + 17, X + 9, Y + 17, CLR_WHITE);
+        GDisc(Hps, X + 19, Y + 15, 4, CLR_DARKRED);   GDisc(Hps, X + 18, Y + 16, 3, CLR_RED);
+        GLn(Hps, X + 17, Y + 17, X + 18, Y + 17, CLR_WHITE);
+        GBox(Hps, X + 9, Y + 2, X + 21, Y + 4, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 11, Y + 5, X + 19, Y + 6, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 15, Y + 6, X + 18, Y + 11, CLR_DARKGRAY);
+        GLn(Hps, X + 16, Y + 6, X + 19, Y + 11, CLR_DARKGRAY);
+        GDisc(Hps, X + 5, Y + 5, 3, CLR_DARKCYAN);    GDisc(Hps, X + 4, Y + 6, 2, CLR_CYAN);
       End;
     IC_MSTSC :
       Begin
