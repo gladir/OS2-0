@@ -36,6 +36,9 @@ Program OS2KRNL;
     Partie 12 - Couche API (DOSCALLS) utilisee par le runtime de OS2PC
     Partie 13 - Chargeur de programmes PE et processus
     Partie 14 - Demarrage du systeme : CONFIG.SYS et CMD.EXE
+    Partie 13e- Virtualisation materielle (KrnVirt) : AMD-V (SVM + NPT),
+                Intel VT-x (VMX + EPT, invite sans restriction) ou mode
+                virtuel 8086, pour les machines de VIRTUAL.EXE
     Video     - appel du BIOS en mode reel (KERNEL/BIOSCALL.ASM, recopie
                 en 0000:7000) et modes VESA du BIOS VBE : KrnVideo
                 (liste des modes a memoire lineaire, passage a un mode
@@ -384,6 +387,10 @@ Var
   { session montree dans une fenetre de PM (PMVIOP lit son ecran) ; plein
     ecran automatique d'un mode graphique }
   VmWinSeen, VmAutoFs : Boolean;
+  { machine de VIRTUAL.EXE en mode V86 (partie 13e) : en cours, sa tache,
+    retour force a l'application par la minuterie (CS:IP sauves) }
+  VxV86On, VxTramp : Boolean;
+  VxTask, VxSavIp, VxSavCs : LongInt;
   { memoire physique des processus : blocs tries par adresse }
   PBase, PSize     : Array[0..MaxPBlk - 1] Of LongInt;
   PCount           : LongInt;
@@ -947,6 +954,20 @@ Begin
     If Not (((TmpEip >= ProcWinBase) And (TmpEip < ProcWinBase + ProcWinSize)) Or
             ((MemL[0:TmpIntEbp + 48] And 3) = 3) Or ((MemL[0:TmpIntEbp + 52] And $20000) <> 0)) Then
       Inc(KrnTicks);
+  End;
+  { machine de VIRTUAL.EXE en mode V86 : l'invite est detournee vers le
+    HLT de F000:FF00 qui rend la main a l'application (partie 13e) }
+  If VxV86On And (CurTask = VxTask) And ((MemL[0:TmpIntEbp + 52] And $20000) <> 0) Then
+  Begin
+    If Not VxTramp Then
+    Begin
+      VxSavIp := MemL[0:TmpIntEbp + 44] And $FFFF;
+      VxSavCs := MemL[0:TmpIntEbp + 48] And $FFFF;
+      MemL[0:TmpIntEbp + 44] := $FF00;
+      MemL[0:TmpIntEbp + 48] := $F000;
+      VxTramp := True;
+    End;
+    Exit;
   End;
   { code 16 bits de la machine virtuelle DOS (mode V86) ou de son client
     DPMI (anneau 3) : interruptions virtuelles, puis partage du temps }
@@ -10246,6 +10267,7 @@ Var
   VmVec, VmErrCode : LongInt;   { vecteur et code d'erreur de la faute }
   VmKEsp, VmE0P : LongInt;      { pile du noyau a l'entree, ESP0 }
   VmEnterS, VmLeaveS : LongInt; { souches d'entree et de sortie }
+  VmExitL : LongInt;            { sortie commune (iretd) des souches }
   VmCtx : Array[0..17] Of LongInt;  { registres du contexte courant }
   VmPM : Boolean;               { contexte en mode protege (DPMI) }
   VmPad : LongInt;              { bourrage du cadre a la sortie (0, 16) }
@@ -10560,6 +10582,7 @@ Begin
   PutB(A, $FF); PutB(A, $D0);                       { call eax }
   PutB(A, $83); PutB(A, $C4); PutB(A, 4);           { add esp,4 }
   ExitL := A;
+  VmExitL := A;
   PutB(A, $58);                                     { pop eax }
   PutB(A, $0F); PutB(A, $22); PutB(A, $D8);         { mov cr3,eax (TLB) }
   PutB(A, $61);                                     { popad }
@@ -14818,8 +14841,16 @@ Procedure VmPostTrap; Forward;
 
 { Point d'entree des souches : faute ou trappe du mode V86, ou du
   client DPMI en anneau 3 }
+Procedure V86xTrap(F : LongInt); Forward;
+
 Procedure V86Trap(F : LongInt);
 Begin
+  { machine de VIRTUAL.EXE (partie 13e) }
+  If VxV86On And (CurTask = VxTask) And ((MemL[0:F + 56] And $20000) <> 0) Then
+  Begin
+    V86xTrap(F);
+    Exit;
+  End;
   VmLoadCtx(F);
   VmF := LongInt(@VmCtx);
   asm
@@ -19492,6 +19523,1674 @@ Begin
   NeLoadExe := Pid;
 End;
 { NE-FIN }
+
+{ ==================================================================== }
+{ Partie 13e - Virtualisation materielle (KrnVirt, VIRTUAL.EXE)        }
+{ ==================================================================== }
+{ Une machine virtuelle de VIRTUAL.EXE s'execute directement sur le
+  processeur (virtualisation, et non emulation) par l'une de ces
+  methodes, choisie dans cet ordre :
+
+  - AMD-V (SVM) avec tables de pages imbriquees (NPT) : le bloc de
+    controle de la machine (VMCB, 4 Ko) decrit les evenements a
+    intercepter et l'etat de l'invite ; VMRUN execute l'invite jusqu'a
+    l'evenement suivant (#VMEXIT). L'invite demarre en mode reel ; les
+    tables NPT projettent son adresse physique 0 sur la memoire qui lui
+    est reservee (bloc contigu au-dela de 16 Mo, vu par VIRTUAL.EXE a la
+    meme adresse). L'invite peut passer en mode protege, paginer, entrer
+    en mode V86 (EMM386, Windows 3.1) sans aide du noyau.
+  - Intel VT-x (VMX) avec EPT et invite sans restriction (unrestricted
+    guest) : region VMXON, structure VMCS (VMREAD / VMWRITE), tables EPT
+    a 4 niveaux sur la meme memoire.
+  - mode virtuel 8086 du 80386 (plan B, comme les sessions DOS d'OS/2 2.x) :
+    l'invite s'execute en mode V86 a l'anneau 3 ; les instructions
+    sensibles (IN, OUT, INT, IRET, PUSHF, POPF, CLI, STI, HLT) provoquent
+    une faute de protection generale que ce moniteur traite ; IF est
+    virtuel. Pas de mode protege dans l'invite.
+
+  Le noyau ne fait que le processeur : les peripheriques (BIOS, PIC, PIT,
+  clavier, VGA, CMOS, disques VHD/VDI) sont dans VIRTUAL.EXE, a la facon
+  de KVM. KrnVirt(2, cadre) execute l'invite et rend la raison de la
+  sortie (E/S, HLT, interruption de l'hote, arret...) ; les registres
+  passent par un cadre de 160 octets (constantes x* ci-dessous). Les
+  sorties CPUID, RDMSR/WRMSR et les instructions de virtualisation de
+  l'invite sont traitees ici sans revenir a l'application.
+
+  KrnVirt(op, p1, p2) :
+    0 : information (p1 = tampon de 512 octets) ; rend la meilleure
+        methode (1 SVM, 2 VMX, 3 V86)
+    1 : creer la machine (p1 = taille de la memoire en octets, p2 =
+        methode, 0 = la meilleure) ; rend l'adresse de la memoire ou 0
+    2 : executer (p1 = cadre) ; rend le code de sortie VXE_*
+    3 : detruire la machine
+    4 : police 8x16 de la carte VGA (p1 = tampon de 4096 octets)
+    5 : effacer les compteurs de sorties }
+
+Const
+  VXM_NONE = 0; VXM_SVM = 1; VXM_VMX = 2; VXM_V86 = 3;
+  VXE_IO = 1; VXE_HLT = 2; VXE_INTR = 3; VXE_SHUT = 4; VXE_NPF = 5;
+  VXE_FAIL = 6; VXE_EXC = 7; VXE_OTHER = 8;
+  { cadre des registres partage avec VIRTUAL.EXE }
+  xEax = 0; xEbx = 4; xEcx = 8; xEdx = 12; xEsi = 16; xEdi = 20; xEbp = 24;
+  xEsp = 28; xEip = 32; xFl = 36; xCs = 40; xDs = 44; xEs = 48; xSs = 52;
+  xFs = 56; xGs = 60; xCsB = 64; xDsB = 68; xEsB = 72; xSsB = 76; xFsB = 80;
+  xGsB = 84; xCr0 = 88; xCr3 = 92; xCr4 = 96; xSet = 100; xIrq = 104;
+  xExit = 108; xInfo1 = 112; xInfo2 = 116; xNext = 120; xRaw = 124;
+  xCpl = 128; xEfer = 132;
+
+Var
+  VxStub, VxIdS, VxCpuidS, VxRdMsrS, VxWrMsrS, VxSvmS : LongInt;
+  VxA, VxB, VxC, VxD : LongInt;          { registres d'echange des souches }
+  VxG : Array[0..5] Of LongInt;          { EBX ECX EDX ESI EDI EBP de l'invite }
+  VxProbed, VxHasId : Boolean;
+  VxBest, VxMethod, VxFlags : LongInt;
+  VxSvmRev, VxAsids, VxStd1A, VxStd1C, VxStd1D, VxExtC, VxExtD : LongInt;
+  VxVmxLo, VxVmxHi, VxProc2Hi, VxEptCap : LongInt;
+  VxVendor, VxBrand, VxWhy : String;
+  VxOwner, VxMem, VxSize : LongInt;
+  VxVmcb, VxHsave, VxHVmcb, VxIopm, VxMsrpm, VxNpd, VxNpts, VxDPt, VxDPg : LongInt;
+  VxFpuH, VxFpuG : Array[0..27] Of LongInt;
+  VxFpuInit : Boolean;
+  VxCnt : Array[0..15] Of LongInt;
+  VxTotal : LongInt;
+
+Procedure VxCall(S : LongInt);
+Begin
+  asm
+    mov ecx,S
+    call ecx
+  end;
+End;
+
+{ souches : instructions que l'assembleur integre ne connait pas }
+Procedure VxBuild;
+Var A : LongInt;
+Begin
+  If VxStub <> 0 Then Exit;
+  VxStub := KAlloc(512);
+  A := VxStub;
+  { EFLAGS.ID modifiable : CPUID existe (486 recent et suivants) }
+  VxIdS := A;
+  PutB(A, $9C); PutB(A, $58);                       { pushfd ; pop eax }
+  PutB(A, $89); PutB(A, $C1);                       { mov ecx,eax }
+  PutB(A, $35); PutD(A, $00200000);                 { xor eax,200000h }
+  PutB(A, $50); PutB(A, $9D);                       { push eax ; popfd }
+  PutB(A, $9C); PutB(A, $58);                       { pushfd ; pop eax }
+  PutB(A, $51); PutB(A, $9D);                       { push ecx ; popfd }
+  PutB(A, $31); PutB(A, $C8);                       { xor eax,ecx }
+  PutB(A, $A3); PutD(A, LongInt(@VxA));
+  PutB(A, $C3);
+  { CPUID : VxA (feuille), VxC (sous-feuille) -> VxA..VxD }
+  VxCpuidS := A;
+  PutB(A, $53); PutB(A, $56); PutB(A, $57); PutB(A, $55);
+  PutB(A, $A1); PutD(A, LongInt(@VxA));
+  PutB(A, $8B); PutB(A, $0D); PutD(A, LongInt(@VxC));
+  PutB(A, $0F); PutB(A, $A2);
+  PutB(A, $A3); PutD(A, LongInt(@VxA));
+  PutB(A, $89); PutB(A, $1D); PutD(A, LongInt(@VxB));
+  PutB(A, $89); PutB(A, $0D); PutD(A, LongInt(@VxC));
+  PutB(A, $89); PutB(A, $15); PutD(A, LongInt(@VxD));
+  PutB(A, $5D); PutB(A, $5F); PutB(A, $5E); PutB(A, $5B);
+  PutB(A, $C3);
+  { RDMSR : VxC -> VxD:VxA }
+  VxRdMsrS := A;
+  PutB(A, $8B); PutB(A, $0D); PutD(A, LongInt(@VxC));
+  PutB(A, $0F); PutB(A, $32);
+  PutB(A, $A3); PutD(A, LongInt(@VxA));
+  PutB(A, $89); PutB(A, $15); PutD(A, LongInt(@VxD));
+  PutB(A, $C3);
+  { WRMSR : VxD:VxA -> VxC }
+  VxWrMsrS := A;
+  PutB(A, $8B); PutB(A, $0D); PutD(A, LongInt(@VxC));
+  PutB(A, $A1); PutD(A, LongInt(@VxA));
+  PutB(A, $8B); PutB(A, $15); PutD(A, LongInt(@VxD));
+  PutB(A, $0F); PutB(A, $30);
+  PutB(A, $C3);
+  { VMRUN : etat cache de l'hote (FS, GS, TR, LDTR) garde par VMSAVE,
+    celui de l'invite charge par VMLOAD ; GIF = 0 pendant les echanges,
+    puis l'interruption de l'hote en attente est servie apres STGI }
+  VxSvmS := A;
+  PutB(A, $53); PutB(A, $56); PutB(A, $57); PutB(A, $55);
+  PutB(A, $FA);                                     { cli }
+  PutB(A, $0F); PutB(A, $01); PutB(A, $DD);         { clgi }
+  PutB(A, $A1); PutD(A, LongInt(@VxHVmcb));
+  PutB(A, $0F); PutB(A, $01); PutB(A, $DB);         { vmsave (hote) }
+  PutB(A, $A1); PutD(A, LongInt(@VxVmcb));
+  PutB(A, $0F); PutB(A, $01); PutB(A, $DA);         { vmload (invite) }
+  PutB(A, $FB);                                     { sti (GIF = 0) }
+  PutB(A, $8B); PutB(A, $1D); PutD(A, LongInt(@VxG[0]));
+  PutB(A, $8B); PutB(A, $0D); PutD(A, LongInt(@VxG[1]));
+  PutB(A, $8B); PutB(A, $15); PutD(A, LongInt(@VxG[2]));
+  PutB(A, $8B); PutB(A, $35); PutD(A, LongInt(@VxG[3]));
+  PutB(A, $8B); PutB(A, $3D); PutD(A, LongInt(@VxG[4]));
+  PutB(A, $8B); PutB(A, $2D); PutD(A, LongInt(@VxG[5]));
+  PutB(A, $A1); PutD(A, LongInt(@VxVmcb));
+  PutB(A, $0F); PutB(A, $01); PutB(A, $D8);         { vmrun }
+  PutB(A, $89); PutB(A, $1D); PutD(A, LongInt(@VxG[0]));
+  PutB(A, $89); PutB(A, $0D); PutD(A, LongInt(@VxG[1]));
+  PutB(A, $89); PutB(A, $15); PutD(A, LongInt(@VxG[2]));
+  PutB(A, $89); PutB(A, $35); PutD(A, LongInt(@VxG[3]));
+  PutB(A, $89); PutB(A, $3D); PutD(A, LongInt(@VxG[4]));
+  PutB(A, $89); PutB(A, $2D); PutD(A, LongInt(@VxG[5]));
+  PutB(A, $A1); PutD(A, LongInt(@VxVmcb));
+  PutB(A, $0F); PutB(A, $01); PutB(A, $DB);         { vmsave (invite) }
+  PutB(A, $A1); PutD(A, LongInt(@VxHVmcb));
+  PutB(A, $0F); PutB(A, $01); PutB(A, $DA);         { vmload (hote) }
+  PutB(A, $0F); PutB(A, $01); PutB(A, $DC);         { stgi }
+  PutB(A, $FB);                                     { sti }
+  PutB(A, $5D); PutB(A, $5F); PutB(A, $5E); PutB(A, $5B);
+  PutB(A, $C3);
+End;
+
+Procedure VxCpuid(L, Sub : LongInt);
+Begin
+  VxA := L; VxC := Sub; VxB := 0; VxD := 0;
+  VxCall(VxCpuidS);
+End;
+
+Procedure VxRdMsr(Msr : LongInt);
+Begin
+  VxC := Msr; VxA := 0; VxD := 0;
+  VxCall(VxRdMsrS);
+End;
+
+Procedure VxWrMsr(Msr, Lo, Hi : LongInt);
+Begin
+  VxC := Msr; VxA := Lo; VxD := Hi;
+  VxCall(VxWrMsrS);
+End;
+
+Function VxRegStr(R : LongInt) : String;
+Var S : String; I, C : LongInt;
+Begin
+  S := '';
+  For I := 0 To 3 Do
+  Begin
+    C := (R Shr (I * 8)) And $FF;
+    If C <> 0 Then S := S + Chr(C);
+  End;
+  VxRegStr := S;
+End;
+
+{ Detection : CPUID (fabricant, nom, SVM, VMX), MSR de controle }
+Procedure VxProbe;
+Var MaxStd, MaxExt, I : LongInt; S : String;
+Begin
+  If VxProbed Then Exit;
+  VxProbed := True;
+  VxBuild;
+  VxBest := VXM_V86; VxFlags := 0; VxVendor := ''; VxBrand := ''; VxWhy := '';
+  VxA := 0;
+  VxCall(VxIdS);
+  VxHasId := VxA <> 0;
+  If Not VxHasId Then
+  Begin
+    VxVendor := '80386/80486'; VxWhy := 'CPUID absent';
+    Exit;
+  End;
+  VxCpuid(0, 0);
+  MaxStd := VxA;
+  VxVendor := VxRegStr(VxB) + VxRegStr(VxD) + VxRegStr(VxC);
+  If MaxStd >= 1 Then
+  Begin
+    VxCpuid(1, 0);
+    VxStd1A := VxA; VxStd1C := VxC; VxStd1D := VxD;
+  End;
+  VxCpuid(LongInt($80000000), 0);
+  MaxExt := VxA;
+  If (MaxExt < LongInt($80000000)) Or (MaxExt > LongInt($800000FF)) Then MaxExt := 0;
+  If MaxExt >= LongInt($80000004) Then
+  Begin
+    S := '';
+    For I := 2 To 4 Do
+    Begin
+      VxCpuid(LongInt($80000000) + I, 0);
+      S := S + VxRegStr(VxA) + VxRegStr(VxB) + VxRegStr(VxC) + VxRegStr(VxD);
+    End;
+    While (Length(S) > 0) And (S[1] = ' ') Do Delete(S, 1, 1);
+    VxBrand := S;
+  End;
+  If MaxExt >= LongInt($80000001) Then
+  Begin
+    VxCpuid(LongInt($80000001), 0);
+    VxExtC := VxC; VxExtD := VxD;
+  End;
+  { AMD-V }
+  If (VxExtC And 4) <> 0 Then
+  Begin
+    VxFlags := VxFlags Or 1;
+    If MaxExt >= LongInt($8000000A) Then
+    Begin
+      VxCpuid(LongInt($8000000A), 0);
+      VxSvmRev := VxA And $FF; VxAsids := VxB;
+      If (VxD And 1) <> 0 Then VxFlags := VxFlags Or 4;
+      If (VxD And 8) <> 0 Then VxFlags := VxFlags Or 8;
+      If (VxD And 4) <> 0 Then VxFlags := VxFlags Or 512;
+    End;
+    VxRdMsr(LongInt($C0010114));                    { VM_CR }
+    If (VxA And $10) <> 0 Then VxFlags := VxFlags Or 2;
+  End;
+  { Intel VT-x }
+  If (VxStd1C And $20) <> 0 Then
+  Begin
+    VxFlags := VxFlags Or 16;
+    VxRdMsr($3A);                                   { IA32_FEATURE_CONTROL }
+    If ((VxA And 1) <> 0) And ((VxA And 4) = 0) Then VxFlags := VxFlags Or 32;
+    VxRdMsr($480);                                  { IA32_VMX_BASIC }
+    VxVmxLo := VxA; VxVmxHi := VxD;
+    VxRdMsr($482);                                  { controles du processeur }
+    If (VxD And LongInt($80000000)) <> 0 Then
+    Begin
+      VxRdMsr($48B);                                { controles secondaires }
+      VxProc2Hi := VxD;
+      If (VxD And 2) <> 0 Then VxFlags := VxFlags Or 64;
+      If (VxD And $80) <> 0 Then VxFlags := VxFlags Or 128;
+      If (VxD And $20) <> 0 Then VxFlags := VxFlags Or 256;
+      If (VxFlags And 64) <> 0 Then
+      Begin
+        VxRdMsr($48C);
+        VxEptCap := VxA;
+      End;
+    End;
+  End;
+  If (VxFlags And 1) <> 0 Then
+  Begin
+    If (VxFlags And 2) <> 0 Then VxWhy := 'AMD-V desactive par le BIOS (VM_CR.SVMDIS)'
+    Else If (VxFlags And 4) = 0 Then VxWhy := 'AMD-V sans tables de pages imbriquees (NPT)'
+    Else VxBest := VXM_SVM;
+  End;
+  If (VxBest = VXM_V86) And ((VxFlags And 16) <> 0) Then
+  Begin
+    If (VxFlags And 32) <> 0 Then VxWhy := 'VT-x desactive par le BIOS (IA32_FEATURE_CONTROL)'
+    Else If (VxFlags And 64) = 0 Then VxWhy := 'VT-x sans EPT'
+    Else If (VxFlags And 128) = 0 Then VxWhy := 'VT-x sans invite sans restriction (unrestricted guest)'
+    Else VxBest := VXM_VMX;
+  End;
+  If (VxBest = VXM_V86) And (VxWhy = '') Then VxWhy := 'ni AMD-V ni Intel VT-x';
+End;
+
+Procedure VxPutStr(A : LongInt; S : String; Max : LongInt);
+Var I : LongInt;
+Begin
+  If Length(S) > Max Then S := Copy(S, 1, Max);
+  Mem[0:A] := Length(S);
+  For I := 1 To Length(S) Do Mem[0:A + I] := Ord(S[I]);
+End;
+
+Procedure VxInfo(P : LongInt);
+Var I : LongInt;
+Begin
+  FillMem(P, 512, 0);
+  MemL[0:P] := VxBest;
+  MemL[0:P + 4] := Ord(VxHasId);
+  MemL[0:P + 8] := VxFlags;
+  MemL[0:P + 12] := VxSvmRev;
+  MemL[0:P + 16] := VxAsids;
+  MemL[0:P + 20] := VxVmxLo;
+  MemL[0:P + 24] := VxVmxHi;
+  MemL[0:P + 28] := VxStd1A;
+  MemL[0:P + 32] := VxStd1C;
+  MemL[0:P + 36] := VxStd1D;
+  MemL[0:P + 40] := VxExtC;
+  MemL[0:P + 44] := VxExtD;
+  MemL[0:P + 48] := VxMethod;
+  MemL[0:P + 52] := VxMem;
+  MemL[0:P + 56] := VxSize;
+  MemL[0:P + 60] := VxVmcb;
+  MemL[0:P + 64] := VxNpd;
+  MemL[0:P + 68] := VxTotal;
+  For I := 0 To 15 Do MemL[0:P + 72 + I * 4] := VxCnt[I];
+  MemL[0:P + 136] := VxIopm;
+  MemL[0:P + 140] := VxMsrpm;
+  MemL[0:P + 144] := VxHsave;
+  MemL[0:P + 148] := VxProc2Hi;
+  MemL[0:P + 152] := VxEptCap;
+  MemL[0:P + 156] := VxOwner;
+  VxPutStr(P + 160, VxVendor, 31);
+  VxPutStr(P + 192, VxBrand, 63);
+  VxPutStr(P + 256, VxWhy, 127);
+End;
+
+{ --- AMD-V ---------------------------------------------------------- }
+
+Procedure SvmSeg(Off, Sel, Attr, Limit, Base : LongInt);
+Begin
+  MemW[0:VxVmcb + Off] := Sel;
+  MemW[0:VxVmcb + Off + 2] := Attr;
+  MemL[0:VxVmcb + Off + 4] := Limit;
+  MemL[0:VxVmcb + Off + 8] := Base;
+  MemL[0:VxVmcb + Off + 12] := 0;
+End;
+
+{ etat de l'invite a la mise sous tension (mode reel, F000:FFF0) }
+Procedure SvmReset;
+Var V : LongInt;
+Begin
+  V := VxVmcb;
+  FillMem(V + $400, $C00, 0);
+  SvmSeg($400, 0, $93, $FFFF, 0);
+  SvmSeg($410, $F000, $9B, $FFFF, $F0000);
+  SvmSeg($420, 0, $93, $FFFF, 0);
+  SvmSeg($430, 0, $93, $FFFF, 0);
+  SvmSeg($440, 0, $93, $FFFF, 0);
+  SvmSeg($450, 0, $93, $FFFF, 0);
+  SvmSeg($460, 0, 0, $FFFF, 0);
+  SvmSeg($470, 0, $82, $FFFF, 0);
+  SvmSeg($480, 0, 0, $3FF, 0);
+  SvmSeg($490, 0, $8B, $FFFF, 0);
+  Mem[0:V + $4CB] := 0;
+  MemL[0:V + $4D0] := $1000;                        { EFER.SVME }
+  MemL[0:V + $548] := 0;
+  MemL[0:V + $550] := 0;
+  MemL[0:V + $558] := $10;
+  MemL[0:V + $560] := $400;
+  MemL[0:V + $568] := LongInt($FFFF0FF0);
+  MemL[0:V + $570] := 2;
+  MemL[0:V + $578] := $FFF0;
+  MemL[0:V + $668] := $00070406;
+  MemL[0:V + $66C] := $00070406;
+End;
+
+{ tables imbriquees (format de l'hote : 2 niveaux, pages de 4 Ko,
+  acces utilisateur) : 0 .. taille-1 -> memoire de l'invite, le reste
+  des 4 Go sur une page sans effet }
+Procedure VxBuildPt;
+Var N, I : LongInt;
+Begin
+  N := (VxSize + $3FFFFF) Shr 22;
+  VxNpd := PAlloc(4096);
+  VxNpts := PAlloc(N * 4096);
+  VxDPt := PAlloc(4096);
+  VxDPg := PAlloc(4096);
+  FillMem(VxDPg, 4096, 0);
+  For I := 0 To 1023 Do MemL[0:VxDPt + I * 4] := VxDPg Or 7;
+  For I := 0 To 1023 Do
+    If I < N Then MemL[0:VxNpd + I * 4] := (VxNpts + I * 4096) Or 7
+    Else MemL[0:VxNpd + I * 4] := VxDPt Or 7;
+  For I := 0 To N * 1024 - 1 Do
+    If I * 4096 < VxSize Then MemL[0:VxNpts + I * 4] := (VxMem + I * 4096) Or 7
+    Else MemL[0:VxNpts + I * 4] := VxDPg Or 7;
+End;
+
+Function SvmCreate : Boolean;
+Var V : LongInt;
+Begin
+  SvmCreate := False;
+  VxVmcb := PAlloc(4096); VxHsave := PAlloc(4096); VxHVmcb := PAlloc(4096);
+  VxIopm := PAlloc(12288); VxMsrpm := PAlloc(8192);
+  If (VxVmcb = 0) Or (VxHsave = 0) Or (VxHVmcb = 0) Or (VxIopm = 0) Or (VxMsrpm = 0) Then Exit;
+  FillMem(VxVmcb, 4096, 0); FillMem(VxHsave, 4096, 0); FillMem(VxHVmcb, 4096, 0);
+  FillMem(VxIopm, 12288, $FF); FillMem(VxMsrpm, 8192, $FF);
+  VxBuildPt;
+  If (VxNpd = 0) Or (VxNpts = 0) Or (VxDPt = 0) Or (VxDPg = 0) Then Exit;
+  { EFER.SVME de l'hote, zone de sauvegarde de l'hote }
+  VxRdMsr(LongInt($C0000080));
+  VxWrMsr(LongInt($C0000080), VxA Or $1000, VxD);
+  VxWrMsr(LongInt($C0010117), VxHsave, 0);
+  V := VxVmcb;
+  { INTR, NMI, CPUID, INVD, HLT, IOIO, MSR, arret (triple faute) }
+  MemL[0:V + $0C] := 1 Or 2 Or (1 Shl 18) Or (1 Shl 22) Or (1 Shl 24) Or
+    (1 Shl 27) Or (1 Shl 28) Or LongInt($80000000);
+  { VMRUN, VMMCALL, VMLOAD, VMSAVE, STGI, CLGI, SKINIT }
+  MemL[0:V + $10] := $7F;
+  MemL[0:V + $40] := VxIopm;
+  MemL[0:V + $48] := VxMsrpm;
+  MemL[0:V + $58] := 1;                             { ASID }
+  Mem[0:V + $5C] := 1;                              { vider le TLB }
+  MemL[0:V + $60] := 1 Shl 24;                      { V_INTR_MASKING }
+  MemL[0:V + $90] := 1;                             { NP_ENABLE }
+  MemL[0:V + $B0] := VxNpd;
+  SvmReset;
+  SvmCreate := True;
+End;
+
+Procedure SvmSegIn(F, Off, X, XB : LongInt; Real : Boolean);
+Begin
+  If Real Then
+  Begin
+    MemW[0:VxVmcb + Off] := MemL[0:F + X] And $FFFF;
+    MemL[0:VxVmcb + Off + 8] := (MemL[0:F + X] And $FFFF) Shl 4;
+  End;
+End;
+
+Procedure SvmSegOut(F, Off, X, XB : LongInt);
+Begin
+  MemL[0:F + X] := MemW[0:VxVmcb + Off];
+  MemL[0:F + XB] := MemL[0:VxVmcb + Off + 8];
+End;
+
+Function SvmRun(F : LongInt) : LongInt;
+Var V, Code, R, Irq, Loops, L, Sub : LongInt; Real, Done, Injected : Boolean;
+Begin
+  V := VxVmcb;
+  If (MemL[0:F + xSet] And 4) <> 0 Then
+  Begin
+    SvmReset;
+    MemL[0:V + $A8] := 0;
+    MemL[0:F + xSet] := MemL[0:F + xSet] And Not 4;
+  End;
+  MemL[0:V + $5F8] := MemL[0:F + xEax]; MemL[0:V + $5FC] := 0;
+  MemL[0:V + $5D8] := MemL[0:F + xEsp]; MemL[0:V + $5DC] := 0;
+  MemL[0:V + $578] := MemL[0:F + xEip]; MemL[0:V + $57C] := 0;
+  MemL[0:V + $570] := MemL[0:F + xFl] Or 2; MemL[0:V + $574] := 0;
+  VxG[0] := MemL[0:F + xEbx]; VxG[1] := MemL[0:F + xEcx];
+  VxG[2] := MemL[0:F + xEdx]; VxG[3] := MemL[0:F + xEsi];
+  VxG[4] := MemL[0:F + xEdi]; VxG[5] := MemL[0:F + xEbp];
+  If (MemL[0:F + xSet] And 4) <> 0 Then
+  Begin
+    SvmReset;
+    MemL[0:V + $A8] := 0;
+  End;
+  If (MemL[0:F + xSet] And 1) <> 0 Then
+  Begin
+    Real := ((MemL[0:V + $558] And 1) = 0) Or ((MemL[0:F + xFl] And $20000) <> 0);
+    SvmSegIn(F, $400, xEs, xEsB, Real);
+    SvmSegIn(F, $410, xCs, xCsB, Real);
+    SvmSegIn(F, $420, xSs, xSsB, Real);
+    SvmSegIn(F, $430, xDs, xDsB, Real);
+    SvmSegIn(F, $440, xFs, xFsB, Real);
+    SvmSegIn(F, $450, xGs, xGsB, Real);
+  End;
+  MemL[0:F + xSet] := 0;
+  Irq := MemL[0:F + xIrq];
+  Injected := False;
+  MemL[0:V + $60] := 1 Shl 24;                      { V_INTR_MASKING }
+  Loops := 0;
+  Repeat
+    Done := True;
+    { interruption demandee : injectee (EVENTINJ) si l'invite l'accepte
+      (IF = 1, pas d'ombre STI/MOV SS, aucun evenement en attente), sinon
+      sortie VINTR a l'ouverture de la fenetre (V_IRQ factice) }
+    If (Irq >= 0) And Not Injected Then
+    Begin
+      If ((MemL[0:V + $570] And $200) <> 0) And ((MemL[0:V + $68] And 1) = 0) And
+         (MemL[0:V + $A8] >= 0) Then
+      Begin
+        MemL[0:V + $A8] := (Irq And $FF) Or LongInt($80000000);
+        MemL[0:V + $AC] := 0;
+        Injected := True;
+        MemL[0:V + $60] := 1 Shl 24;
+        MemL[0:V + $0C] := MemL[0:V + $0C] And Not $10;
+      End
+      Else
+      Begin
+        MemL[0:V + $60] := (1 Shl 24) Or (1 Shl 20) Or ($F Shl 16) Or (1 Shl 8);
+        MemL[0:V + $64] := 0;
+        MemL[0:V + $0C] := MemL[0:V + $0C] Or $10;
+      End;
+    End;
+    MemL[0:V + $C0] := 0;                           { aucun champ propre }
+    asm
+      fnsave VxFpuH
+      frstor VxFpuG
+    end;
+    VxCall(VxSvmS);
+    asm
+      fnsave VxFpuG
+      frstor VxFpuH
+    end;
+    Mem[0:V + $5C] := 0;
+    Code := MemL[0:V + $70];
+    Inc(VxTotal);
+    { evenement interrompu par la sortie : a reprendre }
+    If MemL[0:V + $88] < 0 Then
+    Begin
+      MemL[0:V + $A8] := MemL[0:V + $88];
+      MemL[0:V + $AC] := MemL[0:V + $8C];
+    End;
+    Inc(Loops);
+    Case Code Of
+      $64 :                                         { VINTR : fenetre ouverte }
+        Begin
+          MemL[0:V + $60] := 1 Shl 24;
+          MemL[0:V + $0C] := MemL[0:V + $0C] And Not $10;
+          Done := False;
+        End;
+      $72 :                                         { CPUID }
+        Begin
+          Inc(VxCnt[9]);
+          L := MemL[0:V + $5F8]; Sub := VxG[1];
+          VxCpuid(L, Sub);
+          If L = 1 Then VxC := VxC And Not $20;     { pas de VMX dans l'invite }
+          If L = LongInt($80000001) Then VxC := VxC And Not 4;
+          If L = LongInt($8000000A) Then Begin VxA := 0; VxB := 0; VxC := 0; VxD := 0; End;
+          MemL[0:V + $5F8] := VxA; VxG[0] := VxB; VxG[1] := VxC; VxG[2] := VxD;
+          MemL[0:V + $578] := MemL[0:V + $578] + 2;
+          Done := False;
+        End;
+      $7C :                                         { RDMSR / WRMSR }
+        Begin
+          Inc(VxCnt[10]);
+          If MemL[0:V + $78] = 0 Then
+          Begin
+            MemL[0:V + $5F8] := 0; VxG[2] := 0;
+          End;
+          MemL[0:V + $578] := MemL[0:V + $578] + 2;
+          Done := False;
+        End;
+      $76, $80, $81, $82, $83, $84, $85, $86, $87 : { INVD, VMRUN... : #UD }
+        Begin
+          Inc(VxCnt[11]);
+          If Code = $76 Then MemL[0:V + $578] := MemL[0:V + $578] + 2
+          Else
+          Begin
+            MemL[0:V + $A8] := 6 Or (3 Shl 8) Or LongInt($80000000);
+            MemL[0:V + $AC] := 0;
+          End;
+          Done := False;
+        End;
+    End;
+    If Loops > 200 Then Done := True;
+  Until Done;
+  { registres de l'invite -> cadre }
+  MemL[0:F + xEax] := MemL[0:V + $5F8];
+  MemL[0:F + xEsp] := MemL[0:V + $5D8];
+  MemL[0:F + xEip] := MemL[0:V + $578];
+  MemL[0:F + xFl] := MemL[0:V + $570];
+  MemL[0:F + xEbx] := VxG[0]; MemL[0:F + xEcx] := VxG[1];
+  MemL[0:F + xEdx] := VxG[2]; MemL[0:F + xEsi] := VxG[3];
+  MemL[0:F + xEdi] := VxG[4]; MemL[0:F + xEbp] := VxG[5];
+  SvmSegOut(F, $400, xEs, xEsB);
+  SvmSegOut(F, $410, xCs, xCsB);
+  SvmSegOut(F, $420, xSs, xSsB);
+  SvmSegOut(F, $430, xDs, xDsB);
+  SvmSegOut(F, $440, xFs, xFsB);
+  SvmSegOut(F, $450, xGs, xGsB);
+  MemL[0:F + xCr0] := MemL[0:V + $558];
+  MemL[0:F + xCr3] := MemL[0:V + $550];
+  MemL[0:F + xCr4] := MemL[0:V + $548];
+  MemL[0:F + xEfer] := MemL[0:V + $4D0];
+  MemL[0:F + xCpl] := Mem[0:V + $4CB];
+  If Injected Then MemL[0:F + xIrq] := -1;
+  MemL[0:V + $60] := 1 Shl 24;
+  MemL[0:V + $0C] := MemL[0:V + $0C] And Not $10;
+  MemL[0:F + xRaw] := Code;
+  MemL[0:F + xInfo1] := MemL[0:V + $78];
+  MemL[0:F + xInfo2] := MemL[0:V + $80];
+  MemL[0:F + xNext] := MemL[0:V + $578];
+  Case Code Of
+    $60, $61 : R := VXE_INTR;
+    $7B : Begin R := VXE_IO; MemL[0:F + xNext] := MemL[0:V + $80]; End;
+    $78 : Begin R := VXE_HLT; MemL[0:F + xNext] := MemL[0:V + $578] + 1; End;
+    $7F : R := VXE_SHUT;
+    $400 : R := VXE_NPF;
+    $64, $72, $7C, $76, $80..$87 : R := VXE_INTR;
+    -1 : R := VXE_FAIL;
+  Else
+    If (Code >= $40) And (Code <= $5F) Then R := VXE_EXC Else R := VXE_OTHER;
+  End;
+  Inc(VxCnt[R]);
+  MemL[0:F + xExit] := R;
+  SvmRun := R;
+End;
+
+Procedure SvmDestroy;
+Begin
+  VxRdMsr(LongInt($C0000080));
+  VxWrMsr(LongInt($C0000080), VxA And Not $1000, VxD);
+End;
+
+{ --- Intel VT-x ------------------------------------------------------ }
+
+Var
+  VxXonS, VxClearS, VxPtrldS, VxXoffS, VxVwS, VxVrS, VxSegS, VxVmxS : LongInt;
+  VxXon, VxVmcs, VxEpml4 : LongInt;    { region VMXON, VMCS, racine EPT }
+  VxPa : Array[0..1] Of LongInt;       { operande de 64 bits (adresse) }
+  VxGa : LongInt;                      { EAX de l'invite }
+  VxLaunched, VxFailed, VxVmxOn : LongInt;
+  VxGdtr, VxIdtr : Array[0..1] Of LongInt;
+  VxHSel : Array[0..3] Of LongInt;     { TR, FS, GS, SS de l'hote }
+  VxCr0Fix0, VxCr0Fix1, VxCr4Fix0, VxCr4Fix1 : LongInt;
+  VxProcCtl : LongInt;
+  VxOldCr0, VxOldCr4, VxVmxExitA : LongInt;
+
+Procedure VmxFlags(Var A : LongInt);
+Begin
+  PutB(A, $9C); PutB(A, $58);                       { pushfd ; pop eax }
+  PutB(A, $A3); PutD(A, LongInt(@VxB));
+End;
+
+Procedure VmxBuild;
+Var A, J1, ExitA : LongInt;
+Begin
+  If VxXonS <> 0 Then Exit;
+  A := KAlloc(768);
+  { VMXON [VxPa] }
+  VxXonS := A;
+  PutB(A, $F3); PutB(A, $0F); PutB(A, $C7); PutB(A, $35); PutD(A, LongInt(@VxPa));
+  VmxFlags(A); PutB(A, $C3);
+  { VMCLEAR [VxPa] }
+  VxClearS := A;
+  PutB(A, $66); PutB(A, $0F); PutB(A, $C7); PutB(A, $35); PutD(A, LongInt(@VxPa));
+  VmxFlags(A); PutB(A, $C3);
+  { VMPTRLD [VxPa] }
+  VxPtrldS := A;
+  PutB(A, $0F); PutB(A, $C7); PutB(A, $35); PutD(A, LongInt(@VxPa));
+  VmxFlags(A); PutB(A, $C3);
+  { VMXOFF }
+  VxXoffS := A;
+  PutB(A, $0F); PutB(A, $01); PutB(A, $C4);
+  VmxFlags(A); PutB(A, $C3);
+  { VMWRITE champ VxC <- VxA }
+  VxVwS := A;
+  PutB(A, $A1); PutD(A, LongInt(@VxA));
+  PutB(A, $8B); PutB(A, $15); PutD(A, LongInt(@VxC));
+  PutB(A, $0F); PutB(A, $79); PutB(A, $D0);         { vmwrite edx,eax }
+  VmxFlags(A); PutB(A, $C3);
+  { VMREAD VxA <- champ VxC }
+  VxVrS := A;
+  PutB(A, $8B); PutB(A, $15); PutD(A, LongInt(@VxC));
+  PutB(A, $0F); PutB(A, $78); PutB(A, $D0);         { vmread eax,edx }
+  PutB(A, $A3); PutD(A, LongInt(@VxA));
+  PutB(A, $C3);
+  { GDTR, IDTR, TR, FS, GS, SS de l'hote }
+  VxSegS := A;
+  PutB(A, $0F); PutB(A, $01); PutB(A, $05); PutD(A, LongInt(@VxGdtr));  { sgdt }
+  PutB(A, $0F); PutB(A, $01); PutB(A, $0D); PutD(A, LongInt(@VxIdtr));  { sidt }
+  PutB(A, $31); PutB(A, $C0);                       { xor eax,eax }
+  PutB(A, $0F); PutB(A, $00); PutB(A, $C8);         { str ax }
+  PutB(A, $A3); PutD(A, LongInt(@VxHSel[0]));
+  PutB(A, $8C); PutB(A, $E0);                       { mov eax,fs }
+  PutB(A, $A3); PutD(A, LongInt(@VxHSel[1]));
+  PutB(A, $8C); PutB(A, $E8);                       { mov eax,gs }
+  PutB(A, $A3); PutD(A, LongInt(@VxHSel[2]));
+  PutB(A, $8C); PutB(A, $D0);                       { mov eax,ss }
+  PutB(A, $A3); PutD(A, LongInt(@VxHSel[3]));
+  PutB(A, $C3);
+  { VMLAUNCH / VMRESUME : HOST_RSP ecrit juste avant l'entree, HOST_RIP
+    (fixe) designe la sortie ; FS, GS et LDTR de l'hote gardes sur la
+    pile (la sortie charge FS = GS = 10h et un LDTR nul) }
+  VxVmxS := A;
+  PutB(A, $53); PutB(A, $56); PutB(A, $57); PutB(A, $55);
+  PutB(A, $0F); PutB(A, $A0); PutB(A, $0F); PutB(A, $A8);   { push fs ; push gs }
+  PutB(A, $66); PutB(A, $0F); PutB(A, $00); PutB(A, $C0);   { sldt ax }
+  PutB(A, $50);                                     { push eax }
+  PutB(A, $FA);                                     { cli }
+  PutB(A, $66); PutB(A, $B8); PutB(A, $10); PutB(A, 0);     { mov ax,10h }
+  PutB(A, $8E); PutB(A, $E0); PutB(A, $8E); PutB(A, $E8);   { fs, gs }
+  PutB(A, $BA); PutD(A, $6C14);                     { mov edx,HOST_RSP }
+  PutB(A, $89); PutB(A, $E0);                       { mov eax,esp }
+  PutB(A, $0F); PutB(A, $79); PutB(A, $D0);         { vmwrite edx,eax }
+  PutB(A, $8B); PutB(A, $1D); PutD(A, LongInt(@VxG[0]));
+  PutB(A, $8B); PutB(A, $0D); PutD(A, LongInt(@VxG[1]));
+  PutB(A, $8B); PutB(A, $15); PutD(A, LongInt(@VxG[2]));
+  PutB(A, $8B); PutB(A, $35); PutD(A, LongInt(@VxG[3]));
+  PutB(A, $8B); PutB(A, $3D); PutD(A, LongInt(@VxG[4]));
+  PutB(A, $8B); PutB(A, $2D); PutD(A, LongInt(@VxG[5]));
+  PutB(A, $80); PutB(A, $3D); PutD(A, LongInt(@VxLaunched)); PutB(A, 0);  { cmp byte [..],0 }
+  PutB(A, $A1); PutD(A, LongInt(@VxGa));            { mov eax,[VxGa] (sans effet sur ZF) }
+  PutJcc(A, $75, J1);                               { jne -> vmresume }
+  PutB(A, $0F); PutB(A, $01); PutB(A, $C2);         { vmlaunch }
+  PutB(A, $EB); PutB(A, 3);                         { jmp echec }
+  FixJcc(J1, A);
+  PutB(A, $0F); PutB(A, $01); PutB(A, $C3);         { vmresume }
+  { echec de l'entree : CF ou ZF }
+  VmxFlags(A);
+  PutB(A, $C7); PutB(A, $05); PutD(A, LongInt(@VxFailed)); PutD(A, 1);
+  PutB(A, $EB); PutB(A, 0);
+  J1 := A - 1;
+  { (le saut court ci-dessus est corrige vers la fin commune) }
+  ExitA := A;
+  { sortie de l'invite (HOST_RIP) }
+  PutB(A, $A3); PutD(A, LongInt(@VxGa));
+  PutB(A, $89); PutB(A, $1D); PutD(A, LongInt(@VxG[0]));
+  PutB(A, $89); PutB(A, $0D); PutD(A, LongInt(@VxG[1]));
+  PutB(A, $89); PutB(A, $15); PutD(A, LongInt(@VxG[2]));
+  PutB(A, $89); PutB(A, $35); PutD(A, LongInt(@VxG[3]));
+  PutB(A, $89); PutB(A, $3D); PutD(A, LongInt(@VxG[4]));
+  PutB(A, $89); PutB(A, $2D); PutD(A, LongInt(@VxG[5]));
+  PutB(A, $C7); PutB(A, $05); PutD(A, LongInt(@VxFailed)); PutD(A, 0);
+  FixJcc(J1, A);
+  PutB(A, $58);                                     { pop eax }
+  PutB(A, $0F); PutB(A, $00); PutB(A, $D0);         { lldt ax }
+  PutB(A, $0F); PutB(A, $A9); PutB(A, $0F); PutB(A, $A1);   { pop gs ; pop fs }
+  PutB(A, $FB);                                     { sti }
+  PutB(A, $5D); PutB(A, $5F); PutB(A, $5E); PutB(A, $5B);
+  PutB(A, $C3);
+  VxVmxExitA := ExitA;
+End;
+
+Function VxW(Enc, V : LongInt) : Boolean;
+Begin
+  VxC := Enc; VxA := V;
+  VxCall(VxVwS);
+  VxW := (VxB And $41) = 0;
+End;
+
+Function VxR(Enc : LongInt) : LongInt;
+Begin
+  VxC := Enc; VxA := 0;
+  VxCall(VxVrS);
+  VxR := VxA;
+End;
+
+{ champ de 64 bits : moitie basse puis haute (encodage + 1) }
+Procedure VxW64(Enc, Lo, Hi : LongInt);
+Begin
+  VxW(Enc, Lo);
+  VxW(Enc + 1, Hi);
+End;
+
+{ controle ajuste aux bits permis : MSR (bas = obligatoires a 1,
+  haut = permis a 1) }
+Function VmxAdj(Msr, Want : LongInt) : LongInt;
+Begin
+  VxRdMsr(Msr);
+  VmxAdj := (Want Or VxA) And VxD;
+End;
+
+Function VmxCtlMsr(Normal, True_ : LongInt) : LongInt;
+Begin
+  If (VxVmxHi And $00800000) <> 0 Then VmxCtlMsr := True_ Else VmxCtlMsr := Normal;
+End;
+
+Function GdtBase(Sel : LongInt) : LongInt;
+Var D : LongInt;
+Begin
+  D := VxGdtr[0] Shr 16 Or (VxGdtr[1] Shl 16);
+  D := D + (Sel And $FFF8);
+  GdtBase := (MemL[0:D] Shr 16) And $FFFF Or ((MemL[0:D + 4] And $FF) Shl 16) Or
+             (MemL[0:D + 4] And LongInt($FF000000));
+End;
+
+Function GetCr0 : LongInt;
+Var V : LongInt;
+Begin
+  asm
+    mov eax,cr0
+    mov V,eax
+  end;
+  GetCr0 := V;
+End;
+
+Function GetCr4 : LongInt;
+Var V : LongInt;
+Begin
+  asm
+    mov eax,cr4
+    mov V,eax
+  end;
+  GetCr4 := V;
+End;
+
+Procedure SetCr0(V : LongInt);
+Begin
+  asm
+    mov eax,V
+    mov cr0,eax
+  end;
+End;
+
+Procedure SetCr4(V : LongInt);
+Begin
+  asm
+    mov eax,V
+    mov cr4,eax
+  end;
+End;
+
+Procedure VmxSeg(Enc, Sel, Base, Limit, Ar : LongInt);
+Begin
+  { encodages : selecteur 0800h + 2i, limite 4800h + 2i, droits
+    4814h + 2i, base 6806h + 2i }
+  VxW($0800 + Enc * 2, Sel);
+  VxW($4800 + Enc * 2, Limit);
+  VxW($4814 + Enc * 2, Ar);
+  VxW($6806 + Enc * 2, Base);
+End;
+
+{ etat de l'invite a la mise sous tension (mode reel) }
+Procedure VmxReset;
+Begin
+  VmxSeg(0, 0, 0, $FFFF, $93);                      { ES }
+  VmxSeg(1, $F000, $F0000, $FFFF, $9B);             { CS }
+  VmxSeg(2, 0, 0, $FFFF, $93);                      { SS }
+  VmxSeg(3, 0, 0, $FFFF, $93);                      { DS }
+  VmxSeg(4, 0, 0, $FFFF, $93);                      { FS }
+  VmxSeg(5, 0, 0, $FFFF, $93);                      { GS }
+  VmxSeg(6, 0, 0, $FFFF, $10082);                   { LDTR (inutilisable) }
+  VmxSeg(7, 0, 0, $FFFF, $8B);                      { TR }
+  VxW($4810, $FFFF); VxW($6816, 0);                 { GDTR }
+  VxW($4812, $3FF); VxW($6818, 0);                  { IDTR }
+  { CR0 : bits obligatoires sauf PE et PG (invite sans restriction) }
+  VxW($6800, ($10 Or VxCr0Fix0) And Not LongInt($80000001));
+  VxW($6004, $10);                                  { ombre de CR0 }
+  VxW($6000, VxCr0Fix0 And Not LongInt($80000001)); { bits de CR0 a l'hote }
+  VxW($6802, 0);
+  VxW($6804, VxCr4Fix0);                            { CR4 (VMXE) }
+  VxW($6006, 0);
+  VxW($6002, VxCr4Fix0);
+  VxW($681A, $400);                                 { DR7 }
+  VxW($681C, 0); VxW($681E, $FFF0); VxW($6820, 2);
+  VxW($6822, 0);
+  VxW($4824, 0); VxW($4826, 0);
+  VxW($482A, 0); VxW($6824, 0); VxW($6826, 0);
+  VxW64($2800, -1, -1);                             { lien VMCS }
+  VxW64($2802, 0, 0);                               { IA32_DEBUGCTL }
+  VxW($4016, 0);
+End;
+
+{ tables EPT : 4 niveaux, entrees de 64 bits, pages de 4 Ko en
+  ecriture differee (type 6) }
+Procedure VmxBuildEpt;
+Var NPt, I, Pdpt, Pd : LongInt;
+Begin
+  NPt := (VxSize + $1FFFFF) Shr 21;
+  VxEpml4 := PAlloc(4096);
+  Pdpt := PAlloc(4096);
+  Pd := PAlloc(4 * 4096);
+  VxNpts := PAlloc(NPt * 4096);
+  VxDPt := PAlloc(4096);
+  VxDPg := PAlloc(4096);
+  VxNpd := Pdpt;
+  VxHVmcb := Pd;                                    { (rendu par VxFreeAll) }
+  If (VxEpml4 = 0) Or (Pdpt = 0) Or (Pd = 0) Or (VxNpts = 0) Or (VxDPt = 0) Or (VxDPg = 0) Then Exit;
+  FillMem(VxEpml4, 4096, 0); FillMem(Pdpt, 4096, 0); FillMem(VxDPg, 4096, 0);
+  MemL[0:VxEpml4] := Pdpt Or 7;
+  For I := 0 To 3 Do MemL[0:Pdpt + I * 8] := (Pd + I * 4096) Or 7;
+  For I := 0 To 511 Do
+  Begin
+    MemL[0:VxDPt + I * 8] := VxDPg Or $37; MemL[0:VxDPt + I * 8 + 4] := 0;
+  End;
+  For I := 0 To 2047 Do
+  Begin
+    If I < NPt Then MemL[0:Pd + I * 8] := (VxNpts + I * 4096) Or 7
+    Else MemL[0:Pd + I * 8] := VxDPt Or 7;
+    MemL[0:Pd + I * 8 + 4] := 0;
+  End;
+  For I := 0 To NPt * 512 - 1 Do
+  Begin
+    If I * 4096 < VxSize Then MemL[0:VxNpts + I * 8] := (VxMem + I * 4096) Or $37
+    Else MemL[0:VxNpts + I * 8] := VxDPg Or $37;
+    MemL[0:VxNpts + I * 8 + 4] := 0;
+  End;
+End;
+
+Function VmxCreate : Boolean;
+Var Rev, Ctl, Fx : LongInt;
+Begin
+  VmxCreate := False;
+  VmxBuild;
+  VxXon := PAlloc(4096); VxVmcs := PAlloc(4096);
+  VxVmcb := VxVmcs; VxHsave := VxXon;               { (rendus par VxFreeAll) }
+  If (VxXon = 0) Or (VxVmcs = 0) Then Exit;
+  FillMem(VxXon, 4096, 0); FillMem(VxVmcs, 4096, 0);
+  Rev := VxVmxLo And $7FFFFFFF;
+  MemL[0:VxXon] := Rev; MemL[0:VxVmcs] := Rev;
+  VmxBuildEpt;
+  If VxEpml4 = 0 Then Exit;
+  { activation par IA32_FEATURE_CONTROL si le BIOS ne l'a pas verrouille }
+  VxRdMsr($3A);
+  If (VxA And 1) = 0 Then VxWrMsr($3A, VxA Or 5, VxD);
+  VxRdMsr($486); VxCr0Fix0 := VxA;
+  VxRdMsr($487); VxCr0Fix1 := VxA;
+  VxRdMsr($488); VxCr4Fix0 := VxA;
+  VxRdMsr($489); VxCr4Fix1 := VxA;
+  VxOldCr0 := GetCr0; VxOldCr4 := GetCr4;
+  SetCr0((VxOldCr0 Or VxCr0Fix0) And VxCr0Fix1);
+  SetCr4((VxOldCr4 Or VxCr4Fix0 Or $2000) And (VxCr4Fix1 Or $2000));
+  VxPa[0] := VxXon; VxPa[1] := 0;
+  VxCall(VxXonS);
+  If (VxB And $41) <> 0 Then
+  Begin
+    VxWhy := 'VMXON refuse';
+    SetCr4(VxOldCr4); SetCr0(VxOldCr0);
+    Exit;
+  End;
+  VxVmxOn := 1;
+  VxPa[0] := VxVmcs;
+  VxCall(VxClearS);
+  VxCall(VxPtrldS);
+  If (VxB And $41) <> 0 Then
+  Begin
+    VxWhy := 'VMPTRLD refuse';
+    Exit;
+  End;
+  VxLaunched := 0;
+  { controles : interruptions externes et NMI ; HLT, E/S, MSR (sans
+    table : tous interceptes), controles secondaires (EPT, invite sans
+    restriction) }
+  VxW($4000, VmxAdj(VmxCtlMsr($481, $48D), 1 Or 8));
+  VxProcCtl := VmxAdj(VmxCtlMsr($482, $48E), (1 Shl 7) Or (1 Shl 24) Or LongInt($80000000));
+  VxW($4002, VxProcCtl);
+  VxW($401E, VmxAdj($48B, 2 Or $80));
+  VxW($400C, VmxAdj(VmxCtlMsr($483, $48F), 0));
+  VxW($4012, VmxAdj(VmxCtlMsr($484, $490), 0));
+  VxW($4004, 0);                                    { exceptions }
+  VxW($4006, 0); VxW($4008, 0);
+  VxW($400A, 0);                                    { cibles de CR3 }
+  VxW($400E, 0); VxW($4010, 0); VxW($4014, 0);
+  Fx := 0;
+  If (VxEptCap And $4000) <> 0 Then Fx := 6;
+  VxW64($201A, VxEpml4 Or Fx Or (3 Shl 3), 0);      { pointeur EPT }
+  { etat de l'hote }
+  VxCall(VxSegS);
+  VxW($0C00, $10); VxW($0C02, $08); VxW($0C04, VxHSel[3] And $FFF8);
+  VxW($0C06, $10); VxW($0C08, $10); VxW($0C0A, $10);
+  VxW($0C0C, VxHSel[0] And $FFF8);
+  VxW($6C06, GdtBase($10)); VxW($6C08, GdtBase($10));
+  VxW($6C0A, GdtBase(VxHSel[0]));
+  VxW($6C0C, (VxGdtr[0] Shr 16) Or (VxGdtr[1] Shl 16));
+  VxW($6C0E, (VxIdtr[0] Shr 16) Or (VxIdtr[1] Shl 16));
+  VxW($4C00, 0); VxW($6C10, 0); VxW($6C12, 0);
+  VxW($6C16, VxVmxExitA);
+  VmxReset;
+  VmxCreate := True;
+End;
+
+Procedure VmxDestroy;
+Begin
+  If VxVmxOn <> 0 Then
+  Begin
+    VxPa[0] := VxVmcs; VxPa[1] := 0;
+    VxCall(VxClearS);
+    VxCall(VxXoffS);
+    SetCr4(VxOldCr4);
+    SetCr0(VxOldCr0);
+  End;
+  VxVmxOn := 0;
+  If VxEpml4 <> 0 Then PFree(VxEpml4);
+  VxEpml4 := 0;
+End;
+
+{ registre general n (codage x86) de l'invite }
+Function VmxGpr(N : LongInt) : LongInt;
+Begin
+  Case N Of
+    0 : VmxGpr := VxGa;
+    1 : VmxGpr := VxG[1];
+    2 : VmxGpr := VxG[2];
+    3 : VmxGpr := VxG[0];
+    4 : VmxGpr := VxR($681C);
+    5 : VmxGpr := VxG[5];
+    6 : VmxGpr := VxG[3];
+  Else
+    VmxGpr := VxG[4];
+  End;
+End;
+
+Procedure VmxSetGpr(N, V : LongInt);
+Begin
+  Case N Of
+    0 : VxGa := V;
+    1 : VxG[1] := V;
+    2 : VxG[2] := V;
+    3 : VxG[0] := V;
+    4 : VxW($681C, V);
+    5 : VxG[5] := V;
+    6 : VxG[3] := V;
+  Else
+    VxG[4] := V;
+  End;
+End;
+
+Procedure VmxSkip;
+Begin
+  VxW($681E, VxR($681E) + VxR($440C));
+End;
+
+Function VmxRun(F : LongInt) : LongInt;
+Var R, Reason, Q, Irq, Loops, L, Sub, V, Info, N : LongInt;
+    Real, Done, Injected : Boolean;
+Begin
+  VxGa := MemL[0:F + xEax];
+  VxG[0] := MemL[0:F + xEbx]; VxG[1] := MemL[0:F + xEcx];
+  VxG[2] := MemL[0:F + xEdx]; VxG[3] := MemL[0:F + xEsi];
+  VxG[4] := MemL[0:F + xEdi]; VxG[5] := MemL[0:F + xEbp];
+  If (MemL[0:F + xSet] And 4) <> 0 Then VmxReset;
+  VxW($681C, MemL[0:F + xEsp]);
+  VxW($681E, MemL[0:F + xEip]);
+  VxW($6820, MemL[0:F + xFl] Or 2);
+  If (MemL[0:F + xSet] And 1) <> 0 Then
+  Begin
+    Real := ((VxR($6800) And 1) = 0) Or ((MemL[0:F + xFl] And $20000) <> 0);
+    If Real Then
+    Begin
+      VxW($0800, MemL[0:F + xEs] And $FFFF); VxW($6806, (MemL[0:F + xEs] And $FFFF) Shl 4);
+      VxW($0802, MemL[0:F + xCs] And $FFFF); VxW($6808, (MemL[0:F + xCs] And $FFFF) Shl 4);
+      VxW($0804, MemL[0:F + xSs] And $FFFF); VxW($680A, (MemL[0:F + xSs] And $FFFF) Shl 4);
+      VxW($0806, MemL[0:F + xDs] And $FFFF); VxW($680C, (MemL[0:F + xDs] And $FFFF) Shl 4);
+      VxW($0808, MemL[0:F + xFs] And $FFFF); VxW($680E, (MemL[0:F + xFs] And $FFFF) Shl 4);
+      VxW($080A, MemL[0:F + xGs] And $FFFF); VxW($6810, (MemL[0:F + xGs] And $FFFF) Shl 4);
+    End;
+  End;
+  MemL[0:F + xSet] := 0;
+  VxW($6C00, GetCr0); VxW($6C02, GetCr3); VxW($6C04, GetCr4);
+  Irq := MemL[0:F + xIrq];
+  Injected := False;
+  Loops := 0;
+  R := VXE_INTR; Reason := 0;
+  Repeat
+    Done := True;
+    { interruption demandee : injectee si l'invite l'accepte, sinon
+      sortie a l'ouverture de la fenetre d'interruption }
+    If (Irq >= 0) And Not Injected Then
+    Begin
+      If ((VxR($6820) And $200) <> 0) And ((VxR($4824) And 3) = 0) And
+         (VxR($4016) >= 0) Then
+      Begin
+        VxW($4016, (Irq And $FF) Or LongInt($80000000));
+        Injected := True;
+        VxW($4002, VxProcCtl);
+      End
+      Else VxW($4002, VxProcCtl Or 4);
+    End;
+    asm
+      fnsave VxFpuH
+      frstor VxFpuG
+    end;
+    VxCall(VxVmxS);
+    asm
+      fnsave VxFpuG
+      frstor VxFpuH
+    end;
+    Inc(VxTotal);
+    Inc(Loops);
+    If VxFailed <> 0 Then
+    Begin
+      R := VXE_FAIL; Reason := VxR($4400) Or $10000;
+      VxWhy := 'VMLAUNCH/VMRESUME refuse (erreur ' + IntStr(VxR($4400)) + ')';
+    End
+    Else
+    Begin
+      VxLaunched := 1;
+      Reason := VxR($4402);
+      VxW($4016, 0);
+      { evenement interrompu par la sortie : a reprendre }
+      Info := VxR($4408);
+      If Info < 0 Then
+      Begin
+        VxW($4016, Info And Not $1000);
+        If (Info And $800) <> 0 Then VxW($4018, VxR($440A));
+        N := (Info Shr 8) And 7;
+        If (N = 4) Or (N = 5) Or (N = 6) Then VxW($401A, VxR($440C));
+      End;
+      If Reason < 0 Then R := VXE_FAIL
+      Else
+        Case Reason And $FFFF Of
+          1 : R := VXE_INTR;
+          0 : If ((VxR($4404) Shr 8) And 7) = 2 Then R := VXE_INTR Else R := VXE_EXC;
+          2 : R := VXE_SHUT;
+          7 : Begin                                 { fenetre d'interruption }
+                VxW($4002, VxProcCtl);
+                Done := False;
+              End;
+          10 : Begin                                { CPUID }
+                 Inc(VxCnt[9]);
+                 L := VxGa; Sub := VxG[1];
+                 VxCpuid(L, Sub);
+                 If L = 1 Then VxC := VxC And Not $20;
+                 If L = LongInt($80000001) Then VxC := VxC And Not 4;
+                 VxGa := VxA; VxG[0] := VxB; VxG[1] := VxC; VxG[2] := VxD;
+                 VmxSkip;
+                 Done := False;
+               End;
+          12 : R := VXE_HLT;
+          13, 54 : Begin VmxSkip; Done := False; End;     { INVD, WBINVD }
+          16 : Begin VxGa := Ticks; VxG[2] := 0; VmxSkip; Done := False; End;  { RDTSC }
+          18..27, 50, 53 :                          { VMCALL, VMX : #UD }
+               Begin
+                 Inc(VxCnt[11]);
+                 VxW($4016, 6 Or (3 Shl 8) Or LongInt($80000000));
+                 Done := False;
+               End;
+          28 : Begin                                { MOV CR }
+                 Q := VxR($6400);
+                 N := (Q Shr 8) And 15;
+                 Case (Q Shr 4) And 3 Of
+                   0 : Begin
+                         V := VmxGpr(N);
+                         Case Q And 15 Of
+                           0 : Begin
+                                 VxW($6800, (V Or (VxCr0Fix0 And Not LongInt($80000001))) And VxCr0Fix1);
+                                 VxW($6004, V);
+                               End;
+                           3 : VxW($6802, V);
+                           4 : Begin
+                                 VxW($6804, (V Or VxCr4Fix0) And VxCr4Fix1);
+                                 VxW($6006, V);
+                               End;
+                         End;
+                       End;
+                   1 : Case Q And 15 Of
+                         3 : VmxSetGpr(N, VxR($6802));
+                       End;
+                   2 : Begin
+                         VxW($6800, VxR($6800) And Not 8);
+                         VxW($6004, VxR($6004) And Not 8);
+                       End;
+                   3 : Begin
+                         V := (Q Shr 16) And $F;
+                         VxW($6800, (VxR($6800) And Not $E) Or (V And $E) Or (VxR($6800) And 1) Or (V And 1));
+                         VxW($6004, (VxR($6004) And Not $F) Or V);
+                       End;
+                 End;
+                 VmxSkip;
+                 Done := False;
+               End;
+          30 : R := VXE_IO;
+          31 : Begin                                { RDMSR }
+                 Inc(VxCnt[10]);
+                 VxGa := 0; VxG[2] := 0;
+                 VmxSkip;
+                 Done := False;
+               End;
+          32 : Begin Inc(VxCnt[10]); VmxSkip; Done := False; End;
+          48 : R := VXE_NPF;
+        Else
+          R := VXE_OTHER;
+        End;
+    End;
+    If Loops > 200 Then Done := True;
+  Until Done;
+  MemL[0:F + xEax] := VxGa;
+  MemL[0:F + xEbx] := VxG[0]; MemL[0:F + xEcx] := VxG[1];
+  MemL[0:F + xEdx] := VxG[2]; MemL[0:F + xEsi] := VxG[3];
+  MemL[0:F + xEdi] := VxG[4]; MemL[0:F + xEbp] := VxG[5];
+  MemL[0:F + xEsp] := VxR($681C);
+  MemL[0:F + xEip] := VxR($681E);
+  MemL[0:F + xFl] := VxR($6820);
+  MemL[0:F + xEs] := VxR($0800); MemL[0:F + xEsB] := VxR($6806);
+  MemL[0:F + xCs] := VxR($0802); MemL[0:F + xCsB] := VxR($6808);
+  MemL[0:F + xSs] := VxR($0804); MemL[0:F + xSsB] := VxR($680A);
+  MemL[0:F + xDs] := VxR($0806); MemL[0:F + xDsB] := VxR($680C);
+  MemL[0:F + xFs] := VxR($0808); MemL[0:F + xFsB] := VxR($680E);
+  MemL[0:F + xGs] := VxR($080A); MemL[0:F + xGsB] := VxR($6810);
+  MemL[0:F + xCr0] := (VxR($6800) And Not VxR($6000)) Or (VxR($6004) And VxR($6000));
+  MemL[0:F + xCr3] := VxR($6802);
+  MemL[0:F + xCr4] := (VxR($6804) And Not VxR($6002)) Or (VxR($6006) And VxR($6002));
+  MemL[0:F + xEfer] := 0;
+  MemL[0:F + xCpl] := (VxR($4818) Shr 5) And 3;
+  { une interruption injectee est livree a l'entree ; si la sortie l'a
+    interrompue, elle est reprise (champ d'injection) a l'entree suivante }
+  If Injected Then MemL[0:F + xIrq] := -1;
+  MemL[0:F + xRaw] := Reason;
+  MemL[0:F + xNext] := MemL[0:F + xEip];
+  MemL[0:F + xInfo1] := 0;
+  MemL[0:F + xInfo2] := 0;
+  Case R Of
+    VXE_IO :
+      Begin
+        Q := VxR($6400);
+        { meme forme que EXITINFO1 de SVM : bit 0 lecture, 2 chaine,
+          3 REP, 4/5/6 taille 8/16/32, 16-31 port }
+        V := (Q And $FFFF0000);
+        If (Q And 8) <> 0 Then V := V Or 1;
+        If (Q And 16) <> 0 Then V := V Or 4;
+        If (Q And 32) <> 0 Then V := V Or 8;
+        Case Q And 7 Of
+          0 : V := V Or 16;
+          1 : V := V Or 32;
+        Else
+          V := V Or 64;
+        End;
+        MemL[0:F + xInfo1] := V;
+        MemL[0:F + xNext] := MemL[0:F + xEip] + VxR($440C);
+      End;
+    VXE_HLT : MemL[0:F + xNext] := MemL[0:F + xEip] + VxR($440C);
+    VXE_NPF :
+      Begin
+        MemL[0:F + xInfo1] := VxR($6400);
+        MemL[0:F + xInfo2] := VxR($2400);
+      End;
+    VXE_EXC : MemL[0:F + xInfo1] := VxR($4404);
+  End;
+  Inc(VxCnt[R]);
+  MemL[0:F + xExit] := R;
+  VmxRun := R;
+End;
+
+{ --- mode virtuel 8086 (plan B) ------------------------------------- }
+{ L'invite s'execute en mode V86 dans la tache de l'appelant : l'entree
+  0 du repertoire de pages designe une table dont les 256 premieres pages
+  sont la memoire de l'invite (le reste des 4 Mo, noyau compris, reste a
+  l'identique et inaccessible a l'anneau 3 : pas de zone haute HMA). Les
+  fautes du mode V86 de cette tache arrivent a V86xTrap (souches de la
+  partie 13b) ; la minuterie de l'hote detourne l'invite vers un HLT en
+  F000:FF00 pour rendre la main a l'application a chaque top. }
+
+Const
+  VxTrampCs = $F000;
+  VxTrampIp = $FF00;
+
+Var
+  VxPt86, VxEnterS, VxLeaveS, VxKEsp, VxE0P, VxAppF, VxExitR, VxOldE0 : LongInt;
+  VxImg : Array[0..16] Of LongInt;
+  VxVIF, VxDeliv : Boolean;
+  VxPend : LongInt;
+
+Procedure V86xBuild;
+Var A, K : LongInt;
+Begin
+  If VxEnterS <> 0 Then Exit;
+  If VmPd = 0 Then VmPd := PageDir;
+  VmBuildStubs;
+  A := KAlloc(256);
+  { entree : EAX = VxImg (meme forme que VmEnterS, pile et ESP0 propres) }
+  VxEnterS := A;
+  PutB(A, $55); PutB(A, $53); PutB(A, $56); PutB(A, $57);
+  PutB(A, $89); PutB(A, $25); PutD(A, LongInt(@VxKEsp));
+  PutB(A, $89); PutB(A, $25); PutD(A, TssBase + 4);
+  PutB(A, $8B); PutB(A, $15); PutD(A, LongInt(@VxE0P));
+  PutB(A, $89); PutB(A, $22);                       { mov [edx],esp }
+  PutB(A, $B9); PutD(A, 9);
+  PutB(A, $8D); PutB(A, $70); PutB(A, 64);          { lea esi,[eax+64] }
+  PutB(A, $FF); PutB(A, $36);                       { push [esi] }
+  PutB(A, $83); PutB(A, $EE); PutB(A, 4);           { sub esi,4 }
+  PutB(A, $E2); PutB(A, $F9);                       { loop }
+  For K := 1 To 4 Do
+  Begin
+    PutB(A, $6A); PutB(A, 0);                       { push 0 }
+  End;
+  PutB(A, $B9); PutD(A, 8);
+  PutB(A, $FF); PutB(A, $36);
+  PutB(A, $83); PutB(A, $EE); PutB(A, 4);
+  PutB(A, $E2); PutB(A, $F9);
+  PutB(A, $FF); PutB(A, $35); PutD(A, LongInt(@VmPd));
+  PutB(A, $C7); PutB(A, $05); PutD(A, LongInt(@VmPad)); PutD(A, 0);
+  VmJmp(A, VmExitL);
+  { sortie : retour de l'appel d'entree }
+  VxLeaveS := A;
+  PutB(A, $FA);
+  PutB(A, $8B); PutB(A, $25); PutD(A, LongInt(@VxKEsp));
+  PutB(A, $5F); PutB(A, $5E); PutB(A, $5B); PutB(A, $5D);
+  PutB(A, $C3);
+End;
+
+Function V86xCreate : Boolean;
+Var I : LongInt;
+Begin
+  V86xCreate := False;
+  V86xBuild;
+  VxPt86 := PAlloc(4096);
+  If VxPt86 = 0 Then Exit;
+  VxNpd := VxPt86;                                  { (rendu par VxFreeAll) }
+  For I := 0 To 1023 Do
+    If I < 256 Then MemL[0:VxPt86 + I * 4] := (VxMem + I * 4096) Or 7
+    Else MemL[0:VxPt86 + I * 4] := (I Shl 12) Or 3;
+  VxVIF := False; VxPend := -1;
+  V86xCreate := True;
+End;
+
+Procedure V86xDestroy;
+Begin
+  VxPt86 := 0;
+End;
+
+{ pile de l'invite (16 bits) }
+Procedure V86Push(F, V : LongInt);
+Var Sp : LongInt;
+Begin
+  Sp := (MemL[0:F + 60] - 2) And $FFFF;
+  MemL[0:F + 60] := (MemL[0:F + 60] And LongInt($FFFF0000)) Or Sp;
+  MemW[0:VxMem + ((MemL[0:F + 64] And $FFFF) Shl 4) + Sp] := V And $FFFF;
+End;
+
+Function V86Pop(F : LongInt) : LongInt;
+Var Sp : LongInt;
+Begin
+  Sp := MemL[0:F + 60] And $FFFF;
+  V86Pop := MemW[0:VxMem + ((MemL[0:F + 64] And $FFFF) Shl 4) + Sp];
+  MemL[0:F + 60] := (MemL[0:F + 60] And LongInt($FFFF0000)) Or ((Sp + 2) And $FFFF);
+End;
+
+Function V86Flags(F : LongInt) : LongInt;
+Var Fl : LongInt;
+Begin
+  Fl := MemL[0:F + 56] And Not ($3200);
+  If VxVIF Then Fl := Fl Or $200;
+  V86Flags := Fl;
+End;
+
+Procedure V86SetFl(F, V, Mask : LongInt);
+Begin
+  VxVIF := (V And $200) <> 0;
+  V := V And Not $7200;
+  MemL[0:F + 56] := (MemL[0:F + 56] And Not Mask) Or (V And Mask) Or $20202;
+End;
+
+{ interruption n reflechie par la table des vecteurs de l'invite }
+Procedure V86Reflect(F, N, RetIp : LongInt);
+Begin
+  V86Push(F, V86Flags(F));
+  V86Push(F, MemL[0:F + 52]);
+  V86Push(F, RetIp);
+  VxVIF := False;
+  MemL[0:F + 56] := MemL[0:F + 56] And Not $100;    { TF }
+  MemL[0:F + 48] := MemW[0:VxMem + N * 4];
+  MemL[0:F + 52] := MemW[0:VxMem + N * 4 + 2];
+End;
+
+Procedure V86Deliver(F : LongInt);
+Begin
+  If (VxPend >= 0) And VxVIF Then
+  Begin
+    V86Reflect(F, VxPend, MemL[0:F + 48] And $FFFF);
+    VxPend := -1;
+    VxDeliv := True;
+  End;
+End;
+
+{ fin de l'execution : etat de l'invite -> cadre de l'application }
+Procedure V86xLeave(F, R : LongInt);
+Var A, S : LongInt;
+Begin
+  A := VxAppF;
+  MemL[0:A + xEdi] := MemL[0:F]; MemL[0:A + xEsi] := MemL[0:F + 4];
+  MemL[0:A + xEbp] := MemL[0:F + 8]; MemL[0:A + xEbx] := MemL[0:F + 16];
+  MemL[0:A + xEdx] := MemL[0:F + 20]; MemL[0:A + xEcx] := MemL[0:F + 24];
+  MemL[0:A + xEax] := MemL[0:F + 28];
+  MemL[0:A + xEip] := MemL[0:F + 48] And $FFFF;
+  MemL[0:A + xCs] := MemL[0:F + 52] And $FFFF;
+  MemL[0:A + xFl] := V86Flags(F) And Not $20000;
+  MemL[0:A + xEsp] := MemL[0:F + 60] And $FFFF;
+  MemL[0:A + xSs] := MemL[0:F + 64] And $FFFF;
+  MemL[0:A + xEs] := MemL[0:F + 68] And $FFFF;
+  MemL[0:A + xDs] := MemL[0:F + 72] And $FFFF;
+  MemL[0:A + xFs] := MemL[0:F + 76] And $FFFF;
+  MemL[0:A + xGs] := MemL[0:F + 80] And $FFFF;
+  MemL[0:A + xCsB] := MemL[0:A + xCs] Shl 4; MemL[0:A + xDsB] := MemL[0:A + xDs] Shl 4;
+  MemL[0:A + xEsB] := MemL[0:A + xEs] Shl 4; MemL[0:A + xSsB] := MemL[0:A + xSs] Shl 4;
+  MemL[0:A + xFsB] := MemL[0:A + xFs] Shl 4; MemL[0:A + xGsB] := MemL[0:A + xGs] Shl 4;
+  MemL[0:A + xCr0] := $10; MemL[0:A + xCr3] := 0; MemL[0:A + xCr4] := 0;
+  MemL[0:A + xCpl] := 0; MemL[0:A + xEfer] := 0;
+  MemL[0:A + xExit] := R;
+  If VxDeliv Then MemL[0:A + xIrq] := -1;
+  VxExitR := R;
+  Inc(VxCnt[R]);
+  Inc(VxTotal);
+  S := VxLeaveS;
+  asm
+    mov eax,S
+    jmp eax
+  end;
+End;
+
+{ E/S : forme de EXITINFO1 de SVM }
+Procedure V86Io(F, Port_, In_, Size, Len : LongInt);
+Var A : LongInt;
+Begin
+  A := VxAppF;
+  MemL[0:A + xInfo1] := (Port_ Shl 16) Or In_ Or (8 Shl Size);
+  MemL[0:A + xNext] := (MemL[0:F + 48] + Len) And $FFFF;
+  MemL[0:A + xRaw] := $7B;
+  V86xLeave(F, VXE_IO);
+End;
+
+{ faute du mode V86 de la machine de VIRTUAL.EXE (interruptions masquees) }
+Procedure V86xTrap(F : LongInt);
+Var Lin, Op, Len, Ip, O32, V, P : LongInt; Pre : Boolean;
+Begin
+  VmPad := 0;
+  Ip := MemL[0:F + 48] And $FFFF;
+  MemL[0:VxAppF + xRaw] := VmVec;
+  MemL[0:VxAppF + xInfo1] := VmErrCode;
+  MemL[0:VxAppF + xInfo2] := 0;
+  Case VmVec Of
+    13 : ;
+    14 : Begin
+           MemL[0:VxAppF + xInfo1] := 14;
+           MemL[0:VxAppF + xInfo2] := GetCr2;
+           V86xLeave(F, VXE_EXC);
+         End;
+    0, 1, 3, 4, 5, 6, 7, 12, 17 :
+      Begin
+        V86Reflect(F, VmVec, Ip);
+        Exit;
+      End;
+  Else
+    MemL[0:VxAppF + xInfo1] := VmVec;
+    V86xLeave(F, VXE_EXC);
+  End;
+  Lin := ((MemL[0:F + 52] And $FFFF) Shl 4) + Ip;
+  Len := 0; O32 := 0;
+  Repeat
+    Op := Mem[0:VxMem + Lin + Len];
+    Pre := Op In [$26, $2E, $36, $3E, $64, $65, $66, $67, $F0, $F2, $F3];
+    If Op = $66 Then O32 := 1;
+    If Pre Then Inc(Len);
+  Until Not Pre Or (Len > 6);
+  Inc(Len);
+  Case Op Of
+    $FA : Begin VxVIF := False; MemL[0:F + 48] := (Ip + Len) And $FFFF; End;
+    $FB : Begin VxVIF := True; MemL[0:F + 48] := (Ip + Len) And $FFFF; End;
+    $9C : Begin
+            MemL[0:F + 48] := (Ip + Len) And $FFFF;
+            V := V86Flags(F);
+            If O32 <> 0 Then
+            Begin
+              V86Push(F, V Shr 16);
+            End;
+            V86Push(F, V);
+          End;
+    $9D : Begin
+            MemL[0:F + 48] := (Ip + Len) And $FFFF;
+            V := V86Pop(F);
+            If O32 <> 0 Then
+            Begin
+              P := V86Pop(F);
+              V := V Or ((P And $24) Shl 16);
+              V86SetFl(F, V, $244FD5);
+            End
+            Else V86SetFl(F, V, $4FD5);
+          End;
+    $CD : Begin
+            V := Mem[0:VxMem + Lin + Len];
+            V86Reflect(F, V, (Ip + Len + 1) And $FFFF);
+          End;
+    $CC : V86Reflect(F, 3, (Ip + Len) And $FFFF);
+    $CE : If (MemL[0:F + 56] And $800) <> 0 Then V86Reflect(F, 4, (Ip + Len) And $FFFF)
+          Else MemL[0:F + 48] := (Ip + Len) And $FFFF;
+    $CF : Begin
+            If O32 <> 0 Then
+            Begin
+              V := V86Pop(F); V86Pop(F);
+              MemL[0:F + 48] := V;
+              MemL[0:F + 52] := V86Pop(F); V86Pop(F);
+              V := V86Pop(F); P := V86Pop(F);
+              V86SetFl(F, V Or ((P And $24) Shl 16), $244FD5);
+            End
+            Else
+            Begin
+              MemL[0:F + 48] := V86Pop(F);
+              MemL[0:F + 52] := V86Pop(F);
+              V86SetFl(F, V86Pop(F), $4FD5);
+            End;
+          End;
+    $F4 : Begin
+            If VxTramp And ((MemL[0:F + 52] And $FFFF) = VxTrampCs) And (Ip = VxTrampIp) Then
+            Begin
+              VxTramp := False;
+              MemL[0:F + 48] := VxSavIp;
+              MemL[0:F + 52] := VxSavCs;
+              MemL[0:VxAppF + xRaw] := $60;
+              V86xLeave(F, VXE_INTR);
+            End;
+            MemL[0:VxAppF + xNext] := (Ip + Len) And $FFFF;
+            MemL[0:VxAppF + xRaw] := $78;
+            V86xLeave(F, VXE_HLT);
+          End;
+    $E4 : V86Io(F, Mem[0:VxMem + Lin + Len], 1, 0, Len + 1);
+    $E5 : V86Io(F, Mem[0:VxMem + Lin + Len], 1, 1 + O32, Len + 1);
+    $E6 : V86Io(F, Mem[0:VxMem + Lin + Len], 0, 0, Len + 1);
+    $E7 : V86Io(F, Mem[0:VxMem + Lin + Len], 0, 1 + O32, Len + 1);
+    $EC : V86Io(F, MemL[0:F + 20] And $FFFF, 1, 0, Len);
+    $ED : V86Io(F, MemL[0:F + 20] And $FFFF, 1, 1 + O32, Len);
+    $EE : V86Io(F, MemL[0:F + 20] And $FFFF, 0, 0, Len);
+    $EF : V86Io(F, MemL[0:F + 20] And $FFFF, 0, 1 + O32, Len);
+  Else
+    { autre faute de protection : interruption 0Dh du mode reel }
+    MemL[0:VxAppF + xInfo1] := 13;
+    MemL[0:VxAppF + xInfo2] := Op;
+    V86xLeave(F, VXE_EXC);
+  End;
+  V86Deliver(F);
+End;
+
+Function V86xRun(F : LongInt) : LongInt;
+Var Irq, S, A, Fl : LongInt;
+Begin
+  VxAppF := F;
+  If (MemL[0:F + xSet] And 4) <> 0 Then
+  Begin
+    VxVIF := False; VxPend := -1;
+  End;
+  MemL[0:F + xSet] := 0;
+  Fl := MemL[0:F + xFl];
+  VxVIF := (Fl And $200) <> 0;
+  VxImg[0] := MemL[0:F + xEdi]; VxImg[1] := MemL[0:F + xEsi];
+  VxImg[2] := MemL[0:F + xEbp]; VxImg[3] := 0;
+  VxImg[4] := MemL[0:F + xEbx]; VxImg[5] := MemL[0:F + xEdx];
+  VxImg[6] := MemL[0:F + xEcx]; VxImg[7] := MemL[0:F + xEax];
+  VxImg[8] := MemL[0:F + xEip] And $FFFF;
+  VxImg[9] := MemL[0:F + xCs] And $FFFF;
+  VxImg[10] := (Fl And Not $7200) Or $20202;
+  VxImg[11] := MemL[0:F + xEsp] And $FFFF;
+  VxImg[12] := MemL[0:F + xSs] And $FFFF;
+  VxImg[13] := MemL[0:F + xEs] And $FFFF;
+  VxImg[14] := MemL[0:F + xDs] And $FFFF;
+  VxImg[15] := MemL[0:F + xFs] And $FFFF;
+  VxImg[16] := MemL[0:F + xGs] And $FFFF;
+  MemL[0:F + xInfo1] := 0; MemL[0:F + xInfo2] := 0; MemL[0:F + xNext] := 0;
+  Mem[0:VxMem + VxTrampCs * 16 + VxTrampIp] := $F4;
+  VxDeliv := False;
+  Irq := MemL[0:F + xIrq];
+  VxPend := Irq;
+  If (Irq >= 0) And VxVIF Then
+  Begin
+    { livree tout de suite : cadre fictif sur la pile de l'invite }
+    S := (VxImg[11] - 6) And $FFFF;
+    A := VxMem + (VxImg[12] Shl 4);
+    MemW[0:A + ((S + 4) And $FFFF)] := (VxImg[10] And Not $33000) Or $200 And $FFFF;
+    MemW[0:A + ((S + 2) And $FFFF)] := VxImg[9];
+    MemW[0:A + S] := VxImg[8];
+    VxImg[11] := S;
+    VxImg[8] := MemW[0:VxMem + Irq * 4];
+    VxImg[9] := MemW[0:VxMem + Irq * 4 + 2];
+    VxImg[10] := VxImg[10] And Not $100;
+    VxVIF := False; VxPend := -1; VxDeliv := True;
+  End;
+  VxOldE0 := TkEsp0[CurTask];
+  VxE0P := LongInt(@TkEsp0[CurTask]);
+  VxTask := CurTask;
+  VxTramp := False;
+  asm
+    cli
+  end;
+  MemL[0:PageDir] := VxPt86 Or 7;
+  FlushTlb;
+  VxV86On := True;
+  A := LongInt(@VxImg);
+  S := VxEnterS;
+  asm
+    mov eax,A
+    mov ecx,S
+    call ecx
+  end;
+  VxV86On := False;
+  VxTramp := False;
+  MemL[0:PageDir] := CurPde;
+  FlushTlb;
+  TkEsp0[CurTask] := VxOldE0;
+  asm
+    sti
+  end;
+  V86xRun := VxExitR;
+End;
+
+{ --- commun ---------------------------------------------------------- }
+
+Procedure VxFreeAll;
+Begin
+  If VxMethod = VXM_SVM Then SvmDestroy;
+  If VxMethod = VXM_VMX Then VmxDestroy;
+  If VxMethod = VXM_V86 Then V86xDestroy;
+  If VxVmcb <> 0 Then PFree(VxVmcb);
+  If VxHsave <> 0 Then PFree(VxHsave);
+  If VxHVmcb <> 0 Then PFree(VxHVmcb);
+  If VxIopm <> 0 Then PFree(VxIopm);
+  If VxMsrpm <> 0 Then PFree(VxMsrpm);
+  If VxNpd <> 0 Then PFree(VxNpd);
+  If VxNpts <> 0 Then PFree(VxNpts);
+  If VxDPt <> 0 Then PFree(VxDPt);
+  If VxDPg <> 0 Then PFree(VxDPg);
+  If VxMem <> 0 Then PFree(VxMem);
+  VxVmcb := 0; VxHsave := 0; VxHVmcb := 0; VxIopm := 0; VxMsrpm := 0;
+  VxNpd := 0; VxNpts := 0; VxDPt := 0; VxDPg := 0; VxMem := 0; VxSize := 0;
+  VxMethod := VXM_NONE; VxOwner := -1;
+End;
+
+Function VxCreate(Size, Method : LongInt) : LongInt;
+Var Ok : Boolean;
+Begin
+  VxCreate := 0;
+  VxProbe;
+  If VxMethod <> VXM_NONE Then
+  Begin
+    If (VxOwner >= 0) And (VxOwner < MaxProcs) And (VxOwner <> CurProc) And Procs[VxOwner].Used Then Exit;
+    VxFreeAll;
+  End;
+  If Method = 0 Then Method := VxBest;
+  If (Method = VXM_SVM) And (VxBest <> VXM_SVM) Then Exit;
+  If (Method = VXM_VMX) And (VxBest <> VXM_VMX) Then Exit;
+  If (Method < VXM_SVM) Or (Method > VXM_V86) Then Exit;
+  Size := (Size + 4095) And Not 4095;
+  If Size < $110000 Then Size := $110000;
+  If Size > $10000000 Then Exit;
+  VxMem := PAlloc(Size);
+  If VxMem = 0 Then Exit;
+  VxSize := Size;
+  FillMem(VxMem, Size, 0);
+  MoveMem(LongInt(@FpuInit), LongInt(@VxFpuG), 108);
+  VxMethod := Method;
+  Case Method Of
+    VXM_SVM : Ok := SvmCreate;
+    VXM_VMX : Ok := VmxCreate;
+  Else
+    Ok := V86xCreate;
+  End;
+  If Not Ok Then
+  Begin
+    VxFreeAll;
+    Exit;
+  End;
+  VxOwner := CurProc;
+  VxCreate := VxMem;
+End;
+
+Function KrnVirt(Op, P1, P2 : LongInt) : LongInt;
+Var I : LongInt;
+Begin
+  KrnVirt := 0;
+  Case Op Of
+    0 : Begin
+          VxProbe;
+          If P1 <> 0 Then VxInfo(P1);
+          KrnVirt := VxBest;
+        End;
+    1 : KrnVirt := VxCreate(P1, P2);
+    2 : If (VxMethod <> VXM_NONE) And (P1 <> 0) Then
+          Case VxMethod Of
+            VXM_SVM : KrnVirt := SvmRun(P1);
+            VXM_VMX : KrnVirt := VmxRun(P1);
+            VXM_V86 : KrnVirt := V86xRun(P1);
+          End
+        Else KrnVirt := VXE_FAIL;
+    3 : Begin
+          If VxMethod <> VXM_NONE Then VxFreeAll;
+          KrnVirt := 1;
+        End;
+    4 : If (VmFontBuf <> 0) And (P1 <> 0) Then
+        Begin
+          MoveMem(VmFontBuf, P1, 4096);
+          KrnVirt := 1;
+        End;
+    5 : Begin
+          For I := 0 To 15 Do VxCnt[I] := 0;
+          VxTotal := 0;
+        End;
+  End;
+End;
 
 { ==================================================================== }
 { Partie 25 - Ecran de demarrage graphique                             }
