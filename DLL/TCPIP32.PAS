@@ -34,7 +34,9 @@ Library TCPIP32;
   dans l'ordre du reseau) : sock_init, socket (AF_INET ; SOCK_STREAM,
   SOCK_DGRAM, SOCK_RAW + IPPROTO_ICMP), bind, connect, send, recv, sendto,
   recvfrom, soclose, shutdown, sock_errno, gethostbyname, gethostid,
-  inet_addr ; points d'entree internes TCPIPINFO (etat de l'interface
+  inet_addr, select (ordinal 12, select d'OS/2 : tableau de sockets,
+  delai en millisecondes) et bsdselect (ordinal 32, select de BSD :
+  masques fd_set, struct timeval) ; points d'entree internes TCPIPINFO (etat de l'interface
   lan0 : IFCONFIG, gestionnaire de peripheriques) et TCPIPRENEW (refaire
   la configuration). Codes d'erreur (sock_errno) : SOCBASEERR (10000) +
   code BSD. }
@@ -1197,6 +1199,128 @@ Begin
   SoSystem := 0;
 End;
 
+{ ==================================================================== }
+{ select : attente de plusieurs sockets                                 }
+{ ==================================================================== }
+
+{ donnees a lire (ou fin de la connexion : recv rend 0 ou une erreur) }
+Function SockReadable(S : LongInt) : Boolean;
+Begin
+  If SType[S] = T_TCP Then
+    SockReadable := (SLen[S] > 0) Or ((SState[S] <> TS_ESTAB) And (SState[S] <> TS_SYNSENT))
+  Else SockReadable := SLen[S] > 0;
+End;
+
+Function SockWritable(S : LongInt) : Boolean;
+Begin
+  If SType[S] = T_TCP Then SockWritable := (SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT)
+  Else SockWritable := True;
+End;
+
+{ select d'OS/2 (ordinal 12) : int select(int *s, int noreads, int
+  nowrites, int noexcepts, long timeout) ; S : noreads sockets a lire,
+  puis nowrites a ecrire, puis noexcepts ; Timeout en millisecondes (-1 :
+  sans limite, 0 : interrogation). Les sockets qui ne sont pas prets sont
+  remplaces par -1 dans le tableau ; rend le nombre de sockets prets (0 :
+  delai ecoule, -1 : erreur) }
+Function Os2Select(PS, NR, NW, NE, Timeout : LongInt) : LongInt;
+Var T, I, N, D, S, Tot : LongInt; Rd : Boolean;
+Begin
+  Os2Select := -1;
+  Tot := NR + NW + NE;
+  If (Tot < 0) Or ((Tot > 0) And (PS = 0)) Then
+  Begin
+    Errno := SOCEINVAL;
+    Exit;
+  End;
+  For I := 0 To Tot - 1 Do
+    If SockOf(RdL(PS + I * 4)) < 0 Then Exit;
+  T := KTicks;
+  Repeat
+    NetPoll;
+    N := 0;
+    For I := 0 To Tot - 1 Do
+    Begin
+      S := SockOf(RdL(PS + I * 4));
+      If I < NR Then Rd := SockReadable(S)
+      Else If I < NR + NW Then Rd := SockWritable(S)
+      Else Rd := SState[S] = TS_RESET;
+      If Rd Then Inc(N);
+    End;
+    If (N > 0) Or (Timeout = 0) Or ((Timeout > 0) And (KTicks - T >= Timeout)) Then Break;
+    Idle;
+  Until False;
+  { les sockets pas prets : -1 }
+  For I := 0 To Tot - 1 Do
+  Begin
+    D := RdL(PS + I * 4);
+    S := SockOf(D);
+    If I < NR Then Rd := SockReadable(S)
+    Else If I < NR + NW Then Rd := SockWritable(S)
+    Else Rd := SState[S] = TS_RESET;
+    If Not Rd Then WrL(PS + I * 4, -1);
+  End;
+  Os2Select := N;
+End;
+
+{ bsdselect (ordinal 32) : select de BSD, int bsdselect(int nfds, fd_set
+  *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) ;
+  fd_set : masque de bits (un LongInt par 32 descripteurs) ; timeout :
+  secondes et microsecondes (pointeur nul : sans limite). Les ensembles
+  ne gardent que les descripteurs prets ; rend leur nombre }
+Function BsdSelect(Nfds, PR, PW, PE, PTv : LongInt) : LongInt;
+Var T, Ms, D, S, N, K, W : LongInt; Sets : Array[0..2] Of LongInt;
+    Want, Got : Array[0..2, 0..1] Of LongInt; Rd : Boolean;
+Begin
+  BsdSelect := -1;
+  If (Nfds < 0) Or (Nfds > 64) Then
+  Begin
+    Errno := SOCEINVAL;
+    Exit;
+  End;
+  Sets[0] := PR; Sets[1] := PW; Sets[2] := PE;
+  For K := 0 To 2 Do
+    For W := 0 To 1 Do
+    Begin
+      If (Sets[K] <> 0) And (W * 32 < Nfds) Then Want[K, W] := RdL(Sets[K] + W * 4) Else Want[K, W] := 0;
+      Got[K, W] := 0;
+    End;
+  For K := 0 To 2 Do
+    For D := 0 To Nfds - 1 Do
+      If ((Want[K, D Shr 5] Shr (D And 31)) And 1) <> 0 Then
+        If SockOf(D) < 0 Then Exit;
+  If PTv = 0 Then Ms := -1 Else Ms := RdL(PTv) * 1000 + RdL(PTv + 4) Div 1000;
+  T := KTicks;
+  Repeat
+    NetPoll;
+    N := 0;
+    For K := 0 To 2 Do
+      For D := 0 To Nfds - 1 Do
+        If ((Want[K, D Shr 5] Shr (D And 31)) And 1) <> 0 Then
+        Begin
+          S := SockOf(D);
+          Case K Of
+            0 : Rd := SockReadable(S);
+            1 : Rd := SockWritable(S);
+          Else
+            Rd := SState[S] = TS_RESET;
+          End;
+          If Rd Then
+          Begin
+            Got[K, D Shr 5] := Got[K, D Shr 5] Or (1 Shl (D And 31));
+            Inc(N);
+          End;
+        End;
+    If (N > 0) Or (Ms = 0) Or ((Ms > 0) And (KTicks - T >= Ms)) Then Break;
+    Idle;
+  Until False;
+  For K := 0 To 2 Do
+    If Sets[K] <> 0 Then
+      For W := 0 To 1 Do
+        If W * 32 < Nfds Then WrL(Sets[K] + W * 4, Got[K, W]);
+  BsdSelect := N;
+End;
+
 Function Sock_Errno : LongInt;
 Begin
   Sock_Errno := Errno;
@@ -1367,7 +1491,9 @@ Exports
   Inet_Addr Index 105 Name 'inet_addr',
   TcpipInfo Index 900 Name 'TCPIPINFO',
   TcpipRenew Index 901 Name 'TCPIPRENEW',
-  SoSystem Index 902 Name 'sosystem';
+  SoSystem Index 902 Name 'sosystem',
+  Os2Select Index 12 Name 'select',
+  BsdSelect Index 32 Name 'bsdselect';
 
 Var
   InitK : LongInt;

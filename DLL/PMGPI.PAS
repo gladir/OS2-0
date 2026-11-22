@@ -5899,6 +5899,46 @@ Begin
     End;
     Exit;
   End;
+  { meme chemin pour une image de 24 bits par pel (OPENGL.DLL, rendus
+    en couleurs vraies) : couleur convertie une fois par suite de pels
+    identiques, et non par l'operation generique }
+  If HasSrc And (SrKind = 99) And (SrBpp = 24) And (Sw = Tw) And (Sh = Th) And (Rop = $CC) And
+     (RMode <> 2) And (Msk <> 1) Then
+  Begin
+    On := False;
+    Rgb := -1; S := 0;
+    For Y := Y1 To Y2 - 1 Do
+    Begin
+      Py := Y + TgOffY;
+      Sy := Sy1 + Y - Y1;
+      If (Sy >= 0) And (Sy < SrH) Then Row := SrBase + Sy * SrStride Else Row := -1;
+      For X := X1 To X2 - 1 Do
+      Begin
+        Px := X + TgOffX;
+        If InClip(Px, Py) Then
+        Begin
+          Sx := Sx1 + X - X1;
+          If (Row <> -1) And (Sx >= 0) And (Sx < SrW) Then
+          Begin
+            P := RdB(Row + Sx * 3) Or (RdB(Row + Sx * 3 + 1) Shl 8) Or (RdB(Row + Sx * 3 + 2) Shl 16);
+            If P <> Rgb Then
+            Begin
+              Rgb := P;
+              S := DevVal(Rgb) And Msk;
+            End;
+          End
+          Else S := 0;
+          TgPut(Px, Py, S);
+          On := True;
+        End;
+      End;
+    End;
+    If On Then
+    Begin
+      BndAdd(X1, Y1); BndAdd(X2 - 1, Y2 - 1);
+    End;
+    Exit;
+  End;
   For Y := Y1 To Y2 - 1 Do
   Begin
     Py := Y + TgOffY;

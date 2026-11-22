@@ -27,7 +27,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
-              PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, DEMARRE.WAV,
+              PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
+              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -1158,6 +1159,43 @@ decode en avance (anneau de 3 s, MDMSTREAM/MDMFEED) et cede le
 processeur par DosSleep(0) apres chaque trame : la fenetre reste
 active. Exemple : AURORE.MP3 (composition originale synthetisee).
 
+Client FTP (FTPCLI.EXE, dossier Outils reseau)
+----------------------------------------------
+Client FTP et SFTP (SSH-2) porte de Pasdows 95 (source APPS\FTPCLI.PAS).
+Connexion rapide (hote, identifiant, mot de passe, port : 21 pour FTP,
+22 ou sftp://hote pour SFTP) ou Fichier - Gestionnaire de sites
+(sitemanager.xml de FileZilla 3, import et export). Panneaux Site local et
+Site distant, file d'attente (en attente, echoues, reussis), dossiers
+recursifs, droits d'acces (chmod), commande personnalisee. Double-clic
+ou Entree : transferer ; bouton 2 : menus. Sites, historique et cles
+d'hote : C:\RESEAU\ (D:\RESEAU\ au demarrage du CD-ROM).
+  OS2PC APPS\FTPCLI.PAS                     -> FTPCLI.EXE
+
+Client SSH (SSHCLI.EXE, dossier Outils reseau)
+----------------------------------------------
+Client SSH-2 porte de Pasdows 95 (source APPS\SSHCLI.PAS) : terminal
+xterm (couleurs 16/256/RVB, ecran alternatif, UTF-8, graphismes DEC,
+historique, selection, copier, coller), jusqu'a 8 sessions en onglets,
+MultiExec, panneau Sessions (sessions.xml), Outils (programmes d'OS/2-0,
+table ASCII, mots de passe), Macros (macros.xml) et SFTP. Connexion
+rapide : utilisateur@serveur:port puis Entree. Fichiers dans C:\RESEAU\
+(knownhosts.txt commun avec le Client FTP). TCPIP32.DLL : select
+(ordinal 12) et bsdselect (ordinal 32).
+  OS2PC APPS\SSHCLI.PAS                     -> SSHCLI.EXE
+
+OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
+---------------------------------------------------------------------
+OpenGL 1.1 en rendu logiciel (source DLL\OPENGL.PAS, porte de
+l'OPENGL32.DLL de Pasdows 95) avec l'interface PGL d'OS/2 Warp :
+pglChooseConfig, pglCreateContext, pglMakeCurrent(hab, hgc, hwnd),
+pglSwapBuffers(hab, hwnd), pglDestroyContext... (389 fonctions).
+Textures, eclairage, brouillard, tampon Z, melange alpha, tableaux de
+sommets. Essai OpenGL (source APPS\GLTEST.PAS) : cube texture,
+pyramide, sol dans le brouillard, carre translucide ; Echap pour
+quitter.
+  OS2PC -Q DLL\OPENGL.PAS                   -> OPENGL.DLL
+  OS2PC APPS\GLTEST.PAS                     -> GLTEST.EXE
+
 Notator for OS2-Zero (NOTATOR.EXE, dossier Multimedia) : portage de
 NOTATOR.PAS du depot OFFICE-0, clone du sequenceur MIDI et editeur de
 partition Notator SL. Syntaxe : NOTATOR [fichier.SON | fichier.MID]
@@ -1446,8 +1484,24 @@ EXPLORER [dossier] a l'invite.
     numerique, .HTM dans le Navigateur Web ;
   - Retour arriere : dossier parent ; F5 : actualiser ; Tab : arbre ou
     contenu ; Alt+Entree : Proprietes ; bouton 2 : Ouvrir, Proprietes ;
-  - menus Fichier, Affichage, Aller a, Outils (Connecter et Deconnecter
-    un lecteur reseau), ?.
+  - menus Fichier (Ouvrir, Nouveau dossier, Supprimer, Renommer,
+    Proprietes, Fermer), Edition (Couper, Copier, Coller, Selectionner
+    tout, Inverser la selection), Affichage, Aller a, Outils (Connecter
+    et Deconnecter un lecteur reseau), ?.
+  - selection multiple : Ctrl+clic, Maj+clic, Maj+fleches, Ctrl+A ; la
+    barre d'etat donne le nombre d'objets choisis et leur taille.
+  - Couper (Ctrl+X), Copier (Ctrl+C), Coller (Ctrl+V) : fichiers et
+    dossiers avec leur contenu, d'un lecteur a l'autre ; "Copie de nom"
+    dans le meme dossier ; "Voulez-vous le remplacer ?" (Oui, Non,
+    Annuler). Suppr : supprimer (avec confirmation) ; F2 : renommer.
+  - bouton 2 sur un fichier : Ouvrir, Couper, Copier, Coller (dossier),
+    Supprimer, Renommer, Selectionner tout, Proprietes ; sur le fond :
+    Selectionner tout, Actualiser, Coller, Nouveau dossier, Proprietes.
+  - Proprietes d'un fichier, d'un dossier ou de plusieurs elements :
+    type, emplacement, taille, contenu, dates de creation, de
+    modification et de dernier acces, attributs Lecture seule, Masque,
+    Archive, Systeme (modifiables par OK ou Appliquer).
+  - .MP3, .M3U, .PLS : Lecteur MP3.
   - Proprietes d'un lecteur : boite "Proprietes de (C:)" de Pasdows 95,
     onglets General (nom du volume modifiable, type, espace utilise en
     bleu et libre en magenta, en octets et en Ko/Mo/Go, capacite,
