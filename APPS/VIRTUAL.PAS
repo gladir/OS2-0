@@ -4027,7 +4027,7 @@ Begin
       If P > 0 Then
       Begin
         OutTxt(16, Y, Copy(S, 1, P - 1), $000080, $CCCCCC);
-        OutTxt(200, Y, Copy(S, P + 1, 80), $101010, $CCCCCC);
+        OutTxt(236, Y, Copy(S, P + 1, 80), $101010, $CCCCCC);
       End
       Else OutTxt(16, Y, S, $101010, $CCCCCC);
       Y := Y + 17;
@@ -4043,7 +4043,11 @@ Begin
     WM_PAINT : InfoPaint(H);
     WM_COMMAND : Dummy := WinDestroyWindow(InfoFrame);
     WM_CLOSE : Dummy := WinDestroyWindow(InfoFrame);
-    WM_DESTROY : InfoFrame := 0;
+    WM_DESTROY : Begin
+                   InfoFrame := 0;
+                   LastSum := -1;
+                   If VmClient <> 0 Then Dummy := WinInvalidateRect(VmClient, 0, 0);
+                 End;
   Else
     InfoProc := WinDefWindowProc(H, Msg0, Mp1, Mp2);
   End;
@@ -4062,9 +4066,9 @@ Begin
   For K := 0 To InfoN - 1 Do
     If (InfoL[K] <> '') And (InfoL[K][1] = '#') Then Y := Y + 24 Else Y := Y + 17;
   H := Y + 50;
-  CenterFrame(InfoFrame, 780, H);
+  CenterFrame(InfoFrame, 800, H);
   CH := H;
-  Dummy := Ctl(C, WC_BUTTON, 'OK', BS_PUSHBUTTON Or BS_DEFAULT Or WS_TABSTOP, 780 Div 2 - 45, H - 38, 90, 28, ID_OK);
+  Dummy := Ctl(C, WC_BUTTON, 'OK', BS_PUSHBUTTON Or BS_DEFAULT Or WS_TABSTOP, 800 Div 2 - 45, H - 38, 90, 28, ID_OK);
 End;
 
 { ==================================================================== }
@@ -4119,7 +4123,8 @@ Procedure VmTick(H : LongInt);
 Var S : LongInt; Rc : Array[0..3] Of LongInt;
 Begin
   If (NowMs Div 400) And 1 = 1 Then BlinkOn := 1 Else BlinkOn := 0;
-  If GMem = 0 Then Exit;
+  { pas de dessin par-dessus les boites de l'application }
+  If (GMem = 0) Or (InfoFrame <> 0) Or (InDlg <> 0) Then Exit;
   S := ScreenSum;
   If (S <> LastSum) Or (StatText <> VmMsg) Or ((NowMs Div 1000) <> LastBlink) Then
   Begin
@@ -4167,7 +4172,9 @@ Begin
   Case Msg0 Of
     WM_PAINT : VmPaint(H);
     WM_TIMER : VmTick(H);
-    WM_CHAR : If InDlg = 0 Then VmKey(Mp1, Mp2);
+    WM_CHAR : If ((Lo16(Mp1) And KC_ALT) <> 0) And (UpCase(Chr(Lo16(Mp2) And 255)) In ['M', 'A']) Then
+                VmProc := WinDefWindowProc(H, Msg0, Mp1, Mp2)
+              Else If InDlg = 0 Then VmKey(Mp1, Mp2);
     WM_BUTTON1DOWN : Begin Dummy := WinSetFocus(HWND_DESKTOP, H); VmProc := 1; End;
     WM_COMMAND : VmCommand(Lo16(Mp1));
     WM_CLOSE : If VmState <> VS_OFF Then
@@ -4398,24 +4405,24 @@ Begin
   CenterFrame(CfgFrame, W, H);
   CH := H;
   Gray(Ctl(CfgClient, WC_STATIC, 'G`en`eral', SS_GROUPBOX, 8, 4, W - 16, 98, 0));
-  CfgLabel('~Nom :', 24);
+  CfgLabel('Nom :', 24);
   CName := CfgEntry(V.Name, 24, 400, ID_NAME);
-  CfgLabel('~Type (OSType) :', 50);
+  CfgLabel('Type (OSType) :', 50);
   CType := CfgEntry(V.OsType, 50, 160, ID_TYPE);
-  CfgLabel('~M`emoire vive (Mo) :', 76);
+  CfgLabel('M`emoire vive (Mo) :', 76);
   CMem := CfgEntry(IStr(V.MemMb), 76, 80, ID_MEM);
   Gray(Ctl(CfgClient, WC_STATIC, 'Stockage', SS_GROUPBOX, 8, 108, W - 16, 174, 0));
-  CfgLabel('~Disque dur 0 :', 128);
+  CfgLabel('Disque dur 0 :', 128);
   CHd := CfgEntry(V.Hd0, 128, 400, ID_HD);
-  CNew := Ctl(CfgClient, WC_BUTTON, 'Cr`eer un nouveau disque ~dynamique (VHD) de', BS_AUTOCHECKBOX Or WS_TABSTOP,
+  CNew := Ctl(CfgClient, WC_BUTTON, 'Nouveau disque ~dynamique (VHD) de', BS_AUTOCHECKBOX Or WS_TABSTOP,
               172, 156, 330, 22, ID_NEWHD);
   Gray(CNew);
   CSize := CfgEntry('64', 156, 60, ID_HDSZ);
   Dummy := WinSetWindowPos(CSize, 0, 506, CH - 156 - 24, 60, 24, SWP_MOVE Or SWP_SIZE);
   Gray(Ctl(CfgClient, WC_STATIC, 'Mo', SS_TEXT, 570, 159, 24, 20, 0));
-  CfgLabel('Disque dur ~1 :', 186);
+  CfgLabel('Disque dur 1 :', 186);
   CHd2 := CfgEntry(V.Hd1, 186, 400, ID_HD2);
-  CfgLabel('Dis~quette (A:) :', 214);
+  CfgLabel('Disquette (A:) :', 214);
   CFd := CfgEntry(V.Fd, 214, 400, ID_FD);
   CBootFd := Ctl(CfgClient, WC_BUTTON, '~Amorcer d''abord la disquette', BS_AUTOCHECKBOX Or WS_TABSTOP, 172, 244, 300, 22, 28);
   Gray(CBootFd);
@@ -4469,7 +4476,7 @@ End;
 Procedure Field(Y : LongInt; L, V : String);
 Begin
   OutTxt(ListW + 30, Y, Fr(L), $303030, $E8E8E8);
-  OutTxt(ListW + 170, Y, Copy(V, 1, (MgrW - ListW - 190) Div 8), $101010, $E8E8E8);
+  OutTxt(ListW + 190, Y, Copy(V, 1, (MgrW - ListW - 210) Div 8), $101010, $E8E8E8);
 End;
 
 Function MethodLong(M : LongInt) : String;

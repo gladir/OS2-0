@@ -1251,7 +1251,8 @@ details techniques (CPUID, revision SVM/VMCS, ASID, EPT, VMCB/VMCS,
 tables, compteurs des sorties). BIOS, 8259A, 8254, 8042, CMOS, VGA
 (texte, CGA, 13h), A20 et disques sont dans VIRTUAL.EXE. Machines et
 disques copies dans C:\VMS trouves au demarrage. VIRTUAL /TEST : essais
-sur COM1 ; /BOOTTEST:disque /WAIT:n /KEYS:texte ; /TRACE ; /START:nom.
+sur COM1 ; /BOOTTEST:disque /WAIT:n /KEYS:texte ; /TRACE ; /ADD:fichier ;
+/START:nom /KEYS:texte (# : F5). Alt+M, Alt+A : menus de la fenetre.
 Dans VirtualBox : cocher Activer VT-x/AMD-V imbrique pour la machine
 d'OS/2-0.
   OS2PC APPS\VIRTUAL.PAS                    -> VIRTUAL.EXE
