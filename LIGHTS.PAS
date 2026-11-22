@@ -691,15 +691,15 @@ Procedure DrawBanner;
 Var Y : LongInt;
 Begin
   If Banner = '' Then Exit;
-  Rect(36, 136, 363, 263, C_SHADOW);
-  Rect(30, 130, 357, 257, C_BANNER);
-  Rect(30, 130, 357, 131, C_BANNERE); Rect(30, 256, 357, 257, C_BANNERE);
-  Rect(30, 130, 31, 257, C_BANNERE); Rect(356, 130, 357, 257, C_BANNERE);
+  Rect(42, 136, 369, 263, C_SHADOW);
+  Rect(36, 130, 363, 257, C_BANNER);
+  Rect(36, 130, 363, 131, C_BANNERE); Rect(36, 256, 363, 257, C_BANNERE);
+  Rect(36, 130, 37, 257, C_BANNERE); Rect(362, 130, 363, 257, C_BANNERE);
   Y := 146;
-  FbText((BW - 12 - Length(Banner) * 16) Div 2, Y, Banner, C_YELLOW, 2);
-  FbText((BW - 12 - Length(Banner2) * 8) Div 2, Y + 44, Banner2, C_WHITE, 1);
-  FbText((BW - 12 - Length(Banner3) * 8) Div 2, Y + 68, Banner3, C_GREEN, 1);
-  Touch(30, 130, 363, 263);
+  FbText((BW - Length(Banner) * 16) Div 2, Y, Banner, C_YELLOW, 2);
+  FbText((BW - Length(Banner2) * 8) Div 2, Y + 44, Banner2, C_WHITE, 1);
+  FbText((BW - Length(Banner3) * 8) Div 2, Y + 68, Banner3, C_GREEN, 1);
+  Touch(36, 130, 369, 263);
 End;
 
 { tout le plateau }
@@ -1397,7 +1397,7 @@ BEGIN
   MItem(MIS_TEXT, 0, CM_NEXT, 'Niveau ~suivant' + Chr(9) + 'Pg Suiv');
   MItem(MIS_SEPARATOR, 0, 0, '');
   MItem(MIS_TEXT, 0, CM_QUIT, '~Quitter');
-  MenuClose(H1, 11);
+  MenuClose(H1, 10);
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 200, '~Options');
   H3 := MenuOpen;
   MItem(MIS_TEXT, 0, CM_SOLUTION, '~Afficher la solution');
