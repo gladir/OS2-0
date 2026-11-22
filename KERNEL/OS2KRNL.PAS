@@ -9456,6 +9456,186 @@ Begin
   NetQuery := IfsCall(Ifss[IfsVols[D].Ifs].FAttach, 6);
 End;
 
+{ ==================================================================== }
+{ Mise hors tension par l'ACPI (etat S5)                                }
+{ ==================================================================== }
+{ Comme un PC qui s'eteint a la fin de l'arret : la table RSDP (zone
+  EBDA ou E0000h-FFFFFh, "RSD PTR "), la RSDT (ou la XSDT), la FADT
+  ("FACP" : registres PM1a_CNT et PM1b_CNT, SMI_CMD et ACPI_ENABLE, DSDT)
+  puis l'objet \_S5_ de la DSDT (paquet : SLP_TYPa, SLP_TYPb). On ecrit
+  SLP_TYP Shl 10 Or SLP_EN (2000h) dans PM1a_CNT (et PM1b_CNT) : VirtualBox,
+  VMware, QEMU et les PC reels coupent alors l'alimentation. Les 4 Go sont
+  projetes a l'identique : les tables se lisent directement. }
+
+Function AcpiSum(A, N : LongInt) : LongInt;
+Var I, S : LongInt;
+Begin
+  S := 0;
+  For I := 0 To N - 1 Do S := S + Mem[0:A + I];
+  AcpiSum := S And 255;
+End;
+
+Function AcpiSig(A : LongInt; S : String) : Boolean;
+Var I : LongInt;
+Begin
+  AcpiSig := False;
+  For I := 1 To Length(S) Do
+    If Mem[0:A + I - 1] <> Ord(S[I]) Then Exit;
+  AcpiSig := True;
+End;
+
+Function AcpiRsdp : LongInt;
+Var A, E : LongInt;
+Begin
+  AcpiRsdp := 0;
+  E := MemW[0:$40E] Shl 4;
+  If (E >= $80000) And (E < $A0000) Then
+  Begin
+    A := E;
+    While A < E + 1024 Do
+    Begin
+      If AcpiSig(A, 'RSD PTR ') And (AcpiSum(A, 20) = 0) Then
+      Begin
+        AcpiRsdp := A;
+        Exit;
+      End;
+      A := A + 16;
+    End;
+  End;
+  A := $E0000;
+  While A < $100000 Do
+  Begin
+    If AcpiSig(A, 'RSD PTR ') And (AcpiSum(A, 20) = 0) Then
+    Begin
+      AcpiRsdp := A;
+      Exit;
+    End;
+    A := A + 16;
+  End;
+End;
+
+{ table de signature Sig dans la RSDT (entrees de 4 octets) ou la XSDT
+  (entrees de 8 octets, partie basse seulement) }
+Function AcpiTable(Sig : String) : LongInt;
+Var R, T, N, I, Step, A : LongInt;
+Begin
+  AcpiTable := 0;
+  R := AcpiRsdp;
+  If R = 0 Then Exit;
+  T := MemL[0:R + 16]; Step := 4;
+  If (T = 0) And (Mem[0:R + 15] >= 2) Then
+  Begin
+    T := MemL[0:R + 24]; Step := 8;
+  End;
+  If (T = 0) Or (T >= $FFFF0000) Then Exit;
+  If Not (AcpiSig(T, 'RSDT') Or AcpiSig(T, 'XSDT')) Then Exit;
+  N := (MemL[0:T + 4] - 36) Div Step;
+  If (N < 0) Or (N > 256) Then Exit;
+  For I := 0 To N - 1 Do
+  Begin
+    A := MemL[0:T + 36 + I * Step];
+    If (A <> 0) And (A < $FFFF0000) Then
+      If AcpiSig(A, Sig) Then
+      Begin
+        AcpiTable := A;
+        Exit;
+      End;
+  End;
+End;
+
+{ entier AML a l'adresse P (Zero, One, Ones, BytePrefix, WordPrefix,
+  DWordPrefix) ; P avance }
+Function AcpiAmlInt(Var P : LongInt) : LongInt;
+Var B : LongInt;
+Begin
+  B := Mem[0:P];
+  Case B Of
+    $00 : Begin AcpiAmlInt := 0; Inc(P); End;
+    $01 : Begin AcpiAmlInt := 1; Inc(P); End;
+    $FF : Begin AcpiAmlInt := 255; Inc(P); End;
+    $0A : Begin AcpiAmlInt := Mem[0:P + 1]; P := P + 2; End;
+    $0B : Begin AcpiAmlInt := MemW[0:P + 1]; P := P + 3; End;
+    $0C : Begin AcpiAmlInt := MemL[0:P + 1]; P := P + 5; End;
+  Else
+    Begin AcpiAmlInt := B; Inc(P); End;
+  End;
+End;
+
+{ SLP_TYPa et SLP_TYPb de \_S5_ ; faux si la DSDT n'en a pas }
+Function AcpiS5(Dsdt : LongInt; Var TypA, TypB : LongInt) : Boolean;
+Var A, E, P, Lead : LongInt;
+Begin
+  AcpiS5 := False;
+  If (Dsdt = 0) Or Not AcpiSig(Dsdt, 'DSDT') Then Exit;
+  E := Dsdt + MemL[0:Dsdt + 4] - 8;
+  A := Dsdt + 36;
+  While A < E Do
+  Begin
+    If AcpiSig(A, '_S5_') And ((Mem[0:A - 1] = $08) Or ((Mem[0:A - 1] = $5C) And (Mem[0:A - 2] = $08))) And
+       (Mem[0:A + 4] = $12) Then
+    Begin
+      P := A + 5;
+      Lead := Mem[0:P];
+      P := P + 1 + (Lead Shr 6);        { longueur du paquet (1 a 4 octets) }
+      Inc(P);                            { nombre d'elements }
+      TypA := AcpiAmlInt(P) And 7;
+      TypB := AcpiAmlInt(P) And 7;
+      AcpiS5 := True;
+      Exit;
+    End;
+    Inc(A);
+  End;
+End;
+
+Procedure AcpiWait(N : LongInt);
+Var K : LongInt;
+Begin
+  K := 0;
+  While K < N Do Inc(K);
+End;
+
+{ mettre l'ordinateur hors tension ; ne revient que si c'est impossible }
+Procedure PowerOff;
+Var Fadt, Dsdt, Pm1a, Pm1b, Smi, En, TypA, TypB, K : LongInt;
+Begin
+  FlushAllVolumes;
+  Fadt := AcpiTable('FACP');
+  If Fadt <> 0 Then
+  Begin
+    Dsdt := MemL[0:Fadt + 40];
+    Smi := MemL[0:Fadt + 48]; En := Mem[0:Fadt + 52];
+    Pm1a := MemL[0:Fadt + 64]; Pm1b := MemL[0:Fadt + 68];
+    If (Pm1a > 0) And (Pm1a < $10000) And AcpiS5(Dsdt, TypA, TypB) Then
+    Begin
+      asm
+        cli
+      end;
+      { mode ACPI (SCI_EN) s'il n'est pas deja actif }
+      If ((PortW[Pm1a] And 1) = 0) And (Smi > 0) And (Smi < $10000) And (En <> 0) Then
+      Begin
+        Port[Smi] := En;
+        K := 0;
+        While ((PortW[Pm1a] And 1) = 0) And (K < 300) Do
+        Begin
+          AcpiWait(100000);
+          Inc(K);
+        End;
+      End;
+      PortW[Pm1a] := (TypA Shl 10) Or $2000;
+      If (Pm1b > 0) And (Pm1b < $10000) Then PortW[Pm1b] := (TypB Shl 10) Or $2000;
+      AcpiWait(50000000);
+    End;
+  End;
+  { machines connues, sans tables lisibles : QEMU, Bochs, VirtualBox }
+  PortW[$604] := $2000;
+  PortW[$B004] := $2000;
+  PortW[$4004] := $3400;
+  AcpiWait(10000000);
+  asm
+    sti
+  end;
+End;
+
 { KrnDiskCtl(op, p1, p2) : disques durs (INSTALL.EXE, DOSCALLS.DLL)
     0 nombre de disques durs IDE
     1 description du disque p1 dans p2 : secteurs, ports, esclave (0/1),
@@ -9480,6 +9660,8 @@ End;
       retour (+8) ; rend 0 si un pilote IFS la reconnait
     8 vider les tampons de tous les volumes
     9 redemarrer l'ordinateur (apres vidage)
+   16 mettre l'ordinateur hors tension (apres vidage ; ACPI, etat S5) ;
+      rend 1 si l'alimentation n'a pas pu etre coupee
    10 demarrage : rend 1 si le systeme a demarre d'un disque dur (p2 :
       debut de la partition d'amorcage) }
 Function KrnDiskCtl(Op, P1, P2 : LongInt) : LongInt;
@@ -9594,6 +9776,10 @@ Begin
    13 : KrnDiskCtl := NetAttach(P1, P2);
    14 : KrnDiskCtl := NetDetach(P1);
    15 : KrnDiskCtl := NetQuery(P1, P2);
+   16 : Begin
+          PowerOff;
+          KrnDiskCtl := 1;
+        End;
   End;
 End;
 
