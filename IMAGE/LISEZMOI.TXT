@@ -28,7 +28,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
-              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, DEMARRE.WAV,
+              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -1182,6 +1182,23 @@ rapide : utilisateur@serveur:port puis Entree. Fichiers dans C:\RESEAU\
 (knownhosts.txt commun avec le Client FTP). TCPIP32.DLL : select
 (ordinal 12) et bsdselect (ordinal 32).
   OS2PC APPS\SSHCLI.PAS                     -> SSHCLI.EXE
+
+Connexion Bureau a distance (MSTSC.EXE, dossier Outils reseau)
+--------------------------------------------------------------
+Client RDP porte de Pasdows 95 (source APPS\MSTSC.PAS) pour ouvrir une
+session sur Windows Server 2008 a 2022 (dont 2019), Windows 7 a 11,
+xrdp ou FreeRDP. Boite de connexion : ordinateur (serveur:port si le
+port n'est pas 3389), utilisateur (DOMAINE\nom), mot de passe, domaine,
+taille (640x480, 800x600, 1024x768, plein ecran) ; dernier ordinateur
+et utilisateur gardes dans OS2.INI (PM_RemoteDesktop), jamais le mot de
+passe. TLS 1.2 (x25519, AES-128-GCM) et NLA (CredSSP v6, NTLMv2) ;
+X.224, MCS/GCC, licences, bitmaps RLE 8/15/16/24 bits, chemin rapide ;
+clavier, souris et molette ; menu Session : Envoyer Ctrl+Alt+Suppr
+(aussi Ctrl+Alt+Fin), Plein ecran (Ctrl+Alt+Pause ou Ctrl+Alt+Entree),
+Deconnecter. Molette de la souris ajoutee a OS/2-0 : souris PS/2
+IntelliMouse dans le noyau, evenements $0100/$0200 de MOUCALLS,
+WM_VSCROLL de PMWIN vers la fenetre sous le pointeur.
+  OS2PC APPS\MSTSC.PAS                      -> MSTSC.EXE
 
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
 ---------------------------------------------------------------------
