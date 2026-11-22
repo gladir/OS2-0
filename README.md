@@ -663,7 +663,7 @@ Le texte est celui de la police 8 x 16 du VGA ; les couleurs CLR_*, SYSCLR_* et 
 Limites : les fonctions Gpi* sont dans PMGPI.DLL (qui accepte les HPS et HDC de PMWIN) ; les régions de PMWIN se limitent à la fenêtre entière (en mode texte, une bitmap est dessinée en trame) ; une seule police ; les pointeurs du système sont dessinés en flèche ; WinCatch et WinThrow ne peuvent dérouler la pile (WinThrow rend FALSE), les messages envoyés à une fenêtre d'un autre processus ne sont remis que si sa procédure est dans une DLL. Le programme <b>DLL/TESTWIN.PAS</b> vérifie ces fonctions (75 vérifications ; il se termine par des entrées du clavier et de la souris, voir son en-tête pour les événements à envoyer avec QEMU).
 
 <h3>Bibliothèque PMGPI.DLL</h3>
-
+ <b>Découpage par les fenêtres placées au-dessus</b> : un espace de présentation obtenu hors de WM_PAINT (<code>WinGetPS</code>, <code>WinGetClipPS</code>, contexte de fenêtre), celui des animations comme l'Essai OpenGL, ne dessine pas sur les menus et les fenêtres qui le recouvrent : PMWIN donne leurs rectangles (point d'entrée interne WINQUERYOBSCURING, ordinal 1011) et PMGPI les retire de sa liste de rectangles de découpage. Un menu système ouvert sur une animation reste donc visible et utilisable.
 Le fichier <b>DLL/PMGPI.PAS</b> est la bibliothèque OS/2 <b>PMGPI.DLL</b> (base préférée 00800000h, relogée par le noyau si la place est prise), l'interface graphique GPI de Presentation Manager, avec ses 572 ordinaux (303 fonctions Dev*, Gpi*, Dsp*, Mt*, Segs* et Fmt* : ordinaux 1 à 312 de l'interface 16 bits, noms en majuscules quand la fonction est aussi exportée à un ordinal 32 bits, et 351 à 657). Elle dessine dans quatre sortes de cibles :
 
 <table>
