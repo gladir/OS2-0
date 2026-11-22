@@ -45,6 +45,13 @@ Program PMSHELL;
   supprime que le raccourci (OS2.INI, PMSHELL_RACCOURCIS). Modeles :
   dossier, fichier texte, fichier de commandes ; ouvrir un modele (ou le
   deposer sur un dossier) cree un nouvel objet.
+  Menu contextuel d'un objet : Ouvrir, Ouvrir dans l'Explorateur, Modifier,
+  Couper, Copier, Coller, Creer un raccourci, Supprimer, Renommer,
+  Proprietes (EXPLORER /FPROPS) ; du fond : Nouveau (dossier, document
+  texte, image bitmap, document HTML, fichier de commandes), Coller,
+  Coller le raccourci, Selectionner tout. Ctrl+clic, Ctrl+A, Ctrl+X,
+  Ctrl+C, Ctrl+V, Suppr, F2 ; presse-papiers partage avec l'Explorateur
+  OS2-Zero (\SHAREMEM\EXPLORER.CLP).
 
   Souris : clic (bouton 1) : selection ; double clic : ouvrir ; bouton 2 :
   menu contextuel de l'objet ou du fond.
@@ -186,11 +193,19 @@ Const
   CM_HELP = 106; CM_PROPS = 107; CM_DELETE = 108; CM_CLOSE = 109; CM_PARENT = 110; CM_CMDHERE = 111;
   CM_SHADOW = 112; CM_CREATE = 113; CM_SETTINGS = 114; CM_TASKMGR = 115; CM_BROWSER = 116;
   CM_EXPLORER = 117; CM_NEWDIR = 118; CM_NEWTXT = 119; CM_NEWHTML = 120;
+  CM_NEWBMP = 121; CM_NEWCMD = 122; CM_CUT = 123; CM_COPY = 124; CM_PASTE = 125; CM_SELALL = 126;
+  CM_RENAME = 127; CM_EDIT = 128; CM_EXPLHERE = 129; CM_PASTESH = 130; CM_CMDITEM = 131; CM_SELINV = 132;
+  { presse-papiers des objets : memoire partagee de l'Explorateur OS2-Zero
+    (+0 : 1 copier, 2 couper ; +4 : nombre ; +16 : chemins ; +32768 : texte) }
+  ClipName = '\SHAREMEM\EXPLORER.CLP'; ClipSz = 65536; ClipTxt = 32768;
+  FCF_DLGBORDER = $100; BS_DEFAULT = $400; EM_SETSEL = $0142; EM_SETTEXTLIMIT = $0143;
+  VK_TAB = 6; VK_BACKTAB = 7; VK_F2 = $21; MB_YESNOCANCEL = 5; MBID_NO = 7; MBID_CANCEL = 2;
+  MIA_DISABLED = $4000; MAXSEL = 256;
 
 Type
   { objet d'une vue (icone) }
   TItem = Record
-    Use, View, Icon, Obj, X, Top, Size, Shadow : LongInt;
+    Use, View, Icon, Obj, X, Top, Size, Shadow, Mark : LongInt;
     Name : String[47];
     Path : String[127];
   End;
@@ -223,6 +238,20 @@ Var
   MenuTpl : Array[0..2047] Of Byte;
   MenuLen, MenuCnt : LongInt;
   MenuSubHdr, MenuSubOuter : LongInt;     { sous-menu en cours (Nouveau) }
+  { objets choisis (menu contextuel, Ctrl+C...) }
+  SelK : Array[0..MAXSEL - 1] Of LongInt;
+  SelN : LongInt;
+  { presse-papiers : objets du systeme et raccourcis (creent un raccourci
+    au Coller) ; valides tant que le texte du presse-papiers est le meme }
+  ObjN, ObjHash, ObjMode : LongInt;
+  ObjName : Array[0..31] Of String[47];
+  ObjTarget : Array[0..31] Of String[127];
+  ObjCont : Array[0..31] Of String[127];
+  { boite Renommer }
+  RnFr, RnCl, RnEd, RnOkB, RnCaB, RnEnd, RnH : LongInt;
+  RnReg : Boolean;
+  RnLabel : String;
+  PendSingle : LongInt;                    { clic sur un objet d'un choix multiple }
   FindBuf : Array[0..4095] Of Byte;
   FileBuf : Array[0..4095] Of Byte;
   EntBuf, EntCap : LongInt;            { entrees d'un repertoire (tri) }
@@ -285,6 +314,16 @@ Function DosSetDefaultDisk(Disk : LongInt) : LongInt; External 'DOSCALLS';
 Function DosSleep(Ms : LongInt) : LongInt; External 'DOSCALLS';
 Function DosCopy(PSrc, PDst, Opt : LongInt) : LongInt; External 'DOSCALLS';
 Function DosMove(POld, PNew : LongInt) : LongInt; External 'DOSCALLS';
+Function DosAllocSharedMem(PPb, PName, Cb, Fl : LongInt) : LongInt; External 'DOSCALLS';
+Function DosGetNamedSharedMem(PPb, PName, Fl : LongInt) : LongInt; External 'DOSCALLS';
+Function WinOpenClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
+Function WinCloseClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
+Function WinEmptyClipbrd(Hab : LongInt) : LongInt; External 'PMWIN';
+Function WinSetClipbrdData(Hab, D, Fmt, Fl : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryClipbrdData(Hab, Fmt : LongInt) : LongInt; External 'PMWIN';
+Function WinCalcFrameRect(H, P, FClient : LongInt) : LongInt; External 'PMWIN';
+Function WinEnableWindow(H, En : LongInt) : LongInt; External 'PMWIN';
+Function WinQueryFocus(HD : LongInt) : LongInt; External 'PMWIN';
 Function DosCreateDir(PName, PEa : LongInt) : LongInt; External 'DOSCALLS';
 Function DosDeleteDir(PName : LongInt) : LongInt; External 'DOSCALLS';
 Function DosWrite(H, B, Cb, PA : LongInt) : LongInt; External 'DOSCALLS';
@@ -763,7 +802,7 @@ Begin
   If F >= 0 Then
   Begin
     It(F)^.Use := 1; It(F)^.View := V; It(F)^.Icon := Icon; It(F)^.Obj := Obj; It(F)^.Name := Name; It(F)^.Path := Path;
-    It(F)^.X := 0; It(F)^.Top := 0; It(F)^.Size := 0; It(F)^.Shadow := 0;
+    It(F)^.X := 0; It(F)^.Top := 0; It(F)^.Size := 0; It(F)^.Shadow := 0; It(F)^.Mark := 0;
   End;
   NewItem := F;
 End;
@@ -821,12 +860,99 @@ Begin
   Dummy := WinInvalidateRect(Vw(It(K)^.View)^.Client, LongInt(@Rc), 1);
 End;
 
+{ objet choisi : l'objet courant de la vue ou un objet marque (Ctrl+clic,
+  Selectionner tout) }
+Function IsSel(K : LongInt) : Boolean;
+Begin
+  IsSel := False;
+  If (K < 0) Or (It(K)^.Use = 0) Then Exit;
+  IsSel := (It(K)^.Mark <> 0) Or (Vw(It(K)^.View)^.Sel = K);
+End;
+
+{ enlever les marques de la vue V }
+Procedure ClearMarks(V : LongInt);
+Var K : LongInt;
+Begin
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) And (It(K)^.Mark <> 0) Then
+    Begin
+      It(K)^.Mark := 0;
+      InvalItem(K);
+    End;
+End;
+
+{ un seul objet choisi : K (ou aucun, -1) }
 Procedure SelectItem(V, K : LongInt);
 Begin
+  ClearMarks(V);
   If Vw(V)^.Sel = K Then Exit;
   InvalItem(Vw(V)^.Sel);
   Vw(V)^.Sel := K;
   InvalItem(K);
+End;
+
+{ Ctrl+clic : ajouter K au choix ou l'en retirer }
+Procedure ToggleItem(V, K : LongInt);
+Begin
+  If K < 0 Then Exit;
+  If IsSel(K) Then
+  Begin
+    It(K)^.Mark := 0;
+    If Vw(V)^.Sel = K Then Vw(V)^.Sel := -1;
+  End
+  Else
+  Begin
+    If (Vw(V)^.Sel >= 0) And (It(Vw(V)^.Sel)^.Use <> 0) Then It(Vw(V)^.Sel)^.Mark := 1;
+    It(K)^.Mark := 1;
+    Vw(V)^.Sel := K;
+  End;
+  InvalItem(K);
+End;
+
+{ Selectionner tout }
+Procedure SelectAll(V : LongInt);
+Var K : LongInt;
+Begin
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then It(K)^.Mark := 1;
+  Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
+End;
+
+{ Inverser la selection }
+Procedure SelectInvert(V : LongInt);
+Var K : LongInt; B : Boolean;
+Begin
+  For K := 0 To ItemCap - 1 Do
+    If (It(K)^.Use <> 0) And (It(K)^.View = V) Then
+    Begin
+      B := IsSel(K);
+      If B Then It(K)^.Mark := 0 Else It(K)^.Mark := 1;
+    End;
+  Vw(V)^.Sel := -1;
+  Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
+End;
+
+{ objets sur lesquels agit une commande : tout le choix si K en fait
+  partie, sinon K seul ; dans SelK[0..SelN-1] }
+Procedure GatherSel(V, K : LongInt);
+Var J : LongInt;
+Begin
+  SelN := 0;
+  If (K >= 0) And Not IsSel(K) Then
+  Begin
+    SelK[0] := K; SelN := 1;
+    Exit;
+  End;
+  If (K >= 0) Then
+  Begin
+    SelK[0] := K; SelN := 1;
+  End;
+  For J := 0 To ItemCap - 1 Do
+    If (SelN < MAXSEL) And (J <> K) And (It(J)^.Use <> 0) And (It(J)^.View = V) And IsSel(J) Then
+    Begin
+      SelK[SelN] := J;
+      Inc(SelN);
+    End;
 End;
 
 Function HitItem(V, X, Y : LongInt) : LongInt;
@@ -1223,6 +1349,40 @@ End;
 
 { Nouveau (menu contextuel du bureau et des dossiers) : dossier, document
   texte vide ou page HTML minimale, nommes sans ecraser un objet existant }
+{ en-tete d'une image BMP 24 bits blanche de BmpW x BmpH (Paint) }
+Const
+  BmpW = 320; BmpH = 240;
+
+Procedure PutLE(Ofs, V, N : LongInt);
+Var K : LongInt;
+Begin
+  For K := 0 To N - 1 Do FileBuf[Ofs + K] := (V Shr (K * 8)) And 255;
+End;
+
+Function WriteBmp(H : LongInt) : Boolean;
+Var K, W, Row, Rows, R : LongInt;
+Begin
+  For K := 0 To 53 Do FileBuf[K] := 0;
+  FileBuf[0] := Ord('B'); FileBuf[1] := Ord('M');
+  Row := BmpW * 3;
+  PutLE(2, 54 + Row * BmpH, 4); PutLE(10, 54, 4); PutLE(14, 40, 4);
+  PutLE(18, BmpW, 4); PutLE(22, BmpH, 4); PutLE(26, 1, 2); PutLE(28, 24, 2);
+  PutLE(34, Row * BmpH, 4); PutLE(38, 2835, 4); PutLE(42, 2835, 4);
+  W := 0;
+  WriteBmp := False;
+  If DosWrite(H, LongInt(@FileBuf), 54, LongInt(@W)) <> 0 Then Exit;
+  { lignes blanches : 4 lignes de 960 octets par ecriture }
+  For K := 0 To 4 * Row - 1 Do FileBuf[K] := 255;
+  Rows := BmpH;
+  While Rows > 0 Do
+  Begin
+    R := MinI(4, Rows);
+    If DosWrite(H, LongInt(@FileBuf), R * Row, LongInt(@W)) <> 0 Then Exit;
+    Rows := Rows - R;
+  End;
+  WriteBmp := True;
+End;
+
 Function CreateNew(Cmd : LongInt; Dir : String) : Boolean;
 Var S, Txt : String; H, A, W : LongInt;
 Begin
@@ -1239,6 +1399,15 @@ Begin
   Begin
     S := UniqueName(Dir, 'Nouveau document', '.TXT'); Txt := '';
   End
+  Else If Cmd = CM_NEWBMP Then
+  Begin
+    S := UniqueName(Dir, 'Nouvelle image', '.BMP'); Txt := '';
+  End
+  Else If Cmd = CM_NEWCMD Then
+  Begin
+    S := UniqueName(Dir, 'Nouveau fichier de commandes', '.CMD');
+    Txt := '@ECHO OFF' + #13#10 + 'REM Fichier de commandes cree par le bureau' + #13#10;
+  End
   Else
   Begin
     S := UniqueName(Dir, 'Nouvelle page', '.HTML');
@@ -1253,6 +1422,7 @@ Begin
   Begin
     W := 0;
     If Txt <> '' Then Dummy := DosWrite(H, Z2(Txt), Length(Txt), LongInt(@W));
+    If Cmd = CM_NEWBMP Then Dummy := Ord(WriteBmp(H));
     Dummy := DosClose(H);
     CreateNew := True;
   End
@@ -2819,7 +2989,7 @@ Var X1, Y1, X2, Y2, V : LongInt; L1, L2, L3 : String; Sel : Boolean;
 Begin
   V := It(K)^.View;
   CellRect(K, X1, Y1, X2, Y2);
-  Sel := Vw(V)^.Sel = K;
+  Sel := (Vw(V)^.Sel = K) Or (It(K)^.Mark <> 0);
   DrawIcon(Hps, It(K)^.Icon, X1 + (CW - 32) Div 2, Y2 - 36);
   SplitLabel(It(K)^.Name, L1, L2, L3);
   { raccourci : titre en couleur (bleu, jaune sur le bureau) }
@@ -2870,10 +3040,11 @@ Begin
   MenuLen := 6; MenuCnt := 0;
 End;
 
-Procedure MenuAdd(Id : LongInt; S : String);
+{ article de menu ; Id 0 : separateur ; Off : grise (MIA_DISABLED) }
+Procedure MenuAddX(Id : LongInt; S : String; Off : Boolean);
 Begin
   If Id = 0 Then WrW(LongInt(@MenuTpl) + MenuLen, 4) Else WrW(LongInt(@MenuTpl) + MenuLen, 1);
-  WrW(LongInt(@MenuTpl) + MenuLen + 2, 0);
+  If Off Then WrW(LongInt(@MenuTpl) + MenuLen + 2, MIA_DISABLED) Else WrW(LongInt(@MenuTpl) + MenuLen + 2, 0);
   WrW(LongInt(@MenuTpl) + MenuLen + 4, Id);
   MenuLen := MenuLen + 6;
   If Id <> 0 Then
@@ -2882,6 +3053,11 @@ Begin
     MenuLen := MenuLen + Length(S) + 1;
   End;
   Inc(MenuCnt);
+End;
+
+Procedure MenuAdd(Id : LongInt; S : String);
+Begin
+  MenuAddX(Id, S, False);
 End;
 
 { sous-menu : article MIS_SUBMENU puis son propre gabarit (MenuSubEnd) }
@@ -2907,13 +3083,17 @@ Begin
   MenuCnt := MenuSubOuter;
 End;
 
-{ Nouveau : dossier, document texte, document HTML }
+{ Nouveau : dossier, document texte, image bitmap, document HTML,
+  fichier de commandes }
 Procedure MenuNew;
 Begin
   MenuSubBegin(199, '~Nouveau');
   MenuAdd(CM_NEWDIR, '~Dossier');
+  MenuAdd(0, '');
   MenuAdd(CM_NEWTXT, 'Document ~texte');
+  MenuAdd(CM_NEWBMP, '~Image bitmap');
   MenuAdd(CM_NEWHTML, 'Document ~HTML');
+  MenuAdd(CM_NEWCMD, '~Fichier de commandes');
   MenuSubEnd;
 End;
 
@@ -2925,27 +3105,62 @@ Begin
   If MenuH <> 0 Then Dummy := WinPopupMenu(Vw(V)^.Client, Vw(V)^.Client, MenuH, X, Y, First, 0);
 End;
 
+Function ClipAvail : Boolean; Forward;
+Function IsFileItem(K : LongInt) : Boolean; Forward;
+Function Deletable(K : LongInt) : Boolean; Forward;
+
+{ vue d'un vrai repertoire (bureau ou dossier) : on peut y coller }
+Function PasteView(V : LongInt) : Boolean;
+Begin
+  PasteView := (Vw(V)^.Kind = VK_DESK) Or (Vw(V)^.Kind = VK_DIR);
+End;
+
 Procedure ContextMenu(V, K, X, Y : LongInt);
+Var J, Ob : LongInt; AllDel, AllFile, One : Boolean;
 Begin
   MenuView := V; MenuItem := K;
   MenuStart;
   If K >= 0 Then
   Begin
-    MenuAdd(CM_OPEN, '~Ouvrir');
-    If (It(K)^.Obj >= OB_TPLDIR) And (It(K)^.Obj <= OB_TPLCMD) Then MenuAdd(CM_CREATE, '~Creer un autre')
-    Else MenuAdd(CM_SHADOW, '~Creer un raccourci');
-    MenuAdd(CM_PROPS, '~Proprietes');
-    If Deletable(K) Then
+    GatherSel(V, K);
+    AllDel := True; AllFile := True;
+    For J := 0 To SelN - 1 Do
     Begin
-      MenuAdd(0, '');
-      MenuAdd(CM_DELETE, '~Supprimer...');
+      If Not Deletable(SelK[J]) Then AllDel := False;
+      If Not IsFileItem(SelK[J]) Or (It(SelK[J])^.Shadow <> 0) Then AllFile := False;
     End;
+    One := SelN = 1;
+    Ob := It(K)^.Obj;
+    MenuAdd(CM_OPEN, '~Ouvrir');
+    If One And (Ob = OB_DIR) And (It(K)^.Path <> '') Then
+    Begin
+      If ExplorerPath <> '' Then MenuAdd(CM_EXPLHERE, 'Ouvrir dans l''~Explorateur');
+      MenuAdd(CM_CMDITEM, '~Invite de commandes ici');
+    End;
+    If One And ((Ob = OB_BATCH) Or (Ob = OB_HTML) Or (Ob = OB_DATA) Or (Ob = OB_TEXT)) And
+       FileExists('C:\NOTEPAD.EXE') Then MenuAdd(CM_EDIT, '~Modifier (Bloc-notes)');
+    MenuAdd(0, '');
+    MenuAddX(CM_CUT, 'Co~uper' + Chr(9) + 'Ctrl+X', Not AllDel);
+    MenuAdd(CM_COPY, '~Copier' + Chr(9) + 'Ctrl+C');
+    If One And (Ob = OB_DIR) And (It(K)^.Path <> '') Then
+      MenuAddX(CM_PASTE, 'C~oller' + Chr(9) + 'Ctrl+V', Not ClipAvail);
+    MenuAdd(0, '');
+    If (Ob >= OB_TPLDIR) And (Ob <= OB_TPLCMD) Then MenuAdd(CM_CREATE, 'Creer un ~autre')
+    Else MenuAdd(CM_SHADOW, 'Creer un ~raccourci');
+    MenuAddX(CM_DELETE, '~Supprimer...' + Chr(9) + 'Suppr', Not AllDel);
+    MenuAddX(CM_RENAME, 'Re~nommer...' + Chr(9) + 'F2', Not (One And Deletable(K)));
+    MenuAdd(0, '');
+    MenuAdd(CM_PROPS, '~Proprietes');
   End
   Else If Vw(V)^.Kind = VK_DESK Then
   Begin
     MenuNew;
     MenuAdd(0, '');
-    MenuAdd(CM_REFRESH, '~Actualiser');
+    MenuAddX(CM_PASTE, 'C~oller' + Chr(9) + 'Ctrl+V', Not ClipAvail);
+    MenuAddX(CM_PASTESH, 'Coller le ra~ccourci', Not ClipAvail);
+    MenuAdd(CM_SELALL, 'Selectionner ~tout' + Chr(9) + 'Ctrl+A');
+    MenuAdd(0, '');
+    MenuAdd(CM_REFRESH, '~Actualiser' + Chr(9) + 'F5');
     MenuAdd(CM_ARRANGE, '~Reorganiser');
     MenuAdd(0, '');
     MenuAdd(CM_WINLIST, '~Liste des fenetres');
@@ -2964,19 +3179,26 @@ Begin
     Begin
       MenuNew;
       MenuAdd(0, '');
+      MenuAddX(CM_PASTE, 'C~oller' + Chr(9) + 'Ctrl+V', Not ClipAvail);
+      MenuAddX(CM_PASTESH, 'Coller le ra~ccourci', Not ClipAvail);
     End;
-    MenuAdd(CM_REFRESH, '~Actualiser');
+    MenuAdd(CM_SELALL, 'Selectionner ~tout' + Chr(9) + 'Ctrl+A');
+    MenuAdd(CM_SELINV, '~Inverser la selection');
+    MenuAdd(0, '');
+    MenuAdd(CM_REFRESH, '~Actualiser' + Chr(9) + 'F5');
     If Vw(V)^.Kind = VK_DIR Then
     Begin
       MenuAdd(CM_PARENT, '~Dossier parent');
+      If ExplorerPath <> '' Then MenuAdd(CM_EXPLHERE, 'Ouvrir dans l''~Explorateur');
       MenuAdd(CM_CMDHERE, '~Invite de commandes ici');
+      MenuAdd(CM_PROPS, '~Proprietes');
     End;
     MenuAdd(0, '');
     MenuAdd(CM_CLOSE, '~Fermer');
   End;
   If K >= 0 Then MenuShow(V, X, Y, CM_OPEN)
   Else If (Vw(V)^.Kind = VK_DESK) Or (Vw(V)^.Kind = VK_DIR) Then MenuShow(V, X, Y, 199)
-  Else MenuShow(V, X, Y, CM_REFRESH);
+  Else MenuShow(V, X, Y, CM_SELALL);
 End;
 
 { ==================================================================== }
@@ -3926,6 +4148,518 @@ Begin
   End;
 End;
 
+{ ==================================================================== }
+{ Couper, Copier, Coller, Renommer, Proprietes (objets choisis)          }
+{ ==================================================================== }
+{ Le presse-papiers des fichiers et dossiers est celui de l'Explorateur
+  OS2-Zero (memoire partagee \SHAREMEM\EXPLORER.CLP, texte CF_TEXT) : on
+  copie sur le bureau et on colle dans l'Explorateur, ou l'inverse. Les
+  objets du systeme (programmes, dossiers Jeux...) et les raccourcis
+  copies deviennent des raccourcis au Coller. }
+
+Function ClipMem : LongInt;
+Var P : LongInt;
+Begin
+  P := 0;
+  If DosGetNamedSharedMem(LongInt(@P), Z(ClipName), 3) <> 0 Then
+  Begin
+    P := 0;
+    If DosAllocSharedMem(LongInt(@P), Z(ClipName), ClipSz, $13) <> 0 Then P := 0
+    Else WrL(P, 0);
+  End;
+  ClipMem := P;
+End;
+
+{ texte de PM (CF_TEXT) egal a celui pose par Copier ? }
+Function ClipCurrent(P : LongInt) : Boolean;
+Var D, K : LongInt;
+Begin
+  ClipCurrent := False;
+  If (P = 0) Or (RdL(P) = 0) Then Exit;
+  If WinOpenClipbrd(Hab) = 0 Then Exit;
+  D := WinQueryClipbrdData(Hab, 1);
+  If D <> 0 Then
+  Begin
+    K := 0;
+    While (K < 16000) And (RdB(D + K) = RdB(P + ClipTxt + K)) And (RdB(D + K) <> 0) Do Inc(K);
+    ClipCurrent := (RdB(D + K) = 0) And (RdB(P + ClipTxt + K) = 0);
+  End;
+  Dummy := WinCloseClipbrd(Hab);
+End;
+
+Function TextHash(A : LongInt) : LongInt;
+Var H, K, C : LongInt;
+Begin
+  H := 5381; K := 0;
+  C := RdB(A);
+  While (C <> 0) And (K < 30000) Do
+  Begin
+    H := ((H Shl 5) + H + C) And $0FFFFFFF;
+    Inc(K);
+    C := RdB(A + K);
+  End;
+  TextHash := H;
+End;
+
+Function ObjValid(P : LongInt) : Boolean;
+Begin
+  ObjValid := (ObjN > 0) And (TextHash(P + ClipTxt) = ObjHash);
+End;
+
+Function ClipAvail : Boolean;
+Var P : LongInt;
+Begin
+  P := ClipMem;
+  ClipAvail := ClipCurrent(P) And ((RdL(P + 4) > 0) Or ObjValid(P));
+End;
+
+Function NoSlash(S : String) : String;
+Begin
+  If (Length(S) > 3) And (S[Length(S)] = '\') Then S := Copy(S, 1, Length(S) - 1);
+  NoSlash := S;
+End;
+
+Function BaseOf(S : String) : String;
+Begin
+  S := NoSlash(S);
+  While Pos('\', S) > 0 Do Delete(S, 1, Pos('\', S));
+  BaseOf := S;
+End;
+
+{ conteneur des raccourcis de la vue d'un objet }
+Function ViewCont(V : LongInt) : String;
+Begin
+  If Vw(V)^.Kind = VK_DESK Then ViewCont := 'BUREAU' Else ViewCont := UpStr(Vw(V)^.Path);
+End;
+
+{ Couper (Mode 2) ou Copier (Mode 1) les objets SelK[0..SelN-1] }
+Procedure ClipPut(Mode : LongInt);
+Var P, I, N, Q, T, K, S : LongInt; Nm : String; IsF : Boolean;
+Begin
+  If SelN = 0 Then Exit;
+  P := ClipMem;
+  If P = 0 Then Exit;
+  N := 0; Q := P + 16; T := P + ClipTxt; ObjN := 0;
+  For I := 0 To SelN - 1 Do
+  Begin
+    S := SelK[I];
+    IsF := IsFileItem(S) And (It(S)^.Shadow = 0) And (Length(NoSlash(It(S)^.Path)) > 3);
+    If IsF Then Nm := NoSlash(It(S)^.Path) Else Nm := It(S)^.Name;
+    If (Q - P < ClipTxt - 300) And (T - P < ClipSz - 300) Then
+    Begin
+      If IsF Then
+      Begin
+        PutZ(Q, Nm); Q := Q + Length(Nm) + 1;
+        Inc(N);
+      End
+      Else If ObjN < 32 Then
+      Begin
+        ObjName[ObjN] := It(S)^.Name;
+        ObjTarget[ObjN] := TargetOf(S);
+        If It(S)^.Shadow <> 0 Then ObjCont[ObjN] := ViewCont(It(S)^.View) Else ObjCont[ObjN] := '';
+        Inc(ObjN);
+      End;
+      If T > P + ClipTxt Then
+      Begin
+        WrB(T, 13); WrB(T + 1, 10); T := T + 2;
+      End;
+      For K := 1 To Length(Nm) Do WrB(T + K - 1, Ord(Nm[K]));
+      T := T + Length(Nm);
+    End;
+  End;
+  WrB(T, 0);
+  WrL(P + 4, N);
+  WrL(P, Mode);
+  ObjMode := Mode;
+  ObjHash := TextHash(P + ClipTxt);
+  If WinOpenClipbrd(Hab) <> 0 Then
+  Begin
+    Dummy := WinEmptyClipbrd(Hab);
+    Dummy := WinSetClipbrdData(Hab, P + ClipTxt, 1, $400);
+    Dummy := WinCloseClipbrd(Hab);
+  End;
+End;
+
+{ "Copie de nom", "Copie (2) de nom"... }
+Function CopyName(Dir, Nm : String) : String;
+Var K : LongInt; S : String;
+Begin
+  K := 1;
+  Repeat
+    If K = 1 Then S := 'Copie de ' + Nm Else S := 'Copie (' + IStr(K) + ') de ' + Nm;
+    Inc(K);
+  Until Not FileExists(Dir + S) Or (K > 99);
+  CopyName := S;
+End;
+
+{ supprimer un fichier ou un dossier et son contenu }
+Function KillPath(S : String) : LongInt;
+Var Info : Array[0..63] Of Byte;
+Begin
+  KillPath := 0;
+  If DosQueryPathInfo(Z(S), 1, LongInt(@Info), 64) <> 0 Then Exit;
+  If (Info[20] And $10) <> 0 Then KillPath := RemoveTree(S) Else KillPath := DosDelete(Z(S));
+End;
+
+{ un fichier ou dossier S colle dans Dir (avec \) ; faux pour tout arreter }
+Function PasteOne(S, Dir : String; Cut : Boolean) : Boolean;
+Var Nm, D, US, UD : String; R : LongInt;
+Begin
+  PasteOne := True;
+  Nm := BaseOf(S);
+  US := UpStr(NoSlash(S)); UD := UpStr(Dir);
+  If Not FileExists(S) Then
+  Begin
+    ShowMsg('Introuvable : ' + S + '.', 'Coller', MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  { un dossier dans lui-meme ou dans un de ses sous-dossiers }
+  If Copy(UD, 1, Length(US) + 1) = US + '\' Then
+  Begin
+    ShowMsg('Impossible de copier ' + Nm + ' : le dossier de destination est un sous-dossier du dossier source.',
+            'Coller', MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  If UpStr(DirOf(US)) = UD Then
+  Begin
+    If Cut Then Exit;                      { deja la }
+    D := Dir + CopyName(Dir, Nm);
+  End
+  Else
+  Begin
+    D := Dir + Nm;
+    If FileExists(D) Then
+    Begin
+      R := WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('Ce dossier contient deja un objet nomme ' + Nm + '.' + Chr(10) +
+                         Chr(10) + 'Voulez-vous le remplacer ?'), Z2('Confirmer le remplacement'), 0,
+                         MB_YESNOCANCEL Or MB_QUERY Or MB_MOVEABLE);
+      If R = MBID_CANCEL Then
+      Begin
+        PasteOne := False;
+        Exit;
+      End;
+      If R <> MBID_YES Then Exit;
+      R := KillPath(D);
+      If R <> 0 Then
+      Begin
+        ShowMsg('Impossible de remplacer ' + D + ' (erreur ' + IStr(R) + ').', 'Coller', MB_OK Or MB_ERROR);
+        Exit;
+      End;
+    End;
+  End;
+  If Cut And (UpCase(S[1]) = UpCase(D[1])) Then
+  Begin
+    R := DosMove(Z(NoSlash(S)), Z2(D));
+    If R = 0 Then Exit;
+  End;
+  R := DosCopy(Z(NoSlash(S)), Z2(D), 0);
+  If R <> 0 Then
+  Begin
+    ShowMsg('Copie impossible de ' + S + ' vers ' + Dir + ' (erreur ' + IStr(R) + ').', 'Coller', MB_OK Or MB_ERROR);
+    Exit;
+  End;
+  If Cut Then
+  Begin
+    R := KillPath(NoSlash(S));
+    If R <> 0 Then ShowMsg('Copie faite, mais ' + S + ' n''a pas pu etre supprime (erreur ' + IStr(R) + ').', 'Coller',
+                           MB_OK Or MB_WARNING);
+  End;
+End;
+
+{ actualiser le bureau et tous les dossiers ouverts }
+Procedure RefreshAll;
+Var V : LongInt;
+Begin
+  For V := 0 To ViewCap - 1 Do
+    If (Vw(V)^.Use <> 0) And ((Vw(V)^.Kind = VK_DIR) Or (Vw(V)^.Kind = VK_DESK)) Then
+    Begin
+      Populate(V);
+      Dummy := WinInvalidateRect(Vw(V)^.Client, 0, 1);
+    End;
+End;
+
+{ Coller dans Dir (Shadow : Coller le raccourci) }
+Procedure DoPaste(Dir : String; Shadow : Boolean);
+Var P, N, I, Q, Mode : LongInt; S : String; Objs : Boolean;
+Begin
+  If Dir = '' Then Exit;
+  If Dir[Length(Dir)] <> '\' Then Dir := Dir + '\';
+  P := ClipMem;
+  If Not ClipCurrent(P) Then
+  Begin
+    WinAlarm(HWND_DESKTOP, 0);
+    Exit;
+  End;
+  Mode := RdL(P); N := RdL(P + 4);
+  Objs := ObjValid(P);
+  Q := P + 16;
+  For I := 1 To N Do
+  Begin
+    S := GetZ(Q);
+    Q := Q + Length(S) + 1;
+    If Shadow Then MakeShadow(ContOf(Dir), BaseOf(S), NoSlash(S))
+    Else If Not PasteOne(S, Dir, Mode = 2) Then Break;
+  End;
+  If Objs Then
+    For I := 0 To ObjN - 1 Do
+    Begin
+      MakeShadow(ContOf(Dir), ObjName[I], ObjTarget[I]);
+      { raccourci coupe : il quitte son ancien dossier }
+      If (Mode = 2) And Not Shadow And (ObjCont[I] <> '') Then DelShadow(ObjCont[I], ObjName[I]);
+    End;
+  { Couper : la liste ne sert qu'une fois }
+  If (Mode = 2) And Not Shadow Then
+  Begin
+    WrL(P, 0); ObjN := 0;
+    If WinOpenClipbrd(Hab) <> 0 Then
+    Begin
+      Dummy := WinEmptyClipbrd(Hab);
+      Dummy := WinCloseClipbrd(Hab);
+    End;
+  End;
+  RefreshAll;
+End;
+
+{ repertoire ou se colle ce qui est depose dans la vue V (sur K : un dossier) }
+Function PasteDir(V, K : LongInt) : String;
+Begin
+  PasteDir := '';
+  If (K >= 0) And (It(K)^.Obj = OB_DIR) And (It(K)^.Path <> '') Then PasteDir := It(K)^.Path
+  Else If K < 0 Then
+  Begin
+    If Vw(V)^.Kind = VK_DESK Then PasteDir := DeskDir
+    Else If Vw(V)^.Kind = VK_DIR Then PasteDir := Vw(V)^.Path;
+  End;
+End;
+
+{ supprimer les objets choisis (une seule confirmation) }
+Procedure DeleteSel(V, K : LongInt);
+Var I, N : LongInt; Ask : Boolean;
+Begin
+  GatherSel(V, K);
+  If SelN = 0 Then Exit;
+  If SelN = 1 Then
+  Begin
+    DeleteItem(SelK[0]);
+    Exit;
+  End;
+  N := 0;
+  For I := 0 To SelN - 1 Do If Deletable(SelK[I]) Then Inc(N);
+  If N = 0 Then
+  Begin
+    WinAlarm(HWND_DESKTOP, 0);
+    Exit;
+  End;
+  If (CfgConf[0] <> 0) Or (CfgConf[1] <> 0) Then
+    If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('Supprimer ces ' + IStr(N) + ' objets ?'), Z2('Supprimer'), 0,
+                     MB_YESNO Or MB_WARNING Or MB_MOVEABLE) <> MBID_YES Then Exit;
+  For I := 0 To SelN - 1 Do
+    If Deletable(SelK[I]) Then
+      If Not DoDelete(SelK[I], False) Then Break;
+  RefreshAll;
+End;
+
+{ ------------------------------------------------------ boite Renommer }
+
+Function RnText : String;
+Var N : LongInt; B : Array[0..259] Of Byte; S : String;
+Begin
+  For N := 0 To 259 Do B[N] := 0;
+  N := WinQueryWindowText(RnEd, 250, LongInt(@B));
+  S := '';
+  While (Length(S) < N) And (Length(S) < 250) And (B[Length(S)] <> 0) Do S := S + Chr(B[Length(S)]);
+  RnText := S;
+End;
+
+Function RnProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Ps, Fl, Vk, F : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  RnProc := 0;
+  Case Msg Of
+    WM_PAINT :
+      Begin
+        Ps := WinBeginPaint(H, 0, 0);
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        Dummy := WinFillRect(Ps, LongInt(@Rc), CLR_PALEGRAY);
+        GText(Ps, 12, Rc[3] - 26, RnLabel, CLR_BLACK, CLR_PALEGRAY);
+        Dummy := WinEndPaint(Ps);
+      End;
+    WM_COMMAND :
+      If Lo16(Mp1) = 1 Then RnEnd := 1
+      Else If Lo16(Mp1) = 2 Then RnEnd := 2;
+    WM_CHAR :
+      Begin
+        Fl := Lo16(Mp1); Vk := Hi16(Mp2);
+        RnProc := 1;
+        If ((Fl And KC_KEYUP) <> 0) Or ((Fl And KC_VIRTUALKEY) = 0) Then RnProc := WinDefWindowProc(H, Msg, Mp1, Mp2)
+        Else If (Vk = VK_ENTER) Or (Vk = VK_NEWLINE) Then
+        Begin
+          If WinQueryFocus(HWND_DESKTOP) = RnCaB Then RnEnd := 2 Else RnEnd := 1;
+        End
+        Else If Vk = VK_ESC Then RnEnd := 2
+        Else If (Vk = VK_TAB) Or (Vk = VK_BACKTAB) Then
+        Begin
+          F := WinQueryFocus(HWND_DESKTOP);
+          If ((Vk = VK_TAB) And ((Fl And KC_SHIFT) = 0)) Then
+          Begin
+            If F = RnEd Then F := RnOkB Else If F = RnOkB Then F := RnCaB Else F := RnEd;
+          End
+          Else If F = RnEd Then F := RnCaB Else If F = RnCaB Then F := RnOkB Else F := RnEd;
+          Dummy := WinSetFocus(HWND_DESKTOP, F);
+        End
+        Else RnProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+      End;
+    WM_CLOSE : RnEnd := 2;
+  Else
+    RnProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+{ demander un nouveau nom (Old : nom actuel) ; '' si Annuler }
+Function AskName(Old : String) : String;
+Var Fl, W, H, X, Y : LongInt; Rc : Array[0..3] Of LongInt; Qm : Array[0..7] Of LongInt; S : String;
+Begin
+  AskName := '';
+  If Not RnReg Then
+  Begin
+    Dummy := WinRegisterClass(Hab, Z('WPRename'), LongInt(@RnProc), 0, 0);
+    RnReg := True;
+  End;
+  Fl := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER;
+  RnCl := 0;
+  RnFr := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Fl), Z('WPRename'), Z2('Renommer'), 0, 0, 0, LongInt(@RnCl));
+  If RnFr = 0 Then Exit;
+  W := 420; H := 100; RnH := H;
+  RnLabel := 'Nouveau nom de ' + Old + ' :';
+  If Length(RnLabel) > 50 Then RnLabel := 'Nouveau nom :';
+  Rc[0] := 0; Rc[1] := 0; Rc[2] := W; Rc[3] := H;
+  Dummy := WinCalcFrameRect(RnFr, LongInt(@Rc), 0);
+  X := MaxI(0, (ScrW - (Rc[2] - Rc[0])) Div 2);
+  Y := MaxI(0, (ScrH - (Rc[3] - Rc[1])) Div 2);
+  Dummy := WinSetWindowPos(RnFr, HWND_TOP, X, Y, Rc[2] - Rc[0], Rc[3] - Rc[1],
+                           SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW Or SWP_ACTIVATE);
+  RnEd := WinCreateWindow(RnCl, WC_ENTRYFIELD, Z(Old), WS_VISIBLE Or WS_TABSTOP Or ES_AUTOSCROLL Or ES_MARGIN,
+                          12, H - 62, W - 24, 20, RnCl, HWND_TOP, 12, 0, 0);
+  Dummy := WinSendMsg(RnEd, EM_SETTEXTLIMIT, 250, 0);
+  RnOkB := WinCreateWindow(RnCl, WC_BUTTON, Z('OK'), WS_VISIBLE Or WS_TABSTOP Or BS_PUSHBUTTON Or BS_DEFAULT,
+                           W - 208, 8, 96, 26, RnCl, HWND_TOP, 1, 0, 0);
+  RnCaB := WinCreateWindow(RnCl, WC_BUTTON, Z('Annuler'), WS_VISIBLE Or WS_TABSTOP Or BS_PUSHBUTTON,
+                           W - 104, 8, 96, 26, RnCl, HWND_TOP, 2, 0, 0);
+  { nom sans l'extension choisi (comme l'Explorateur de Windows) }
+  X := Length(Old);
+  While (X > 0) And (Old[X] <> '.') Do Dec(X);
+  If X <= 1 Then X := Length(Old) + 1;
+  Dummy := WinSendMsg(RnEd, EM_SETSEL, (X - 1) Shl 16, 0);
+  Dummy := WinSetActiveWindow(HWND_DESKTOP, RnFr);
+  Dummy := WinSetFocus(HWND_DESKTOP, RnEd);
+  RnEnd := 0;
+  While RnEnd = 0 Do
+    If WinGetMsg(Hab, LongInt(@Qm), 0, 0, 0) = 0 Then RnEnd := 2
+    Else Dummy := WinDispatchMsg(Hab, LongInt(@Qm));
+  S := '';
+  If RnEnd = 1 Then S := RnText;
+  Dummy := WinDestroyWindow(RnFr);
+  RnFr := 0;
+  While (S <> '') And (S[1] = ' ') Do Delete(S, 1, 1);
+  While (S <> '') And (S[Length(S)] = ' ') Do Delete(S, Length(S), 1);
+  AskName := S;
+End;
+
+Function BadName(S : String) : Boolean;
+Var K : LongInt;
+Begin
+  BadName := (S = '') Or (S = '.') Or (S = '..');
+  For K := 1 To Length(S) Do
+    If (Pos(S[K], '\/:*?"<>|') > 0) Or (Ord(S[K]) < 32) Then BadName := True;
+End;
+
+{ Renommer l'objet K (fichier, dossier ou raccourci) }
+Procedure RenameItem(K : LongInt);
+Var V, R : LongInt; Old, Nw, Src, Dst, Pos0, Tg, Cont : String;
+Begin
+  If (K < 0) Or Not Deletable(K) Then
+  Begin
+    WinAlarm(HWND_DESKTOP, 0);
+    Exit;
+  End;
+  V := It(K)^.View;
+  If It(K)^.Shadow <> 0 Then Old := It(K)^.Name Else Old := BaseOf(It(K)^.Path);
+  Nw := AskName(Old);
+  If (Nw = '') Or (Nw = Old) Then Exit;
+  If BadName(Nw) Then
+  Begin
+    ShowMsg('Un nom ne peut contenir aucun des caracteres suivants : \ / : * ? " < > |', 'Renommer',
+            MB_OK Or MB_WARNING);
+    Exit;
+  End;
+  Pos0 := PrfStr('PMSHELL', 'POS ' + It(K)^.Name);
+  If It(K)^.Shadow <> 0 Then
+  Begin
+    Cont := ViewCont(V);
+    Tg := PrfStr(ShadowApp, Cont + '|' + Old);
+    If ShadowExists(Cont, Nw) Then
+    Begin
+      ShowMsg('Un raccourci nomme ' + Nw + ' existe deja.', 'Renommer', MB_OK Or MB_WARNING);
+      Exit;
+    End;
+    DelShadow(Cont, Old);
+    MakeShadow(Cont, Nw, Tg);
+  End
+  Else
+  Begin
+    Src := NoSlash(It(K)^.Path);
+    Dst := DirOf(Src) + Nw;
+    If FileExists(Dst) And (UpStr(Dst) <> UpStr(Src)) Then
+    Begin
+      ShowMsg('Un objet nomme ' + Nw + ' existe deja dans ' + DirOf(Src) + '.', 'Renommer', MB_OK Or MB_WARNING);
+      Exit;
+    End;
+    R := DosMove(Z(Src), Z2(Dst));
+    If R <> 0 Then
+    Begin
+      ShowMsg('Impossible de renommer ' + Old + ' (erreur ' + IStr(R) + ').', 'Renommer', MB_OK Or MB_ERROR);
+      Exit;
+    End;
+  End;
+  { la position de l'icone sur le bureau suit le nom }
+  If Pos0 <> '' Then
+  Begin
+    PrfSet('PMSHELL', 'POS ' + It(K)^.Name, '');
+    PrfSet('PMSHELL', 'POS ' + Nw, Pos0);
+  End;
+  RefreshAll;
+End;
+
+{ Proprietes : boite de l'Explorateur OS2-Zero (EXPLORER /FPROPS) pour
+  les fichiers et dossiers (dates, taille, attributs modifiables) }
+Procedure PropsSel(V, K : LongInt);
+Var I : LongInt; A : String; AllFile : Boolean;
+Begin
+  If K < 0 Then
+  Begin
+    If (Vw(V)^.Kind = VK_DIR) And (ExplorerPath <> '') Then
+    Begin
+      If Length(Vw(V)^.Path) <= 3 Then RunPm(ExplorerPath, '/PROPS:' + UpCase(Vw(V)^.Path[1]) + ':')
+      Else RunPm(ExplorerPath, '/FPROPS ' + QArg(NoSlash(Vw(V)^.Path)));
+    End;
+    Exit;
+  End;
+  GatherSel(V, K);
+  AllFile := ExplorerPath <> '';
+  For I := 0 To SelN - 1 Do
+    If Not IsFileItem(SelK[I]) Or (It(SelK[I])^.Shadow <> 0) Or (Length(NoSlash(It(SelK[I])^.Path)) <= 3) Then
+      AllFile := False;
+  If Not AllFile Then
+  Begin
+    Props(K);
+    Exit;
+  End;
+  A := '/FPROPS';
+  For I := 0 To SelN - 1 Do
+    If Length(A) + Length(It(SelK[I])^.Path) + 4 < 250 Then A := A + ' ' + QArg(NoSlash(It(SelK[I])^.Path));
+  RunPm(ExplorerPath, A);
+End;
+
 Procedure ParentFolder(V : LongInt);
 Var P : String; K : LongInt;
 Begin
@@ -3959,14 +4693,47 @@ Begin
 End;
 
 Procedure Command(V, Cmd : LongInt);
-Var K : LongInt;
+Var K, J : LongInt; D : String;
 Begin
   K := MenuItem;
   If (K >= 0) And ((It(K)^.Use = 0) Or (It(K)^.View <> V)) Then K := -1;
   Case Cmd Of
-    CM_OPEN : OpenItem(K);
-    CM_PROPS : If K >= 0 Then Props(K);
-    CM_DELETE : DeleteItem(K);
+    CM_OPEN :
+      Begin
+        GatherSel(V, K);
+        For J := 0 To MinI(SelN, 16) - 1 Do OpenItem(SelK[J]);
+      End;
+    CM_PROPS : PropsSel(V, K);
+    CM_DELETE : DeleteSel(V, K);
+    CM_CUT, CM_COPY :
+      Begin
+        GatherSel(V, K);
+        If SelN = 0 Then Exit;
+        If Cmd = CM_CUT Then
+        Begin
+          For J := 0 To SelN - 1 Do
+            If Not Deletable(SelK[J]) Then
+            Begin
+              WinAlarm(HWND_DESKTOP, 0);
+              Exit;
+            End;
+          ClipPut(2);
+        End
+        Else ClipPut(1);
+      End;
+    CM_PASTE, CM_PASTESH :
+      Begin
+        D := PasteDir(V, K);
+        If D <> '' Then DoPaste(D, Cmd = CM_PASTESH) Else WinAlarm(HWND_DESKTOP, 0);
+      End;
+    CM_SELALL : SelectAll(V);
+    CM_SELINV : SelectInvert(V);
+    CM_RENAME : RenameItem(K);
+    CM_EDIT : If K >= 0 Then RunPm('C:\NOTEPAD.EXE', QArg(It(K)^.Path));
+    CM_EXPLHERE :
+      If (K >= 0) And (It(K)^.Path <> '') Then RunPm(ExplorerPath, QArg(NoSlash(It(K)^.Path)))
+      Else If Vw(V)^.Kind = VK_DIR Then RunPm(ExplorerPath, QArg(NoSlash(Vw(V)^.Path)));
+    CM_CMDITEM : If K >= 0 Then RunProgram(Comspec, '', It(K)^.Path, False);
     CM_REFRESH : Refresh(V);
     CM_ARRANGE : Arrange(V);
     CM_WINLIST : OpenWinList;
@@ -3991,7 +4758,7 @@ Begin
       Begin
         If CreateFromTemplate(It(K)^.Obj, DeskDir) Then RefreshDir(DeskDir);
       End;
-    CM_NEWDIR, CM_NEWTXT, CM_NEWHTML :
+    CM_NEWDIR, CM_NEWTXT, CM_NEWHTML, CM_NEWBMP, CM_NEWCMD :
       If Vw(V)^.Kind = VK_DESK Then
       Begin
         If CreateNew(Cmd, DeskDir) Then RefreshDir(DeskDir);
@@ -4107,7 +4874,8 @@ Begin
       VK_ENTER, VK_NEWLINE : OpenItem(Vw(V)^.Sel);
       VK_F1 : Help;
       VK_F5 : Refresh(V);
-      VK_DELETE : DeleteItem(Vw(V)^.Sel);
+      VK_DELETE : DeleteSel(V, Vw(V)^.Sel);
+      VK_F2 : RenameItem(Vw(V)^.Sel);
       VK_BACKSPACE : ParentFolder(V);
       VK_PAGEUP :
         If Vw(V)^.Kind <> VK_DESK Then
@@ -4127,6 +4895,22 @@ Begin
       Done := False;
     End;
     If Done Then Exit;
+  End;
+  { Ctrl+A, Ctrl+X, Ctrl+C, Ctrl+V }
+  If ((Fs And KC_CTRL) <> 0) And ((Fs And KC_ALT) = 0) And (Ch > 0) And (Ch < 256) Then
+  Begin
+    MenuItem := Vw(V)^.Sel;
+    If (MenuItem >= 0) And (It(MenuItem)^.Use = 0) Then MenuItem := -1;
+    If (Ch = 1) Or (UpCase(Chr(Ch)) = 'A') Then SelectAll(V)
+    Else If (Ch = 24) Or (UpCase(Chr(Ch)) = 'X') Then Command(V, CM_CUT)
+    Else If (Ch = 3) Or (UpCase(Chr(Ch)) = 'C') Then Command(V, CM_COPY)
+    Else If (Ch = 22) Or (UpCase(Chr(Ch)) = 'V') Then
+    Begin
+      MenuItem := -1;
+      If PasteView(V) Then Command(V, CM_PASTE) Else WinAlarm(HWND_DESKTOP, 0);
+    End
+    Else ViewKey := False;
+    Exit;
   End;
   If ((Fs And KC_CHAR) <> 0) And (Ch > 32) And (Ch < 127) And ((Fs And (KC_CTRL Or KC_ALT)) = 0) Then
   Begin
@@ -5820,7 +6604,17 @@ Begin
         Else ViewProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
         X := S16(Mp1); Y := S16(Mp1 Shr 16);
         K := HitItem(V, X, Y);
-        SelectItem(V, K);
+        { Ctrl+clic : ajouter au choix ou en retirer ; clic sur un objet deja
+          choisi : le choix reste (pour le glisser) }
+        If ((Hi16(Mp2) And KC_CTRL) <> 0) And (K >= 0) Then ToggleItem(V, K)
+        Else If (K < 0) Or Not IsSel(K) Then SelectItem(V, K)
+        Else
+        Begin
+          InvalItem(Vw(V)^.Sel);
+          Vw(V)^.Sel := K;
+          InvalItem(K);
+          PendSingle := K;
+        End;
         { correspondances (carnet Souris) : Maj + clic du bouton 1 = menu }
         If (CfgMapMenu <> 0) And ((Hi16(Mp2) And KC_SHIFT) <> 0) Then
         Begin
@@ -5863,6 +6657,16 @@ Begin
       End;
     WM_BUTTON1UP :
       Begin
+        { clic sans glisser sur un objet d'un choix multiple : lui seul }
+        If PendSingle >= 0 Then
+        Begin
+          Pt[0] := S16(Mp1); Pt[1] := S16(Mp1 Shr 16);
+          Dummy := WinMapWindowPoints(H, HWND_DESKTOP, LongInt(@Pt), 1);
+          If ((DragItem >= 0) And (Dragging = 0)) Or
+             ((DragItem < 0) And (DActive <> 0) And (AbsI(Pt[0] - DX0) + AbsI(Pt[1] - DY0) <= DragMin)) Then
+            If It(PendSingle)^.Use <> 0 Then SelectItem(V, PendSingle);
+          PendSingle := -1;
+        End;
         If DragItem >= 0 Then
         Begin
           Dummy := WinSetCapture(HWND_DESKTOP, 0);
@@ -5957,7 +6761,7 @@ Begin
         Begin
           X := S16(Mp1); Y := S16(Mp1 Shr 16);
           K := HitItem(V, X, Y);
-          If K >= 0 Then SelectItem(V, K);
+          If (K >= 0) And Not IsSel(K) Then SelectItem(V, K);
           ContextMenu(V, K, X, Y);
         End;
         NoMenu := 0;
@@ -6133,7 +6937,7 @@ End;
 BEGIN
   Creating := -1; MenuH := 0; Desk := 0; DragItem := -1; Dragging := 0; MenuItem := -1; MenuView := 0;
   ItemBuf := 0; ItemCap := 0; ViewBuf := 0; ViewCap := 0; EntBuf := 0; EntCap := 0;
-  DSrc := -1; DActive := 0; NoMenu := 0;
+  DSrc := -1; DActive := 0; NoMenu := 0; PendSingle := -1; ObjN := 0; RnReg := False; RnFr := 0;
   { bureau : C:\DESKTOP, ou D:\DESKTOP si C: est en lecture seule (CD-ROM) }
   Dummy := DosCreateDir(Z('C:\DESKTOP'), 0);
   If FileExists('C:\DESKTOP') Then DeskDir := 'C:\DESKTOP\'

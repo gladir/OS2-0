@@ -24,7 +24,9 @@
   Proprietes d'un lecteur : boite "Proprietes de (C:)" de Pasdows 95
   (onglets General, Outils, Partage ; nom du volume modifiable ; espace
   utilise et libre ; camembert en relief) ; EXPLORER /PROPS:C: ouvre cette
-  boite seule (dossier Lecteurs du bureau).
+  boite seule (dossier Lecteurs du bureau) ; EXPLORER /FPROPS fichier...
+  ouvre seule la boite Proprietes de fichiers ou de dossiers (menu
+  contextuel du bureau et des dossiers).
   Edition et bouton 2 : Couper, Copier, Coller (fichiers et dossiers,
   d'un lecteur a l'autre), Supprimer, Renommer, Nouveau dossier,
   Selectionner tout ; Ctrl+clic, Maj+clic, Ctrl+A, Ctrl+X, Ctrl+C,
@@ -4539,6 +4541,23 @@ BEGIN
     Client := 0; Frame := 0; PAlone := True;
     DriveProps(Start[8]);
     While WinGetMsg(Hab, LongInt(@Qmsg), 0, 0, 0) <> 0 Do Dummy := WinDispatchMsg(Hab, LongInt(@Qmsg));
+    Halt(0);
+  End;
+  { EXPLORER /FPROPS fichier... : seulement la boite Proprietes de ces
+    fichiers ou dossiers (menu contextuel du bureau et des dossiers) }
+  If (Start = '/FPROPS') And (ParamCount >= 2) Then
+  Begin
+    Hab := WinInitialize(0);
+    Hmq := WinCreateMsgQueue(Hab, 0);
+    Client := 0; Frame := 0; PAlone := True;
+    PrN := 0;
+    For I := 2 To ParamCount Do
+      If PrN < 64 Then
+      Begin
+        PrPath[PrN] := ParamStr(I);
+        Inc(PrN);
+      End;
+    PropsDialog;
     Halt(0);
   End;
   While (Length(Start) > 2) And (Start[Length(Start)] = '\') Do Delete(Start, Length(Start), 1);
