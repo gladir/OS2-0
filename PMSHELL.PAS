@@ -3469,6 +3469,22 @@ Begin
           End;
         End;
       End;
+    IC_GITCLI :
+      Begin
+        { disque noir de GitHub et graphe de Git : branche principale
+          (commits rouges) et branche secondaire (commit vert) }
+        GDisc(Hps, X + 16, Y + 16, 15, CLR_BLACK);
+        GLn(Hps, X + 11, Y + 6, X + 11, Y + 26, CLR_WHITE);
+        GLn(Hps, X + 12, Y + 6, X + 12, Y + 26, CLR_WHITE);
+        GLn(Hps, X + 12, Y + 12, X + 21, Y + 18, CLR_WHITE);
+        GLn(Hps, X + 12, Y + 13, X + 21, Y + 19, CLR_WHITE);
+        GLn(Hps, X + 21, Y + 18, X + 21, Y + 22, CLR_WHITE);
+        GLn(Hps, X + 22, Y + 18, X + 22, Y + 22, CLR_WHITE);
+        GDisc(Hps, X + 12, Y + 7, 3, CLR_RED);
+        GDisc(Hps, X + 12, Y + 16, 3, CLR_RED);
+        GDisc(Hps, X + 12, Y + 25, 3, CLR_RED);
+        GDisc(Hps, X + 22, Y + 23, 3, CLR_GREEN);
+      End;
     IC_SVNCLI :
       Begin
         { copie de travail (dossier, pastille verte) et branches de
