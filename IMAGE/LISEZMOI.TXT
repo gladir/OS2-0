@@ -1310,6 +1310,11 @@ bureau VGA 16 couleurs). OS2-Zero exige AMD-V ou VT-x (mode protege) :
 sous Bochs avec AMD-V, son noyau lit le CD-ROM par l'ATAPI emule et
 charge Presentation Manager. /SHOT:COM ou /SHOT:fichier.BMP : image de
 l'invite a la fin de /BOOTTEST.
+Fenetre de la machine : menu Peripheriques (Alt+P) et clic sur la
+partie disque de la barre d'etat (icones du disque dur, du CD-ROM et de
+la disquette) : choisir ou ejecter l'image du CD-ROM ou de la disquette,
+informations sur les disques. INT 15h APM 1.2 : POWER ADV:OFF de MSDOS-0
+eteint la machine et ferme sa fenetre.
   OS2PC APPS\VIRTUAL.PAS                    -> VIRTUAL.EXE
 
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)

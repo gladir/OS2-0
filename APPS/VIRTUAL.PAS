@@ -58,6 +58,12 @@ Program VIRTUAL;
     A0000h est retiree a l'invite (KrnVirt 7) et chaque instruction qui
     y touche est emulee (plans, verrous, modes d'ecriture et de lecture).
 
+  Fenetre de la machine : menu Peripheriques et clic sur la partie disque
+  de la barre d'etat (icones des supports) : choisir ou ejecter l'image du
+  CD-ROM ou de la disquette (change par la tache de la machine, note dans
+  le .vbox), informations sur les disques. APM 1.2 (INT 15h AH=53h) :
+  5307h hors tension eteint la machine et ferme sa fenetre.
+
   Nouvelle machine : le type est une liste deroulante ; MSDOS-0, UNIX-0,
   OS2-Zero et Pasdows95 sont telecharges a partir de GitHub (image ISO
   d'installation de raw.githubusercontent.com/gladir/..., https par
@@ -110,6 +116,8 @@ Const
   CM_HELP = 301; CM_ABOUT = 302;
   CM_PAUSE = 401; CM_RESET = 402; CM_CAD = 403; CM_POWER = 404; CM_FLOPPY = 405; CM_EJECT = 406;
   CM_ZOOM = 407; CM_VMINFO = 408;
+  CM_CDCHOOSE = 410; CM_CDEJECT = 411; CM_FDCHOOSE = 412; CM_FDEJECT = 413; CM_DISKINFO = 414;
+  WM_BUTTON2DOWN = $0074;
   ID_LIST = 10; ID_BNEW = 11; ID_BSET = 12; ID_BDEL = 13; ID_BSTART = 14; ID_BINFO = 15;
   ID_OK = 1; ID_CANCEL = 2;
   ID_NAME = 20; ID_TYPE = 21; ID_MEM = 22; ID_HD = 23; ID_FD = 24; ID_NEWHD = 25; ID_HDSZ = 26;
@@ -211,6 +219,7 @@ Function WinReleasePS(Hps : LongInt) : LongInt; External 'PMWIN';
 Function WinSetPresParam(H, Id, Cb, P : LongInt) : LongInt; External 'PMWIN';
 Function WinShowWindow(H, Sh : LongInt) : LongInt; External 'PMWIN';
 Function WinEnableWindow(H, En : LongInt) : LongInt; External 'PMWIN';
+Function WinPopupMenu(HPar, HOwn, HMenu, X, Y, Id, Fs : LongInt) : LongInt; External 'PMWIN';
 { ---- PMGPI ---- }
 Function GpiDrawBits(Hps, PBits, Pbmi, N, P, Rop, Fl : LongInt) : LongInt; External 'PMGPI';
 Function GpiSetColor(Hps, C : LongInt) : LongInt; External 'PMGPI';
@@ -2093,6 +2102,12 @@ Var
     si le CD-ROM est amorcable ; CdEmuOn : emulation active (amorce par
     le CD-ROM, jusqu'a INT 13h AX=4B00h) }
   CdOn, CdEmuOn : Boolean;
+  { changement de support demande par la fenetre, fait par la tache de la
+    machine : 1 CD-ROM insere (MedPath), 2 CD-ROM ejecte, 3 disquette
+    inseree, 4 disquette ejectee }
+  MedReq : LongInt;
+  MedPath : String;
+  FdChanged, MedMsgUntil : LongInt;  { MedMsgUntil : fin du message du changement }
   CdEmu, CdBootLba, CdBootCnt, CdLoadSeg : LongInt;
 
 { somme de controle des en-tetes VHD : complement a un de la somme des
@@ -2587,7 +2602,7 @@ End;
 Var
   Fr_ : Array[0..39] Of LongInt;        { cadre des registres (KrnVirt) }
   GMem, GSize, VmMethod, VmState, VmTid, VmWin, VmFrame : LongInt;
-  VmIdle, VmReqReset, VmReqStop, VmReqCad, VmHalted, VmIdleWait : LongInt;
+  VmIdle, VmReqReset, VmReqStop, VmReqCad, VmHalted, VmIdleWait, VmPowerOff : LongInt;
   VmMsg : String;
   Info : Array[0..127] Of LongInt;
   { 8259A : 0 maitre, 1 esclave }
@@ -3342,7 +3357,7 @@ Var
   IdeSense, IdeAsc : Array[0..1] Of LongInt;
   IdeMult : Array[0..3] Of LongInt;
   IdeBuf : Array[0..2 * IdeBufSz - 1] Of Byte;
-  IdeCmds : LongInt;
+  IdeCmds, IdeUA : LongInt;           { IdeUA : disque change (UNIT ATTENTION) }
 
 Procedure IdeInit;
 Var C : LongInt;
@@ -3354,11 +3369,10 @@ Begin
     IdeWr[C] := 0; IdePkt[C] := 0; IdeSense[C] := 0; IdeAsc[C] := 0;
   End;
   For C := 0 To 3 Do IdeMult[C] := 16;
-  { signature ATAPI du CD-ROM }
-  If DkH[DkCd] >= 0 Then
-  Begin
-    IdeLbaM[1] := $14; IdeLbaH[1] := $EB;
-  End;
+  { signature ATAPI du lecteur de CD-ROM (toujours present, avec ou sans
+    disque, comme le lecteur DVD de VirtualBox) }
+  IdeLbaM[1] := $14; IdeLbaH[1] := $EB;
+  IdeUA := 0;
   IdeCmds := 0;
 End;
 
@@ -3373,7 +3387,7 @@ Begin
     If D = 0 Then U := 0 Else U := 1;
   End
   Else If D = 0 Then U := DkCd;
-  If (U >= 0) And (DkH[U] < 0) Then U := -1;
+  If (U >= 0) And (U <> DkCd) And (DkH[U] < 0) Then U := -1;
   IdeSel := U;
 End;
 
@@ -3585,6 +3599,19 @@ Begin
   Inc(IdeCmds);
   IdePkt[C] := 0;
   Last := DkSect[DkCd] Div 4 - 1;
+  { disque change : UNIT ATTENTION une fois (sauf INQUIRY, REQUEST SENSE) }
+  If (IdeUA <> 0) And (Op <> $03) And (Op <> $12) Then
+  Begin
+    IdeUA := 0;
+    AtapiSense(C, 6, $28);
+    Exit;
+  End;
+  { pas de disque : NOT READY, MEDIUM NOT PRESENT }
+  If (DkH[DkCd] < 0) And (Op In [$00, $25, $28, $A8, $43, $51, $BE]) Then
+  Begin
+    AtapiSense(C, 2, $3A);
+    Exit;
+  End;
   Case Op Of
     $00, $1B, $1E, $35, $2B, $BB, $A6 : Begin
                          IdeSense[C] := 0; IdeAsc[C] := 0;
@@ -3830,7 +3857,7 @@ Begin
     Begin
       IdeLen[C] := 0; IdeLeft[C] := 0; IdePkt[C] := 0;
       IdeErr[C] := 1; IdeCnt[C] := 1; IdeLbaL[C] := 1; IdeDev[C] := $A0;
-      If (C = 1) And (DkH[DkCd] >= 0) Then Begin IdeLbaM[C] := $14; IdeLbaH[C] := $EB; End
+      If C = 1 Then Begin IdeLbaM[C] := $14; IdeLbaH[C] := $EB; End
       Else Begin IdeLbaM[C] := 0; IdeLbaH[C] := 0; End;
       IdeSt[C] := $50;
     End;
@@ -5372,6 +5399,13 @@ Begin
   End;
   Case Ah Of
     $00, $0D : If (D >= 0) Or (Dl < $80) Then DiskRet(Dl, 0) Else DiskRet(Dl, 1);
+    $16 : If (D = 2) And (FdChanged <> 0) Then
+          Begin
+            { disquette changee (menu Peripheriques de la fenetre) }
+            FdChanged := 0;
+            DiskRet(Dl, 6);
+          End
+          Else If D < 0 Then DiskRet(Dl, $80) Else DiskRet(Dl, 0);
     $01 : Begin
             If Dl >= $80 Then SetHi(fAX, BdaB($74)) Else SetHi(fAX, BdaB($41));
             SetCF(GAH <> 0);
@@ -5416,7 +5450,7 @@ Begin
             SetLo(fAX, 0);
             DiskRet(Dl, 0);
           End;
-    $10, $11, $0C, $16, $17, $18 :
+    $10, $11, $0C, $17, $18 :
       Begin
         If D < 0 Then DiskRet(Dl, $80) Else DiskRet(Dl, 0);
         If (Ah = $18) And IsFd(D) Then
@@ -5514,6 +5548,34 @@ Begin
   If Ext < 0 Then Ext := 0;
   Case Ah Of
     $4F : Exit;
+    $53 : Begin
+            { APM 1.2 (gestion de l'alimentation), interface du mode reel :
+              POWER ADV:OFF de MSDOS-0 (5301h, 530Eh, 5308h puis 5307h
+              BX=0001h CX=0003h) eteint la machine }
+            SetCF(False); SetHi(fAX, 0);
+            Case GAL Of
+              $00 : Begin Set16(fAX, $0102); Set16(fBX, $504D); Set16(fCX, 0); End;
+              $01, $04, $06, $08, $09, $0D, $0F : ;
+              $02, $03 : Begin SetHi(fAX, $86); SetCF(True); End;
+              $05 : If (Fr_[fFL] And $200) <> 0 Then VmIdleWait := 1;
+              $07 : Case GCX Of
+                      2 : VmIdleWait := 1;
+                      3 : If (GBX = 1) Or (GBX = $1FF) Or (GBX = 0) Then
+                          Begin
+                            VmMsg := Fr('L''invite a `eteint la machine (APM).');
+                            VmPowerOff := 1;
+                            VmReqStop := 1;
+                          End;
+                    End;
+              $0A : Begin Set16(fBX, $01FF); Set16(fCX, $80FF); Set16(fDX, $FFFF); End;
+              $0B : Begin SetHi(fAX, $80); SetCF(True); End;
+              $0C : Set16(fCX, 0);
+              $0E : Set16(fAX, $0102);
+              $10 : Begin SetLo(fBX, 0); Set16(fCX, 0); End;
+            Else
+              Begin SetHi(fAX, $09); SetCF(True); End;
+            End;
+          End;
     $24 : Begin
             Case GAL Of
               0 : SetA20(0);
@@ -6173,9 +6235,43 @@ Begin
   VmMsg := VmFailMsg;
 End;
 
+{ support change par le menu Peripheriques (dans la tache de la machine,
+  entre deux sorties) }
+Procedure MedChange;
+Var R : LongInt;
+Begin
+  R := MedReq;
+  MedReq := 0;
+  Case R Of
+    1 : Begin
+          If CdOpen(MedPath) Then VmMsg := Fr('CD-ROM ins`er`e : ') + NameOf(MedPath)
+          Else VmMsg := Fr('CD-ROM : ') + DkErr;
+          IdeUA := 1;
+        End;
+    2 : Begin
+          DkClose(DkCd);
+          IdeUA := 1;
+          VmMsg := Fr('CD-ROM `eject`e.');
+        End;
+    3 : Begin
+          If DkOpen(2, MedPath) Then VmMsg := Fr('Disquette ins`er`ee : ') + NameOf(MedPath)
+          Else VmMsg := Fr('Disquette : ') + DkErr;
+          FdChanged := 1;
+          BdaSW($10, BdaW($10) Or 1);
+        End;
+    4 : Begin
+          DkClose(2);
+          FdChanged := 1;
+          VmMsg := Fr('Disquette `eject`ee.');
+        End;
+  End;
+  MedMsgUntil := NowMs + 5000;
+End;
+
 Procedure VmStep;
 Var R, N, V, IrqN : LongInt;
 Begin
+  If MedReq <> 0 Then MedChange;
   If VmReqReset <> 0 Then VmReset;
   If VmReqCad <> 0 Then
   Begin
@@ -6332,7 +6428,8 @@ Begin
   PlTrap := False;
   For K := 0 To 39 Do Fr_[K] := 0;
   Fr_[fIRQ] := -1;
-  VmReqReset := 0; VmReqStop := 0; VmReqCad := 0; VmHalted := 0; VmIdleWait := 0;
+  VmReqReset := 0; VmReqStop := 0; VmReqCad := 0; VmHalted := 0; VmIdleWait := 0; VmPowerOff := 0;
+  MedReq := 0; FdChanged := 0; MedMsgUntil := 0;
   VmReset;
   VmOpen := True;
 End;
@@ -6365,7 +6462,7 @@ End;
 Var
   Fb : Array[0..SW_ * SH_ - 1] Of Byte;
   Bmi : Array[0..16 + 256 * 4 - 1] Of Byte;
-  ShadowSum, LastSum, BlinkOn, LastBlink, ScrH : LongInt;
+  ShadowSum, LastSum, BlinkOn, LastBlink, ScrH, DiskX : LongInt;
   Hps, CW, CH, StatH, MgrFrame, MgrClient, VmClient, InfoFrame, CfgFrame, CfgClient : LongInt;
   VmTitle, StatText : String;
 
@@ -6622,6 +6719,49 @@ Begin
   Dummy := GpiCreateLogColorTable(Hps, 0, 3, 0, 0, 0);
 End;
 
+{ icones des supports a droite de la barre d'etat, comme VirtualBox :
+  disque dur, CD-ROM (gris s'il est vide), disquette ; un clic ouvre le
+  menu des supports }
+Procedure DrawDevs;
+Var X, Y : LongInt;
+Begin
+  Y := ScrH + 3;
+  { disque dur : boitier gris fonce, temoin vert }
+  X := CW - 88;
+  FBar(X, Y + 3, X + 21, Y + 13, $303030); FBar(X + 1, Y + 4, X + 20, Y + 12, $8C8C8C);
+  FBar(X + 1, Y + 4, X + 20, Y + 5, $B4B4B4);
+  FBar(X + 3, Y + 9, X + 12, Y + 10, $303030);
+  If DkReads[0] + DkWrites[0] > 0 Then FBar(X + 16, Y + 9, X + 18, Y + 10, $00E000)
+  Else FBar(X + 16, Y + 9, X + 18, Y + 10, $005000);
+  { CD-ROM : disque argente cercle de gris fonce (contour seul s'il est vide) }
+  X := CW - 60;
+  If DkH[DkCd] >= 0 Then
+  Begin
+    FBar(X + 5, Y, X + 14, Y + 15, $404050); FBar(X + 2, Y + 3, X + 17, Y + 12, $404050);
+    FBar(X + 6, Y + 1, X + 13, Y + 14, $B8B8D0); FBar(X + 3, Y + 4, X + 16, Y + 11, $B8B8D0);
+    FBar(X + 7, Y + 3, X + 12, Y + 6, $E8E8FF);
+    FBar(X + 8, Y + 6, X + 11, Y + 9, $FFFFFF); FBar(X + 9, Y + 7, X + 10, Y + 8, $404050);
+  End
+  Else
+  Begin
+    FBar(X + 5, Y, X + 14, Y + 15, $606060); FBar(X + 2, Y + 3, X + 17, Y + 12, $606060);
+    FBar(X + 6, Y + 1, X + 13, Y + 14, $CCCCCC); FBar(X + 3, Y + 4, X + 16, Y + 11, $CCCCCC);
+    FBar(X + 9, Y + 7, X + 10, Y + 8, $606060);
+  End;
+  { disquette : bleu fonce, volet metallique, etiquette (contour seul si vide) }
+  X := CW - 32;
+  If DkH[2] >= 0 Then
+  Begin
+    FBar(X + 2, Y + 1, X + 17, Y + 15, $283C78); FBar(X + 5, Y + 1, X + 13, Y + 6, $C8C8C8);
+    FBar(X + 10, Y + 2, X + 11, Y + 5, $283C78); FBar(X + 4, Y + 9, X + 15, Y + 15, $F4F4F4);
+  End
+  Else
+  Begin
+    FBar(X + 2, Y + 1, X + 17, Y + 15, $606060); FBar(X + 3, Y + 2, X + 16, Y + 14, $CCCCCC);
+    FBar(X + 5, Y + 2, X + 13, Y + 6, $909090);
+  End;
+End;
+
 { barre d'etat de la fenetre de la machine }
 Procedure DrawStatus;
 Var S : String; Dt : LongInt;
@@ -6633,7 +6773,11 @@ Begin
        IStr(DkWrites[0]) + 'E';
   If VmState = VS_PAUSE Then S := S + '  |  ' + Fr('En pause');
   If VmMsg <> '' Then S := ' ' + VmMsg;
-  OutTxt(4, ScrH + 3, Copy(S, 1, 78), $101010, $CCCCCC);
+  { debut de la partie disque (clic : menu des supports) }
+  If Pos('disque', S) > 0 Then DiskX := 4 + (Pos('disque', S) - 1) * 8 Else DiskX := CW - 96;
+  If DiskX > CW - 96 Then DiskX := CW - 96;
+  OutTxt(4, ScrH + 3, Copy(S, 1, (CW - 108) Div 8), $101010, $CCCCCC);
+  DrawDevs;
 End;
 
 { ==================================================================== }
@@ -6647,6 +6791,9 @@ Var
   CfgEdit : LongInt;                  { machine modifiee (-1 : nouvelle) }
   StartKeys : String;
   CName, CType, CMem, CHd, CHd2, CFd, CNew, CSize, CBootFd, CCd, CBootCd : LongInt;
+  { choix d'une image et menu des supports de la fenetre de la machine }
+  PickFrame, PickClient, PickKind, PickN, PickList, PickPath : LongInt;
+  PopMenu, PopUntil : LongInt;      { PopUntil : menu ouvert, pas de dessin par-dessus }
 
 Procedure FillList; Forward;
 
@@ -6978,7 +7125,12 @@ Var S : LongInt; Rc : Array[0..3] Of LongInt;
 Begin
   If (NowMs Div 400) And 1 = 1 Then BlinkOn := 1 Else BlinkOn := 0;
   { pas de dessin par-dessus les boites de l'application }
-  If (GMem = 0) Or (InfoFrame <> 0) Or (InDlg <> 0) Then Exit;
+  If (GMem = 0) Or (InfoFrame <> 0) Or (InDlg <> 0) Or (PickFrame <> 0) Or (NowMs < PopUntil) Then Exit;
+  If (MedMsgUntil <> 0) And (NowMs > MedMsgUntil) Then
+  Begin
+    MedMsgUntil := 0;
+    VmMsg := '';
+  End;
   S := DispH;
   If S <> ScrH Then
   Begin
@@ -7004,10 +7156,250 @@ Begin
   End;
 End;
 
+{ ---- supports amovibles : menu Peripheriques, menu de la barre d'etat
+  (clic sur la partie disque ou sur les icones), choix d'une image,
+  informations sur les disques ---- }
+
+Const
+  MaxPick = 64;
+  ID_PLIST = 40; ID_PPATH = 41;
+
+Var
+  PickF : Array[0..MaxPick - 1] Of String;
+
+{ images trouvees (CD-ROM : .ISO ; disquette : .IMG, .IMA, .VFD) dans un
+  dossier }
+Procedure PickScan(Dir : String; Depth : LongInt);
+Var Buf : Array[0..299] Of Byte; HD, Cnt, R, Attr : LongInt; N, E : String; Ok : Boolean;
+Begin
+  HD := -1; Cnt := 1;
+  R := DosFindFirst(Z(Dir + '*.*'), LongInt(@HD), $37, LongInt(@Buf), SizeOf(Buf), LongInt(@Cnt), 1);
+  While (R = 0) And (Cnt > 0) And (PickN < MaxPick) Do
+  Begin
+    N := FindName(LongInt(@Buf));
+    Attr := RdL(LongInt(@Buf) + 24);
+    If (N <> '.') And (N <> '..') Then
+    Begin
+      E := ExtOf(N);
+      If (Attr And $10) <> 0 Then
+      Begin
+        If Depth < 1 Then PickScan(Dir + N + '\', Depth + 1);
+      End
+      Else
+      Begin
+        If PickKind = 1 Then Ok := E = 'ISO' Else Ok := (E = 'IMG') Or (E = 'IMA') Or (E = 'VFD');
+        If Ok Then
+        Begin
+          PickF[PickN] := Dir + N;
+          Inc(PickN);
+        End;
+      End;
+    End;
+    Cnt := 1;
+    R := DosFindNext(HD, LongInt(@Buf), SizeOf(Buf), LongInt(@Cnt));
+  End;
+  If HD <> -1 Then Dummy := DosFindClose(HD);
+End;
+
+Procedure PickClose;
+Begin
+  If PickFrame <> 0 Then Dummy := WinDestroyWindow(PickFrame);
+  PickFrame := 0;
+  If VmFrame <> 0 Then Dummy := WinEnableWindow(VmFrame, 1);
+End;
+
+{ image choisie : changee par la tache de la machine, notee dans le .vbox }
+Procedure PickOk;
+Var P : String;
+Begin
+  P := CtlText(PickPath);
+  If (P = '') Or Not FExists(P) Then
+  Begin
+    Dummy := Ask('Image introuvable : ' + P, 'Virtualisation', MB_OK Or MB_ICONWARNING, PickFrame);
+    Exit;
+  End;
+  MedPath := P;
+  MedReq := PickKind;
+  If (CurVm >= 0) And (CurVm < NVm) Then
+  Begin
+    If PickKind = 1 Then Vms[CurVm].Cd := P Else Vms[CurVm].Fd := P;
+    If Vms[CurVm].Vbox <> '' Then Dummy := VmSave(Vms[CurVm]);
+  End;
+  PickClose;
+End;
+
+Function PickProc(H, Msg0, Mp1, Mp2 : LongInt) : LongInt;
+Var Rc : Array[0..3] Of LongInt; K : LongInt;
+Begin
+  PickProc := 0;
+  Case Msg0 Of
+    WM_PAINT : Begin
+                 Hps := WinBeginPaint(H, 0, 0);
+                 Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+                 Dummy := WinFillRect(Hps, LongInt(@Rc), CLR_PALEGRAY);
+                 Dummy := WinEndPaint(Hps);
+               End;
+    WM_CONTROL : If Lo16(Mp1) = ID_PLIST Then
+                 Begin
+                   K := WinSendMsg(PickList, LM_QUERYSELECTION, -1, 0);
+                   If (K >= 0) And (K < PickN) Then
+                   Begin
+                     SetText(PickPath, PickF[K]);
+                     If Hi16(Mp1) = 5 Then PickOk;          { LN_ENTER : double clic }
+                   End;
+                 End;
+    WM_COMMAND : Case Lo16(Mp1) Of
+                   ID_OK : PickOk;
+                   ID_CANCEL : PickClose;
+                 End;
+    WM_CLOSE : PickClose;
+  Else
+    PickProc := WinDefWindowProc(H, Msg0, Mp1, Mp2);
+  End;
+End;
+
+{ choisir une image de CD-ROM (Kind = 1) ou de disquette (Kind = 3) }
+Procedure ShowPick(Kind : LongInt);
+Var Flg, W, H, K : LongInt; T, Cur : String;
+Begin
+  If PickFrame <> 0 Then Exit;
+  PickKind := Kind;
+  If Kind = 1 Then T := Fr('Choisir une image de CD-ROM') Else T := Fr('Choisir une image de disquette');
+  Flg := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER;
+  PickClient := 0;
+  PickFrame := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Flg), Z('VBOXPICK'), Z2(T), 0, 0, 0, LongInt(@PickClient));
+  W := 560; H := 330;
+  CenterFrame(PickFrame, W, H);
+  CH := H;
+  If Kind = 1 Then
+    Gray(Ctl(PickClient, WC_STATIC, Fr('Images de CD-ROM (.ISO) trouv`ees :'), SS_TEXT, 12, 10, 400, 20, 0))
+  Else
+    Gray(Ctl(PickClient, WC_STATIC, Fr('Images de disquette (.IMG, .IMA, .VFD) trouv`ees :'), SS_TEXT, 12, 10, 450, 20, 0));
+  PickList := Ctl(PickClient, WC_LISTBOX, '', WS_TABSTOP, 12, 32, W - 24, 190, ID_PLIST);
+  PickN := 0;
+  PickScan(VmsDir, 0);
+  PickScan('C:\', 1);
+  If UpS(Copy(VmsDir, 1, 2)) <> 'D:' Then PickScan('D:\', 1);
+  For K := 0 To PickN - 1 Do Dummy := WinSendMsg(PickList, LM_INSERTITEM, -1, Z(PickF[K]));
+  Gray(Ctl(PickClient, WC_STATIC, 'Fichier :', SS_TEXT, 12, 233, 80, 20, 0));
+  Cur := '';
+  If (CurVm >= 0) And (CurVm < NVm) Then
+  Begin
+    If Kind = 1 Then Cur := Vms[CurVm].Cd Else Cur := Vms[CurVm].Fd;
+  End;
+  PickPath := Ctl(PickClient, WC_ENTRYFIELD, Cur, ES_AUTOSCROLL Or ES_MARGIN Or WS_TABSTOP, 92, 230, W - 104, 24, ID_PPATH);
+  Dummy := WinSendMsg(PickPath, EM_SETTEXTLIMIT, 250, 0);
+  Dummy := Ctl(PickClient, WC_BUTTON, 'OK', BS_PUSHBUTTON Or BS_DEFAULT Or WS_TABSTOP, W - 210, H - 38, 90, 28, ID_OK);
+  Dummy := Ctl(PickClient, WC_BUTTON, 'Annuler', BS_PUSHBUTTON Or WS_TABSTOP, W - 110, H - 38, 90, 28, ID_CANCEL);
+  If VmFrame <> 0 Then Dummy := WinEnableWindow(VmFrame, 0);
+  Dummy := WinSetFocus(HWND_DESKTOP, PickPath);
+End;
+
+Function MoOf(Sect : LongInt) : String;
+Begin
+  MoOf := IStr(Sect Div 2048) + ',' + IStr(((Sect Mod 2048) * 10) Div 2048) + ' Mo';
+End;
+
+{ Informations sur les disques de la machine en fonction }
+Procedure DiskInfo;
+Var K : LongInt; S : String;
+Begin
+  LClr;
+  For K := 0 To 1 Do
+  Begin
+    If K = 0 Then S := Fr('Disque dur 0 (IDE primaire, ma`itre) : ') Else S := Fr('Disque dur 1 (IDE primaire, esclave) : ');
+    If DkH[K] < 0 Then LLine(S + 'aucun')
+    Else
+    Begin
+      LLine(S + DkPath[K]);
+      S := '   ' + DkFmt[K] + ', ' + MoOf(DkSect[K]) + ', ' + IStr(DkSect[K]) + ' secteurs, CHS ' + IStr(DkCyl[K]) + '/' +
+           IStr(DkHeads[K]) + '/' + IStr(DkSpt[K]) + ', ' + IStr(DkReads[K]) + ' lectures, ' + IStr(DkWrites[K]) +
+           Fr(' `ecritures');
+      If DkRO[K] <> 0 Then S := S + Fr(', lecture seule');
+      LLine(S);
+    End;
+  End;
+  S := Fr('CD-ROM (IDE secondaire, ma`itre, ATAPI) : ');
+  If DkH[DkCd] < 0 Then LLine(S + 'vide')
+  Else
+  Begin
+    LLine(S + DkPath[DkCd]);
+    S := '   ISO 9660, ' + MoOf(DkSect[DkCd]) + ', ' + IStr(DkSect[DkCd] Div 4) + ' secteurs de 2048 octets, ' +
+         IStr(DkReads[DkCd] + DkReads[DkEmu]) + ' lectures';
+    If CdOn Then
+    Begin
+      Case CdEmu Of
+        0 : S := S + Fr(', amor`cable (El Torito sans `emulation)');
+        1, 2, 3 : S := S + Fr(', amor`cable (El Torito, disquette `emul`ee)');
+      Else
+        S := S + Fr(', amor`cable (El Torito, disque dur `emul`e)');
+      End;
+      If CdEmuOn Then S := S + Fr(', `emulation active');
+    End;
+    LLine(S);
+  End;
+  S := 'Disquette (A:) : ';
+  If DkH[2] < 0 Then LLine(S + 'vide')
+  Else
+  Begin
+    LLine(S + DkPath[2]);
+    LLine('   ' + MoOf(DkSect[2]) + ', CHS ' + IStr(DkCyl[2]) + '/' + IStr(DkHeads[2]) + '/' + IStr(DkSpt[2]) + ', ' +
+          IStr(DkReads[2]) + ' lectures, ' + IStr(DkWrites[2]) + Fr(' `ecritures'));
+  End;
+  Dummy := LMsgBox(Fr('Informations sur les disques'), MB_OK Or MB_INFORMATION, VmFrame);
+End;
+
+{ menu des supports (clic sur la partie disque de la barre d'etat) }
+Procedure DevMenu(X, Y : LongInt);
+Var N, A : LongInt; S : String;
+Begin
+  MenuLen := 0;
+  MW(0); MW(0); MW(0);
+  N := 0;
+  If DkH[DkCd] >= 0 Then S := 'CD-ROM : ' + NameOf(DkPath[DkCd]) Else S := 'CD-ROM : vide';
+  MItem(MIS_TEXT, MIA_DISABLED, 499, S); Inc(N);
+  MItem(MIS_TEXT, 0, CM_CDCHOOSE, 'Choisir une image de ~CD-ROM...'); Inc(N);
+  If DkH[DkCd] >= 0 Then A := 0 Else A := MIA_DISABLED;
+  MItem(MIS_TEXT, A, CM_CDEJECT, '`~Ejecter le CD-ROM'); Inc(N);
+  MItem(MIS_SEPARATOR, 0, 0, ''); Inc(N);
+  If DkH[2] >= 0 Then S := 'Disquette : ' + NameOf(DkPath[2]) Else S := 'Disquette : vide';
+  MItem(MIS_TEXT, MIA_DISABLED, 498, S); Inc(N);
+  MItem(MIS_TEXT, 0, CM_FDCHOOSE, 'Choisir une image de ~disquette...'); Inc(N);
+  If DkH[2] >= 0 Then A := 0 Else A := MIA_DISABLED;
+  MItem(MIS_TEXT, A, CM_FDEJECT, '`Ejecter la dis~quette'); Inc(N);
+  MItem(MIS_SEPARATOR, 0, 0, ''); Inc(N);
+  MItem(MIS_TEXT, 0, CM_DISKINFO, '~Informations sur les disques...'); Inc(N);
+  MenuClose(0, N);
+  If PopMenu <> 0 Then Dummy := WinDestroyWindow(PopMenu);
+  PopMenu := WinCreateMenu(HWND_DESKTOP, LongInt(@MenuT));
+  PopUntil := NowMs + 10000;
+  If PopMenu <> 0 Then Dummy := WinPopupMenu(VmClient, VmClient, PopMenu, X, Y, CM_CDCHOOSE, 0);
+End;
+
 Procedure VmCommand(Id : LongInt);
 Var S : String;
 Begin
+  PopUntil := 0;
   Case Id Of
+    CM_CDCHOOSE : ShowPick(1);
+    CM_FDCHOOSE : ShowPick(3);
+    CM_CDEJECT : Begin
+                   MedReq := 2;
+                   If (CurVm >= 0) And (CurVm < NVm) Then
+                   Begin
+                     Vms[CurVm].Cd := '';
+                     If Vms[CurVm].Vbox <> '' Then Dummy := VmSave(Vms[CurVm]);
+                   End;
+                 End;
+    CM_FDEJECT : Begin
+                   MedReq := 4;
+                   If (CurVm >= 0) And (CurVm < NVm) Then
+                   Begin
+                     Vms[CurVm].Fd := '';
+                     If Vms[CurVm].Vbox <> '' Then Dummy := VmSave(Vms[CurVm]);
+                   End;
+                 End;
+    CM_DISKINFO : DiskInfo;
     CM_PAUSE : If VmState = VS_RUN Then VmState := VS_PAUSE Else If VmState = VS_PAUSE Then VmState := VS_RUN;
     CM_RESET : If Ask('R`einitialiser la machine ? Les donn`ees non enregistr`ees de l''invite seront perdues.',
                       'Virtualisation', MB_YESNO Or MB_ICONQUESTION, VmFrame) = MBID_YES Then VmReqReset := 1;
@@ -7029,15 +7421,24 @@ Begin
 End;
 
 Function VmProc(H, Msg0, Mp1, Mp2 : LongInt) : LongInt;
+Var Rc : Array[0..3] Of LongInt;
 Begin
   VmProc := 0;
   Case Msg0 Of
     WM_PAINT : VmPaint(H);
     WM_TIMER : VmTick(H);
-    WM_CHAR : If ((Lo16(Mp1) And KC_ALT) <> 0) And (UpCase(Chr(Lo16(Mp2) And 255)) In ['M', 'A']) Then
+    WM_CHAR : If ((Lo16(Mp1) And KC_ALT) <> 0) And (UpCase(Chr(Lo16(Mp2) And 255)) In ['M', 'P', 'A']) Then
                 VmProc := WinDefWindowProc(H, Msg0, Mp1, Mp2)
               Else If InDlg = 0 Then VmKey(Mp1, Mp2);
-    WM_BUTTON1DOWN : Begin Dummy := WinSetFocus(HWND_DESKTOP, H); VmProc := 1; End;
+    WM_BUTTON1DOWN, WM_BUTTON2DOWN :
+      Begin
+        Dummy := WinSetFocus(HWND_DESKTOP, H);
+        PopUntil := 0;
+        { barre d'etat (en bas, coordonnees de PM) : partie disque ou icones }
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        If (Hi16(Mp1) <= Rc[3] - ScrH) And (Lo16(Mp1) >= DiskX - 8) Then DevMenu(Lo16(Mp1), Hi16(Mp1));
+        VmProc := 1;
+      End;
     WM_COMMAND : VmCommand(Lo16(Mp1));
     WM_CLOSE : If VmState <> VS_OFF Then
                Begin
@@ -7092,11 +7493,21 @@ Begin
   MItem(MIS_SEPARATOR, 0, 0, '');
   MItem(MIS_TEXT, 0, CM_POWER, '`~Eteindre la machine');
   MenuClose(H1, 7);
+  MItem(MIS_TEXT Or MIS_SUBMENU, 0, 1200, '~P`eriph`eriques');
+  H1 := MenuOpen;
+  MItem(MIS_TEXT, 0, CM_CDCHOOSE, 'Choisir une image de ~CD-ROM...');
+  MItem(MIS_TEXT, 0, CM_CDEJECT, '`~Ejecter le CD-ROM');
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  MItem(MIS_TEXT, 0, CM_FDCHOOSE, 'Choisir une image de ~disquette...');
+  MItem(MIS_TEXT, 0, CM_FDEJECT, '`Ejecter la dis~quette');
+  MItem(MIS_SEPARATOR, 0, 0, '');
+  MItem(MIS_TEXT, 0, CM_DISKINFO, '~Informations sur les disques...');
+  MenuClose(H1, 7);
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 1300, 'A~ide');
   H1 := MenuOpen;
   MItem(MIS_TEXT, 0, CM_ABOUT, '`~A propos de Virtualisation');
   MenuClose(H1, 1);
-  MenuClose(H0, 2);
+  MenuClose(H0, 3);
   M := WinCreateMenu(VmFrame, LongInt(@MenuT));
   ScrH := 400;
   CenterFrame(VmFrame, SW_, ScrH + 22);
@@ -8049,7 +8460,7 @@ Begin
     Log('VIRTUAL : ' + DkPath[0] + ' (' + DkFmt[0] + ', ' + IStr(DkSect[0] Div 2048) + ' Mo, CHS ' + IStr(DkCyl[0]) + '/' +
         IStr(DkHeads[0]) + '/' + IStr(DkSpt[0]) + ') par ' + MethodName(VmMethod));
   T0 := NowMs; Step := 0;
-  While NowMs - T0 < (Wait + BootRun) * 1000 Do
+  While (NowMs - T0 < (Wait + BootRun) * 1000) And (VmReqStop = 0) Do
   Begin
     VmStep;
     If (Step = 0) And (NowMs - T0 > Wait * 1000) Then
@@ -8091,7 +8502,7 @@ Var
 
 BEGIN
   InDlg := 0; TestMode := 0; TraceOn := 0; NVm := 0; CurVm := -1; CurSel := -1; VmFrame := 0; VmWin := 0; MgrClient := 0;
-  InfoFrame := 0; CfgFrame := 0; DwFrame := 0; GMem := 0; VmsRootS := ''; VmState := VS_OFF; StartName := ''; BootPath := ''; BootKeys := ''; AddPath := ''; BootWait := 30;
+  InfoFrame := 0; CfgFrame := 0; DwFrame := 0; PickFrame := 0; PopMenu := 0; PopUntil := 0; GMem := 0; VmsRootS := ''; VmState := VS_OFF; StartName := ''; BootPath := ''; BootKeys := ''; AddPath := ''; BootWait := 30;
   BootHd := ''; BootHdMb := 0; BootMem := 32; BootRun := 20; NewDlg := 0; BootShot := '';
   For K := 0 To NDk - 1 Do DkH[K] := -1;
   FillChar(Dt, SizeOf(Dt), 0);
@@ -8106,7 +8517,17 @@ BEGIN
     If Copy(S, 1, 7) = '/START:' Then StartName := Copy(ParamStr(K), 8, 255);
     If Copy(S, 1, 10) = '/BOOTTEST:' Then BootPath := Copy(ParamStr(K), 11, 255);
     If Copy(S, 1, 5) = '/ADD:' Then AddPath := Copy(ParamStr(K), 6, 255);
-    If Copy(S, 1, 6) = '/KEYS:' Then BootKeys := Copy(ParamStr(K), 7, 255);
+    If Copy(S, 1, 6) = '/KEYS:' Then
+    Begin
+      { le texte continue sur les mots suivants (espaces) jusqu'au prochain parametre }
+      BootKeys := Copy(ParamStr(K), 7, 255);
+      E := K + 1;
+      While (E <= ParamCount) And (Copy(ParamStr(E), 1, 1) <> '/') Do
+      Begin
+        BootKeys := BootKeys + ' ' + ParamStr(E);
+        Inc(E);
+      End;
+    End;
     If Copy(S, 1, 6) = '/WAIT:' Then BootWait := SVal(Copy(S, 7, 9));
     If Copy(S, 1, 4) = '/HD:' Then BootHd := Copy(ParamStr(K), 5, 255);
     If Copy(S, 1, 6) = '/HDMB:' Then BootHdMb := SVal(Copy(S, 7, 9));
@@ -8147,6 +8568,7 @@ BEGIN
   Dummy := WinRegisterClass(Hab, Z('VBOXINFO'), LongInt(@InfoProc), 0, 0);
   Dummy := WinRegisterClass(Hab, Z('VBOXCFG'), LongInt(@CfgProc), 0, 0);
   Dummy := WinRegisterClass(Hab, Z('VBOXDL'), LongInt(@DwProc), 0, 0);
+  Dummy := WinRegisterClass(Hab, Z('VBOXPICK'), LongInt(@PickProc), 0, 0);
   RegLoad;
   If AddPath <> '' Then
   Begin
