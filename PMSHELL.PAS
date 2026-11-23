@@ -56,7 +56,9 @@ Program PMSHELL;
   Souris : clic (bouton 1) : selection ; double clic : ouvrir ; bouton 2 :
   menu contextuel de l'objet ou du fond.
   Clavier : fleches, Debut, Fin : selection ; Entree : ouvrir ;
-  Maj+F10 : menu contextuel ; Ctrl+Echap : liste des fenetres ; F5 :
+  Maj+F10 : menu contextuel ; Ctrl+Echap : liste des fenetres ;
+  Ctrl+Alt+Suppr : boite Securite d'OS/2 (Verrouiller, Fermer la session,
+  Arreter, Gestionnaire des taches, Annuler, comme Windows NT) ; F5 :
   actualiser ; Retour arriere : dossier parent ; Suppr : supprimer
   l'objet choisi (apres confirmation) ; F1 : aide ; lettre : objet
   suivant qui commence par cette lettre ; Alt+F4 : fermer la fenetre
@@ -261,6 +263,9 @@ Var
   { boite Renommer }
   RnFr, RnCl, RnEd, RnOkB, RnCaB, RnEnd, RnH : LongInt;
   RnReg : Boolean;
+  { Securite d'OS/2 (Ctrl+Alt+Suppr) : boite, ecran verrouille }
+  SecFr, SecCl, SecEnd, LockH : LongInt;
+  SecReg, SecOpen, Locked : Boolean;
   RnLabel : String;
   PendSingle : LongInt;                    { clic sur un objet d'un choix multiple }
   FindBuf : Array[0..4095] Of Byte;
@@ -4435,7 +4440,8 @@ Begin
     reels ferment la machine) ; si elle est impossible, le message reste }
   Dummy := DosSleep(700);
   Dummy := KDiskCtl(16, 0, 0);
-  { Ctrl+Alt+Suppr est traite par le noyau (redemarrage) }
+  { Ctrl+Alt+Suppr est rendu au noyau (redemarrage) }
+  Dummy := KSes(24, 2, 0);
   Repeat
     If KbdCharIn(LongInt(@Ki), 0, 0) <> 0 Then Dummy := DosSleep(100);
   Until False;
@@ -4449,6 +4455,237 @@ Begin
 End;
 
 Procedure RunPm(P, Params : String); Forward;
+
+{ ==================================================================== }
+{ Securite d'OS/2 (Ctrl+Alt+Suppr), comme Windows NT et Pasdows 95 : le  }
+{ noyau signale la combinaison au bureau (KrnSesCtl 24) au lieu de       }
+{ redemarrer ; boite Verrouiller l'ordinateur, Fermer la session,        }
+{ Arreter, Gestionnaire des taches, Annuler                              }
+{ ==================================================================== }
+
+Const
+  SEC_LOCK = 1; SEC_LOGOFF = 2; SEC_SHUT = 3; SEC_TASKS = 4; SEC_CANCEL = 5;
+
+Function SecProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Ps, Fl, Ch, Vk, I2 : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  SecProc := 0;
+  Case Msg Of
+    WM_PAINT :
+      Begin
+        Ps := WinBeginPaint(H, 0, 0);
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        Dummy := WinFillRect(Ps, LongInt(@Rc), CLR_PALEGRAY);
+        DrawIcon(Ps, IC_SYSTEM, 16, Rc[3] - 50);
+        GText(Ps, 64, Rc[3] - 28, 'OS/2-0', CLR_BLACK, CLR_PALEGRAY);
+        GText(Ps, 65, Rc[3] - 28, 'OS/2-0', CLR_BLACK, CLR_PALEGRAY);
+        GText(Ps, 64, Rc[3] - 48, 'Ouvert en tant que : Utilisateur', CLR_BLACK, CLR_PALEGRAY);
+        GText(Ps, 16, Rc[3] - 86, 'Utilisez le Gestionnaire des t'#131'ches pour fermer une', CLR_BLACK, CLR_PALEGRAY);
+        GText(Ps, 16, Rc[3] - 104, 'application qui ne r'#130'pond pas.', CLR_BLACK, CLR_PALEGRAY);
+        GLn(Ps, 10, Rc[3] - 122, Rc[2] - 10, Rc[3] - 122, CLR_DARKGRAY);
+        GLn(Ps, 10, Rc[3] - 123, Rc[2] - 10, Rc[3] - 123, CLR_WHITE);
+        Dummy := WinEndPaint(Ps);
+      End;
+    WM_COMMAND :
+      If (Lo16(Mp1) >= SEC_LOCK) And (Lo16(Mp1) <= SEC_CANCEL) Then SecEnd := Lo16(Mp1);
+    WM_CHAR :
+      Begin
+        Fl := Lo16(Mp1); Ch := Lo16(Mp2); Vk := Hi16(Mp2);
+        SecProc := 1;
+        If (Fl And KC_KEYUP) <> 0 Then SecProc := WinDefWindowProc(H, Msg, Mp1, Mp2)
+        Else If ((Fl And KC_VIRTUALKEY) <> 0) And ((Vk = VK_ESC) Or (Vk = VK_ENTER) Or (Vk = VK_NEWLINE)) Then
+        Begin
+          SecEnd := SEC_CANCEL;
+          If Vk <> VK_ESC Then
+            For I2 := SEC_LOCK To SEC_TASKS Do
+              If WinQueryFocus(HWND_DESKTOP) = WinWindowFromID(H, I2) Then SecEnd := I2;
+        End
+        Else If (Fl And KC_CHAR) <> 0 Then
+          Case UpCase(Chr(Ch And 255)) Of
+            'V' : SecEnd := SEC_LOCK;
+            'F' : SecEnd := SEC_LOGOFF;
+            'A' : SecEnd := SEC_SHUT;
+            'G' : SecEnd := SEC_TASKS;
+          Else
+            SecProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+          End
+        Else SecProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+      End;
+    WM_CLOSE : SecEnd := SEC_CANCEL;
+  Else
+    SecProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+{ ecran verrouille : tout l'ecran (couleur du bureau) et un panneau ;
+  clavier et souris ne vont plus aux programmes, qui continuent de
+  tourner ; Ctrl+Alt+Suppr le deverrouille }
+Function LockProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Ps, X1, Y1, X2, Y2 : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  LockProc := 1;
+  Case Msg Of
+    WM_PAINT :
+      Begin
+        Ps := WinBeginPaint(H, 0, 0);
+        Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+        Dummy := WinFillRect(Ps, LongInt(@Rc), DeskColor);
+        X1 := (Rc[2] - 460) Div 2; Y1 := (Rc[3] - 180) Div 2; X2 := X1 + 460; Y2 := Y1 + 180;
+        Rc[0] := X1; Rc[1] := Y1; Rc[2] := X2; Rc[3] := Y2;
+        Dummy := WinFillRect(Ps, LongInt(@Rc), CLR_PALEGRAY);
+        GLn(Ps, X1, Y2, X2, Y2, CLR_WHITE); GLn(Ps, X1, Y1, X1, Y2, CLR_WHITE);
+        GLn(Ps, X1, Y1, X2, Y1, CLR_BLACK); GLn(Ps, X2, Y1, X2, Y2, CLR_BLACK);
+        Rc[0] := X1 + 3; Rc[1] := Y2 - 23; Rc[2] := X2 - 3; Rc[3] := Y2 - 3;
+        Dummy := WinFillRect(Ps, LongInt(@Rc), CLR_DARKBLUE);
+        GText(Ps, X1 + 8, Y2 - 21, 'Ordinateur verrouill'#130, CLR_WHITE, CLR_DARKBLUE);
+        DrawIcon(Ps, IC_SYSTEM, X1 + 16, Y2 - 72);
+        GText(Ps, X1 + 64, Y2 - 52, 'Cet ordinateur est en cours d''utilisation', CLR_BLACK, CLR_PALEGRAY);
+        GText(Ps, X1 + 64, Y2 - 70, 'et a '#130't'#130' verrouill'#130'.', CLR_BLACK, CLR_PALEGRAY);
+        GText(Ps, X1 + 64, Y2 - 104, 'Appuyez sur Ctrl+Alt+Suppr pour le', CLR_BLACK, CLR_PALEGRAY);
+        GText(Ps, X1 + 64, Y2 - 122, 'd'#130'verrouiller.', CLR_BLACK, CLR_PALEGRAY);
+        GText(Ps, X1 + 64, Y2 - 156, '(VirtualBox : Ctrl droit+Suppr)', CLR_DARKGRAY, CLR_PALEGRAY);
+        Dummy := WinEndPaint(Ps);
+      End;
+    WM_CHAR, WM_BUTTON1DOWN, WM_BUTTON1UP, WM_BUTTON2DOWN, WM_BUTTON2UP, WM_BUTTON1DBLCLK : ;
+    WM_CLOSE : ;
+  Else
+    LockProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+Procedure LockOn;
+Begin
+  If Locked Then Exit;
+  If Not SecReg Then
+  Begin
+    Dummy := WinRegisterClass(Hab, Z('WPSecurity'), LongInt(@SecProc), 0, 0);
+    Dummy := WinRegisterClass(Hab, Z('WPLock'), LongInt(@LockProc), 0, 0);
+    SecReg := True;
+  End;
+  LockH := WinCreateWindow(HWND_DESKTOP, Z('WPLock'), Z2('Ordinateur verrouill'#130), WS_VISIBLE, 0, 0, ScrW, ScrH,
+                           0, HWND_TOP, 1, 0, 0);
+  If LockH = 0 Then Exit;
+  Locked := True;
+  Dummy := KSes(24, 3, 1);
+  Dummy := WinSetActiveWindow(HWND_DESKTOP, LockH);
+  Dummy := WinSetFocus(HWND_DESKTOP, LockH);
+  Dummy := WinSetCapture(HWND_DESKTOP, LockH);
+End;
+
+Procedure LockOff;
+Begin
+  If Not Locked Then Exit;
+  Dummy := WinSetCapture(HWND_DESKTOP, 0);
+  Dummy := WinDestroyWindow(LockH);
+  LockH := 0;
+  Locked := False;
+  Dummy := KSes(24, 3, 0);
+  Dummy := WinInvalidateRect(HWND_DESKTOP, 0, 1);
+  Dummy := WinSetFocus(HWND_DESKTOP, Desk);
+End;
+
+{ Fermer la session : tous les programmes (sauf le bureau et le
+  LaunchPad) et les dossiers ouverts ; le bureau reste }
+Procedure Logoff;
+Var K : LongInt; PB : Array[0..63] Of LongInt; Nm : String;
+Begin
+  For K := 0 To 63 Do
+    If KTrapCtl(35, K, LongInt(@PB), 0) = 1 Then
+      If (PB[6] And 8) = 0 Then
+      Begin
+        Nm := UpStr(GetZ(LongInt(@PB) + 32));
+        If (Pos('PMSHELL', Nm) = 0) And (Pos('LAUNCHPD', Nm) = 0) Then Dummy := KTrapCtl(5, PB[0], 1, 0);
+      End;
+  For K := 0 To ViewCap - 1 Do
+    If (Vw(K)^.Use <> 0) And (Vw(K)^.Kind <> VK_DESK) Then CloseView(K);
+  Dummy := WinInvalidateRect(HWND_DESKTOP, 0, 1);
+End;
+
+Procedure SecButton(Cl, X, Y, W, Id : LongInt; T : String; Def : Boolean);
+Var St : LongInt;
+Begin
+  St := WS_VISIBLE Or WS_TABSTOP Or BS_PUSHBUTTON;
+  If Def Then St := St Or BS_DEFAULT;
+  Dummy := WinCreateWindow(Cl, WC_BUTTON, Z(T), St, X, Y, W, 26, Cl, HWND_TOP, Id, 0, 0);
+End;
+
+Procedure SecurityBox;
+Var Fl, W, H, X, Y, R : LongInt; Rc : Array[0..3] Of LongInt; Qm : Array[0..7] Of LongInt;
+Begin
+  If SecOpen Then
+  Begin
+    If SecFr <> 0 Then Dummy := WinSetActiveWindow(HWND_DESKTOP, SecFr);
+    Exit;
+  End;
+  If Not SecReg Then
+  Begin
+    Dummy := WinRegisterClass(Hab, Z('WPSecurity'), LongInt(@SecProc), 0, 0);
+    Dummy := WinRegisterClass(Hab, Z('WPLock'), LongInt(@LockProc), 0, 0);
+    SecReg := True;
+  End;
+  Fl := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER;
+  SecCl := 0;
+  SecFr := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Fl), Z('WPSecurity'), Z2('S'#130'curit'#130' d''OS/2'), 0, 0, 0,
+                              LongInt(@SecCl));
+  If SecFr = 0 Then Exit;
+  SecOpen := True;
+  W := 470; H := 240;
+  Rc[0] := 0; Rc[1] := 0; Rc[2] := W; Rc[3] := H;
+  Dummy := WinCalcFrameRect(SecFr, LongInt(@Rc), 0);
+  X := MaxI(0, (ScrW - (Rc[2] - Rc[0])) Div 2);
+  Y := MaxI(0, (ScrH - (Rc[3] - Rc[1])) Div 2);
+  Dummy := WinSetWindowPos(SecFr, HWND_TOP, X, Y, Rc[2] - Rc[0], Rc[3] - Rc[1],
+                           SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW Or SWP_ACTIVATE);
+  { deux colonnes, trois rangees ; Annuler en bas a droite }
+  SecButton(SecCl, 16, H - 162, 212, SEC_LOCK, 'Verrouiller l''ordinateur', False);
+  SecButton(SecCl, 242, H - 162, 212, SEC_LOGOFF, 'Fermer la session...', False);
+  SecButton(SecCl, 16, H - 194, 212, SEC_SHUT, 'Arr'#136'ter...', False);
+  SecButton(SecCl, 242, H - 194, 212, SEC_TASKS, 'Gestionnaire des t'#131'ches', False);
+  SecButton(SecCl, 242, H - 226, 212, SEC_CANCEL, 'Annuler', True);
+  Dummy := WinSetActiveWindow(HWND_DESKTOP, SecFr);
+  Dummy := WinSetFocus(HWND_DESKTOP, WinWindowFromID(SecCl, SEC_CANCEL));
+  SecEnd := 0;
+  While SecEnd = 0 Do
+    If WinGetMsg(Hab, LongInt(@Qm), 0, 0, 0) = 0 Then SecEnd := SEC_CANCEL
+    Else Dummy := WinDispatchMsg(Hab, LongInt(@Qm));
+  R := SecEnd;
+  Dummy := WinDestroyWindow(SecFr);
+  SecFr := 0; SecCl := 0;
+  SecOpen := False;
+  Dummy := WinInvalidateRect(HWND_DESKTOP, 0, 1);
+  Case R Of
+    SEC_LOCK : LockOn;
+    SEC_LOGOFF :
+      If WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, Z('Voulez-vous vraiment fermer la session ? Les programmes ouverts ' +
+                       'seront ferm'#130's.'), Z2('Fermer la session'), 0,
+                       MB_YESNO Or MB_QUERY Or MB_MOVEABLE) = MBID_YES Then Logoff;
+    SEC_SHUT : Shutdown;
+    SEC_TASKS :
+      If TaskMgrPath <> '' Then RunPm(TaskMgrPath, '')
+      Else ShowMsg('Le Gestionnaire des t'#131'ches (TASKMGR.EXE) est introuvable.', 'S'#130'curit'#130' d''OS/2',
+                   MB_OK Or MB_INFORMATION);
+  End;
+End;
+
+{ toutes les 200 ms : Ctrl+Alt+Suppr presse ? (boite, ou deverrouiller) ;
+  l'ecran verrouille reste devant }
+Procedure SasPoll;
+Begin
+  If KSes(24, 0, 0) = 1 Then
+  Begin
+    If Locked Then LockOff Else SecurityBox;
+    Exit;
+  End;
+  If Locked Then
+    If WinQueryActiveWindow(HWND_DESKTOP) <> LockH Then
+    Begin
+      Dummy := WinSetWindowPos(LockH, HWND_TOP, 0, 0, ScrW, ScrH, SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW Or
+                               SWP_ACTIVATE);
+      Dummy := WinSetActiveWindow(HWND_DESKTOP, LockH);
+      Dummy := WinSetFocus(HWND_DESKTOP, LockH);
+      Dummy := WinSetCapture(HWND_DESKTOP, LockH);
+    End;
+End;
 
 Procedure Props(K : LongInt);
 Var T, P, X : String; Drv : Boolean;
@@ -7252,6 +7489,11 @@ Begin
     CheckTrap;
     Exit;
   End;
+  If (Msg = WM_TIMER) And ((Mp1 And $FFFF) = 12) Then
+  Begin
+    SasPoll;
+    Exit;
+  End;
   V := ViewOf(H);
   If (V < 0) And (Msg = WM_CREATE) And (Creating >= 0) Then
   Begin
@@ -7675,6 +7917,9 @@ BEGIN
   { exceptions des programmes : verifiees chaque seconde }
   TrapSeen := KTrapCtl(21, 0, 0, 0);
   Dummy := WinStartTimer(Hab, Desk, 11, 1000);
+  { Ctrl+Alt+Suppr : boite Securite d'OS/2 (au lieu du redemarrage) }
+  Dummy := KSes(24, 1, 0);
+  Dummy := WinStartTimer(Hab, Desk, 12, 200);
   ShowLogo;
   StartLaunchPad;
   StartupCmd;

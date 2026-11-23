@@ -252,7 +252,23 @@ Demarrage
    volumes reconnus (D:, E:...). Il lance enfin le processeur de
    commandes (PROTSHELL : C:\PMSHELL.EXE, le bureau, sur le CD-ROM ;
    C:\CMD.EXE par defaut). S'il se termine, il est relance.
-   Ctrl+Alt+Suppr redemarre l'ordinateur a tout moment.
+   Ctrl+Alt+Suppr ouvre la boite Securite d'OS/2 du bureau (sans
+   bureau, il redemarre l'ordinateur).
+
+Securite d'OS/2 (Ctrl+Alt+Suppr)
+--------------------------------
+Comme sous Windows NT et Pasdows 95 (et non comme sous OS/2),
+Ctrl+Alt+Suppr ouvre la boite Securite d'OS/2 du bureau (PMSHELL.EXE) :
+Verrouiller l'ordinateur (V : ecran plein, clavier et souris retires
+aux programmes, Alt+Echap et Ctrl+Echap sans effet ; Ctrl+Alt+Suppr
+deverrouille), Fermer la session... (F : apres confirmation, tous les
+programmes sauf le bureau et le LaunchPad, et les dossiers ouverts),
+Arreter... (A), Gestionnaire des taches (G : TASKMGR.EXE), Annuler
+(Entree, Echap). Le noyau la signale au bureau (KrnSesCtl 24) et
+ramene Presentation Manager au premier plan ; sans bureau (demarrage,
+installation, PROTSHELL=CMD.EXE, apres l'arret) ou si le bureau ne
+repond plus depuis 5 s, il redemarre l'ordinateur. VirtualBox : Ctrl
+droit+Suppr ou Entree, Clavier, Inserer Ctrl-Alt-Suppr.
 
 Ecran de demarrage graphique (disque dur) : au lieu des messages de la
 console, OS2KRNL affiche en 640 x 480 x 16 couleurs la boite "Demarrage

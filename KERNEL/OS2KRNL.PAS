@@ -411,6 +411,10 @@ Var
   SKbdBuf, SKbdXt, SKbdTm : Array[0..MaxSess * 64 - 1] Of LongInt;
   SesFlags         : Array[0..7] Of LongInt;   { lus par les DLL (KrnSesCtl 15) }
   FgSess, CurSess, Epoch, Switching, PmSess, PendSwitch, NextSess, SwHook : LongInt;
+  { Ctrl+Alt+Suppr (KrnSesCtl 24) : processus du bureau qui le recoit
+    (boite Securite d'OS/2, PMSHELL.EXE), appui en attente, ecran verrouille }
+  SasProc, SasSer, SasT : LongInt;
+  SasPend, SasLock : Boolean;
   KernPT, GfxScratch : LongInt;
   PauseMsg         : String;
 
@@ -1329,12 +1333,28 @@ Begin
       KbdState := KbdState And Not (B Shl 8);
   End;
   KbdSyncFlags;
-  { Ctrl+Alt+Suppr : redemarrage (impulsion de remise a zero du
-    controleur du clavier) }
-  If (Up = 0) And (Sc = $53) And ((KbdState And $000C) = $000C) Then Port[$64] := $FE;
+  { Ctrl+Alt+Suppr : comme sous Windows NT, le bureau (PMSHELL, KrnSesCtl
+    24) ouvre la boite Securite d'OS/2 (Presentation Manager revient au
+    premier plan) ; sans lui (demarrage, installation, bureau termine), ou
+    si un appui precedent attend depuis plus de 5 s (bureau bloque) :
+    redemarrage (impulsion de remise a zero du controleur du clavier) }
+  If (Up = 0) And (Sc = $53) And ((KbdState And $000C) = $000C) Then
+  Begin
+    If (SasSer <> 0) And (SasProc >= 0) And (SasProc < MaxProcs) And Procs[SasProc].Used And
+       (Procs[SasProc].Serial = SasSer) And Not (SasPend And (Ticks - SasT > 500)) Then
+    Begin
+      If Not SasPend Then SasT := Ticks;
+      SasPend := True;
+      If (PmSess >= 0) And (FgSess <> PmSess) Then PendSwitch := PmSess;
+      KbdE0 := False;
+      Port[$20] := $20;
+      Exit;
+    End;
+    Port[$64] := $FE;
+  End;
   { Alt+Echap : session suivante ; Ctrl+Echap (hors de PM) : retour a
-    Presentation Manager }
-  If (Up = 0) And (Sc = $01) And Not KbdE0 And ((KbdState And $000C) <> 0) Then
+    Presentation Manager (pas quand l'ordinateur est verrouille) }
+  If (Up = 0) And (Sc = $01) And Not KbdE0 And ((KbdState And $000C) <> 0) And Not SasLock Then
     If ((KbdState And $0008) <> 0) Or ((PmSess >= 0) And (FgSess <> PmSess)) Then
     Begin
       If (KbdState And $0008) <> 0 Then PendSwitch := NextSessOf(FgSess) Else PendSwitch := PmSess;
@@ -8622,7 +8642,12 @@ End;
    23 lire l'historique de la session p1 : p2 = premiere ligne (0 : la
       plus ancienne gardee), nombre de lignes, adresse (160 octets par
       ligne) ; en retour p2+12 lignes poussees depuis le debut, p2+16
-      lignes gardees ; rend le nombre de lignes gardees }
+      lignes gardees ; rend le nombre de lignes gardees
+   24 Ctrl+Alt+Suppr (comme Windows NT) : p1 = 1 l'appelant (le bureau)
+      le recoit desormais au lieu du redemarrage ; 0 rend 1 s'il a ete
+      presse depuis le dernier appel ; 2 l'appelant y renonce (retour au
+      redemarrage) ; 3 ordinateur verrouille (p2 = 1) ou non (p2 = 0) :
+      Alt+Echap et Ctrl+Echap ne changent plus de session }
 Function KrnSesCtl(Op, P1, P2 : LongInt) : LongInt;
 Var S, Old, KsSave : LongInt;
 Begin
@@ -8808,6 +8833,25 @@ Begin
            MemL[0:P2 + 12] := SHistTot[P1];
            MemL[0:P2 + 16] := SHistCnt[P1];
            KrnSesCtl := SHistCnt[P1];
+         End;
+    24 : Case P1 Of
+           0 : If SasPend Then
+               Begin
+                 SasPend := False;
+                 KrnSesCtl := 1;
+               End;
+           1 : If CurProc >= 0 Then
+               Begin
+                 SasProc := CurProc; SasSer := Procs[CurProc].Serial;
+                 SasPend := False;
+                 KrnSesCtl := 1;
+               End;
+           2 : If (CurProc = SasProc) Or (SasProc < 0) Or (SasProc >= MaxProcs) Or
+                  Not Procs[SasProc].Used Or (Procs[SasProc].Serial <> SasSer) Then
+               Begin
+                 SasSer := 0; SasPend := False; SasLock := False;
+               End;
+           3 : SasLock := P2 <> 0;
          End;
   End;
 End;
