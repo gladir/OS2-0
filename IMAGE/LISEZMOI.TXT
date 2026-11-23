@@ -22,6 +22,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               BLACKJAK.EXE, BLOX.EXE, GOLF.EXE, FROGGER.EXE, HANGMAN.EXE,
               LIGHTS.EXE, LUNAR.EXE, BOSTON.EXE, CANNONBA.EXE, BINGO.EXE,
               CRAPS.EXE, ROULETTE.EXE, XIANGQI.EXE, TTT3D.EXE, PATIENCE.EXE,
+              PLOMBIER.EXE,
               ASTROMAN.EXE, REVES.EXE (et REVE.TXT), ASTRO.EXE, SIMUPLAN.EXE,
               CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
               DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
@@ -135,6 +136,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC XIANGQI.PAS                         -> XIANGQI.EXE (Xiangqi)
   OS2PC TTT3D.PAS                           -> TTT3D.EXE (Tic-Tac-Toe 3D)
   OS2PC PATIENCE.PAS                        -> PATIENCE.EXE (Patience)
+  OS2PC PLOMBIER.PAS                        -> PLOMBIER.EXE (Le Plombier)
   OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
   OS2PC APPS\ASTROMAN.PAS                   -> ASTROMAN.EXE (Astromancie)
   OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
@@ -1176,6 +1178,12 @@ traditionnels, composant Jeux de l'installation) :
   3x3x3. Porte de TTT3D.PAS.
   Patience (PATIENCE.EXE) : solitaire a rang de base, reserves, pioche
   trois par trois ou une a une. Porte de PATIENCE.PAS.
+  Le Plombier (PLOMBIER.EXE) : jeu de plateformes a un ecran ; Lorenzo
+  le plombier (chandail gris) frappe le dessous des plateformes pour
+  retourner tortues, crabes, mouches, rats et crocodiles sortis de deux
+  tuyaux bleus, puis les elimine ; bloc POW, clefs de plombier a deposer
+  en haut (bonus), verglas, pieces, 10 phases. Fleches et Espace.
+  Realise a partir du prototype MARIO.PAS (7iles), dessins originaux.
   Tous : /SEED:n, /AUTO, /NOSOUND, /TEST (7iles).
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,

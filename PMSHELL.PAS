@@ -179,7 +179,7 @@ Const
   OB_NETTOOLS = 41; IC_FTPCLI = 83; IC_SSHCLI = 84; IC_MSTSC = 85; IC_BUBBLE = 86;
   IC_BLACKJAK = 87; IC_BLOX = 88; IC_GOLF = 89; IC_FROGGER = 90; IC_HANGMAN = 91; IC_LIGHTS = 92;
   IC_VIRTUAL = 93; IC_LUNAR = 94; IC_BOSTON = 95; IC_CANNONBA = 96; IC_BINGO = 97; IC_CRAPS = 98;
-  IC_ROULETTE = 99; IC_XIANGQI = 100; IC_TTT3D = 101; IC_PATIENCE = 102;
+  IC_ROULETTE = 99; IC_XIANGQI = 100; IC_TTT3D = 101; IC_PATIENCE = 102; IC_PLOMBIER = 103;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1472,7 +1472,7 @@ Begin
   If Pos(B, ' KLONDIKE FREECELL POKER BACCARAT BADUGI BARBU BATAILLE BLACKJAK GOLF BOSTON PATIENCE ') > 0 Then GameGenre := 1
   Else If Pos(B, ' ECHECS OTHELLO CHECKERS BACKGAM BATTLE POWER4 TTT L25 XIANGQI TTT3D ') > 0 Then GameGenre := 2
   Else If Pos(B, ' MAHJONGG SUDOKU HEX2048 SOKOBAN HANOIS LIGHTS HANGMAN TILEMAN ') > 0 Then GameGenre := 3
-  Else If Pos(B, ' CENTIPED ASTEROID EXCAVAT PINBALL BREAKOUT INVADERS MISSILE BUBBLE BLOX FROGGER BABY LUNAR CANNONBA ') > 0 Then
+  Else If Pos(B, ' CENTIPED ASTEROID EXCAVAT PINBALL BREAKOUT INVADERS MISSILE BUBBLE BLOX FROGGER BABY LUNAR CANNONBA PLOMBIER ') > 0 Then
     GameGenre := 4
   Else If Pos(B, ' YATHZEE 421 BASEBALL BILLARD BINGO CRAPS ROULETTE ') > 0 Then GameGenre := 5;
 End;
@@ -1702,6 +1702,7 @@ Begin
         If FileExists('C:\XIANGQI.EXE') Then Dummy := NewItem(V, IC_XIANGQI, OB_GAME, 'Xiangqi', 'C:\XIANGQI.EXE');
         If FileExists('C:\TTT3D.EXE') Then Dummy := NewItem(V, IC_TTT3D, OB_GAME, 'Tic-Tac-Toe 3D', 'C:\TTT3D.EXE');
         If FileExists('C:\PATIENCE.EXE') Then Dummy := NewItem(V, IC_PATIENCE, OB_GAME, 'Patience', 'C:\PATIENCE.EXE');
+        If FileExists('C:\PLOMBIER.EXE') Then Dummy := NewItem(V, IC_PLOMBIER, OB_GAME, 'Le Plombier', 'C:\PLOMBIER.EXE');
       End;
     VK_PRODUCT :
       Begin
@@ -3367,6 +3368,54 @@ Begin
         GDisc(Hps, X + 18, Y + 6, 2, CLR_BLUE);
         GDisc(Hps, X + 22, Y + 15, 2, CLR_BLUE);
         GDisc(Hps, X + 12, Y + 24, 2, CLR_BLUE);
+      End;
+    IC_PLOMBIER :
+      Begin
+        { mur sombre, tuyau gris a gauche, plateforme de carres a triangles,
+          plancher de briques rouges ; Lorenzo (casquette sarcelle,
+          chandail gris, salopette ocre) leve sa clef a molette }
+        FBox(Hps, X + 1, Y + 1, X + 30, Y + 30, CLR_DARKBLUE, CLR_BLACK);
+        GBox(Hps, X + 2, Y + 2, X + 29, Y + 5, CLR_RED, DRO_FILL);
+        GLn(Hps, X + 2, Y + 4, X + 29, Y + 4, CLR_DARKRED);
+        For K := 0 To 3 Do GLn(Hps, X + 5 + K * 7, Y + 2, X + 5 + K * 7, Y + 3, CLR_DARKRED);
+        For K := 0 To 3 Do GLn(Hps, X + 8 + K * 7, Y + 5, X + 8 + K * 7, Y + 5, CLR_DARKRED);
+        GBox(Hps, X + 2, Y + 21, X + 9, Y + 27, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 2, Y + 26, X + 9, Y + 26, CLR_WHITE);
+        GLn(Hps, X + 2, Y + 22, X + 9, Y + 22, CLR_DARKGRAY);
+        GLn(Hps, X + 5, Y + 22, X + 5, Y + 26, CLR_DARKGRAY);
+        GBox(Hps, X + 10, Y + 19, X + 13, Y + 29, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 10, Y + 28, X + 13, Y + 28, CLR_WHITE);
+        GLn(Hps, X + 10, Y + 20, X + 13, Y + 20, CLR_DARKGRAY);
+        GLn(Hps, X + 13, Y + 21, X + 13, Y + 27, CLR_BLACK);
+        For K := 0 To 2 Do GBox(Hps, X + 2 + K * 4, Y + 13, X + 5 + K * 4, Y + 16, CLR_DARKPINK, DRO_FILL);
+        For K := 0 To 2 Do GLn(Hps, X + 2 + K * 4, Y + 13, X + 5 + K * 4, Y + 16, CLR_BLACK);
+        For K := 0 To 2 Do GLn(Hps, X + 2 + K * 4, Y + 16, X + 5 + K * 4, Y + 13, CLR_BLACK);
+        GLn(Hps, X + 2, Y + 17, X + 13, Y + 17, CLR_PINK);
+        GDisc(Hps, X + 27, Y + 12, 2, CLR_YELLOW);
+        GLn(Hps, X + 27, Y + 11, X + 27, Y + 13, CLR_BROWN);
+        GBox(Hps, X + 15, Y + 6, X + 18, Y + 7, CLR_BLACK, DRO_FILL);
+        GBox(Hps, X + 21, Y + 6, X + 24, Y + 7, CLR_BLACK, DRO_FILL);
+        GBox(Hps, X + 16, Y + 8, X + 18, Y + 11, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 21, Y + 8, X + 23, Y + 11, CLR_YELLOW, DRO_FILL);
+        GBox(Hps, X + 16, Y + 12, X + 23, Y + 15, CLR_YELLOW, DRO_FILL);
+        GLn(Hps, X + 18, Y + 8, X + 18, Y + 11, CLR_BROWN);
+        GLn(Hps, X + 23, Y + 8, X + 23, Y + 11, CLR_BROWN);
+        GBox(Hps, X + 15, Y + 16, X + 24, Y + 19, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 17, Y + 15, X + 22, Y + 17, CLR_YELLOW, DRO_FILL);
+        GLn(Hps, X + 17, Y + 18, X + 17, Y + 19, CLR_YELLOW);
+        GLn(Hps, X + 22, Y + 18, X + 22, Y + 19, CLR_YELLOW);
+        GBox(Hps, X + 14, Y + 12, X + 15, Y + 17, CLR_PALEGRAY, DRO_FILL);
+        GLn(Hps, X + 14, Y + 12, X + 15, Y + 12, CLR_WHITE);
+        GBox(Hps, X + 24, Y + 17, X + 25, Y + 21, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 17, Y + 20, X + 22, Y + 23, CLR_WHITE, DRO_FILL);
+        GLn(Hps, X + 17, Y + 20, X + 17, Y + 23, CLR_BROWN);
+        GBox(Hps, X + 21, Y + 22, X + 21, Y + 22, CLR_BLACK, DRO_FILL);
+        GBox(Hps, X + 16, Y + 24, X + 22, Y + 25, CLR_CYAN, DRO_FILL);
+        GLn(Hps, X + 17, Y + 26, X + 21, Y + 26, CLR_CYAN);
+        GLn(Hps, X + 22, Y + 24, X + 24, Y + 24, CLR_DARKCYAN);
+        GLn(Hps, X + 25, Y + 22, X + 27, Y + 26, CLR_WHITE);
+        GBox(Hps, X + 26, Y + 26, X + 29, Y + 29, CLR_PALEGRAY, DRO_FILL);
+        GBox(Hps, X + 27, Y + 28, X + 29, Y + 28, CLR_DARKBLUE, DRO_FILL);
       End;
     IC_PATIENCE :
       Begin

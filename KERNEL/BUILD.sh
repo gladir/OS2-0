@@ -30,7 +30,7 @@
 #     (Bonhomme pendu), LIGHTS.PAS (Lights), LUNAR.PAS (Alunissage), BOSTON.PAS
 #     (Boston), CANNONBA.PAS (Cannonball), BINGO.PAS (Bingo), CRAPS.PAS (Craps),
 #     ROULETTE.PAS (Roulette), XIANGQI.PAS (Xiangqi), TTT3D.PAS (Tic-Tac-Toe
-#     3D), PATIENCE.PAS (Patience), et
+#     3D), PATIENCE.PAS (Patience), PLOMBIER.PAS (Le Plombier), et
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), MP3PLAY.PAS
 #     (Lecteur MP3 : decodeur, liste de lecture et egaliseur dans le meme
 #     fichier, dossier Multimedia ; son exemple IMAGE/MUSIQUE/*.MP3 est
