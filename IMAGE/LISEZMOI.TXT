@@ -1291,8 +1291,8 @@ IntelliMouse dans le noyau, evenements $0100/$0200 de MOUCALLS,
 WM_VSCROLL de PMWIN vers la fenetre sous le pointeur.
   OS2PC APPS\MSTSC.PAS                      -> MSTSC.EXE
 
-Client GitHub (GITCLI.EXE, dossier Outils reseau)
--------------------------------------------------
+Client GitHub (GITCLI.EXE, dossiers Outils reseau et Developer Kit)
+-------------------------------------------------------------------
 Client Git et GitHub de Pasdows 95 porte vers OS/2 (source
 APPS\GITCLI.PAS, un seul fichier), dans le genre de GitHub Desktop : Git
 en Pascal (SHA-1, zlib, objets, packs et index v2, deltas OFS/REF, index,
@@ -1314,8 +1314,8 @@ deltas, progression a chaque gros objet. Le Client SVN cede aussi le
 processeur pendant ses longs calculs.
   OS2PC APPS\GITCLI.PAS                     -> GITCLI.EXE
 
-Client SVN (SVNCLI.EXE, dossier Outils reseau)
-----------------------------------------------
+Client SVN (SVNCLI.EXE, dossiers Outils reseau et Developer Kit)
+---------------------------------------------------------------
 Client Subversion de Pasdows 95 porte vers OS/2 (source APPS\SVNCLI.PAS,
 un seul fichier) : extraction, mise a jour avec fusion a trois voies et
 conflits (.mine, .rN), validation (ajouts, dossiers, suppressions,
