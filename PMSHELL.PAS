@@ -1580,7 +1580,7 @@ Begin
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
         If BrowserPath <> '' Then
           Dummy := NewItem(V, IC_WEB, OB_GAME, 'Navigateur Web', BrowserPath);
-        If PasDevPath <> '' Then
+        If (PasDevPath <> '') Or FileExists('C:\GITCLI.EXE') Or FileExists('C:\SVNCLI.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_DEVKIT, 'Developer Kit', '');
         { dossiers des applications, directement sur le bureau }
         If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Or
@@ -1804,6 +1804,12 @@ Begin
         If FileExists('C:\GETSRC.EXE') Then
           Dummy := NewItem(V, IC_GETSRC, OB_GAME, 'T' + Chr(130) + 'l' + Chr(130) + 'charger le code source d''OS2-Zero',
                            'C:\GETSRC.EXE');
+        { Client GitHub et Client SVN : aussi dans Outils reseau (le meme
+          programme, deux objets) }
+        If FileExists('C:\GITCLI.EXE') Then
+          Dummy := NewItem(V, IC_GITCLI, OB_GAME, 'Client GitHub', 'C:\GITCLI.EXE');
+        If FileExists('C:\SVNCLI.EXE') Then
+          Dummy := NewItem(V, IC_SVNCLI, OB_GAME, 'Client SVN', 'C:\SVNCLI.EXE');
       End;
     VK_SETUP :
       Begin

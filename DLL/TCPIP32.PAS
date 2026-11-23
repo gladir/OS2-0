@@ -1449,6 +1449,8 @@ Begin
   WrL(P + 4, MyIp); WrL(P + 8, Mask); WrL(P + 12, Gw); WrL(P + 16, Dns); WrL(P + 20, Dhcp);
   If DrvFn <> 0 Then WrL(P + 24, LinkState) Else WrL(P + 24, 0);
   WrL(P + 28, RxPkts); WrL(P + 32, TxPkts); WrL(P + 36, Lease);
+  { [12] serveur DHCP (IPCONFIG /ALL) ; 0 : adresse fixe }
+  WrL(P + 48, DhcpSrv);
   If DrvFn <> 0 Then
   Begin
     S := CardName + ' (' + DrvName + '.DLL), MAC ';

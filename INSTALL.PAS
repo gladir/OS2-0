@@ -42,8 +42,8 @@ Program INSTALL;
        Echecs, Mahjongg, Sudoku... : dossier Jeux du bureau ; Astromancie
        et Onirologie : dossier Loisirs du bureau), multimedia (Audio
        numerique, Lecteur MP3, MDM.DLL, pilotes des cartes son, sons), reseau TCP/IP
-       (TCPIP32.DLL, pilotes E1000 et PCNET, IFCONFIG, PING, HOST,
-       WGET, messagerie Outlink) ;
+       (TCPIP32.DLL, pilotes E1000 et PCNET, IFCONFIG, IPCONFIG, PING,
+       HOST, WGET, CURL, messagerie Outlink) ;
     6. Transfert des fichiers (barre de progression aux logos OS/2) :
        copie des fichiers du CD-ROM, CONFIG.SYS du disque dur, zone
        d'amorcage (secteurs 1 et suivants du disque : repertoire
@@ -1093,7 +1093,7 @@ Begin
           (Pos('.SON', U) > 0) Or (Pos('.MID', U) > 0) Or (U = 'MP3PLAY.EXE') Or
           (Pos('.MP3', U) > 0) Then Wanted := OptMM <> 0
   Else If (U = 'TCPIP32.DLL') Or (U = 'E1000.DLL') Or (U = 'PCNET.DLL') Or (U = 'IFCONFIG.EXE') Or (U = 'PING.EXE') Or
-          (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Or (U = 'SMB.IFS') Or (U = 'NET.EXE') Or
+          (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'IPCONFIG.EXE') Or (U = 'CURL.EXE') Or (U = 'OUTLINK.EXE') Or (U = 'SMB.IFS') Or (U = 'NET.EXE') Or
           (U = 'FTPCLI.EXE') Or (U = 'SSHCLI.EXE') Or (U = 'MSTSC.EXE') Or (U = 'SVNCLI.EXE') Or
           (U = 'GITCLI.EXE') Then
     Wanted := OptNet <> 0
