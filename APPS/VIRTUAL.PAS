@@ -69,7 +69,9 @@ Program VIRTUAL;
   COM1) ; /START:nom (demarre la machine nommee) ; /BOOTTEST:disque ou
   image.ISO /HD:disque /HDMB:n /MEM:n /WAIT:n /RUN:n /KEYS:texte (| ou
   ^ : Entree, # : F5) ; /ADD:fichier (.vbox, disque ou image ISO) ;
-  /NEW (Nouvelle machine virtuelle) ; /VMS:dossier ; /TRACE. }
+  /NEW (Nouvelle machine virtuelle) ; /VMS:dossier ; /TRACE ;
+  /SHOT:COM ou /SHOT:fichier.BMP (image de l'invite a la fin de
+  /BOOTTEST). }
 
 Const
   WM_CREATE = $0001; WM_DESTROY = $0002; WM_SIZE = $0007; WM_SETFOCUS = $000F;
@@ -2226,6 +2228,9 @@ Begin
         H := RdB(A + 446 + K * 16 + 5) + 1;
         S := RdB(A + 446 + K * 16 + 6) And 63;
       End;
+  { geometrie improbable (moins de 2 tetes ou de 9 secteurs, disque de
+    plus de 8 Mo) : traduction LBA }
+  If (H < 2) Or (S < 9) Then If T > 16384 Then H := 0;
   If (H < 1) Or (S < 1) Then
   Begin
     S := 63;
@@ -7968,6 +7973,52 @@ End;
 Var
   BootHd : String;
   BootHdMb, BootMem, BootRun, NewDlg : LongInt;
+  BootShot : String;
+
+{ ecran de l'invite dans un fichier BMP de 8 bits (essais) }
+Procedure ShotBmp(Path : String);
+Var H, Pos, Sz, Off : LongInt; Hd : Array[0..53] Of Byte; S : String;
+Begin
+  InitBmi;
+  RenderScreen;
+  ScrH := DispH;
+  If UpS(Path) = 'COM' Then
+  Begin
+    { image brute sur COM1 : en-tete puis lignes hexadecimales }
+    Log('SHOT ' + IStr(SW_) + ' ' + IStr(ScrH));
+    For Pos := 0 To 255 Do
+      Log('PAL ' + Hex(RdB(LongInt(@Bmi) + 16 + Pos * 4 + 2), 2) + Hex(RdB(LongInt(@Bmi) + 16 + Pos * 4 + 1), 2) +
+          Hex(RdB(LongInt(@Bmi) + 16 + Pos * 4), 2));
+    For Sz := 0 To ScrH - 1 Do
+    Begin
+      { ligne Sz depuis le haut }
+      Off := (SH_ - 1 - Sz) * SW_;
+      For H := 0 To 7 Do
+      Begin
+        S := 'PIX ' + IStr(Sz) + ' ';
+        For Pos := 0 To 79 Do S := S + Hex(Fb[Off + H * 80 + Pos], 2);
+        Log(S);
+      End;
+    End;
+    Exit;
+  End;
+  H := FCreate(Path);
+  If H < 0 Then Exit;
+  Off := 54 + 1024;
+  Sz := Off + SW_ * ScrH;
+  FillChar(Hd, SizeOf(Hd), 0);
+  Hd[0] := Ord('B'); Hd[1] := Ord('M');
+  WrL(LongInt(@Hd) + 2, Sz); WrL(LongInt(@Hd) + 10, Off);
+  WrL(LongInt(@Hd) + 14, 40); WrL(LongInt(@Hd) + 18, SW_); WrL(LongInt(@Hd) + 22, ScrH);
+  WrW(LongInt(@Hd) + 26, 1); WrW(LongInt(@Hd) + 28, 8); WrL(LongInt(@Hd) + 34, SW_ * ScrH);
+  Pos := 0;
+  If FWrite(H, Pos, LongInt(@Hd), 54) Then ;
+  { palette : celle du BITMAPINFO de PM (bleu, vert, rouge, 0) }
+  If FWrite(H, 54, LongInt(@Bmi) + 16, 1024) Then ;
+  { lignes du bas vers le haut : les ScrH lignes du haut de l'image }
+  If FWrite(H, Off, LongInt(@Fb) + (SH_ - ScrH) * SW_, SW_ * ScrH) Then ;
+  Dummy := DosClose(H);
+End;
 
 Procedure BootTest(Path, Keys : String; Wait : LongInt);
 Var T0, K, Step : LongInt; Err, S : String;
@@ -8008,9 +8059,11 @@ Begin
     End;
   End;
   Log('VIRTUAL : ' + IStr(VmExits) + ' sorties, ' + IStr(VmIrqs) + ' interruptions, ' + IStr(VmSvc) +
-      ' services, disque ' + IStr(DkReads[0]) + ' lectures ' + IStr(DkWrites[0]) + ' ecritures, CD ' +
+      ' services, ' + IStr(MmioCnt) + ' instructions VGA emulees, disque ' + IStr(DkReads[0]) + ' lectures ' +
+      IStr(DkWrites[0]) + ' ecritures, CD ' +
       IStr(DkReads[DkCd] + DkReads[DkEmu]) + ' lectures, mode ' + Hex(BdaB($49), 2));
   If VmMsg <> '' Then Log('VIRTUAL : ' + VmMsg);
+  If BootShot <> '' Then ShotBmp(BootShot);
   If DbgLine <> '' Then Log('VIRTUAL : port E9h "' + DbgLine + '"');
   S := '';
   For K := 0 To 255 Do If SvcCnt[K] > 0 Then S := S + ' ' + Hex(K, 2) + 'h:' + IStr(SvcCnt[K]);
@@ -8039,7 +8092,7 @@ Var
 BEGIN
   InDlg := 0; TestMode := 0; TraceOn := 0; NVm := 0; CurVm := -1; CurSel := -1; VmFrame := 0; VmWin := 0; MgrClient := 0;
   InfoFrame := 0; CfgFrame := 0; DwFrame := 0; GMem := 0; VmsRootS := ''; VmState := VS_OFF; StartName := ''; BootPath := ''; BootKeys := ''; AddPath := ''; BootWait := 30;
-  BootHd := ''; BootHdMb := 0; BootMem := 32; BootRun := 20; NewDlg := 0;
+  BootHd := ''; BootHdMb := 0; BootMem := 32; BootRun := 20; NewDlg := 0; BootShot := '';
   For K := 0 To NDk - 1 Do DkH[K] := -1;
   FillChar(Dt, SizeOf(Dt), 0);
   Dummy := DosGetDateTime(LongInt(@Dt));
@@ -8059,6 +8112,7 @@ BEGIN
     If Copy(S, 1, 6) = '/HDMB:' Then BootHdMb := SVal(Copy(S, 7, 9));
     If Copy(S, 1, 5) = '/MEM:' Then BootMem := SVal(Copy(S, 6, 9));
     If Copy(S, 1, 5) = '/RUN:' Then BootRun := SVal(Copy(S, 6, 9));
+    If Copy(S, 1, 6) = '/SHOT:' Then BootShot := Copy(ParamStr(K), 7, 250);
     If Copy(S, 1, 5) = '/VMS:' Then
     Begin
       VmsRootS := Copy(ParamStr(K), 6, 250);

@@ -1305,8 +1305,11 @@ mode protege ; modes VGA planaires 0Dh, 0Eh, 10h, 12h emules (fenetre
 A0000h retiree a l'invite, KrnVirt 7, instruction emulee). Essais :
 /BOOTTEST:image.ISO /HD:disque /HDMB:n /MEM:n /RUN:n /KEYS:^ (Entree) ;
 /ADD:image.ISO ; /NEW ; /VMS:dossier. En mode V86, MSDOS-0 et UNIX-0
-s'installent et demarrent de leur VHD ; l'installateur de Pasdows 95 aussi ;
-OS2-Zero et Pasdows 95 installe exigent AMD-V ou VT-x (mode protege).
+s'installent et demarrent de leur VHD ; Pasdows 95 aussi (jusqu'a son
+bureau VGA 16 couleurs). OS2-Zero exige AMD-V ou VT-x (mode protege) :
+sous Bochs avec AMD-V, son noyau lit le CD-ROM par l'ATAPI emule et
+charge Presentation Manager. /SHOT:COM ou /SHOT:fichier.BMP : image de
+l'invite a la fin de /BOOTTEST.
   OS2PC APPS\VIRTUAL.PAS                    -> VIRTUAL.EXE
 
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
