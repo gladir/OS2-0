@@ -3560,7 +3560,9 @@ Procedure SplitLabel(S : String; Var L1, L2, L3 : String);
 Var K : LongInt;
 Begin
   L2 := ''; L3 := '';
-  If Length(S) <= 13 Then
+  { un seul mot de 14 caracteres (Virtualisation) tient dans la cellule :
+    il n'est pas coupe }
+  If (Length(S) <= 13) Or ((Length(S) = 14) And (Pos(' ', S) = 0)) Then
   Begin
     L1 := S;
     Exit;

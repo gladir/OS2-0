@@ -6365,6 +6365,11 @@ Begin
     { SV_SWAPBUTTON : boutons 1 et 2 inverses (gaucher) }
     If (SysVal[0] <> 0) And ((Btn And 3) <> 0) And ((Btn And 3) <> 3) Then Btn := Btn Xor 3;
     If CaptureWin > 1 Then T := CaptureWin Else T := WinAtAbs(0, MouseX, MouseY, True);
+    { liste deroulante ouverte : un clic dans son rectangle lui revient,
+      meme si le cadre du champ est passe devant elle (activation) }
+    If (CaptureWin <= 1) And (DropList > 1) And (WUse[DropList] <> 0) Then
+      If (MouseX >= AbsX(DropList)) And (MouseX < AbsX(DropList) + WCX[DropList]) And
+         (MouseY >= AbsY(DropList)) And (MouseY < AbsY(DropList) + WCY[DropList]) Then T := DropList;
     { bord ou coin d'un cadre a bordure de taille (le cadre de la fenetre
       visee, meme si la souris est sur un de ses controles : barre de
       defilement contre le coin...) : fleches de taille, et un clic du
