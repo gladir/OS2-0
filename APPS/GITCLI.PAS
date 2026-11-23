@@ -98,7 +98,11 @@ Program GitCli;
                            essais sans fenetre (SHA-1, zlib, objets,
                            packs, deltas, diff, fusion, et clonage, envoi
                            et tirage pour chaque /URL:), resultats sur
-                           COM1 (lignes « GITCLI : ... ») }
+                           COM1 (lignes « GITCLI : ... »)
+    GITCLI /INDEX:pack /DIR:chemin
+                           essai sans fenetre : indexe le pack (fichier
+                           .pack recu d'un serveur) dans un depot neuf,
+                           temps et caches sur COM1 }
 
 Const
   PS = '\';
@@ -334,6 +338,30 @@ Begin
   V := 0;
   If DosQuerySysInfo(14, 14, LongInt(@V), 4) <> 0 Then V := 0;
   MsTick := V;
+End;
+
+{ le noyau ne preempte pas un programme de PM : un long calcul (inflate,
+  delta, SHA-1 d'une image ISO de plusieurs dizaines de Mo) gelerait tout
+  le systeme, pointeur de la souris compris. Breathe(W) compte le travail
+  fait (W : octets traites, environ) et cede le processeur aux autres
+  taches (DosSleep(0)) toutes les 30 ms au plus ; le verrou de
+  l'application reste pris (la fenetre se redessine aux points surs, voir
+  GitProgress). }
+Var
+  BrWork, BrTick : LongInt;
+
+Procedure Breathe(W : LongInt);
+Var T : LongInt;
+Begin
+  BrWork := BrWork + W;
+  If BrWork < 32768 Then Exit;
+  BrWork := 0;
+  T := MsTick;
+  If (T - BrTick >= 30) Or (T < BrTick) Then
+  Begin
+    Dummy0 := DosSleep(0);
+    BrTick := MsTick;
+  End;
 End;
 
 { chaine ASCIIZ a l'adresse A }
@@ -615,43 +643,1382 @@ End;
 { un bloc de 64 octets (P^[O..O+63]) ; rotations ecrites en ligne et
   une boucle par groupe de 20 tours (le SHA-1 de gros fichiers compte) }
 Procedure Sha1Run(Var C : TSha1; P : PBytes; O : LongInt);
-Var I, A, B, Cc, D, E, T, X : LongInt;
+{ compression SHA-1 d'un bloc de 64 octets (P^[O..O+63]) : assembleur 386
+  deroule (genere), 5 registres pour a..e, XCHG AL,AH / ROL EAX,16 pour
+  lire les mots gros-boutistes ; C.W recoit le message etendu. Le code Pascal
+  equivalent faisait la moitie du temps d'un clonage (images ISO de
+  plusieurs dizaines de Mo). Parametres : C [ebp+16], P [ebp+12],
+  O [ebp+8]. Constantes en decimal : l'assembleur d'OS2PC lit 6ED9EBA1h
+  comme un nombre reel et ignore 08F1BBCDCh et 0CA62C1D6h. }
 Begin
-  For I := 0 To 15 Do
-    C.W[I] := (P^[O + I * 4] Shl 24) Or (P^[O + I * 4 + 1] Shl 16) Or
-              (P^[O + I * 4 + 2] Shl 8) Or P^[O + I * 4 + 3];
-  For I := 16 To 79 Do
-  Begin
-    X := C.W[I - 3] Xor C.W[I - 8] Xor C.W[I - 14] Xor C.W[I - 16];
-    C.W[I] := (X Shl 1) Or (X Shr 31);
-  End;
-  A := C.H0; B := C.H1; Cc := C.H2; D := C.H3; E := C.H4;
-  For I := 0 To 19 Do
-  Begin
-    T := ((A Shl 5) Or (A Shr 27)) + ((B And Cc) Or ((Not B) And D)) + E +
-      $5A827999 + C.W[I];
-    E := D; D := Cc; Cc := (B Shl 30) Or (B Shr 2); B := A; A := T;
-  End;
-  For I := 20 To 39 Do
-  Begin
-    T := ((A Shl 5) Or (A Shr 27)) + (B Xor Cc Xor D) + E + $6ED9EBA1 +
-      C.W[I];
-    E := D; D := Cc; Cc := (B Shl 30) Or (B Shr 2); B := A; A := T;
-  End;
-  For I := 40 To 59 Do
-  Begin
-    T := ((A Shl 5) Or (A Shr 27)) + ((B And Cc) Or (B And D) Or (Cc And D))
-      + E + LongInt($8F1BBCDC) + C.W[I];
-    E := D; D := Cc; Cc := (B Shl 30) Or (B Shr 2); B := A; A := T;
-  End;
-  For I := 60 To 79 Do
-  Begin
-    T := ((A Shl 5) Or (A Shr 27)) + (B Xor Cc Xor D) + E +
-      LongInt($CA62C1D6) + C.W[I];
-    E := D; D := Cc; Cc := (B Shl 30) Or (B Shr 2); B := A; A := T;
-  End;
-  C.H0 := C.H0 + A; C.H1 := C.H1 + B; C.H2 := C.H2 + Cc;
-  C.H3 := C.H3 + D; C.H4 := C.H4 + E;
+  Breathe(64);
+  asm
+    push esi
+    push edi
+    push ebx
+    push ebp
+    mov edi,[ebp+16]
+    mov esi,[ebp+12]
+    add esi,[ebp+8]
+    mov eax,[esi+0]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+20],eax
+    mov eax,[esi+4]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+24],eax
+    mov eax,[esi+8]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+28],eax
+    mov eax,[esi+12]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+32],eax
+    mov eax,[esi+16]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+36],eax
+    mov eax,[esi+20]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+40],eax
+    mov eax,[esi+24]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+44],eax
+    mov eax,[esi+28]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+48],eax
+    mov eax,[esi+32]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+52],eax
+    mov eax,[esi+36]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+56],eax
+    mov eax,[esi+40]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+60],eax
+    mov eax,[esi+44]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+64],eax
+    mov eax,[esi+48]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+68],eax
+    mov eax,[esi+52]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+72],eax
+    mov eax,[esi+56]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+76],eax
+    mov eax,[esi+60]
+    xchg al,ah
+    rol eax,16
+    xchg al,ah
+    mov [edi+80],eax
+    mov eax,[edi+72]
+    xor eax,[edi+52]
+    xor eax,[edi+28]
+    xor eax,[edi+20]
+    rol eax,1
+    mov [edi+84],eax
+    mov eax,[edi+76]
+    xor eax,[edi+56]
+    xor eax,[edi+32]
+    xor eax,[edi+24]
+    rol eax,1
+    mov [edi+88],eax
+    mov eax,[edi+80]
+    xor eax,[edi+60]
+    xor eax,[edi+36]
+    xor eax,[edi+28]
+    rol eax,1
+    mov [edi+92],eax
+    mov eax,[edi+84]
+    xor eax,[edi+64]
+    xor eax,[edi+40]
+    xor eax,[edi+32]
+    rol eax,1
+    mov [edi+96],eax
+    mov eax,[edi+88]
+    xor eax,[edi+68]
+    xor eax,[edi+44]
+    xor eax,[edi+36]
+    rol eax,1
+    mov [edi+100],eax
+    mov eax,[edi+92]
+    xor eax,[edi+72]
+    xor eax,[edi+48]
+    xor eax,[edi+40]
+    rol eax,1
+    mov [edi+104],eax
+    mov eax,[edi+96]
+    xor eax,[edi+76]
+    xor eax,[edi+52]
+    xor eax,[edi+44]
+    rol eax,1
+    mov [edi+108],eax
+    mov eax,[edi+100]
+    xor eax,[edi+80]
+    xor eax,[edi+56]
+    xor eax,[edi+48]
+    rol eax,1
+    mov [edi+112],eax
+    mov eax,[edi+104]
+    xor eax,[edi+84]
+    xor eax,[edi+60]
+    xor eax,[edi+52]
+    rol eax,1
+    mov [edi+116],eax
+    mov eax,[edi+108]
+    xor eax,[edi+88]
+    xor eax,[edi+64]
+    xor eax,[edi+56]
+    rol eax,1
+    mov [edi+120],eax
+    mov eax,[edi+112]
+    xor eax,[edi+92]
+    xor eax,[edi+68]
+    xor eax,[edi+60]
+    rol eax,1
+    mov [edi+124],eax
+    mov eax,[edi+116]
+    xor eax,[edi+96]
+    xor eax,[edi+72]
+    xor eax,[edi+64]
+    rol eax,1
+    mov [edi+128],eax
+    mov eax,[edi+120]
+    xor eax,[edi+100]
+    xor eax,[edi+76]
+    xor eax,[edi+68]
+    rol eax,1
+    mov [edi+132],eax
+    mov eax,[edi+124]
+    xor eax,[edi+104]
+    xor eax,[edi+80]
+    xor eax,[edi+72]
+    rol eax,1
+    mov [edi+136],eax
+    mov eax,[edi+128]
+    xor eax,[edi+108]
+    xor eax,[edi+84]
+    xor eax,[edi+76]
+    rol eax,1
+    mov [edi+140],eax
+    mov eax,[edi+132]
+    xor eax,[edi+112]
+    xor eax,[edi+88]
+    xor eax,[edi+80]
+    rol eax,1
+    mov [edi+144],eax
+    mov eax,[edi+136]
+    xor eax,[edi+116]
+    xor eax,[edi+92]
+    xor eax,[edi+84]
+    rol eax,1
+    mov [edi+148],eax
+    mov eax,[edi+140]
+    xor eax,[edi+120]
+    xor eax,[edi+96]
+    xor eax,[edi+88]
+    rol eax,1
+    mov [edi+152],eax
+    mov eax,[edi+144]
+    xor eax,[edi+124]
+    xor eax,[edi+100]
+    xor eax,[edi+92]
+    rol eax,1
+    mov [edi+156],eax
+    mov eax,[edi+148]
+    xor eax,[edi+128]
+    xor eax,[edi+104]
+    xor eax,[edi+96]
+    rol eax,1
+    mov [edi+160],eax
+    mov eax,[edi+152]
+    xor eax,[edi+132]
+    xor eax,[edi+108]
+    xor eax,[edi+100]
+    rol eax,1
+    mov [edi+164],eax
+    mov eax,[edi+156]
+    xor eax,[edi+136]
+    xor eax,[edi+112]
+    xor eax,[edi+104]
+    rol eax,1
+    mov [edi+168],eax
+    mov eax,[edi+160]
+    xor eax,[edi+140]
+    xor eax,[edi+116]
+    xor eax,[edi+108]
+    rol eax,1
+    mov [edi+172],eax
+    mov eax,[edi+164]
+    xor eax,[edi+144]
+    xor eax,[edi+120]
+    xor eax,[edi+112]
+    rol eax,1
+    mov [edi+176],eax
+    mov eax,[edi+168]
+    xor eax,[edi+148]
+    xor eax,[edi+124]
+    xor eax,[edi+116]
+    rol eax,1
+    mov [edi+180],eax
+    mov eax,[edi+172]
+    xor eax,[edi+152]
+    xor eax,[edi+128]
+    xor eax,[edi+120]
+    rol eax,1
+    mov [edi+184],eax
+    mov eax,[edi+176]
+    xor eax,[edi+156]
+    xor eax,[edi+132]
+    xor eax,[edi+124]
+    rol eax,1
+    mov [edi+188],eax
+    mov eax,[edi+180]
+    xor eax,[edi+160]
+    xor eax,[edi+136]
+    xor eax,[edi+128]
+    rol eax,1
+    mov [edi+192],eax
+    mov eax,[edi+184]
+    xor eax,[edi+164]
+    xor eax,[edi+140]
+    xor eax,[edi+132]
+    rol eax,1
+    mov [edi+196],eax
+    mov eax,[edi+188]
+    xor eax,[edi+168]
+    xor eax,[edi+144]
+    xor eax,[edi+136]
+    rol eax,1
+    mov [edi+200],eax
+    mov eax,[edi+192]
+    xor eax,[edi+172]
+    xor eax,[edi+148]
+    xor eax,[edi+140]
+    rol eax,1
+    mov [edi+204],eax
+    mov eax,[edi+196]
+    xor eax,[edi+176]
+    xor eax,[edi+152]
+    xor eax,[edi+144]
+    rol eax,1
+    mov [edi+208],eax
+    mov eax,[edi+200]
+    xor eax,[edi+180]
+    xor eax,[edi+156]
+    xor eax,[edi+148]
+    rol eax,1
+    mov [edi+212],eax
+    mov eax,[edi+204]
+    xor eax,[edi+184]
+    xor eax,[edi+160]
+    xor eax,[edi+152]
+    rol eax,1
+    mov [edi+216],eax
+    mov eax,[edi+208]
+    xor eax,[edi+188]
+    xor eax,[edi+164]
+    xor eax,[edi+156]
+    rol eax,1
+    mov [edi+220],eax
+    mov eax,[edi+212]
+    xor eax,[edi+192]
+    xor eax,[edi+168]
+    xor eax,[edi+160]
+    rol eax,1
+    mov [edi+224],eax
+    mov eax,[edi+216]
+    xor eax,[edi+196]
+    xor eax,[edi+172]
+    xor eax,[edi+164]
+    rol eax,1
+    mov [edi+228],eax
+    mov eax,[edi+220]
+    xor eax,[edi+200]
+    xor eax,[edi+176]
+    xor eax,[edi+168]
+    rol eax,1
+    mov [edi+232],eax
+    mov eax,[edi+224]
+    xor eax,[edi+204]
+    xor eax,[edi+180]
+    xor eax,[edi+172]
+    rol eax,1
+    mov [edi+236],eax
+    mov eax,[edi+228]
+    xor eax,[edi+208]
+    xor eax,[edi+184]
+    xor eax,[edi+176]
+    rol eax,1
+    mov [edi+240],eax
+    mov eax,[edi+232]
+    xor eax,[edi+212]
+    xor eax,[edi+188]
+    xor eax,[edi+180]
+    rol eax,1
+    mov [edi+244],eax
+    mov eax,[edi+236]
+    xor eax,[edi+216]
+    xor eax,[edi+192]
+    xor eax,[edi+184]
+    rol eax,1
+    mov [edi+248],eax
+    mov eax,[edi+240]
+    xor eax,[edi+220]
+    xor eax,[edi+196]
+    xor eax,[edi+188]
+    rol eax,1
+    mov [edi+252],eax
+    mov eax,[edi+244]
+    xor eax,[edi+224]
+    xor eax,[edi+200]
+    xor eax,[edi+192]
+    rol eax,1
+    mov [edi+256],eax
+    mov eax,[edi+248]
+    xor eax,[edi+228]
+    xor eax,[edi+204]
+    xor eax,[edi+196]
+    rol eax,1
+    mov [edi+260],eax
+    mov eax,[edi+252]
+    xor eax,[edi+232]
+    xor eax,[edi+208]
+    xor eax,[edi+200]
+    rol eax,1
+    mov [edi+264],eax
+    mov eax,[edi+256]
+    xor eax,[edi+236]
+    xor eax,[edi+212]
+    xor eax,[edi+204]
+    rol eax,1
+    mov [edi+268],eax
+    mov eax,[edi+260]
+    xor eax,[edi+240]
+    xor eax,[edi+216]
+    xor eax,[edi+208]
+    rol eax,1
+    mov [edi+272],eax
+    mov eax,[edi+264]
+    xor eax,[edi+244]
+    xor eax,[edi+220]
+    xor eax,[edi+212]
+    rol eax,1
+    mov [edi+276],eax
+    mov eax,[edi+268]
+    xor eax,[edi+248]
+    xor eax,[edi+224]
+    xor eax,[edi+216]
+    rol eax,1
+    mov [edi+280],eax
+    mov eax,[edi+272]
+    xor eax,[edi+252]
+    xor eax,[edi+228]
+    xor eax,[edi+220]
+    rol eax,1
+    mov [edi+284],eax
+    mov eax,[edi+276]
+    xor eax,[edi+256]
+    xor eax,[edi+232]
+    xor eax,[edi+224]
+    rol eax,1
+    mov [edi+288],eax
+    mov eax,[edi+280]
+    xor eax,[edi+260]
+    xor eax,[edi+236]
+    xor eax,[edi+228]
+    rol eax,1
+    mov [edi+292],eax
+    mov eax,[edi+284]
+    xor eax,[edi+264]
+    xor eax,[edi+240]
+    xor eax,[edi+232]
+    rol eax,1
+    mov [edi+296],eax
+    mov eax,[edi+288]
+    xor eax,[edi+268]
+    xor eax,[edi+244]
+    xor eax,[edi+236]
+    rol eax,1
+    mov [edi+300],eax
+    mov eax,[edi+292]
+    xor eax,[edi+272]
+    xor eax,[edi+248]
+    xor eax,[edi+240]
+    rol eax,1
+    mov [edi+304],eax
+    mov eax,[edi+296]
+    xor eax,[edi+276]
+    xor eax,[edi+252]
+    xor eax,[edi+244]
+    rol eax,1
+    mov [edi+308],eax
+    mov eax,[edi+300]
+    xor eax,[edi+280]
+    xor eax,[edi+256]
+    xor eax,[edi+248]
+    rol eax,1
+    mov [edi+312],eax
+    mov eax,[edi+304]
+    xor eax,[edi+284]
+    xor eax,[edi+260]
+    xor eax,[edi+252]
+    rol eax,1
+    mov [edi+316],eax
+    mov eax,[edi+308]
+    xor eax,[edi+288]
+    xor eax,[edi+264]
+    xor eax,[edi+256]
+    rol eax,1
+    mov [edi+320],eax
+    mov eax,[edi+312]
+    xor eax,[edi+292]
+    xor eax,[edi+268]
+    xor eax,[edi+260]
+    rol eax,1
+    mov [edi+324],eax
+    mov eax,[edi+316]
+    xor eax,[edi+296]
+    xor eax,[edi+272]
+    xor eax,[edi+264]
+    rol eax,1
+    mov [edi+328],eax
+    mov eax,[edi+320]
+    xor eax,[edi+300]
+    xor eax,[edi+276]
+    xor eax,[edi+268]
+    rol eax,1
+    mov [edi+332],eax
+    mov eax,[edi+324]
+    xor eax,[edi+304]
+    xor eax,[edi+280]
+    xor eax,[edi+272]
+    rol eax,1
+    mov [edi+336],eax
+    mov eax,[edi+0]
+    mov ebx,[edi+4]
+    mov ecx,[edi+8]
+    mov edx,[edi+12]
+    mov esi,[edi+16]
+    add esi,[edi+20]
+    add esi,1518500249
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    and ebp,ebx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+24]
+    add edx,1518500249
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    and ebp,eax
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+28]
+    add ecx,1518500249
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    and ebp,esi
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+32]
+    add ebx,1518500249
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    and ebp,edx
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+36]
+    add eax,1518500249
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,edx
+    xor ebp,esi
+    and ebp,ecx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+40]
+    add esi,1518500249
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    and ebp,ebx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+44]
+    add edx,1518500249
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    and ebp,eax
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+48]
+    add ecx,1518500249
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    and ebp,esi
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+52]
+    add ebx,1518500249
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    and ebp,edx
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+56]
+    add eax,1518500249
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,edx
+    xor ebp,esi
+    and ebp,ecx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+60]
+    add esi,1518500249
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    and ebp,ebx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+64]
+    add edx,1518500249
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    and ebp,eax
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+68]
+    add ecx,1518500249
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    and ebp,esi
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+72]
+    add ebx,1518500249
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    and ebp,edx
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+76]
+    add eax,1518500249
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,edx
+    xor ebp,esi
+    and ebp,ecx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+80]
+    add esi,1518500249
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    and ebp,ebx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+84]
+    add edx,1518500249
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    and ebp,eax
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+88]
+    add ecx,1518500249
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    and ebp,esi
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+92]
+    add ebx,1518500249
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    and ebp,edx
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+96]
+    add eax,1518500249
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,edx
+    xor ebp,esi
+    and ebp,ecx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+100]
+    add esi,1859775393
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+104]
+    add edx,1859775393
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+108]
+    add ecx,1859775393
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+112]
+    add ebx,1859775393
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+116]
+    add eax,1859775393
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+120]
+    add esi,1859775393
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+124]
+    add edx,1859775393
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+128]
+    add ecx,1859775393
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+132]
+    add ebx,1859775393
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+136]
+    add eax,1859775393
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+140]
+    add esi,1859775393
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+144]
+    add edx,1859775393
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+148]
+    add ecx,1859775393
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+152]
+    add ebx,1859775393
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+156]
+    add eax,1859775393
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+160]
+    add esi,1859775393
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+164]
+    add edx,1859775393
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+168]
+    add ecx,1859775393
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+172]
+    add ebx,1859775393
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+176]
+    add eax,1859775393
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+180]
+    add esi,-1894007588
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    and ebp,edx
+    add esi,ebp
+    mov ebp,ebx
+    and ebp,ecx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+184]
+    add edx,-1894007588
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    and ebp,ecx
+    add edx,ebp
+    mov ebp,eax
+    and ebp,ebx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+188]
+    add ecx,-1894007588
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    and ebp,ebx
+    add ecx,ebp
+    mov ebp,esi
+    and ebp,eax
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+192]
+    add ebx,-1894007588
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    and ebp,eax
+    add ebx,ebp
+    mov ebp,edx
+    and ebp,esi
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+196]
+    add eax,-1894007588
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    and ebp,esi
+    add eax,ebp
+    mov ebp,ecx
+    and ebp,edx
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+200]
+    add esi,-1894007588
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    and ebp,edx
+    add esi,ebp
+    mov ebp,ebx
+    and ebp,ecx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+204]
+    add edx,-1894007588
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    and ebp,ecx
+    add edx,ebp
+    mov ebp,eax
+    and ebp,ebx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+208]
+    add ecx,-1894007588
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    and ebp,ebx
+    add ecx,ebp
+    mov ebp,esi
+    and ebp,eax
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+212]
+    add ebx,-1894007588
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    and ebp,eax
+    add ebx,ebp
+    mov ebp,edx
+    and ebp,esi
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+216]
+    add eax,-1894007588
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    and ebp,esi
+    add eax,ebp
+    mov ebp,ecx
+    and ebp,edx
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+220]
+    add esi,-1894007588
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    and ebp,edx
+    add esi,ebp
+    mov ebp,ebx
+    and ebp,ecx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+224]
+    add edx,-1894007588
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    and ebp,ecx
+    add edx,ebp
+    mov ebp,eax
+    and ebp,ebx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+228]
+    add ecx,-1894007588
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    and ebp,ebx
+    add ecx,ebp
+    mov ebp,esi
+    and ebp,eax
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+232]
+    add ebx,-1894007588
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    and ebp,eax
+    add ebx,ebp
+    mov ebp,edx
+    and ebp,esi
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+236]
+    add eax,-1894007588
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    and ebp,esi
+    add eax,ebp
+    mov ebp,ecx
+    and ebp,edx
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+240]
+    add esi,-1894007588
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    and ebp,edx
+    add esi,ebp
+    mov ebp,ebx
+    and ebp,ecx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+244]
+    add edx,-1894007588
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    and ebp,ecx
+    add edx,ebp
+    mov ebp,eax
+    and ebp,ebx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+248]
+    add ecx,-1894007588
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    and ebp,ebx
+    add ecx,ebp
+    mov ebp,esi
+    and ebp,eax
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+252]
+    add ebx,-1894007588
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    and ebp,eax
+    add ebx,ebp
+    mov ebp,edx
+    and ebp,esi
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+256]
+    add eax,-1894007588
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    and ebp,esi
+    add eax,ebp
+    mov ebp,ecx
+    and ebp,edx
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+260]
+    add esi,-899497514
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+264]
+    add edx,-899497514
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+268]
+    add ecx,-899497514
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+272]
+    add ebx,-899497514
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+276]
+    add eax,-899497514
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+280]
+    add esi,-899497514
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+284]
+    add edx,-899497514
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+288]
+    add ecx,-899497514
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+292]
+    add ebx,-899497514
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+296]
+    add eax,-899497514
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+300]
+    add esi,-899497514
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+304]
+    add edx,-899497514
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+308]
+    add ecx,-899497514
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+312]
+    add ebx,-899497514
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+316]
+    add eax,-899497514
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add esi,[edi+320]
+    add esi,-899497514
+    mov ebp,eax
+    rol ebp,5
+    add esi,ebp
+    mov ebp,ebx
+    xor ebp,ecx
+    xor ebp,edx
+    add esi,ebp
+    rol ebx,30
+    add edx,[edi+324]
+    add edx,-899497514
+    mov ebp,esi
+    rol ebp,5
+    add edx,ebp
+    mov ebp,eax
+    xor ebp,ebx
+    xor ebp,ecx
+    add edx,ebp
+    rol eax,30
+    add ecx,[edi+328]
+    add ecx,-899497514
+    mov ebp,edx
+    rol ebp,5
+    add ecx,ebp
+    mov ebp,esi
+    xor ebp,eax
+    xor ebp,ebx
+    add ecx,ebp
+    rol esi,30
+    add ebx,[edi+332]
+    add ebx,-899497514
+    mov ebp,ecx
+    rol ebp,5
+    add ebx,ebp
+    mov ebp,edx
+    xor ebp,esi
+    xor ebp,eax
+    add ebx,ebp
+    rol edx,30
+    add eax,[edi+336]
+    add eax,-899497514
+    mov ebp,ebx
+    rol ebp,5
+    add eax,ebp
+    mov ebp,ecx
+    xor ebp,edx
+    xor ebp,esi
+    add eax,ebp
+    rol ecx,30
+    add [edi+0],eax
+    add [edi+4],ebx
+    add [edi+8],ecx
+    add [edi+12],edx
+    add [edi+16],esi
+    pop ebp
+    pop ebx
+    pop edi
+    pop esi
+  end;
 End;
 
 Procedure Sha1Block(Var C : TSha1);
@@ -1813,15 +3180,28 @@ Begin
   FileDel(Fn);
 End;
 
-{ cache des petits objets resolus (bases des chaines de deltas) }
+{ cache des objets resolus en memoire (bases des chaines de deltas) :
+  jusqu'a DcN objets d'au plus DcMax octets, DcBudget octets en tout ; le
+  moins recemment utilise sort le premier (sa memoire est rendue). Les
+  fichiers moyens (README.md, PMSHELL.PAS : 256 Ko a 2 Mo, chaines de
+  deltas de 50 versions) seraient sinon reconstitues depuis la racine de
+  leur chaine pour chaque version. }
 Const
-  DcN = 24;
-  DcMax = 262144;
+  DcN = 48;
+  DcMax = 2097152;
+  DcBudget = 8388608;
 
 Var
-  DcKey, DcOfs, DcT : Array[0..DcN - 1] Of LongInt;
+  DcKey, DcOfs, DcT, DcUse : Array[0..DcN - 1] Of LongInt;
   DcBuf : Array[0..DcN - 1] Of TBuf;
-  DcNext : LongInt;
+  DcTick, DcBytes : LongInt;
+
+Procedure DcDrop(I : LongInt);
+Begin
+  If DcOfs[I] >= 0 Then DcBytes := DcBytes - DcBuf[I].N;
+  DcKey[I] := 0; DcOfs[I] := -1;
+  BufFree(DcBuf[I]);
+End;
 
 Procedure DcClear;
 Var I : LongInt;
@@ -1831,6 +3211,7 @@ Begin
     DcKey[I] := 0; DcOfs[I] := -1;
     BufFree(DcBuf[I]);
   End;
+  DcBytes := 0;
 End;
 
 Function DcGet(Key, Ofs : LongInt; Var T : LongInt; Var D : TBuf) : Boolean;
@@ -1843,19 +3224,42 @@ Begin
       D.N := 0;
       BufAppend(D, DcBuf[I], 0, DcBuf[I].N);
       T := DcT[I];
+      Inc(DcTick); DcUse[I] := DcTick;
       DcGet := D.N = DcBuf[I].N;
       Exit;
     End;
 End;
 
 Procedure DcPut(Key, Ofs, T : LongInt; Var D : TBuf);
-Var I : LongInt; Oom : Boolean; E : String;
+Var I, J, K : LongInt; Oom : Boolean; E : String;
 Begin
   If D.N > DcMax Then Exit;
-  I := DcNext;
-  DcNext := (DcNext + 1) Mod DcN;
+  For I := 0 To DcN - 1 Do
+    If (DcOfs[I] = Ofs) And (DcKey[I] = Key) Then Exit;
+  { place : une entree libre, sinon la moins recemment utilisee ; puis
+    les plus anciennes jusqu'a tenir dans le budget }
+  I := -1;
+  For J := 0 To DcN - 1 Do
+    If DcOfs[J] < 0 Then
+    Begin
+      If I < 0 Then I := J;
+    End;
+  If I < 0 Then
+  Begin
+    I := 0;
+    For J := 1 To DcN - 1 Do
+      If DcUse[J] < DcUse[I] Then I := J;
+    DcDrop(I);
+  End;
+  While DcBytes + D.N > DcBudget Do
+  Begin
+    J := -1;
+    For K := 0 To DcN - 1 Do
+      If (DcOfs[K] >= 0) And ((J < 0) Or (DcUse[K] < DcUse[J])) Then J := K;
+    If J < 0 Then Break;
+    DcDrop(J);
+  End;
   DcBuf[I].N := 0;
-  DcOfs[I] := -1;
   Oom := GitOom; E := GitErr;
   BufAppend(DcBuf[I], D, 0, D.N);
   If DcBuf[I].N <> D.N Then
@@ -1866,6 +3270,8 @@ Begin
     Exit;
   End;
   DcKey[I] := Key; DcOfs[I] := Ofs; DcT[I] := T;
+  Inc(DcTick); DcUse[I] := DcTick;
+  DcBytes := DcBytes + D.N;
 End;
 
 { ------------------------------------------------------------------ }
@@ -2047,6 +3453,7 @@ Var
 Procedure DEmit(P : PBytes; Ofs, N : LongInt);
 Var K : LongInt;
 Begin
+  Breathe(N + 16);
   If DOutMem Then
   Begin
     BufNeed(DO_^, DO_^.N + N);
@@ -2192,6 +3599,9 @@ Var
   { resolution d'un pack : objet sans enfant dans l'arbre des deltas, seule
     son empreinte est calculee (pas de fichier pour un gros objet) }
   PgShaOnly, PgShaSet : Boolean;
+  { resolution d'un pack : objet avec enfants, garde en memoire (cache) au
+    niveau 0 aussi : ses deltas le suivent dans l'ordre de resolution }
+  PgKeep : Boolean;
   PgSha : TSha;             { bases REF_DELTA du pack en cours }
 
 Function IxRefHook(Const H : TSha; Var T, Sz : LongInt; Var D : TBuf;
@@ -2234,7 +3644,7 @@ Begin
       BufNeed(D, Sz0 + 1);
       ZDstMem(D);
       Ok := ZRun($7FFFFFFF, U) And (D.N = Sz0) And Not ZErr;
-      If Ok And (Depth > 0) Then DcPut(K, Ofs, T, D);
+      If Ok And ((Depth > 0) Or PgKeep) Then DcPut(K, Ofs, T, D);
     End
     Else
     Begin
@@ -2311,7 +3721,7 @@ Begin
     Else If RSz <= BigObj Then
     Begin
       Ok := DeltaApplyCk(UseCk, Base, BH, Dl, D, -1, False);
-      If Ok And (Depth > 0) Then DcPut(K, Ofs, T, D);
+      If Ok And ((Depth > 0) Or PgKeep) Then DcPut(K, Ofs, T, D);
     End
     Else If PgShaOnly And (Depth = 0) Then
     Begin
@@ -2742,6 +4152,10 @@ End;
 
 { verifie le pack recu dans le fichier Path, calcule l'empreinte de chaque
   objet et l'enregistre (objects/pack/pack-X.pack et .idx v2) }
+Var
+  IxTrace : Boolean;                   { /INDEX : trace sur COM1 }
+  IxT0 : LongInt;
+
 Function IndexPackFile(Const Path : String) : Boolean;
 Var Cnt, I, Ofs, T, Sz, At, OB, U, Left, K, H0, Size, N, Dp : LongInt;
     DCnt, DNext, DStk : ^TLongArr;
@@ -2906,6 +4320,7 @@ Begin
     Begin
       I := IxSort^[Dp];
       PgShaOnly := DCnt^[I] < 0;
+      PgKeep := Not PgShaOnly;
       PgShaSet := False;
       If Not IxE^[I].Done Then
         If PackGet(IxK, IxE^[I].Ofs, T, Sz, D, Fn, 0) Then
@@ -2930,14 +4345,17 @@ Begin
             IxE^[I].Typ := T;
             IxE^[I].Done := True;
             Dec(Left);
-            If (Left Mod 16) = 0 Then
+            If ((Left Mod 16) = 0) Or (Sz > BigObj) Then
               GitProgress('R'#233'solution des deltas', Cnt - Left, Cnt);
+            If IxTrace And ((Sz > BigObj) Or ((Left Mod 200) = 0)) Then
+              Log('GITCLI : objet ' + IStr(Cnt - Left) + '/' + IStr(Cnt) +
+                ' ' + IStr(Sz) + ' o, ' + IStr(MsTick - IxT0) + ' ms');
           End;
         End
         Else If FirstErr = '' Then FirstErr := GitErr;
     End;
   Until (Left = 0) Or (Left = K);
-  PgShaOnly := False;
+  PgShaOnly := False; PgKeep := False;
   FreeMem(DCnt, (Cnt + 1) * 4);
   FreeMem(IxSort, (Cnt + 1) * 4);
   PackRefHookOn := False;
@@ -7044,6 +8462,7 @@ Var R, NP : LongInt;
 Begin
   FReadAt := 0;
   NP := 0;
+  Breathe(N + 1024);
   If DosSetFilePtr(H, Pos, 0, LongInt(@NP)) <> 0 Then Exit;
   R := 0;
   If DosRead(H, LongInt(Q), N, LongInt(@R)) <> 0 Then Exit;
@@ -7058,6 +8477,7 @@ Begin
   Begin
     FWrite := True; Exit;
   End;
+  Breathe(N + 1024);
   FWrite := (DosWrite(H, LongInt(Q), N, LongInt(@W)) = 0) And (W = N);
 End;
 
@@ -11870,6 +13290,32 @@ Begin
   TRes(Ok, 'recuperation et tirage (pull) ' + U);
 End;
 
+{ /INDEX:pack /DIR:chemin : indexation d'un pack recu (mesures) }
+Procedure IndexTest(Const Pack, Dir : String);
+Var Nm : String; Ok : Boolean;
+Begin
+  Log('GITCLI : indexation de ' + Pack);
+  If Not InitRepo(Dir, 'main') Then
+  Begin
+    Log('GITCLI : depot ' + Dir + ' impossible'); Exit;
+  End;
+  Nm := TmpPath('recv.pack');
+  If Not FileCopy(Pack, Nm) Then
+  Begin
+    Log('GITCLI : copie de ' + Pack + ' impossible'); Exit;
+  End;
+  IxTrace := True;
+  IxT0 := MsTick;
+  Ok := IndexPackFile(Nm);
+  IxTrace := False;
+  FileDel(Nm);
+  If Ok Then Log('GITCLI : INDEX REUSSI en ' + IStr(MsTick - IxT0) + ' ms')
+  Else Log('GITCLI : INDEX ECHEC (' + GitErr + ') apres ' +
+    IStr(MsTick - IxT0) + ' ms');
+  Log('GITCLI : gros objets ' + IStr(BigMade) + ', bases chargees ' +
+    IStr(BaseLoads) + ', reprises ' + IStr(BaseHits));
+End;
+
 Procedure RunTests;
 Var B, Z, O, O2 : TBuf; H, H2, H3, H4 : TSha; C : TSha1; I, U, T, K : LongInt;
     Ok : Boolean; S : String; Cm : TCommit; HFlatT : TFlat;
@@ -12049,7 +13495,7 @@ End;
 Var
   Fw, Fh, Fl, KA, StartK : LongInt;
   Handled : Boolean;
-  SA, ArgRepo, ArgClone, ArgDir : String;
+  SA, ArgRepo, ArgClone, ArgDir, ArgIndex : String;
 
 Begin
   AgentName := 'git/2.0 (OS/2-0; Client GitHub 1.0)';
@@ -12057,7 +13503,7 @@ Begin
   EnvProxy := GetEnvS('HTTP_PROXY');
   DetectOem;
   TUrlN := 0;
-  ArgRepo := ''; ArgClone := ''; ArgDir := '';
+  ArgRepo := ''; ArgClone := ''; ArgDir := ''; ArgIndex := '';
   For KA := 1 To ParamCount Do
   Begin
     SA := ParamStr(KA);
@@ -12071,9 +13517,17 @@ Begin
       TUrls[TUrlN] := Copy(SA, 5, 200); TRo[TUrlN] := True; Inc(TUrlN);
     End
     Else If UpStr(Copy(SA, 1, 7)) = '/CLONE:' Then ArgClone := Copy(SA, 8, 200)
+    Else If UpStr(Copy(SA, 1, 7)) = '/INDEX:' Then ArgIndex := Copy(SA, 8, 200)
     Else If UpStr(Copy(SA, 1, 5)) = '/DIR:' Then ArgDir := Copy(SA, 6, 200)
     Else If (Length(SA) >= 3) And (SA[2] = ':') And (SA[3] = '\') Then
       ArgRepo := SA;
+  End;
+  If (ArgIndex <> '') And (ArgDir <> '') Then
+  Begin
+    LockOn := False;
+    TestMode := True;
+    IndexTest(ArgIndex, ArgDir);
+    Dummy0 := DosExit(1, 0);
   End;
   If TestMode Then
   Begin
