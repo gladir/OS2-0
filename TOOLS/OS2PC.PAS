@@ -249,6 +249,8 @@ Var
   StackResDir : LongInt;      { directive M en Win32 : pile du fil principal (0 = 1 Mo) }
   PEImgBase  : LongInt;
   AsmBlockSeq: LongInt;
+  InAsmBlock : Boolean;     { bloc asm ... end en cours (programmes OS/2 et noyau) }
+  AsmDropped : LongInt;     { instructions de blocs asm qui n'ont produit aucun octet }
   { OS/2-0 : relocalisations de base d une bibliotheque (section .reloc,
     RVA des adresses absolues de 32 bits) }
   PERelCnt   : LongInt;
@@ -1689,8 +1691,12 @@ Begin
   HasExp  := False;
   RInt    := 0.0;
 
-  { Cible DOS 16 : 0FFh / 530Eh (suffixe h) = entier hexadecimal (blocs asm) }
-  If D16Selected Then
+  { 0FFh / 530Eh / 6ED9EBA1h (suffixe h) = entier hexadecimal des blocs asm,
+    pour toutes les cibles (sinon 6ED9EBA1h serait lu comme le reel 6E9 suivi
+    de D9EBA1h, et 08F1BBCDCh comme 8 suivi de l'identificateur F1BBCDCh) ;
+    cette forme n'est jamais du Pascal valide. Au-dela de 7FFFFFFFh, la
+    valeur est celle de LongInt (complement a deux). }
+  If True Then
   Begin
     ExpVal := LexColNo;
     While (ExpVal <= Length(LexLine)) And IsHexDigit(LexLine[ExpVal]) Do Inc(ExpVal);
@@ -5583,7 +5589,9 @@ Begin
     Else
     Begin
       BcLenBefore := BcGetCodeLen;
-      If AsmNative Then
+      { blocs asm (noyau et programmes OS/2) : instructions systeme, DB/DW/DD,
+        BSWAP, formes 16 bits, puis l'assembleur general }
+      If AsmNative Or InAsmBlock Then
       Begin
         If Not BcAssembleSys(S) Then BcAssemble(S);
       End
@@ -5593,9 +5601,18 @@ Begin
       End
       Else
         BcAssemble(S);
-      If (Opts.DebugMode Or AsmNative) And (BcGetCodeLen = BcLenBefore) And
-         (Copy(S, 1, 1) <> ';') Then
-        WriteLn('  [asm] instruction non assemblee : ', S);
+      If (BcGetCodeLen = BcLenBefore) And (Copy(S, 1, 1) <> ';') Then
+      Begin
+        { une instruction d'un bloc asm qui ne produit aucun octet est une
+          erreur (elle disparaissait sans message) }
+        If InAsmBlock Then
+        Begin
+          Inc(AsmDropped);
+          FatalError('asm : instruction non assemblee : ' + S);
+        End
+        Else If Opts.DebugMode Or AsmNative Then
+          WriteLn('  [asm] instruction non assemblee : ', S);
+      End;
     End;
   End;
 End;
@@ -31329,6 +31346,19 @@ Begin
     Exit;
   End;
 
+  { --- Registres de segment : sans objet en modele plat (PUSH DS, POP ES,
+    MOV AX,DS, MOV DS,AX...) ; l'instruction est ignoree expressement
+    (TranslateReg16to32 les rend vides et l'instruction disparaissait sans
+    message) --- }
+  If (Up <> 'LDS') And (Up <> 'LES') And
+     ((StrUpperCase(Op1) = 'CS') Or (StrUpperCase(Op1) = 'DS') Or (StrUpperCase(Op1) = 'ES') Or
+      (StrUpperCase(Op1) = 'SS') Or (StrUpperCase(Op2) = 'CS') Or (StrUpperCase(Op2) = 'DS') Or
+      (StrUpperCase(Op2) = 'ES') Or (StrUpperCase(Op2) = 'SS')) Then
+  Begin
+    EmitComment('registre de segment ignore (modele plat) : ' + Line);
+    Exit;
+  End;
+
   { --- Traductions speciales de mnemoniques --- }
 
   { CBW -> CWDE (extension de signe 8 -> 32 bits via EAX) }
@@ -31609,6 +31639,7 @@ Var
 Begin
   EmitComment('--- Debut bloc ASM natif ---');
   Inc(AsmBlockSeq);
+  InAsmBlock := True;
   If (Not EPAtEnd) And (TokenPool^[EP]^.Kind = TK_KEYWORD) And
      (StrUpperCase(TokenPool^[EP]^.Val) = 'ASM') Then
     Inc(EP);
@@ -31684,6 +31715,7 @@ Begin
     Inc(EP);
   End;
   EmitComment('--- Fin bloc ASM natif ---');
+  InAsmBlock := False;
 End;
 
 Procedure ParseAsmBlock(PI : LongInt);
@@ -42789,8 +42821,32 @@ Begin
     End;
   End;
 
-  { DB / DW : donnees dans le code }
-  If (Mnem = 'DB') Or (Mnem = 'DW') Then
+  { JECXZ cible : E3 02 (vers le JMP proche) / EB 05 (sinon, apres) /
+    E9 rel32 ; les drapeaux ne changent pas, la cible peut etre loin }
+  If ((Mnem = 'JECXZ') Or (Mnem = 'JCXZ')) And (Op2 = '') And (Op1 <> '') Then
+  Begin
+    BcEmitB($E3); BcEmitB($02); BcEmitB($EB); BcEmitB($05);
+    BcEmitB($E9); BcAddFixup(BC_FIX_REL32, Op1, 0); BcEmitD(0);
+    Exit;
+  End;
+
+  { MOV reg8,DWORD PTR [...] : parametre d'un octet lu dans sa case de 4
+    octets (traduction 8086 -> 80386) : l'octet de poids faible }
+  If (Mnem = 'MOV') And (BcParseReg8(U1) >= 0) And (Copy(U2, 1, 10) = 'DWORD PTR ') Then
+  Begin
+    BcAssemble('MOV ' + Op1 + ',BYTE PTR ' + Copy(Op2, 11, 255));
+    Exit;
+  End;
+
+  { BSWAP reg32 (0F C8+r) }
+  If (Mnem = 'BSWAP') And (Op2 = '') And (BcParseReg32(U1) >= 0) Then
+  Begin
+    BcEmitB($0F); BcEmitB($C8 + BcParseReg32(U1));
+    Exit;
+  End;
+
+  { DB / DW / DD : donnees dans le code }
+  If (Mnem = 'DB') Or (Mnem = 'DW') Or (Mnem = 'DD') Then
   Begin
     Item := ''; InQ := False; Depth := 0;
     For J := 1 To Length(Rest) + 1 Do
@@ -42804,7 +42860,9 @@ Begin
         End
         Else If BcParseImm(Item, V) Then
         Begin
-          If Mnem = 'DB' Then BcEmitB(Byte(V)) Else Begin BcEmitB(Byte(V)); BcEmitB(Byte(V Shr 8)) End;
+          If Mnem = 'DB' Then BcEmitB(Byte(V))
+          Else If Mnem = 'DW' Then Begin BcEmitB(Byte(V)); BcEmitB(Byte(V Shr 8)) End
+          Else BcEmitD(V);
         End;
         Item := '';
       End

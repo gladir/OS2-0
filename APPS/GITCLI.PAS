@@ -644,12 +644,11 @@ End;
   une boucle par groupe de 20 tours (le SHA-1 de gros fichiers compte) }
 Procedure Sha1Run(Var C : TSha1; P : PBytes; O : LongInt);
 { compression SHA-1 d'un bloc de 64 octets (P^[O..O+63]) : assembleur 386
-  deroule (genere), 5 registres pour a..e, XCHG AL,AH / ROL EAX,16 pour
-  lire les mots gros-boutistes ; C.W recoit le message etendu. Le code Pascal
+  deroule (genere), 5 registres pour a..e, BSWAP pour lire les mots
+  gros-boutistes ; C.W recoit le message etendu. Le code Pascal
   equivalent faisait la moitie du temps d'un clonage (images ISO de
   plusieurs dizaines de Mo). Parametres : C [ebp+16], P [ebp+12],
-  O [ebp+8]. Constantes en decimal : l'assembleur d'OS2PC lit 6ED9EBA1h
-  comme un nombre reel et ignore 08F1BBCDCh et 0CA62C1D6h. }
+  O [ebp+8]. }
 Begin
   Breathe(64);
   asm
@@ -661,84 +660,52 @@ Begin
     mov esi,[ebp+12]
     add esi,[ebp+8]
     mov eax,[esi+0]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+20],eax
     mov eax,[esi+4]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+24],eax
     mov eax,[esi+8]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+28],eax
     mov eax,[esi+12]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+32],eax
     mov eax,[esi+16]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+36],eax
     mov eax,[esi+20]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+40],eax
     mov eax,[esi+24]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+44],eax
     mov eax,[esi+28]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+48],eax
     mov eax,[esi+32]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+52],eax
     mov eax,[esi+36]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+56],eax
     mov eax,[esi+40]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+60],eax
     mov eax,[esi+44]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+64],eax
     mov eax,[esi+48]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+68],eax
     mov eax,[esi+52]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+72],eax
     mov eax,[esi+56]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+76],eax
     mov eax,[esi+60]
-    xchg al,ah
-    rol eax,16
-    xchg al,ah
+    bswap eax
     mov [edi+80],eax
     mov eax,[edi+72]
     xor eax,[edi+52]
@@ -1130,7 +1097,7 @@ Begin
     mov edx,[edi+12]
     mov esi,[edi+16]
     add esi,[edi+20]
-    add esi,1518500249
+    add esi,5A827999h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1141,7 +1108,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+24]
-    add edx,1518500249
+    add edx,5A827999h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1152,7 +1119,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+28]
-    add ecx,1518500249
+    add ecx,5A827999h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1163,7 +1130,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+32]
-    add ebx,1518500249
+    add ebx,5A827999h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1174,7 +1141,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+36]
-    add eax,1518500249
+    add eax,5A827999h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1185,7 +1152,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+40]
-    add esi,1518500249
+    add esi,5A827999h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1196,7 +1163,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+44]
-    add edx,1518500249
+    add edx,5A827999h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1207,7 +1174,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+48]
-    add ecx,1518500249
+    add ecx,5A827999h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1218,7 +1185,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+52]
-    add ebx,1518500249
+    add ebx,5A827999h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1229,7 +1196,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+56]
-    add eax,1518500249
+    add eax,5A827999h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1240,7 +1207,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+60]
-    add esi,1518500249
+    add esi,5A827999h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1251,7 +1218,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+64]
-    add edx,1518500249
+    add edx,5A827999h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1262,7 +1229,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+68]
-    add ecx,1518500249
+    add ecx,5A827999h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1273,7 +1240,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+72]
-    add ebx,1518500249
+    add ebx,5A827999h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1284,7 +1251,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+76]
-    add eax,1518500249
+    add eax,5A827999h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1295,7 +1262,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+80]
-    add esi,1518500249
+    add esi,5A827999h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1306,7 +1273,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+84]
-    add edx,1518500249
+    add edx,5A827999h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1317,7 +1284,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+88]
-    add ecx,1518500249
+    add ecx,5A827999h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1328,7 +1295,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+92]
-    add ebx,1518500249
+    add ebx,5A827999h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1339,7 +1306,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+96]
-    add eax,1518500249
+    add eax,5A827999h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1350,7 +1317,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+100]
-    add esi,1859775393
+    add esi,6ED9EBA1h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1360,7 +1327,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+104]
-    add edx,1859775393
+    add edx,6ED9EBA1h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1370,7 +1337,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+108]
-    add ecx,1859775393
+    add ecx,6ED9EBA1h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1380,7 +1347,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+112]
-    add ebx,1859775393
+    add ebx,6ED9EBA1h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1390,7 +1357,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+116]
-    add eax,1859775393
+    add eax,6ED9EBA1h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1400,7 +1367,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+120]
-    add esi,1859775393
+    add esi,6ED9EBA1h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1410,7 +1377,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+124]
-    add edx,1859775393
+    add edx,6ED9EBA1h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1420,7 +1387,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+128]
-    add ecx,1859775393
+    add ecx,6ED9EBA1h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1430,7 +1397,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+132]
-    add ebx,1859775393
+    add ebx,6ED9EBA1h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1440,7 +1407,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+136]
-    add eax,1859775393
+    add eax,6ED9EBA1h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1450,7 +1417,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+140]
-    add esi,1859775393
+    add esi,6ED9EBA1h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1460,7 +1427,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+144]
-    add edx,1859775393
+    add edx,6ED9EBA1h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1470,7 +1437,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+148]
-    add ecx,1859775393
+    add ecx,6ED9EBA1h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1480,7 +1447,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+152]
-    add ebx,1859775393
+    add ebx,6ED9EBA1h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1490,7 +1457,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+156]
-    add eax,1859775393
+    add eax,6ED9EBA1h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1500,7 +1467,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+160]
-    add esi,1859775393
+    add esi,6ED9EBA1h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1510,7 +1477,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+164]
-    add edx,1859775393
+    add edx,6ED9EBA1h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1520,7 +1487,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+168]
-    add ecx,1859775393
+    add ecx,6ED9EBA1h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1530,7 +1497,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+172]
-    add ebx,1859775393
+    add ebx,6ED9EBA1h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1540,7 +1507,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+176]
-    add eax,1859775393
+    add eax,6ED9EBA1h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1550,7 +1517,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+180]
-    add esi,-1894007588
+    add esi,08F1BBCDCh
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1563,7 +1530,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+184]
-    add edx,-1894007588
+    add edx,08F1BBCDCh
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1576,7 +1543,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+188]
-    add ecx,-1894007588
+    add ecx,08F1BBCDCh
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1589,7 +1556,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+192]
-    add ebx,-1894007588
+    add ebx,08F1BBCDCh
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1602,7 +1569,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+196]
-    add eax,-1894007588
+    add eax,08F1BBCDCh
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1615,7 +1582,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+200]
-    add esi,-1894007588
+    add esi,08F1BBCDCh
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1628,7 +1595,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+204]
-    add edx,-1894007588
+    add edx,08F1BBCDCh
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1641,7 +1608,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+208]
-    add ecx,-1894007588
+    add ecx,08F1BBCDCh
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1654,7 +1621,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+212]
-    add ebx,-1894007588
+    add ebx,08F1BBCDCh
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1667,7 +1634,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+216]
-    add eax,-1894007588
+    add eax,08F1BBCDCh
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1680,7 +1647,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+220]
-    add esi,-1894007588
+    add esi,08F1BBCDCh
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1693,7 +1660,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+224]
-    add edx,-1894007588
+    add edx,08F1BBCDCh
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1706,7 +1673,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+228]
-    add ecx,-1894007588
+    add ecx,08F1BBCDCh
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1719,7 +1686,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+232]
-    add ebx,-1894007588
+    add ebx,08F1BBCDCh
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1732,7 +1699,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+236]
-    add eax,-1894007588
+    add eax,08F1BBCDCh
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1745,7 +1712,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+240]
-    add esi,-1894007588
+    add esi,08F1BBCDCh
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1758,7 +1725,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+244]
-    add edx,-1894007588
+    add edx,08F1BBCDCh
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1771,7 +1738,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+248]
-    add ecx,-1894007588
+    add ecx,08F1BBCDCh
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1784,7 +1751,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+252]
-    add ebx,-1894007588
+    add ebx,08F1BBCDCh
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1797,7 +1764,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+256]
-    add eax,-1894007588
+    add eax,08F1BBCDCh
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1810,7 +1777,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+260]
-    add esi,-899497514
+    add esi,0CA62C1D6h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1820,7 +1787,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+264]
-    add edx,-899497514
+    add edx,0CA62C1D6h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1830,7 +1797,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+268]
-    add ecx,-899497514
+    add ecx,0CA62C1D6h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1840,7 +1807,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+272]
-    add ebx,-899497514
+    add ebx,0CA62C1D6h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1850,7 +1817,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+276]
-    add eax,-899497514
+    add eax,0CA62C1D6h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1860,7 +1827,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+280]
-    add esi,-899497514
+    add esi,0CA62C1D6h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1870,7 +1837,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+284]
-    add edx,-899497514
+    add edx,0CA62C1D6h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1880,7 +1847,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+288]
-    add ecx,-899497514
+    add ecx,0CA62C1D6h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1890,7 +1857,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+292]
-    add ebx,-899497514
+    add ebx,0CA62C1D6h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1900,7 +1867,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+296]
-    add eax,-899497514
+    add eax,0CA62C1D6h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1910,7 +1877,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+300]
-    add esi,-899497514
+    add esi,0CA62C1D6h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1920,7 +1887,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+304]
-    add edx,-899497514
+    add edx,0CA62C1D6h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1930,7 +1897,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+308]
-    add ecx,-899497514
+    add ecx,0CA62C1D6h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1940,7 +1907,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+312]
-    add ebx,-899497514
+    add ebx,0CA62C1D6h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -1950,7 +1917,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+316]
-    add eax,-899497514
+    add eax,0CA62C1D6h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
@@ -1960,7 +1927,7 @@ Begin
     add eax,ebp
     rol ecx,30
     add esi,[edi+320]
-    add esi,-899497514
+    add esi,0CA62C1D6h
     mov ebp,eax
     rol ebp,5
     add esi,ebp
@@ -1970,7 +1937,7 @@ Begin
     add esi,ebp
     rol ebx,30
     add edx,[edi+324]
-    add edx,-899497514
+    add edx,0CA62C1D6h
     mov ebp,esi
     rol ebp,5
     add edx,ebp
@@ -1980,7 +1947,7 @@ Begin
     add edx,ebp
     rol eax,30
     add ecx,[edi+328]
-    add ecx,-899497514
+    add ecx,0CA62C1D6h
     mov ebp,edx
     rol ebp,5
     add ecx,ebp
@@ -1990,7 +1957,7 @@ Begin
     add ecx,ebp
     rol esi,30
     add ebx,[edi+332]
-    add ebx,-899497514
+    add ebx,0CA62C1D6h
     mov ebp,ecx
     rol ebp,5
     add ebx,ebp
@@ -2000,7 +1967,7 @@ Begin
     add ebx,ebp
     rol edx,30
     add eax,[edi+336]
-    add eax,-899497514
+    add eax,0CA62C1D6h
     mov ebp,ebx
     rol ebp,5
     add eax,ebp
