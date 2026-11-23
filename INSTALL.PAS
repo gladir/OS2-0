@@ -1084,6 +1084,8 @@ Begin
           (U = 'FREECELL.EXE') Or (U = 'MISSILE.EXE') Or (U = 'L25.EXE') Or (U = 'BUBBLE.EXE') Or
           (U = 'BLACKJAK.EXE') Or (U = 'BLOX.EXE') Or (U = 'GOLF.EXE') Or (U = 'FROGGER.EXE') Or (U = 'HANGMAN.EXE') Or
           (U = 'LIGHTS.EXE') Or
+          (U = 'LUNAR.EXE') Or (U = 'BOSTON.EXE') Or (U = 'CANNONBA.EXE') Or (U = 'BINGO.EXE') Or (U = 'CRAPS.EXE') Or
+          (U = 'ROULETTE.EXE') Or (U = 'XIANGQI.EXE') Or (U = 'TTT3D.EXE') Or (U = 'PATIENCE.EXE') Or
           (U = 'ASTROMAN.EXE') Or (U = 'REVES.EXE') Then
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'GLTEST.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
@@ -1094,7 +1096,7 @@ Begin
           (U = 'HOST.EXE') Or (U = 'WGET.EXE') Or (U = 'OUTLINK.EXE') Or (U = 'SMB.IFS') Or (U = 'NET.EXE') Or
           (U = 'FTPCLI.EXE') Or (U = 'SSHCLI.EXE') Or (U = 'MSTSC.EXE') Then
     Wanted := OptNet <> 0
-  Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or
+  Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or (U = 'VIRTUAL.EXE') Or
           (U = 'PASDEV.EXE') Or (U = 'OS2PC.EXE') Or (U = 'GETSRC.EXE') Or (U = 'CALC.EXE') Or (U = 'EXPLORER.EXE') Or
           (U = 'PAINT.EXE') Or (U = 'WORDIUM.EXE') Or (U = 'EXCELSIO.EXE') Or
           { dossier Science du bureau, et donnees de l'Anatomie 3D }

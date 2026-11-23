@@ -20,7 +20,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               EXCAVAT.EXE, PINBALL.EXE, BARBU.EXE, BREAKOUT.EXE, BATAILLE.EXE,
               INVADERS.EXE, FREECELL.EXE, MISSILE.EXE, L25.EXE, BUBBLE.EXE,
               BLACKJAK.EXE, BLOX.EXE, GOLF.EXE, FROGGER.EXE, HANGMAN.EXE,
-              LIGHTS.EXE,
+              LIGHTS.EXE, LUNAR.EXE, BOSTON.EXE, CANNONBA.EXE, BINGO.EXE,
+              CRAPS.EXE, ROULETTE.EXE, XIANGQI.EXE, TTT3D.EXE, PATIENCE.EXE,
               ASTROMAN.EXE, REVES.EXE (et REVE.TXT), ASTRO.EXE, SIMUPLAN.EXE,
               CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
               DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
@@ -30,7 +31,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
-              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, DEMARRE.WAV,
+              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, VIRTUAL.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -110,7 +111,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC TTT.PAS                             -> TTT.EXE (Tic-Tac-Toe)
   OS2PC BASEBALL.PAS                        -> BASEBALL.EXE (Baseball)
   OS2PC EXCAVAT.PAS                         -> EXCAVAT.EXE (Excavateur)
-  OS2PC PINBALL.PAS                         -> PINBALL.EXE (Pinball)
+  OS2PC PINBALL.PAS                         -> PINBALL.EXE (Machine a boule)
   OS2PC BARBU.PAS                           -> BARBU.EXE (Barbu)
   OS2PC BREAKOUT.PAS                        -> BREAKOUT.EXE (Casse-Brique)
   OS2PC BATAILLE.PAS                        -> BATAILLE.EXE (Bataille)
@@ -125,6 +126,15 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC FROGGER.PAS                         -> FROGGER.EXE (Grenouille)
   OS2PC HANGMAN.PAS                         -> HANGMAN.EXE (Bonhomme pendu)
   OS2PC LIGHTS.PAS                          -> LIGHTS.EXE (Lights)
+  OS2PC LUNAR.PAS                           -> LUNAR.EXE (Alunissage)
+  OS2PC BOSTON.PAS                          -> BOSTON.EXE (Boston)
+  OS2PC CANNONBA.PAS                        -> CANNONBA.EXE (Cannonball)
+  OS2PC BINGO.PAS                           -> BINGO.EXE (Bingo)
+  OS2PC CRAPS.PAS                           -> CRAPS.EXE (Craps)
+  OS2PC ROULETTE.PAS                        -> ROULETTE.EXE (Roulette)
+  OS2PC XIANGQI.PAS                         -> XIANGQI.EXE (Xiangqi)
+  OS2PC TTT3D.PAS                           -> TTT3D.EXE (Tic-Tac-Toe 3D)
+  OS2PC PATIENCE.PAS                        -> PATIENCE.EXE (Patience)
   OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
   OS2PC APPS\ASTROMAN.PAS                   -> ASTROMAN.EXE (Astromancie)
   OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
@@ -1077,7 +1087,7 @@ traditionnels, composant Jeux de l'installation) :
   effraie. Fleches (une case par appui), P pause, trois vitesses.
   Ecrit a partir des regles d'un clone en Turbo Pascal (DigMan In the
   Rock) ; dessins et niveaux propres a OS/2-0. /AUTO, /LEVEL:n.
-  Pinball (PINBALL.EXE) : flipper a deux tables, Glace et Rat de
+  Machine a boule (PINBALL.EXE) : flipper a deux tables, Glace et Rat de
   l'espace, de 1 a 4 joueurs, trois balles chacun. Maj gauche et Maj
   droite tenues : batteurs ; Espace puis Espace (ou Ctrl tenu puis
   relache) : ressort ; K : secouer (5 fois : TILT). Porte du flipper
@@ -1148,10 +1158,29 @@ traditionnels, composant Jeux de l'installation) :
   Lights (LIGHTS.EXE) : eteindre toutes les lampes (une lampe inverse ses
   voisines) ; annuler, indice, solution, minimum exact. Porte de
   LIGHTS.PAS (7iles). /SEED:n, /LEVEL:n, /AUTO, /TEST.
+  Alunissage (LUNAR.EXE) : poser le module lunaire sur une piste
+  (moteur, propulseurs, carburant ; pistes x1 a x5). Porte de LUNAR.PAS.
+  Boston (BOSTON.EXE) : jeu de levees a quatre avec encheres de 5 a 13
+  levees ; demandeur seul contre trois. Porte de BOSTON.PAS.
+  Cannonball (CANNONBA.EXE) : l'homme-canon du cirque, angle, puissance,
+  filet a deplacer ; spectacles de 10 artistes. Porte de CANNONBA.PAS.
+  Bingo (BINGO.EXE) : bingo a 75 boules contre 1 a 3 ordinateurs, on
+  marque et on crie BINGO soi-meme. Porte de BINGO.PAS.
+  Craps (CRAPS.EXE) : des de casino, ligne de passe, Ne passe pas, champ,
+  cote. Porte de CRAPS.PAS.
+  Roulette (ROULETTE.EXE) : roulette europeenne, cylindre qui tourne,
+  tapis complet. Porte de ROULETTE.PAS.
+  Xiangqi (XIANGQI.EXE) : echecs chinois contre l'ordinateur (alpha-beta,
+  trois niveaux) ou a deux. Porte de XIANGQI.PAS.
+  Tic-Tac-Toe 3D (TTT3D.EXE) : morpion dans un cube 4x4x4 (76 lignes) ou
+  3x3x3. Porte de TTT3D.PAS.
+  Patience (PATIENCE.EXE) : solitaire a rang de base, reserves, pioche
+  trois par trois ou une a une. Porte de PATIENCE.PAS.
+  Tous : /SEED:n, /AUTO, /NOSOUND, /TEST (7iles).
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
 Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,
-Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique,
+Tic-Tac-Toe, Baseball, Excavateur, Machine a boule, Barbu, Casse-Brique,
 Bataille, Invasion de l'espace, FreeCell, Commandement des missiles) :
 donne reproductible.
 
@@ -1237,6 +1266,25 @@ Deconnecter. Molette de la souris ajoutee a OS/2-0 : souris PS/2
 IntelliMouse dans le noyau, evenements $0100/$0200 de MOUCALLS,
 WM_VSCROLL de PMWIN vers la fenetre sous le pointeur.
   OS2PC APPS\MSTSC.PAS                      -> MSTSC.EXE
+
+Virtualisation (VIRTUAL.EXE, dossier Systeme OS/2)
+---------------------------------------------------
+Gestionnaire de machines virtuelles a la facon de VirtualBox (source
+APPS\VIRTUAL.PAS), menus et apparence d'OS/2 : machines .vbox de
+VirtualBox, disques VHD (fixes, dynamiques), VDI, VMDK plats, IMG,
+disquettes. L'invite s'execute directement sur le processeur (KrnVirt du
+noyau) : AMD-V (SVM + NPT), Intel VT-x (VMX + EPT, invite sans
+restriction), sinon mode virtuel 8086 (plan B, sans HMA ni mode
+protege). Menu Machine > Information de virtualisation : methode et
+details techniques (CPUID, revision SVM/VMCS, ASID, EPT, VMCB/VMCS,
+tables, compteurs des sorties). BIOS, 8259A, 8254, 8042, CMOS, VGA
+(texte, CGA, 13h), A20 et disques sont dans VIRTUAL.EXE. Machines et
+disques copies dans C:\VMS trouves au demarrage. VIRTUAL /TEST : essais
+sur COM1 ; /BOOTTEST:disque /WAIT:n /KEYS:texte ; /TRACE ; /ADD:fichier ;
+/START:nom /KEYS:texte (# : F5). Alt+M, Alt+A : menus de la fenetre.
+Dans VirtualBox : cocher Activer VT-x/AMD-V imbrique pour la machine
+d'OS/2-0.
+  OS2PC APPS\VIRTUAL.PAS                    -> VIRTUAL.EXE
 
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
 ---------------------------------------------------------------------

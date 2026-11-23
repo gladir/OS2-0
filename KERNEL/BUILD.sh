@@ -20,14 +20,17 @@
 #     Hanoi), BABY.PAS (Baby, sauvetage de bebes), 421.PAS (421, des),
 #     CENTIPED.PAS (Mille-pattes), ASTEROID.PAS (Asteroide), BADUGI.PAS
 #     (Badugi, poker coreen), TTT.PAS (Tic-Tac-Toe), BASEBALL.PAS (Baseball),
-#     EXCAVAT.PAS (Excavateur), PINBALL.PAS (Pinball : tables et sons dans le
+#     EXCAVAT.PAS (Excavateur), PINBALL.PAS (Machine a boule : tables et sons dans le
 #     programme), BARBU.PAS (Barbu), BREAKOUT.PAS (Casse-Brique),
 #     BATAILLE.PAS (Bataille), INVADERS.PAS (Invasion de l'espace),
 #     FREECELL.PAS (FreeCell), MISSILE.PAS (Commandement des missiles),
 #     L25.PAS (L25, parcours du cavalier), BUBBLE.PAS (Bubble Shooter, porte
 #     du prototype BS.PAS de 7iles), BLACKJAK.PAS (BlackJack), BLOX.PAS
 #     (Blox), GOLF.PAS (Golf, cartes), FROGGER.PAS (Grenouille), HANGMAN.PAS
-#     (Bonhomme pendu), LIGHTS.PAS (Lights), et
+#     (Bonhomme pendu), LIGHTS.PAS (Lights), LUNAR.PAS (Alunissage), BOSTON.PAS
+#     (Boston), CANNONBA.PAS (Cannonball), BINGO.PAS (Bingo), CRAPS.PAS (Craps),
+#     ROULETTE.PAS (Roulette), XIANGQI.PAS (Xiangqi), TTT3D.PAS (Tic-Tac-Toe
+#     3D), PATIENCE.PAS (Patience), et
 #     DIGAUDIO.PAS (Audio numerique, dossier Multimedia), MP3PLAY.PAS
 #     (Lecteur MP3 : decodeur, liste de lecture et egaliseur dans le meme
 #     fichier, dossier Multimedia ; son exemple IMAGE/MUSIQUE/*.MP3 est
@@ -259,6 +262,8 @@ echo "== Outils reseau (OS2PC : APPS/FTPCLI.PAS, Client FTP et SFTP, APPS/SSHCLI
 "$W/os2pc" -Q "$ROOT/APPS/FTPCLI.PAS" "$W/cd/FTPCLI.EXE"
 "$W/os2pc" -Q "$ROOT/APPS/SSHCLI.PAS" "$W/cd/SSHCLI.EXE"
 "$W/os2pc" -Q "$ROOT/APPS/MSTSC.PAS" "$W/cd/MSTSC.EXE"
+echo "== Virtualisation (OS2PC : APPS/VIRTUAL.PAS, machines de VirtualBox par AMD-V, Intel VT-x ou mode V86, KrnVirt du noyau)"
+"$W/os2pc" -Q "$ROOT/APPS/VIRTUAL.PAS" "$W/cd/VIRTUAL.EXE"
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"
 "$W/os2pc" -Q -CD "$ROOT/DLL/TESTVDM.PAS" "$W/cd/TESTVDM.EXE"
 cp "$ROOT"/IMAGE/SONS/*.WAV "$W/cd/"

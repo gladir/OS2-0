@@ -2,7 +2,7 @@
   @created: 2026 (OS/2-0)
   @website(https://www.gladir.com/os2-0)
   @abstract(Target: OS2PC -COS2)
-  @description: PINBALL - flipper pour le Presentation Manager d'OS/2-0
+  @description: PINBALL - Machine a boule (flipper) pour le Presentation Manager d'OS/2-0
                 (dossier Jeux du bureau).
 }
 
@@ -10221,7 +10221,7 @@ End;
 
 Procedure DrawPanel;
 Begin
-  BigText(PnX, 8, 'PINBALL', CLR_DARKBLUE, CLR_PALEGRAY);
+  BigText(PnX, 8, 'MACHINE A BOULE', CLR_DARKBLUE, CLR_PALEGRAY);
   OutTxt(PnX, 30, 'Table : ' + TableName, CLR_BLACK, CLR_PALEGRAY);
   Edge(MapX - 2, MapY - 2, MapX + MapW + 1, MapY + MapH + 1, CLR_DARKGRAY, CLR_WHITE);
   Edge(MapX - 1, MapY - 1, MapX + MapW, MapY + MapH, CLR_BLACK, CLR_PALEGRAY);
@@ -10408,15 +10408,15 @@ Begin
              'verrouill' + Chr(130) + 'e, rampe, trous de sortie, relance (RL).' + Chr(10) + Chr(10));
         LAdd('Trois balles par joueur, de 1 ' + Chr(133) + ' 4 joueurs (menu Options). Les bonus sont compt' +
              Chr(130) + 's ' + Chr(133) + ' la fin de chaque balle.');
-        Dummy := LMsgBox('Pinball - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
+        Dummy := LMsgBox('Machine ' + Chr(133) + ' boule - R' + Chr(138) + 'gles', MB_OK Or MB_INFORMATION);
       End;
     CM_ABOUT :
       Begin
         LClr;
-        LAdd('Pinball pour OS/2-0 (Presentation Manager) : deux tables, Glace et Rat de l''espace, ' +
+        LAdd('Machine ' + Chr(133) + ' boule pour OS/2-0 (Presentation Manager) : deux tables, Glace et Rat de l''espace, ' +
              'de 1 ' + Chr(133) + ' 4 joueurs.' + Chr(10) + 'Programme ' + Chr(130) + 'crit en Pascal et ' +
              'compil' + Chr(130) + ' par OS2PC.');
-        Dummy := LMsgBox('A propos de Pinball', MB_OK Or MB_INFORMATION);
+        Dummy := LMsgBox('A propos de Machine ' + Chr(133) + ' boule', MB_OK Or MB_INFORMATION);
       End;
   End;
 End;
@@ -10592,7 +10592,7 @@ BEGIN
   LedClear;
   Dummy := WinRegisterClass(Hab, Z('PINBALL'), LongInt(@MainProc), 0, 0);
   Flg := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_MINBUTTON Or FCF_DLGBORDER Or FCF_TASKLIST;
-  Frame := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Flg), Z('PINBALL'), Z2('Pinball'), 0, 0, 0, LongInt(@Client));
+  Frame := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Flg), Z('PINBALL'), Z2('Machine ' + Chr(133) + ' boule'), 0, 0, 0, LongInt(@Client));
   MenuLen := 0;
   H0 := MenuOpen;
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 100, '~Partie');
@@ -10618,7 +10618,7 @@ BEGIN
   MItem(MIS_TEXT Or MIS_SUBMENU, 0, 300, 'A~ide');
   H2 := MenuOpen;
   MItem(MIS_TEXT, 0, CM_RULES, '~R' + Chr(138) + 'gles du jeu' + Chr(9) + 'F1');
-  MItem(MIS_TEXT, 0, CM_ABOUT, '~A propos de Pinball');
+  MItem(MIS_TEXT, 0, CM_ABOUT, '~A propos de Machine ' + Chr(133) + ' boule');
   MenuClose(H2, 2);
   MenuClose(H0, 3);
   M := WinCreateMenu(Frame, LongInt(@MenuT));
