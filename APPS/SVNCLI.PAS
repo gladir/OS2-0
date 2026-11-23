@@ -333,6 +333,29 @@ Function KSes(Op, P1, P2 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnSesC
 Var
   Dummy0 : LongInt;
 
+{ le noyau ne preempte pas un programme de PM : un long calcul du fil de
+  travail (MD5, svndiff, lecture ou ecriture d'un gros fichier) gelerait
+  tout le systeme, pointeur de la souris compris. Breathe(W) compte le
+  travail fait (W : octets traites, environ) et cede le processeur aux
+  autres taches (DosSleep(0)) toutes les 30 ms au plus. }
+Var
+  BrWork, BrTick : LongInt;
+
+Procedure Breathe(W : LongInt);
+Var T : LongInt;
+Begin
+  BrWork := BrWork + W;
+  If BrWork < 32768 Then Exit;
+  BrWork := 0;
+  T := 0;
+  If DosQuerySysInfo(14, 14, LongInt(@T), 4) <> 0 Then T := 0;
+  If (T - BrTick >= 30) Or (T < BrTick) Then
+  Begin
+    Dummy0 := DosSleep(0);
+    BrTick := T;
+  End;
+End;
+
 { ==================================================================== }
 { Noyau : utilitaires, tampons d'octets                                }
 { ==================================================================== }
@@ -1556,6 +1579,7 @@ End;
 Procedure Md5Run(Var C : TMd5; P : PBytes; O : LongInt);
 Var X : Array[0..15] Of LongInt; I, A, B, Cc, D, F, G, T, S : LongInt;
 Begin
+  Breathe(64);
   For I := 0 To 15 Do
     X[I] := P^[O + I * 4] Or (P^[O + I * 4 + 1] Shl 8) Or
       (P^[O + I * 4 + 2] Shl 16) Or (P^[O + I * 4 + 3] Shl 24);
@@ -5397,6 +5421,7 @@ Var R, Act : LongInt;
 Begin
   FReadAt := 0;
   Act := 0;
+  Breathe(N + 1024);
   If DosSetFilePtr(H, Pos, 0, LongInt(@Act)) <> 0 Then Exit;
   R := 0;
   If DosRead(H, LongInt(Q), N, LongInt(@R)) <> 0 Then Exit;
@@ -5411,6 +5436,7 @@ Begin
   Begin
     FWrite := True; Exit;
   End;
+  Breathe(N + 1024);
   FWrite := (DosWrite(H, LongInt(Q), N, LongInt(@W)) = 0) And (W = N);
 End;
 

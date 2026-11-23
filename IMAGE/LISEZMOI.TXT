@@ -1287,7 +1287,15 @@ publication) ; onglets Modifications et Historique, differences en
 couleurs, branches (nouvelle, renommer, supprimer, branche distante),
 boites Cloner, Options, Parcourir ; proxy des Options ou SET HTTP_PROXY.
 Reglages dans C:\RESEAU\GITCLI.INI. Parametres : GITCLI chemin ;
-/CLONE:url /DIR:chemin ; /TEST [/URL:url]... [/RO:url]... (COM1).
+/CLONE:url /DIR:chemin ; /TEST [/URL:url]... [/RO:url]... (COM1) ;
+/INDEX:pack /DIR:chemin (indexe un pack recu, temps sur COM1).
+Gros depots (OS2-0 lui-meme : 193 versions des images ISO, plus de 5 Go
+a reconstituer) : le noyau ne preempte pas un programme de PM, le fil
+du clonage cede donc le processeur toutes les 30 ms (DosSleep(0)) ; le
+pointeur et les autres programmes restent vivants. SHA-1 en assembleur
+386, objets de 2 Mo au plus gardes en memoire (8 Mo) pour les chaines de
+deltas, progression a chaque gros objet. Le Client SVN cede aussi le
+processeur pendant ses longs calculs.
   OS2PC APPS\GITCLI.PAS                     -> GITCLI.EXE
 
 Client SVN (SVNCLI.EXE, dossier Outils reseau)

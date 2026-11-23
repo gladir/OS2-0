@@ -319,6 +319,7 @@ Procedure CsData;Assembler;ASM
 {  OurBp} Dw 0
 END; {CsData}
 
+{$IFNDEF OS2PC}
 PROCEDURE IHook;Near;Assembler;ASM
   Cmp Ah,0Ah
   JE  @1
@@ -348,6 +349,14 @@ PROCEDURE IHook;Near;Assembler;ASM
   Jmp CsData.CsDataRec.Dos21Vec
 END;
 
+{$ENDIF}
+
+{$IFDEF OS2PC}
+{ OS/2-0 (modele plat) : pas de vecteur de l'INT 21h a restaurer }
+PROCEDURE IRestore;
+Begin
+End;
+{$ELSE}
 PROCEDURE IRestore;Assembler;ASM
  Mov Ax,02521h
  Push Ds
@@ -355,6 +364,7 @@ PROCEDURE IRestore;Assembler;ASM
   Int 021h
  Pop Ds
 END;
+{$ENDIF}
 
 PROCEDURE IReturn;Assembler;ASM
  Mov Ss,UserSS
@@ -869,6 +879,17 @@ BEGIN
   WriteLn(' /SHELL   Lance l''interpr‚teur de commande');
  End
   Else
+ {$IFDEF OS2PC}
+ { OS/2-0 : le mode resident de DOS (deroutement de l'INT 21h, pile et
+   segments du programme) n'a pas de sens en modele plat 32 bits ; seul
+   /SHELL est garde }
+ If StrToUpper(ParamStr(1))='/SHELL'Then Shell
+  Else
+ Begin
+  WriteLn('DOSKEY : le mode r‚sident de DOS n''existe pas sous OS/2-0 ;');
+  WriteLn('         DOSKEY /SHELL lance l''interpr‚teur de commandes.');
+ End
+ {$ELSE}
  Begin
   ASM
    Mov CsData.CsDataRec.OurDs,Ds
@@ -904,4 +925,5 @@ BEGIN
    Keep(0);
   End;
  End;
+ {$ENDIF}
 END.
