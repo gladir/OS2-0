@@ -32,7 +32,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
-              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, VIRTUAL.EXE, DEMARRE.WAV,
+              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, SVNCLI.EXE, VIRTUAL.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -1274,6 +1274,19 @@ Deconnecter. Molette de la souris ajoutee a OS/2-0 : souris PS/2
 IntelliMouse dans le noyau, evenements $0100/$0200 de MOUCALLS,
 WM_VSCROLL de PMWIN vers la fenetre sous le pointeur.
   OS2PC APPS\MSTSC.PAS                      -> MSTSC.EXE
+
+Client SVN (SVNCLI.EXE, dossier Outils reseau)
+----------------------------------------------
+Client Subversion de Pasdows 95 porte vers OS/2 (source APPS\SVNCLI.PAS,
+un seul fichier) : extraction, mise a jour avec fusion a trois voies et
+conflits (.mine, .rN), validation (ajouts, dossiers, suppressions,
+svn:ignore), annulation, branches (creation, changement), historique et
+differences en couleurs, en svn:// (ANONYMOUS, CRAM-MD5), http:// et
+https:// (WebDAV de mod_dav_svn, client HTTP/1.1 sur TCPIP32, TLS32,
+proxy HTTP_PROXY). Copie de travail dans .pasvn, reglages dans OS2.INI.
+Parametres : SVNCLI dossier ; SVNCLI url dossier ; /CHECKOUT url dossier
+(sans fenetre) ; /USER: /PASS: ; /TEST [urls] (essais sur COM1).
+  OS2PC APPS\SVNCLI.PAS                     -> SVNCLI.EXE
 
 Virtualisation (VIRTUAL.EXE, dossier Systeme OS/2)
 ---------------------------------------------------

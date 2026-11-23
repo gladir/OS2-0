@@ -180,6 +180,7 @@ Const
   IC_BLACKJAK = 87; IC_BLOX = 88; IC_GOLF = 89; IC_FROGGER = 90; IC_HANGMAN = 91; IC_LIGHTS = 92;
   IC_VIRTUAL = 93; IC_LUNAR = 94; IC_BOSTON = 95; IC_CANNONBA = 96; IC_BINGO = 97; IC_CRAPS = 98;
   IC_ROULETTE = 99; IC_XIANGQI = 100; IC_TTT3D = 101; IC_PATIENCE = 102; IC_PLOMBIER = 103;
+  IC_SVNCLI = 104; IC_GITCLI = 105;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1589,7 +1590,8 @@ Begin
         If FileExists('C:\ASTRO.EXE') Or FileExists('C:\SIMUPLAN.EXE') Or FileExists('C:\CS3DA.EXE') Or
            FileExists('C:\ELEMENTS.EXE') Or FileExists('C:\CHEMDRAW.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_SCIENCE, 'Science', '');
-        If FileExists('C:\FTPCLI.EXE') Or FileExists('C:\SSHCLI.EXE') Or FileExists('C:\MSTSC.EXE') Then
+        If FileExists('C:\FTPCLI.EXE') Or FileExists('C:\SSHCLI.EXE') Or FileExists('C:\MSTSC.EXE') Or
+           FileExists('C:\GITCLI.EXE') Or FileExists('C:\SVNCLI.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_NETTOOLS, 'Outils r'#130'seau', '');
         { fichiers et dossiers du repertoire du bureau, puis raccourcis }
         AddSorted(V, DeskDir);
@@ -1763,6 +1765,10 @@ Begin
           Dummy := NewItem(V, IC_SSHCLI, OB_GAME, 'Client SSH', 'C:\SSHCLI.EXE');
         If FileExists('C:\MSTSC.EXE') Then
           Dummy := NewItem(V, IC_MSTSC, OB_GAME, 'Connexion Bureau a distance', 'C:\MSTSC.EXE');
+        If FileExists('C:\GITCLI.EXE') Then
+          Dummy := NewItem(V, IC_GITCLI, OB_GAME, 'Client GitHub', 'C:\GITCLI.EXE');
+        If FileExists('C:\SVNCLI.EXE') Then
+          Dummy := NewItem(V, IC_SVNCLI, OB_GAME, 'Client SVN', 'C:\SVNCLI.EXE');
       End;
     VK_SCIENCE :
       Begin
@@ -3462,6 +3468,24 @@ Begin
                 Y + 7 + (K Div 3) * 10, CLR_PALEGRAY);
           End;
         End;
+      End;
+    IC_SVNCLI :
+      Begin
+        { copie de travail (dossier, pastille verte) et branches de
+          Subversion : tronc, branche et revisions }
+        FBox(Hps, X + 1, Y + 3, X + 19, Y + 19, CLR_YELLOW, CLR_BLACK);
+        FBox(Hps, X + 1, Y + 19, X + 8, Y + 22, CLR_YELLOW, CLR_BLACK);
+        GDisc(Hps, X + 13, Y + 9, 5, CLR_DARKGREEN);
+        GLn(Hps, X + 10, Y + 9, X + 12, Y + 7, CLR_WHITE);
+        GLn(Hps, X + 12, Y + 7, X + 16, Y + 12, CLR_WHITE);
+        GLn(Hps, X + 26, Y + 2, X + 26, Y + 29, CLR_DARKBLUE);
+        GLn(Hps, X + 27, Y + 2, X + 27, Y + 29, CLR_DARKBLUE);
+        GLn(Hps, X + 26, Y + 12, X + 21, Y + 19, CLR_DARKBLUE);
+        GLn(Hps, X + 21, Y + 19, X + 21, Y + 29, CLR_DARKBLUE);
+        GDisc(Hps, X + 26, Y + 5, 2, CLR_BLUE);
+        GDisc(Hps, X + 26, Y + 17, 2, CLR_BLUE);
+        GDisc(Hps, X + 26, Y + 27, 2, CLR_BLUE);
+        GDisc(Hps, X + 21, Y + 25, 2, CLR_RED);
       End;
     IC_MSTSC :
       Begin
