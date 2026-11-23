@@ -19565,7 +19565,9 @@ End;
     3 : detruire la machine
     4 : police 8x16 de la carte VGA (p1 = tampon de 4096 octets)
     5 : effacer les compteurs de sorties
-    6 : ligne A20 de l'invite (p1 = 0 fermee, 1 ouverte) }
+    6 : ligne A20 de l'invite (p1 = 0 fermee, 1 ouverte)
+    7 : fenetre VGA A0000h-AFFFFh absente (p1 = 1, acces emules par
+        l'application dans les modes planaires) ou presente (p1 = 0) }
 
 Const
   VXM_NONE = 0; VXM_SVM = 1; VXM_VMX = 2; VXM_V86 = 3;
@@ -19577,7 +19579,7 @@ Const
   xFs = 56; xGs = 60; xCsB = 64; xDsB = 68; xEsB = 72; xSsB = 76; xFsB = 80;
   xGsB = 84; xCr0 = 88; xCr3 = 92; xCr4 = 96; xSet = 100; xIrq = 104;
   xExit = 108; xInfo1 = 112; xInfo2 = 116; xNext = 120; xRaw = 124;
-  xCpl = 128; xEfer = 132;
+  xCpl = 128; xEfer = 132; xCsA = 136;   { xCsA : bit 0 = segment de code 32 bits (D) }
 
 Var
   VxStub, VxIdS, VxCpuidS, VxRdMsrS, VxWrMsrS, VxSvmS : LongInt;
@@ -20102,6 +20104,7 @@ Begin
   MemL[0:F + xCr4] := MemL[0:V + $548];
   MemL[0:F + xEfer] := MemL[0:V + $4D0];
   MemL[0:F + xCpl] := Mem[0:V + $4CB];
+  MemL[0:F + xCsA] := (MemW[0:V + $412] Shr 10) And 1;
   If Injected Then MemL[0:F + xIrq] := -1;
   MemL[0:V + $60] := 1 Shl 24;
   MemL[0:V + $0C] := MemL[0:V + $0C] And Not $10;
@@ -20709,6 +20712,7 @@ Begin
   MemL[0:F + xCr4] := (VxR($6804) And Not VxR($6002)) Or (VxR($6006) And VxR($6002));
   MemL[0:F + xEfer] := 0;
   MemL[0:F + xCpl] := (VxR($4818) Shr 5) And 3;
+  MemL[0:F + xCsA] := (VxR($4816) Shr 14) And 1;
   { une interruption injectee est livree a l'entree ; si la sortie l'a
     interrompue, elle est reprise (champ d'injection) a l'entree suivante }
   If Injected Then MemL[0:F + xIrq] := -1;
@@ -20731,6 +20735,12 @@ Begin
           1 : V := V Or 32;
         Else
           V := V Or 64;
+        End;
+        { INS/OUTS : taille d'adresse (bit 7 A16, bit 8 A32 comme SVM),
+          celle du segment de code (bit D des droits d'acces de CS) }
+        If (Q And 16) <> 0 Then
+        Begin
+          If (VxR($4816) And $4000) <> 0 Then V := V Or $100 Else V := V Or $80;
         End;
         MemL[0:F + xInfo1] := V;
         MemL[0:F + xNext] := MemL[0:F + xEip] + VxR($440C);
@@ -20901,7 +20911,7 @@ Begin
   MemL[0:A + xEsB] := MemL[0:A + xEs] Shl 4; MemL[0:A + xSsB] := MemL[0:A + xSs] Shl 4;
   MemL[0:A + xFsB] := MemL[0:A + xFs] Shl 4; MemL[0:A + xGsB] := MemL[0:A + xGs] Shl 4;
   MemL[0:A + xCr0] := $10; MemL[0:A + xCr3] := 0; MemL[0:A + xCr4] := 0;
-  MemL[0:A + xCpl] := 0; MemL[0:A + xEfer] := 0;
+  MemL[0:A + xCpl] := 0; MemL[0:A + xEfer] := 0; MemL[0:A + xCsA] := 0;
   MemL[0:A + xExit] := R;
   If VxDeliv Then MemL[0:A + xIrq] := -1;
   VxExitR := R;
@@ -21199,6 +21209,49 @@ Begin
   VxA20 := 1;
 End;
 
+{ fenetre VGA A0000h-AFFFFh de l'invite (KrnVirt 7) : absente (On <> 0)
+  tant que l'invite est dans un mode planaire 16 couleurs, pour que chaque
+  acces sorte vers l'application (defaut de page en V86, sortie NPF des
+  tables imbriquees ou EPT) qui emule l'instruction ; presente sinon }
+Function VxVgaTrap(On : LongInt) : LongInt;
+Var I, Pg, T : LongInt;
+Begin
+  VxVgaTrap := 0;
+  If VxMem = 0 Then Exit;
+  For I := $A0 To $AF Do
+  Begin
+    Pg := VxMem + I * 4096;
+    If VxMethod = VXM_SVM Then
+    Begin
+      If VxNpts = 0 Then Exit;
+      If On <> 0 Then MemL[0:VxNpts + I * 4] := 0 Else MemL[0:VxNpts + I * 4] := Pg Or 7;
+    End
+    Else If VxMethod = VXM_VMX Then
+    Begin
+      If VxNpts = 0 Then Exit;
+      If On <> 0 Then MemL[0:VxNpts + I * 8] := 0 Else MemL[0:VxNpts + I * 8] := Pg Or $37;
+      MemL[0:VxNpts + I * 8 + 4] := 0;
+    End
+    Else If VxPt86 <> 0 Then
+    Begin
+      { V86 : le TLB est vide a chaque entree (V86xRun) }
+      If On <> 0 Then MemL[0:VxPt86 + I * 4] := Pg Or 6 Else MemL[0:VxPt86 + I * 4] := Pg Or 7;
+    End;
+  End;
+  If VxMethod = VXM_SVM Then Mem[0:VxVmcb + $5C] := 1;
+  If VxMethod = VXM_VMX Then
+  Begin
+    VxInvDesc[0] := VxEpml4 Or 6 Or (3 Shl 3);
+    If (VxEptCap And $4000) = 0 Then VxInvDesc[0] := VxEpml4 Or (3 Shl 3);
+    VxInvDesc[1] := 0; VxInvDesc[2] := 0; VxInvDesc[3] := 0;
+    T := 1;
+    If (VxEptCap And $02000000) = 0 Then T := 2;
+    VxInvType := T;
+    VxCall(VxInvS);
+  End;
+  VxVgaTrap := 1;
+End;
+
 Function KrnVirt(Op, P1, P2 : LongInt) : LongInt;
 Var I : LongInt;
 Begin
@@ -21238,6 +21291,7 @@ Begin
           VxTotal := 0;
         End;
     6 : KrnVirt := VxA20(P1);
+    7 : KrnVirt := VxVgaTrap(P1);
   End;
 End;
 

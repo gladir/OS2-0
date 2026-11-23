@@ -49,8 +49,29 @@ Program VIRTUAL;
     par GpiDrawBits), clavier par codes de balayage (KEYB de l'invite
     garde sa disposition).
 
+  - CD-ROM : image ISO 9660, amorcage El Torito (sans emulation, ou
+    emulation d'une disquette de 1,2, 1,44 ou 2,88 Mo ou d'un disque
+    dur), INT 13h E0h (secteurs de 2048 octets) et 4Bh ;
+  - controleurs IDE en PIO : disques ATA sur 1F0h, CD-ROM ATAPI sur
+    170h (invites en mode protege : OS2-Zero, Pasdows 95, Linux) ;
+  - modes VGA planaires 16 couleurs (0Dh, 0Eh, 10h, 12h) : la fenetre
+    A0000h est retiree a l'invite (KrnVirt 7) et chaque instruction qui
+    y touche est emulee (plans, verrous, modes d'ecriture et de lecture).
+
+  Nouvelle machine : le type est une liste deroulante ; MSDOS-0, UNIX-0,
+  OS2-Zero et Pasdows95 sont telecharges a partir de GitHub (image ISO
+  d'installation de raw.githubusercontent.com/gladir/..., https par
+  TLS32.DLL, proxy HTTP_PROXY, fenetre de progression), puis la machine
+  demarre sur ce CD-ROM ; DOS, Windows, Linux et Autre sont fournis
+  localement.
+
   Parametres : /TEST (essais sans fenetre, resultat sur le port serie
-  COM1) ; /START:nom (demarre la machine nommee). }
+  COM1) ; /START:nom (demarre la machine nommee) ; /BOOTTEST:disque ou
+  image.ISO /HD:disque /HDMB:n /MEM:n /WAIT:n /RUN:n /KEYS:texte (| ou
+  ^ : Entree, # : F5) ; /ADD:fichier (.vbox, disque ou image ISO) ;
+  /NEW (Nouvelle machine virtuelle) ; /VMS:dossier ; /TRACE ;
+  /SHOT:COM ou /SHOT:fichier.BMP (image de l'invite a la fin de
+  /BOOTTEST). }
 
 Const
   WM_CREATE = $0001; WM_DESTROY = $0002; WM_SIZE = $0007; WM_SETFOCUS = $000F;
@@ -104,6 +125,7 @@ Const
   fCS = 10; fDS = 11; fES = 12; fSS = 13; fFS = 14; fGS = 15; fCSB = 16; fDSB = 17; fESB = 18;
   fSSB = 19; fFSB = 20; fGSB = 21; fCR0 = 22; fCR3 = 23; fCR4 = 24; fSET = 25; fIRQ = 26;
   fEXIT = 27; fINFO1 = 28; fINFO2 = 29; fNEXT = 30; fRAW = 31; fCPL = 32; fEFER = 33;
+  fCSA = 34;                { bit 0 : segment de code 32 bits }
   { BIOS de l'invite }
   RomStub = $1000;          { F000:1000 + 8n : talon du vecteur n }
   RomInt08 = $E000; RomInt09 = $E03B; RomIrqM = $E04E; RomIrqS = $E055; RomPost = $E05E;
@@ -117,8 +139,9 @@ Const
   { disques }
   DK_RAW = 1; DK_VHDFIX = 2; DK_VHDDYN = 3; DK_VDIFIX = 4; DK_VDIDYN = 5;
   MaxVm = 32;
-  { affichage : 640 x 400 (texte 80 x 25 en 8 x 16, 320 x 200 double) }
-  SW_ = 640; SH_ = 400;
+  { affichage : image de 640 x 480 ; hauteur montree ScrH : 400 (texte 80 x 25
+    en 8 x 16, 320 x 200 double), 350 (mode 10h) ou 480 (mode 12h) }
+  SW_ = 640; SH_ = 480;
 
   { code 16 bits du BIOS (nasm, org 0E000h, segment F000) :
     int08 : compteur 0040:006C (minuit 1800B0h), INT 1Ch, EOI ;
@@ -135,8 +158,8 @@ Type
   PByte = ^Byte;
   TVm = Record
     Used : Boolean;
-    Name, OsType, Vbox, Hd0, Hd1, Fd, Uuid, Hd0Uuid, Hd1Uuid : String;
-    MemMb, BootFd : LongInt;
+    Name, OsType, Vbox, Hd0, Hd1, Fd, Uuid, Hd0Uuid, Hd1Uuid, Cd, CdUuid, Distro : String;
+    MemMb, BootFd, BootCd : LongInt;
   End;
 
 { ---- DOSCALLS ---- }
@@ -583,6 +606,952 @@ Begin
 End;
 
 { ==================================================================== }
+{ Telechargement d'une image (http:// et https:// par TLS32.DLL)        }
+{ ==================================================================== }
+
+{ Bloc insere apres p1.pas (utilitaires WrB, RdB, RdL, IStr, UpS, TrimS,
+  Hex, NowMs, Log, DirOf, BaseOf...). Le telechargement tourne dans un
+  fil d'execution a part (DosCreateThread) ; la fenetre de progression
+  lit DlState, DlTotal, DlDone, DlRate et DlErr sur une minuterie, et
+  met DlAbort a 1 pour annuler.
+
+  Logique reprise de GETSRC.PAS : connexion TCP (TCPIP32.DLL), tunnel
+  CONNECT du proxy (SET HTTP_PROXY=hote:port, ou HTTPS_PROXY), poignee
+  de main TLS (TLS32.DLL, une seule connexion a la fois), requete
+  HTTP/1.1, redirections 301/302/303/307/308 (8 au plus), corps
+  "chunked", Content-Length ou jusqu'a la fermeture. Le proxy n'est pas
+  utilise pour localhost et les adresses privees (10.x, 172.16-31.x,
+  192.168.x, 127.x).
+
+  Le corps est recu directement dans un tampon de 64 Ko, ecrit par blocs
+  de 64 Ko dans Dest + '.TMP' (ou, si ce nom est refuse, le nom de Dest
+  avec l'extension .TMP), puis renomme en Dest (DosMove ; sinon recopie)
+  une fois complet. Le .TMP est efface en cas d'erreur ou d'annulation.
+
+  Le fil n'utilise ni Z ni Z2 (tampons NameZ partages avec la fenetre)
+  mais ses propres tampons DlZBuf et DlZBuf2. }
+
+Const
+  DL_IDLE = 0; DL_CONNECT = 1; DL_GET = 2; DL_DONE = 3; DL_ERROR = 4; DL_CANCEL = 5;
+  DlRSz = 32768;
+  DlWSz = 65536;
+
+{ ---- TCPIP32 et TLS32 (comme GETSRC.PAS) ---- }
+Function NetSockInit : LongInt; External 'TCPIP32' Name 'sock_init';
+Function NetSocket(D, T, P : LongInt) : LongInt; External 'TCPIP32' Name 'socket';
+Function NetConnect(S, A, L : LongInt) : LongInt; External 'TCPIP32' Name 'connect';
+Function NetSend(S, B, L, F : LongInt) : LongInt; External 'TCPIP32' Name 'send';
+Function NetRecv(S, B, L, F : LongInt) : LongInt; External 'TCPIP32' Name 'recv';
+Function NetSoClose(S : LongInt) : LongInt; External 'TCPIP32' Name 'soclose';
+Function NetSockErrno : LongInt; External 'TCPIP32' Name 'sock_errno';
+Function NetGetHostByName(P : LongInt) : LongInt; External 'TCPIP32' Name 'gethostbyname';
+Function NetTlsOpen(S, PHost : LongInt) : LongInt; External 'TLS32' Name 'TLSOPEN';
+Function NetTlsSend(H, B, L : LongInt) : LongInt; External 'TLS32' Name 'TLSSEND';
+Function NetTlsRecv(H, B, L : LongInt) : LongInt; External 'TLS32' Name 'TLSRECV';
+Function NetTlsClose(H : LongInt) : LongInt; External 'TLS32' Name 'TLSCLOSE';
+Function NetTlsError(B, Cb : LongInt) : LongInt; External 'TLS32' Name 'TLSERROR';
+{ ---- DOSCALLS (absents de p1.pas) ---- }
+Function DlDosMove(POld, PNew : LongInt) : LongInt; External 'DOSCALLS' Name 'DosMove';
+Function DlDosScanEnv(PName, PPValue : LongInt) : LongInt; External 'DOSCALLS' Name 'DosScanEnv';
+Function DlDosQueryFSInfo(Disk, Level, PBuf, Cb : LongInt) : LongInt; External 'DOSCALLS' Name 'DosQueryFSInfo';
+
+Var
+  { interface : etat partage avec la fenetre de progression }
+  DlState, DlTotal, DlDone, DlAbort, DlRate, DlHttp : LongInt;
+  DlErr, DlUrl, DlDest, DlTmp : String;
+  { essai (/TEST) : annuler apres DlTestCut octets (0 : jamais) }
+  DlTestCut : LongInt;
+  { connexion }
+  DlTid, DlNetOk, DlSock, DlTls, DlConn, DlFh, DlPort, DlPxPort, DlT0 : LongInt;
+  DlScheme, DlHost, DlPath, DlPxHost, DlLoc : String;
+  DlRBuf : Array[0..DlRSz - 1] Of Byte;
+  DlRPos, DlRLen : LongInt;
+  DlWBuf : Array[0..DlWSz - 1] Of Byte;
+  DlWLen : LongInt;
+  DlSBuf : Array[0..1023] Of Byte;
+  DlZBuf, DlZBuf2 : Array[0..299] Of Byte;
+  { vitesse : un releve toutes les 500 ms, moyenne sur les 4 dernieres secondes }
+  DlRtT, DlRtB : Array[0..7] Of LongInt;
+  DlRtN, DlYT : LongInt;
+  DlCrcT : Array[0..255] Of LongInt;
+
+Function DlZ(S : String) : LongInt;
+Begin
+  PutZ(LongInt(@DlZBuf), S);
+  DlZ := LongInt(@DlZBuf);
+End;
+
+Function DlZ2(S : String) : LongInt;
+Begin
+  PutZ(LongInt(@DlZBuf2), S);
+  DlZ2 := LongInt(@DlZBuf2);
+End;
+
+{ copie rapide (zones disjointes) }
+Procedure DlMove(Src, Dst, N : LongInt);
+Begin
+  If N <= 0 Then Exit;
+  asm
+    push esi
+    push edi
+    mov esi,Src
+    mov edi,Dst
+    mov ecx,N
+    cld
+    rep movsb
+    pop edi
+    pop esi
+  end;
+End;
+
+Function DlLow(S : String) : String;
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do If (S[K] >= 'A') And (S[K] <= 'Z') Then S[K] := Chr(Ord(S[K]) + 32);
+  DlLow := S;
+End;
+
+Function DlHexD(C : Char) : LongInt;
+Begin
+  If (C >= '0') And (C <= '9') Then DlHexD := Ord(C) - 48
+  Else If (C >= 'a') And (C <= 'f') Then DlHexD := Ord(C) - 87
+  Else If (C >= 'A') And (C <= 'F') Then DlHexD := Ord(C) - 55
+  Else DlHexD := -1;
+End;
+
+{ nombre decimal ; Def si illisible }
+Function DlNum(S : String; Def : LongInt) : LongInt;
+Var V, E : LongInt;
+Begin
+  Val(TrimS(S), V, E);
+  If E <> 0 Then DlNum := Def Else DlNum := V;
+End;
+
+Function DlEnv(N : String) : String;
+Var P, K : LongInt; S : String;
+Begin
+  DlEnv := '';
+  P := 0;
+  If DlDosScanEnv(DlZ(N), LongInt(@P)) <> 0 Then Exit;
+  If P = 0 Then Exit;
+  S := ''; K := 0;
+  While (K < 250) And (RdB(P + K) <> 0) Do
+  Begin
+    S := S + Chr(RdB(P + K));
+    Inc(K);
+  End;
+  DlEnv := S;
+End;
+
+{ proxy : HTTP_PROXY (ou HTTPS_PROXY) = [http://]hote:port[/] }
+Procedure DlReadProxy;
+Var S : String; K : LongInt;
+Begin
+  S := TrimS(DlEnv('HTTP_PROXY'));
+  If S = '' Then S := TrimS(DlEnv('HTTPS_PROXY'));
+  If DlLow(Copy(S, 1, 7)) = 'http://' Then Delete(S, 1, 7);
+  While (Length(S) > 0) And (S[Length(S)] = '/') Do Delete(S, Length(S), 1);
+  DlPxHost := ''; DlPxPort := 0;
+  K := Pos(':', S);
+  If K > 1 Then
+  Begin
+    DlPxHost := Copy(S, 1, K - 1);
+    DlPxPort := DlNum(Copy(S, K + 1, 6), 0);
+    If (DlPxPort <= 0) Or (DlPxPort > 65535) Then DlPxHost := '';
+  End;
+End;
+
+{ hote joint directement malgre le proxy : localhost et adresses privees }
+Function DlDirect(H : String) : Boolean;
+Var K, A, B : LongInt;
+Begin
+  H := DlLow(H);
+  DlDirect := True;
+  If (H = 'localhost') Or (Copy(H, 1, 4) = '127.') Or (Copy(H, 1, 3) = '10.') Or (Copy(H, 1, 8) = '192.168.') Then Exit;
+  If Copy(H, 1, 4) = '172.' Then
+  Begin
+    A := 0; K := 5;
+    While (K <= Length(H)) And (H[K] >= '0') And (H[K] <= '9') Do
+    Begin
+      A := A * 10 + Ord(H[K]) - 48;
+      Inc(K);
+    End;
+    B := Ord((K <= Length(H)) And (H[K] = '.'));
+    If (B = 1) And (A >= 16) And (A <= 31) Then Exit;
+  End;
+  DlDirect := False;
+End;
+
+Function DlSplit(Url : String) : Boolean;
+Var K : LongInt; Rest : String;
+Begin
+  DlSplit := False;
+  K := Pos('://', Url);
+  If K = 0 Then Exit;
+  DlScheme := DlLow(Copy(Url, 1, K - 1));
+  Rest := Copy(Url, K + 3, 255);
+  K := Pos('/', Rest);
+  If K = 0 Then
+  Begin
+    DlHost := Rest; DlPath := '/';
+  End
+  Else
+  Begin
+    DlHost := Copy(Rest, 1, K - 1); DlPath := Copy(Rest, K, 255);
+  End;
+  If DlScheme = 'https' Then DlPort := 443 Else DlPort := 80;
+  K := Pos(':', DlHost);
+  If K > 0 Then
+  Begin
+    DlPort := DlNum(Copy(DlHost, K + 1, 6), DlPort);
+    DlHost := Copy(DlHost, 1, K - 1);
+  End;
+  DlSplit := (DlHost <> '') And ((DlScheme = 'http') Or (DlScheme = 'https'));
+End;
+
+{ adresse de Location (absolue, //hote/..., /chemin ou relative) }
+Function DlJoin(Url, Loc : String) : String;
+Var Base : String; K : LongInt;
+Begin
+  If Pos('://', Loc) > 0 Then
+  Begin
+    DlJoin := Loc;
+    Exit;
+  End;
+  If Not DlSplit(Url) Then
+  Begin
+    DlJoin := Loc;
+    Exit;
+  End;
+  If Copy(Loc, 1, 2) = '//' Then
+  Begin
+    DlJoin := DlScheme + ':' + Loc;
+    Exit;
+  End;
+  Base := DlScheme + '://' + DlHost;
+  If ((DlScheme = 'https') And (DlPort <> 443)) Or ((DlScheme = 'http') And (DlPort <> 80)) Then
+    Base := Base + ':' + IStr(DlPort);
+  If Copy(Loc, 1, 1) = '/' Then DlJoin := Base + Loc
+  Else
+  Begin
+    K := Length(DlPath);
+    While (K > 0) And (DlPath[K] <> '/') Do Dec(K);
+    DlJoin := Base + Copy(DlPath, 1, K) + Loc;
+  End;
+End;
+
+Function DlHostIp(H : String; Var A0, A1, A2, A3 : LongInt) : Boolean;
+Var K, N, V, R, P : LongInt; Num : Boolean; Ip : Array[0..3] Of LongInt; B : Array[0..259] Of Byte;
+Begin
+  DlHostIp := False;
+  Num := H <> '';
+  For K := 1 To Length(H) Do If Not (((H[K] >= '0') And (H[K] <= '9')) Or (H[K] = '.')) Then Num := False;
+  If Num Then
+  Begin
+    N := 0; V := 0;
+    For K := 1 To Length(H) Do
+      If H[K] = '.' Then
+      Begin
+        If N < 4 Then Ip[N] := V And 255;
+        Inc(N); V := 0;
+      End
+      Else V := V * 10 + Ord(H[K]) - 48;
+    If N <> 3 Then Exit;
+    Ip[3] := V And 255;
+  End
+  Else
+  Begin
+    For K := 1 To Length(H) Do B[K - 1] := Ord(H[K]);
+    B[Length(H)] := 0;
+    R := NetGetHostByName(LongInt(@B));
+    If R = 0 Then Exit;
+    P := RdL(RdL(R + 16));
+    If P = 0 Then Exit;
+    For K := 0 To 3 Do Ip[K] := RdB(P + K);
+  End;
+  A0 := Ip[0]; A1 := Ip[1]; A2 := Ip[2]; A3 := Ip[3];
+  DlHostIp := True;
+End;
+
+Procedure DlClose;
+Begin
+  If DlConn <> 0 Then
+  Begin
+    If DlTls <> 0 Then Dummy := NetTlsClose(1);
+    Dummy := NetSoClose(DlSock);
+  End;
+  DlConn := 0; DlTls := 0; DlRPos := 0; DlRLen := 0;
+End;
+
+Function DlSendB(P, N : LongInt) : Boolean;
+Begin
+  If DlTls <> 0 Then DlSendB := NetTlsSend(1, P, N) = N Else DlSendB := NetSend(DlSock, P, N, 0) = N;
+End;
+
+Function DlSendStr(S : String) : Boolean;
+Var K : LongInt;
+Begin
+  For K := 1 To Length(S) Do DlSBuf[K - 1] := Ord(S[K]);
+  DlSendStr := DlSendB(LongInt(@DlSBuf), Length(S));
+End;
+
+{ au plus N octets de la connexion ; 0 a la fermeture, -1 en cas d'erreur }
+Function DlRecv(P, N : LongInt) : LongInt;
+Begin
+  If DlTls <> 0 Then DlRecv := NetTlsRecv(1, P, N) Else DlRecv := NetRecv(DlSock, P, N, 0);
+End;
+
+Function DlFill : Boolean;
+Begin
+  DlRPos := 0;
+  DlRLen := DlRecv(LongInt(@DlRBuf), DlRSz);
+  If DlRLen < 0 Then DlRLen := 0;
+  DlFill := DlRLen > 0;
+End;
+
+Function DlGetB(Var C : LongInt) : Boolean;
+Begin
+  DlGetB := False;
+  If DlRPos >= DlRLen Then If Not DlFill Then Exit;
+  C := DlRBuf[DlRPos];
+  Inc(DlRPos);
+  DlGetB := True;
+End;
+
+{ ligne terminee par LF (sans CR) ; faux a la fermeture }
+Function DlGetLine(Var S : String) : Boolean;
+Var C : LongInt;
+Begin
+  DlGetLine := False;
+  S := '';
+  Repeat
+    If Not DlGetB(C) Then Exit;
+    If C = 10 Then
+    Begin
+      DlGetLine := True;
+      Exit;
+    End;
+    If (C <> 13) And (Length(S) < 255) Then S := S + Chr(C);
+  Until False;
+End;
+
+{ raison d'un echec de connect (sock_errno) }
+Function DlSockMsg(E : LongInt; Who : String) : String;
+Begin
+  If E = 10061 Then DlSockMsg := Fr('Connexion refus`ee par ') + Who + '.'
+  Else If E = 10060 Then DlSockMsg := Fr('Pas de r`eponse de ') + Who + Fr(' (d`elai d`epass`e).')
+  Else If E = 10065 Then DlSockMsg := Who + Fr(' est injoignable (pas de route).')
+  Else If E = 10050 Then DlSockMsg := Fr('Le r`eseau ne fonctionne pas (carte r`eseau, DHCP : voir IFCONFIG).')
+  Else DlSockMsg := Fr('Connexion impossible `a ') + Who + ' (erreur ' + IStr(E) + ').';
+End;
+
+{ connexion a l'hote de DlHost/DlPort (proxy, tunnel CONNECT, TLS) }
+Function DlOpen : Boolean;
+Var Ad : Array[0..15] Of Byte; A0, A1, A2, A3, K, St, Port : LongInt; Host, Line : String;
+    B : Array[0..259] Of Byte; Px : Boolean;
+Begin
+  DlOpen := False;
+  DlClose;
+  If DlNetOk = 0 Then
+  Begin
+    If NetSockInit = 0 Then DlNetOk := 1
+    Else
+    Begin
+      DlErr := Fr('Le r`eseau n''est pas disponible (carte r`eseau, DHCP : voir IFCONFIG).');
+      Exit;
+    End;
+  End;
+  Px := (DlPxHost <> '') And Not DlDirect(DlHost);
+  Host := DlHost; Port := DlPort;
+  If Px Then
+  Begin
+    Host := DlPxHost; Port := DlPxPort;
+  End;
+  If Not DlHostIp(Host, A0, A1, A2, A3) Then
+  Begin
+    If Px Then DlErr := Fr('Proxy introuvable : ') + Host + ' (variable HTTP_PROXY).'
+    Else DlErr := Fr('H`ote introuvable : ') + Host + Fr(' (nom inconnu ou serveur de noms injoignable).');
+    Exit;
+  End;
+  For K := 0 To 15 Do Ad[K] := 0;
+  Ad[0] := 16; Ad[1] := 2; Ad[2] := (Port Shr 8) And 255; Ad[3] := Port And 255;
+  Ad[4] := A0; Ad[5] := A1; Ad[6] := A2; Ad[7] := A3;
+  DlSock := NetSocket(2, 1, 0);
+  If DlSock < 0 Then
+  Begin
+    DlErr := Fr('Impossible de cr`eer une connexion (socket).');
+    Exit;
+  End;
+  If NetConnect(DlSock, LongInt(@Ad), 16) <> 0 Then
+  Begin
+    If Px Then DlErr := 'Proxy : ' + DlSockMsg(NetSockErrno, Host + ':' + IStr(Port))
+    Else DlErr := DlSockMsg(NetSockErrno, Host + ':' + IStr(Port));
+    Dummy := NetSoClose(DlSock);
+    Exit;
+  End;
+  DlConn := 1; DlTls := 0; DlRPos := 0; DlRLen := 0;
+  If DlScheme = 'https' Then
+  Begin
+    If Px Then
+    Begin
+      If Not DlSendStr('CONNECT ' + DlHost + ':' + IStr(DlPort) + ' HTTP/1.1' + #13#10 + 'Host: ' + DlHost + ':' +
+                       IStr(DlPort) + #13#10#13#10) Then
+      Begin
+        DlErr := Fr('Le proxy ') + Host + Fr(' ne r`epond pas.');
+        DlClose;
+        Exit;
+      End;
+      St := 0;
+      Repeat
+        If Not DlGetLine(Line) Then
+        Begin
+          DlErr := Fr('Le proxy ') + Host + Fr(' a ferm`e la connexion.');
+          DlClose;
+          Exit;
+        End;
+        If (St = 0) And (Line <> '') Then
+        Begin
+          K := Pos(' ', Line);
+          If K > 0 Then St := DlNum(Copy(Line, K + 1, 3), 0);
+        End;
+      Until Line = '';
+      If (St < 200) Or (St > 299) Then
+      Begin
+        If St = 407 Then DlErr := Fr('Le proxy ') + Host + Fr(' demande une authentification (code 407).')
+        Else DlErr := Fr('Le proxy ') + Host + ' refuse le tunnel vers ' + DlHost + ' (code ' + IStr(St) + ').';
+        DlClose;
+        Exit;
+      End;
+      { reste de la reponse du proxy : rien n'est attendu avant TLS }
+      DlRPos := 0; DlRLen := 0;
+    End;
+    For K := 1 To Length(DlHost) Do B[K - 1] := Ord(DlHost[K]);
+    B[Length(DlHost)] := 0;
+    If NetTlsOpen(DlSock, LongInt(@B)) <> 1 Then
+    Begin
+      Dummy := NetTlsError(LongInt(@B), 250);
+      Line := ''; K := 0;
+      While (K < 200) And (B[K] <> 0) Do
+      Begin
+        Line := Line + Chr(B[K]);
+        Inc(K);
+      End;
+      DlErr := Fr('Connexion s`ecuris`ee (TLS) impossible avec ') + DlHost + ' : ' + Line;
+      Dummy := NetSoClose(DlSock);
+      DlConn := 0;
+      Exit;
+    End;
+    DlTls := 1;
+  End;
+  DlOpen := True;
+End;
+
+{ vitesse (octets par seconde sur les 4 dernieres secondes) ; cede le
+  processeur toutes les 50 ms : TCPIP32 et TLS32 ne sont jamais
+  interrompus par la minuterie, et sans cela la fenetre de progression
+  (fil principal) ne serait pas servie pendant un transfert rapide }
+Procedure DlTick;
+Var T, I, J, Dt, Db : LongInt;
+Begin
+  T := NowMs;
+  If (T - DlYT >= 50) Or (T < DlYT) Then
+  Begin
+    DlYT := T;
+    Dummy := DosSleep(0);
+  End;
+  If (DlRtN > 0) And (T - DlRtT[(DlRtN - 1) And 7] < 500) Then Exit;
+  I := DlRtN And 7;
+  DlRtT[I] := T; DlRtB[I] := DlDone;
+  Inc(DlRtN);
+  If DlRtN > 8 Then J := DlRtN And 7 Else J := 0;
+  Dt := T - DlRtT[J]; Db := DlDone - DlRtB[J];
+  If Dt > 0 Then DlRate := (Db Div Dt) * 1000 + ((Db Mod Dt) * 1000) Div Dt;
+End;
+
+{ place libre en Ko sur l'unite du chemin P (0 : inconnue) }
+Function DlFreeKb(P : String) : LongInt;
+Var Buf : Array[0..23] Of Byte; D : LongInt;
+Begin
+  DlFreeKb := 0;
+  D := 0;
+  If (Length(P) >= 2) And (P[2] = ':') Then D := Ord(UpCase(P[1])) - 64;
+  If DlDosQueryFSInfo(D, 1, LongInt(@Buf), 18) = 0 Then
+    DlFreeKb := RdL(LongInt(@Buf) + 12) * ((RdL(LongInt(@Buf) + 4) * (RdB(LongInt(@Buf) + 16) Or
+                (RdB(LongInt(@Buf) + 17) Shl 8))) Div 512) Div 2;
+End;
+
+{ tampon d'ecriture vers le .TMP ; faux si le disque est plein }
+Function DlFlush : Boolean;
+Var A, R : LongInt;
+Begin
+  DlFlush := True;
+  If DlWLen <= 0 Then Exit;
+  A := 0;
+  R := DosWrite(DlFh, LongInt(@DlWBuf), DlWLen, LongInt(@A));
+  If (R <> 0) Or (A <> DlWLen) Then
+  Begin
+    DlErr := Fr('Disque plein : impossible d''`ecrire ') + DlTmp + ' (' + IStr(DlDone) + Fr(' octets re`cus).');
+    DlFlush := False;
+  End;
+  DlWLen := 0;
+End;
+
+{ octets recus : vitesse, tampon plein ecrit ; faux si le disque est plein }
+Function DlGot(N : LongInt) : Boolean;
+Begin
+  DlGot := True;
+  DlWLen := DlWLen + N;
+  DlDone := DlDone + N;
+  DlTick;
+  If DlWLen >= DlWSz Then DlGot := DlFlush;
+End;
+
+{ au plus N octets du corps vers le tampon d'ecriture : d'abord ce qui
+  reste dans DlRBuf, sinon directement de la connexion ; rend le nombre
+  d'octets (0 : fermeture, -1 : erreur, -3 : disque plein) }
+Function DlBody(N : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  If N > DlWSz - DlWLen Then N := DlWSz - DlWLen;
+  If DlRPos < DlRLen Then
+  Begin
+    If N > DlRLen - DlRPos Then N := DlRLen - DlRPos;
+    DlMove(LongInt(@DlRBuf) + DlRPos, LongInt(@DlWBuf) + DlWLen, N);
+    DlRPos := DlRPos + N;
+    R := N;
+  End
+  Else
+  Begin
+    R := DlRecv(LongInt(@DlWBuf) + DlWLen, N);
+    If R <= 0 Then
+    Begin
+      If R < 0 Then R := -1;
+      DlBody := R;
+      Exit;
+    End;
+  End;
+  If Not DlGot(R) Then R := -3;
+  DlBody := R;
+End;
+
+Procedure DlMkDirs(D : String);
+Var K : LongInt;
+Begin
+  While (Length(D) > 3) And (D[Length(D)] = '\') Do Delete(D, Length(D), 1);
+  If Length(D) <= 3 Then Exit;
+  For K := 4 To Length(D) Do
+    If D[K] = '\' Then Dummy := DosCreateDir(DlZ(Copy(D, 1, K - 1)), 0);
+  Dummy := DosCreateDir(DlZ(D), 0);
+End;
+
+{ .TMP cree (Dest + '.TMP', sinon nom de Dest avec l'extension .TMP) }
+Function DlCreateTmp : Boolean;
+Var H, A : LongInt;
+Begin
+  DlCreateTmp := False;
+  H := -1; A := 0;
+  If DosOpen(DlZ(DlTmp), LongInt(@H), LongInt(@A), 0, 0, $12, $42, 0) <> 0 Then
+  Begin
+    { nom refuse (FAT 8.3 : deux points) }
+    DlTmp := DirOf(DlDest) + BaseOf(DlDest) + '.TMP';
+    H := -1; A := 0;
+    If (UpS(DlTmp) = UpS(DlDest)) Or (DosOpen(DlZ(DlTmp), LongInt(@H), LongInt(@A), 0, 0, $12, $42, 0) <> 0) Then
+    Begin
+      DlErr := Fr('Impossible de cr`eer ') + DlTmp + Fr(' (disque plein, prot`eg`e ou dossier absent ?).');
+      Exit;
+    End;
+  End;
+  DlFh := H;
+  DlCreateTmp := True;
+End;
+
+Procedure DlDropTmp;
+Begin
+  If DlFh >= 0 Then Dummy := DosClose(DlFh);
+  DlFh := -1;
+  Dummy := DosDelete(DlZ(DlTmp));
+End;
+
+{ une requete GET de Url ; corps ecrit dans le .TMP si la reponse est
+  200 ; rend le code HTTP, -1 (erreur, DlErr) ou -2 (annule) ; DlLoc :
+  en-tete Location }
+Function DlGet(Url : String) : LongInt;
+Var K, N, Chunk, Clen, Chunked, Got : LongInt; Line, HN, HV, PathQ, Req : String; Px : Boolean;
+Begin
+  DlGet := -1;
+  DlLoc := '';
+  If Not DlSplit(Url) Then
+  Begin
+    DlErr := 'Adresse non valable : ' + Url;
+    Exit;
+  End;
+  If DlAbort <> 0 Then
+  Begin
+    DlGet := -2;
+    Exit;
+  End;
+  DlState := DL_CONNECT;
+  If Not DlOpen Then Exit;
+  Px := (DlPxHost <> '') And Not DlDirect(DlHost);
+  PathQ := DlPath;
+  If Px And (DlScheme = 'http') Then PathQ := Url;
+  Req := 'GET ' + PathQ + ' HTTP/1.1' + #13#10 + 'Host: ' + DlHost;
+  If ((DlScheme = 'https') And (DlPort <> 443)) Or ((DlScheme = 'http') And (DlPort <> 80)) Then
+    Req := Req + ':' + IStr(DlPort);
+  Req := Req + #13#10 + 'User-Agent: OS2-0-Virtualisation/1.0 (OS/2-0)' + #13#10 + 'Accept: */*' + #13#10;
+  If Not DlSendStr(Req) Then
+  Begin
+    DlClose;
+    DlErr := 'Le serveur ' + DlHost + Fr(' a ferm`e la connexion.');
+    Exit;
+  End;
+  If Not DlSendStr('Accept-Encoding: identity' + #13#10 + 'Connection: close' + #13#10#13#10) Then
+  Begin
+    DlClose;
+    DlErr := 'Le serveur ' + DlHost + Fr(' a ferm`e la connexion.');
+    Exit;
+  End;
+  If Not DlGetLine(Line) Then
+  Begin
+    DlClose;
+    DlErr := 'Le serveur ' + DlHost + Fr(' a ferm`e la connexion sans r`epondre.');
+    Exit;
+  End;
+  DlHttp := 0;
+  K := Pos(' ', Line);
+  If K > 0 Then DlHttp := DlNum(Copy(Line, K + 1, 3), 0);
+  If (DlHttp < 100) Or (Copy(Line, 1, 5) <> 'HTTP/') Then
+  Begin
+    DlClose;
+    DlErr := Fr('R`eponse illisible de ') + DlHost + ' (pas HTTP).';
+    Exit;
+  End;
+  Clen := -1; Chunked := 0;
+  Repeat
+    If Not DlGetLine(Line) Then
+    Begin
+      DlClose;
+      DlErr := Fr('R`eponse incompl`gte de ') + DlHost + '.';
+      Exit;
+    End;
+    K := Pos(':', Line);
+    If K > 0 Then
+    Begin
+      HN := DlLow(TrimS(Copy(Line, 1, K - 1))); HV := TrimS(Copy(Line, K + 1, 255));
+      If HN = 'content-length' Then Clen := DlNum(HV, -1)
+      Else If (HN = 'transfer-encoding') And (Pos('chunked', DlLow(HV)) > 0) Then Chunked := 1
+      Else If HN = 'location' Then DlLoc := HV;
+    End;
+  Until Line = '';
+  If DlHttp <> 200 Then
+  Begin
+    DlClose;
+    DlGet := DlHttp;
+    Exit;
+  End;
+  { 200 : le corps va dans le .TMP }
+  If Chunked <> 0 Then Clen := -1;
+  DlTotal := Clen;
+  If Clen > 0 Then
+  Begin
+    K := DlFreeKb(DlTmp);
+    If (K > 0) And (Clen Div 1024 + 64 > K) Then
+    Begin
+      DlClose;
+      DlErr := 'Pas assez de place sur ' + Copy(DlDest, 1, 2) + ' : ' + IStr(Clen Div 1048576 + 1) + Fr(' Mo n`ecessaires, ') +
+               IStr(K Div 1024) + ' Mo libres.';
+      Exit;
+    End;
+  End;
+  If Not DlCreateTmp Then
+  Begin
+    DlClose;
+    Exit;
+  End;
+  DlState := DL_GET;
+  DlWLen := 0; DlDone := 0; DlRtN := 0; DlRate := 0;
+  DlTick;
+  If Chunked <> 0 Then
+  Begin
+    Repeat
+      If Not DlGetLine(Line) Then
+      Begin
+        DlErr := Fr('Connexion coup`ee pendant le t`el`echargement (') + IStr(DlDone) + Fr(' octets re`cus).');
+        DlDropTmp; DlClose;
+        Exit;
+      End;
+      Chunk := 0;
+      K := 1;
+      While (K <= Length(Line)) And (DlHexD(Line[K]) >= 0) Do
+      Begin
+        Chunk := Chunk * 16 + DlHexD(Line[K]);
+        Inc(K);
+      End;
+      If Chunk = 0 Then
+      Begin
+        { fin : en-tetes de queue jusqu'a la ligne vide }
+        Repeat Until (Not DlGetLine(Line)) Or (Line = '');
+        Break;
+      End;
+      While Chunk > 0 Do
+      Begin
+        If DlAbort <> 0 Then
+        Begin
+          DlDropTmp; DlClose; DlGet := -2;
+          Exit;
+        End;
+        N := DlBody(Chunk);
+        If N <= 0 Then
+        Begin
+          If N <> -3 Then
+            DlErr := Fr('Connexion coup`ee pendant le t`el`echargement (') + IStr(DlDone) + Fr(' octets re`cus).');
+          DlDropTmp; DlClose;
+          Exit;
+        End;
+        Chunk := Chunk - N;
+      End;
+      { CRLF apres le bloc }
+      If Not DlGetLine(Line) Then
+      Begin
+        DlErr := Fr('Connexion coup`ee pendant le t`el`echargement (') + IStr(DlDone) + Fr(' octets re`cus).');
+        DlDropTmp; DlClose;
+        Exit;
+      End;
+    Until False;
+  End
+  Else
+  Begin
+    Got := 0;
+    While (Clen < 0) Or (Got < Clen) Do
+    Begin
+      If DlAbort <> 0 Then
+      Begin
+        DlDropTmp; DlClose; DlGet := -2;
+        Exit;
+      End;
+      If Clen >= 0 Then N := DlBody(Clen - Got) Else N := DlBody(DlWSz);
+      If N = 0 Then
+      Begin
+        If Clen < 0 Then Break;
+        DlErr := Fr('Transfert interrompu par ') + DlHost + ' (' + IStr(Got) + ' octets sur ' + IStr(Clen) + ').';
+        DlDropTmp; DlClose;
+        Exit;
+      End;
+      If N < 0 Then
+      Begin
+        If N <> -3 Then
+        Begin
+          If (DlTls = 0) And (NetSockErrno = 10060) Then
+            DlErr := Fr('Connexion coup`ee : plus rien re`cu de ') + DlHost + ' depuis 60 s (' + IStr(Got) + ' octets).'
+          Else
+            DlErr := Fr('Connexion coup`ee pendant le t`el`echargement (') + IStr(Got) + Fr(' octets re`cus).');
+        End;
+        DlDropTmp; DlClose;
+        Exit;
+      End;
+      Got := Got + N;
+    End;
+  End;
+  DlClose;
+  If Not DlFlush Then
+  Begin
+    DlDropTmp;
+    Exit;
+  End;
+  Dummy := DosClose(DlFh);
+  DlFh := -1;
+  DlTotal := DlDone;
+  DlGet := 200;
+End;
+
+Function DlHttpMsg(R : LongInt) : String;
+Begin
+  If R = 404 Then DlHttpMsg := Fr('Fichier introuvable sur le serveur (erreur HTTP 404).')
+  Else If R = 410 Then DlHttpMsg := Fr('Fichier retir`e du serveur (erreur HTTP 410).')
+  Else If (R = 401) Or (R = 403) Then DlHttpMsg := Fr('Acc`gs refus`e par le serveur (erreur HTTP ') + IStr(R) + ').'
+  Else If R = 429 Then DlHttpMsg := Fr('Trop de demandes (erreur HTTP 429) : r`eessayez plus tard.')
+  Else If R >= 500 Then DlHttpMsg := Fr('Erreur du serveur (HTTP ') + IStr(R) + Fr(') : r`eessayez plus tard.')
+  Else DlHttpMsg := Fr('Le serveur a r`epondu : erreur HTTP ') + IStr(R) + '.';
+End;
+
+{ .TMP complet -> Dest (DosMove ; sinon recopie) }
+Function DlRename : Boolean;
+Var Hi, Ho, A, R, W : LongInt;
+Begin
+  DlRename := True;
+  Dummy := DosDelete(DlZ(DlDest));
+  If DlDosMove(DlZ(DlTmp), DlZ2(DlDest)) = 0 Then Exit;
+  DlRename := False;
+  Hi := -1; Ho := -1; A := 0;
+  If DosOpen(DlZ(DlTmp), LongInt(@Hi), LongInt(@A), 0, 0, $01, $40, 0) <> 0 Then Hi := -1;
+  A := 0;
+  If DosOpen(DlZ2(DlDest), LongInt(@Ho), LongInt(@A), 0, 0, $12, $42, 0) <> 0 Then Ho := -1;
+  If (Hi < 0) Or (Ho < 0) Then
+  Begin
+    If Hi >= 0 Then Dummy := DosClose(Hi);
+    If Ho >= 0 Then Dummy := DosClose(Ho);
+    DlErr := Fr('Impossible de cr`eer ') + DlDest + '.';
+    Dummy := DosDelete(DlZ(DlTmp));
+    Exit;
+  End;
+  Repeat
+    R := 0;
+    If DosRead(Hi, LongInt(@DlWBuf), DlWSz, LongInt(@R)) <> 0 Then R := -1;
+    If R > 0 Then
+    Begin
+      W := 0;
+      If (DosWrite(Ho, LongInt(@DlWBuf), R, LongInt(@W)) <> 0) Or (W <> R) Then R := -2;
+    End;
+  Until R <= 0;
+  Dummy := DosClose(Hi);
+  Dummy := DosClose(Ho);
+  Dummy := DosDelete(DlZ(DlTmp));
+  If R < 0 Then
+  Begin
+    Dummy := DosDelete(DlZ(DlDest));
+    If R = -2 Then DlErr := Fr('Disque plein : impossible d''`ecrire ') + DlDest + '.'
+    Else DlErr := 'Lecture impossible de ' + DlTmp + '.';
+    Exit;
+  End;
+  DlRename := True;
+End;
+
+Function DlWorker(Arg : LongInt) : LongInt;
+Var Url : String; R, Hops : LongInt; Again : Boolean;
+Begin
+  DlWorker := 0;
+  Url := DlUrl; Hops := 0;
+  DlMkDirs(DirOf(DlDest));
+  Repeat
+    Again := False;
+    R := DlGet(Url);
+    If (R = 301) Or (R = 302) Or (R = 303) Or (R = 307) Or (R = 308) Then
+    Begin
+      Inc(Hops);
+      If DlLoc = '' Then
+      Begin
+        DlErr := 'Redirection (HTTP ' + IStr(R) + ') sans adresse.';
+        R := -1;
+      End
+      Else If Hops > 8 Then
+      Begin
+        DlErr := 'Trop de redirections (' + Url + ').';
+        R := -1;
+      End
+      Else
+      Begin
+        Url := DlJoin(Url, DlLoc);
+        Again := True;
+      End;
+    End;
+  Until Not Again;
+  DlClose;
+  If R = -2 Then
+  Begin
+    DlDropTmp;
+    DlState := DL_CANCEL;
+    Exit;
+  End;
+  If (R <> 200) And (R <> -1) Then DlErr := DlHttpMsg(R);
+  If R <> 200 Then
+  Begin
+    DlDropTmp;
+    DlState := DL_ERROR;
+    Exit;
+  End;
+  If DlAbort <> 0 Then
+  Begin
+    DlDropTmp;
+    DlState := DL_CANCEL;
+    Exit;
+  End;
+  If Not DlRename Then
+  Begin
+    DlState := DL_ERROR;
+    Exit;
+  End;
+  DlState := DL_DONE;
+End;
+
+Function DlBusy : Boolean;
+Begin
+  DlBusy := (DlState = DL_CONNECT) Or (DlState = DL_GET);
+End;
+
+{ lance le telechargement de Url dans le fichier Dest (fil a part) }
+Procedure DlStart(Url, Dest : String);
+Begin
+  If DlBusy Then Exit;
+  DlUrl := TrimS(Url); DlDest := TrimS(Dest); DlTmp := DlDest + '.TMP';
+  DlErr := ''; DlTotal := -1; DlDone := 0; DlAbort := 0; DlRate := 0; DlHttp := 0;
+  DlRtN := 0; DlFh := -1; DlConn := 0; DlTls := 0; DlRPos := 0; DlRLen := 0; DlWLen := 0;
+  DlT0 := NowMs;
+  DlReadProxy;
+  DlState := DL_CONNECT;
+  If DosCreateThread(LongInt(@DlTid), LongInt(@DlWorker), 0, 0, 131072) <> 0 Then Dummy := DlWorker(0);
+End;
+
+{ essai : telecharge, attend la fin, verifie la taille et la somme CRC-32
+  du fichier obtenu ; resultat sur COM1 }
+Procedure DlSelfTest(Url, Dest : String);
+Var T, Last, H, A, N, Crc, Sz, K, J, C : LongInt;
+Begin
+  For K := 0 To 255 Do
+  Begin
+    C := K;
+    For J := 1 To 8 Do
+      If (C And 1) <> 0 Then C := ((C Shr 1) And $7FFFFFFF) Xor LongInt($EDB88320) Else C := (C Shr 1) And $7FFFFFFF;
+    DlCrcT[K] := C;
+  End;
+  Log('DL : ' + Url + ' -> ' + Dest);
+  T := NowMs; Last := T;
+  DlStart(Url, Dest);
+  If DlPxHost <> '' Then Log('DL : proxy ' + DlPxHost + ':' + IStr(DlPxPort));
+  While DlBusy Do
+  Begin
+    Dummy := DosSleep(100);
+    If (DlTestCut > 0) And (DlDone >= DlTestCut) Then DlAbort := 1;
+    If NowMs - Last >= 5000 Then
+    Begin
+      Last := NowMs;
+      Log('DL : ' + IStr(DlDone) + ' / ' + IStr(DlTotal) + ' octets, ' + IStr(DlRate Div 1024) + ' Ko/s');
+    End;
+  End;
+  T := NowMs - T;
+  If DlState = DL_CANCEL Then
+  Begin
+    Log(Fr('DL : annul`e apr`gs ') + IStr(DlDone) + ' octets ; .TMP ' + IStr(Ord(FExists(DlTmp))) + ' ; destination ' +
+        IStr(Ord(FExists(DlDest))));
+    Exit;
+  End;
+  If DlState <> DL_DONE Then
+  Begin
+    Log('DL : erreur ' + DlErr + ' ; .TMP ' + IStr(Ord(FExists(DlTmp))));
+    Exit;
+  End;
+  { relecture du fichier final }
+  H := FOpen(Dest, False);
+  If H < 0 Then
+  Begin
+    Log(Fr('DL : erreur fichier ') + Dest + ' introuvable');
+    Exit;
+  End;
+  Crc := -1; Sz := 0;
+  Repeat
+    N := 0;
+    If DosRead(H, LongInt(@DlWBuf), DlWSz, LongInt(@N)) <> 0 Then N := 0;
+    For K := 0 To N - 1 Do
+      Crc := DlCrcT[(Crc Xor DlWBuf[K]) And 255] Xor ((Crc Shr 8) And $00FFFFFF);
+    Sz := Sz + N;
+  Until N <= 0;
+  Dummy := DosClose(H);
+  Crc := Crc Xor -1;
+  If T <= 0 Then T := 1;
+  Log('DL : ok ' + IStr(Sz) + ' octets CRC32 ' + Hex(Crc, 8) + ' (' + IStr(T) + ' ms, ' +
+      IStr((Sz Div T) * 1000 Div 1024) + ' Ko/s ; annonce ' + IStr(DlTotal) + ' ; .TMP ' + IStr(Ord(FExists(DlTmp))) + ')');
+End;
+
+{ ==================================================================== }
 { Machines : fichiers .vbox (XML de VirtualBox) et registre (OS2.INI)  }
 { ==================================================================== }
 
@@ -774,9 +1743,17 @@ Begin
   If V.MemMb < 2 Then V.MemMb := 2;
   If V.MemMb > 128 Then V.MemMb := 128;
   V.Hd0 := ''; V.Hd1 := ''; V.Fd := ''; V.Hd0Uuid := ''; V.Hd1Uuid := ''; V.BootFd := 0;
-  { ordre d'amorcage : la disquette avant le disque dur ? }
+  V.Cd := ''; V.CdUuid := ''; V.BootCd := 0; V.Distro := '';
+  { ordre d'amorcage : la disquette ou le CD-ROM (DVD) avant le disque dur ? }
   Q := XFind('Order', 0);
-  If Q >= 0 Then If (XAttr(Q, 'position') = '1') And (XAttr(Q, 'device') = 'Floppy') Then V.BootFd := 1;
+  If Q >= 0 Then
+  Begin
+    If (XAttr(Q, 'position') = '1') And (XAttr(Q, 'device') = 'Floppy') Then V.BootFd := 1;
+    If (XAttr(Q, 'position') = '1') And (XAttr(Q, 'device') = 'DVD') Then V.BootCd := 1;
+  End;
+  { distribution telechargee (attribut de Virtualisation, ignore par VirtualBox) }
+  Q := XFind('Description', 0);
+  If Q >= 0 Then V.Distro := XAttr(Q, 'distribution');
   NHd := 0;
   Q := XFind('AttachedDevice', 0);
   While Q >= 0 Do
@@ -793,6 +1770,7 @@ Begin
       Inc(NHd);
     End;
     If (T = 'Floppy') And (U <> '') Then V.Fd := XMedia(Path, U);
+    If (T = 'DVD') And (U <> '') Then Begin V.Cd := XMedia(Path, U); V.CdUuid := U; End;
     Q := XFind('AttachedDevice', Q + 5);
   End;
   { sans controleur : premier disque du registre des supports }
@@ -843,6 +1821,7 @@ Begin
   If V.Uuid = '' Then V.Uuid := NewUuid;
   If (V.Hd0 <> '') And (V.Hd0Uuid = '') Then V.Hd0Uuid := NewUuid;
   If (V.Hd1 <> '') And (V.Hd1Uuid = '') Then V.Hd1Uuid := NewUuid;
+  If (V.Cd <> '') And (V.CdUuid = '') Then V.CdUuid := NewUuid;
   If V.OsType = '' Then V.OsType := 'DOS';
   Dummy := DosDelete(Z(V.Vbox));
   WH := FCreate(V.Vbox);
@@ -861,6 +1840,12 @@ Begin
     WOut('        <HardDisk uuid="' + V.Hd1Uuid + '" location="' + LocOf(V.Vbox, V.Hd1) + '" format="' + DiskFmt(V.Hd1) +
          '" type="Normal"/>');
   WOut('      </HardDisks>');
+  If V.Cd <> '' Then
+  Begin
+    WOut('      <DVDImages>');
+    WOut('        <Image uuid="' + V.CdUuid + '" location="' + LocOf(V.Vbox, V.Cd) + '"/>');
+    WOut('      </DVDImages>');
+  End;
   If V.Fd <> '' Then
   Begin
     WOut('      <FloppyImages>');
@@ -868,13 +1853,20 @@ Begin
     WOut('      </FloppyImages>');
   End;
   WOut('    </MediaRegistry>');
+  If V.Distro <> '' Then WOut('    <Description distribution="' + V.Distro + '"/>');
   WOut('    <Hardware>');
   WOut('      <CPU>');
   WOut('        <HardwareVirtExLargePages enabled="false"/>');
   WOut('      </CPU>');
   WOut('      <Memory RAMSize="' + IStr(V.MemMb) + '"/>');
   WOut('      <Boot>');
-  If V.BootFd <> 0 Then
+  If V.BootCd <> 0 Then
+  Begin
+    WOut('        <Order position="1" device="DVD"/>');
+    WOut('        <Order position="2" device="HardDisk"/>');
+    WOut('        <Order position="3" device="Floppy"/>');
+  End
+  Else If V.BootFd <> 0 Then
   Begin
     WOut('        <Order position="1" device="Floppy"/>');
     WOut('        <Order position="2" device="HardDisk"/>');
@@ -899,6 +1891,12 @@ Begin
   Begin
     WOut('        <AttachedDevice type="HardDisk" hotpluggable="false" port="0" device="1">');
     WOut('          <Image uuid="' + V.Hd1Uuid + '"/>');
+    WOut('        </AttachedDevice>');
+  End;
+  If V.Cd <> '' Then
+  Begin
+    WOut('        <AttachedDevice passthrough="false" type="DVD" hotpluggable="false" port="1" device="0">');
+    WOut('          <Image uuid="' + V.CdUuid + '"/>');
     WOut('        </AttachedDevice>');
   End;
   WOut('      </StorageController>');
@@ -940,6 +1938,34 @@ Begin
   Inc(NVm);
 End;
 
+{ dossier des machines : C:\VMS, ou D:\VMS si C: est en lecture seule
+  (OS/2-0 amorce depuis son CD-ROM) }
+Var
+  VmsRootS : String;
+
+Function VmsDir : String;
+Var H : LongInt; D : String; K : LongInt;
+Begin
+  If VmsRootS = '' Then
+  Begin
+    VmsRootS := 'C:\VMS\';
+    For K := 0 To 1 Do
+    Begin
+      D := Chr(Ord('C') + K) + ':\VMS';
+      Dummy := DosCreateDir(Z(D), 0);
+      H := FCreate(D + '\VMS.TMP');
+      If H >= 0 Then
+      Begin
+        Dummy := DosClose(H);
+        Dummy := DosDelete(Z(D + '\VMS.TMP'));
+        VmsRootS := D + '\';
+        Break;
+      End;
+    End;
+  End;
+  VmsDir := VmsRootS;
+End;
+
 { machine creee pour un disque seul (.vhd, .vdi, .img) : son .vbox est
   ecrit a cote du disque }
 Function VmFromDisk(Disk : String) : LongInt;
@@ -957,14 +1983,25 @@ Begin
   V.Name := BaseOf(Disk);
   For K := 1 To Length(V.Name) Do If V.Name[K] = '_' Then V.Name[K] := ' ';
   V.OsType := 'DOS'; V.MemMb := 32; V.Hd0 := Disk; V.Hd1 := ''; V.Fd := ''; V.BootFd := 0;
+  V.Cd := ''; V.CdUuid := ''; V.BootCd := 0; V.Distro := '';
   V.Uuid := ''; V.Hd0Uuid := ''; V.Hd1Uuid := '';
   V.Vbox := DirOf(Disk) + BaseOf(Disk) + '.VBOX';
+  If ExtOf(Disk) = 'ISO' Then
+  Begin
+    { CD-ROM seul : machine amorcee par le CD-ROM, sans disque dur }
+    V.Hd0 := ''; V.Cd := Disk; V.BootCd := 1;
+  End;
   If FExists(V.Vbox) Then
   Begin
     VmFromDisk := VmAddFile(V.Vbox);
     Exit;
   End;
-  If Not VmSave(V) Then Exit;
+  If Not VmSave(V) Then
+  Begin
+    { dossier en lecture seule (CD-ROM) : .vbox dans C:\VMS }
+    V.Vbox := VmsDir + BaseOf(Disk) + '.VBOX';
+    If Not VmSave(V) Then Exit;
+  End;
   Vms[NVm] := V;
   VmFromDisk := NVm;
   Inc(NVm);
@@ -1026,18 +2063,21 @@ Begin
     P := IniRead('Machine' + IStr(K));
     If (P <> '') And FExists(P) Then Dummy := VmAddFile(P);
   End;
-  ScanDir('C:\VMS\', 0);
+  ScanDir(VmsDir, 0);
   RegSave;
 End;
 
 { ==================================================================== }
 { Disques : VHD (fixe, dynamique), VDI (fixe, dynamique), brut, VMDK   }
-{ plat ; disque 0 et 1 (80h, 81h), disquette (00h)                     }
+{ plat ; disque 0 et 1 (80h, 81h), disquette (00h), CD-ROM ISO 9660    }
+{ (unite 3, E0h) et image El Torito emulee (unite 4 : disquette ou     }
+{ disque dur dans l'image du CD-ROM, meme fichier)                     }
 { ==================================================================== }
 
 Const
   MaxBat = 16384;
-  NDk = 3;
+  NDk = 5;
+  DkCd = 3; DkEmu = 4;
 
 Var
   DkH, DkKind, DkSect, DkCyl, DkHeads, DkSpt, DkRO, DkBlkSec, DkBmp, DkTbl, DkEnd, DkNBlk : Array[0..NDk - 1] Of LongInt;
@@ -1048,6 +2088,12 @@ Var
   SecBuf : Array[0..4095] Of Byte;
   ZBuf : Array[0..32767] Of Byte;
   DkErr : String;
+  { El Torito : CdEmu = type de l'entree d'amorce (0 sans emulation,
+    1 a 3 disquette de 1,2, 1,44 ou 2,88 Mo, 4 disque dur), CdOn = vrai
+    si le CD-ROM est amorcable ; CdEmuOn : emulation active (amorce par
+    le CD-ROM, jusqu'a INT 13h AX=4B00h) }
+  CdOn, CdEmuOn : Boolean;
+  CdEmu, CdBootLba, CdBootCnt, CdLoadSeg : LongInt;
 
 { somme de controle des en-tetes VHD : complement a un de la somme des
   octets (champ de la somme a zero) }
@@ -1144,8 +2190,14 @@ End;
 
 Procedure DkClose(D : LongInt);
 Begin
-  If DkH[D] >= 0 Then Dummy := DosClose(DkH[D]);
-  DkH[D] := -1; DkKind[D] := 0; DkSect[D] := 0;
+  { l'unite emulee partage le fichier du CD-ROM }
+  If (D <> DkEmu) And (DkH[D] >= 0) Then Dummy := DosClose(DkH[D]);
+  DkH[D] := -1; DkKind[D] := 0; DkSect[D] := 0; DkData[D] := 0;
+  If D = DkCd Then
+  Begin
+    DkH[DkEmu] := -1; DkKind[DkEmu] := 0; DkSect[DkEmu] := 0;
+    CdOn := False; CdEmuOn := False;
+  End;
 End;
 
 { geometrie BIOS : celle de la table des partitions (fin de la premiere
@@ -1154,7 +2206,7 @@ Procedure DkGeom(D : LongInt);
 Var A, K, H, S, T : LongInt;
 Begin
   T := DkSect[D];
-  If D = 2 Then
+  If (D = 2) Or ((D = DkEmu) And (CdEmu < 4)) Then
   Begin
     DkHeads[D] := 2;
     Case T Of
@@ -1176,6 +2228,9 @@ Begin
         H := RdB(A + 446 + K * 16 + 5) + 1;
         S := RdB(A + 446 + K * 16 + 6) And 63;
       End;
+  { geometrie improbable (moins de 2 tetes ou de 9 secteurs, disque de
+    plus de 8 Mo) : traduction LBA }
+  If (H < 2) Or (S < 9) Then If T > 16384 Then H := 0;
   If (H < 1) Or (S < 1) Then
   Begin
     S := 63;
@@ -1197,7 +2252,7 @@ Var H, Sz, A, K, N, P, Fo, E : LongInt; S, L : String; Ok : Boolean;
 Begin
   DkOpen := False;
   DkClose(D);
-  DkPath[D] := Path; DkErr := ''; DkFmt[D] := '';
+  DkPath[D] := Path; DkErr := ''; DkFmt[D] := ''; DkData[D] := 0;
   DkReads[D] := 0; DkWrites[D] := 0;
   If Path = '' Then Exit;
   DkRO[D] := 0;
@@ -1362,7 +2417,7 @@ Var B, E : LongInt;
 Begin
   DkPos := -1;
   Case DkKind[D] Of
-    DK_RAW, DK_VHDFIX : DkPos := Lba * 512;
+    DK_RAW, DK_VHDFIX : DkPos := DkData[D] + Lba * 512;
     DK_VHDDYN :
       Begin
         B := Lba Div DkBlkSec[D];
@@ -1461,6 +2516,68 @@ Procedure DkCloseAll;
 Var D : LongInt;
 Begin
   For D := 0 To NDk - 1 Do DkClose(D);
+End;
+
+{ CD-ROM : image ISO 9660 (unite 3, secteurs de 2048 octets = 4 secteurs
+  de 512 de l'unite) ; lit l'entree d'amorce El Torito (descripteur au
+  secteur 17, catalogue, entree initiale) et prepare l'unite 4 pour
+  l'emulation d'une disquette ou d'un disque dur }
+Function CdOpen(Path : String) : Boolean;
+Var A, Cat, M, K, N, S, E : LongInt;
+Begin
+  CdOpen := False;
+  DkClose(DkCd);
+  If Not DkOpen(DkCd, Path) Then Exit;
+  DkRO[DkCd] := 1;
+  DkKind[DkCd] := DK_RAW; DkData[DkCd] := 0; DkFmt[DkCd] := 'ISO';
+  CdOpen := True;
+  CdOn := False; CdEmuOn := False; CdEmu := 0;
+  A := LongInt(@SecBuf);
+  If Not DkReadSec(DkCd, 17 * 4, A) Then Exit;
+  If (RdB(A) <> 0) Or (RdB(A + 1) <> Ord('C')) Or (RdB(A + 2) <> Ord('D')) Or (RdB(A + 7) <> Ord('E')) Or
+     (RdB(A + 8) <> Ord('L')) Or (RdB(A + 10) <> Ord('T')) Then Exit;
+  Cat := RdL(A + $47);
+  If Not DkReadSec(DkCd, Cat * 4, A) Then Exit;
+  If (RdB(A) <> 1) Or (RdB(A + $1E) <> $55) Or (RdB(A + $1F) <> $AA) Then Exit;
+  If RdB(A + $20) <> $88 Then Exit;
+  M := RdB(A + $21) And 15;
+  If M > 4 Then Exit;
+  CdEmu := M;
+  CdLoadSeg := RdW(A + $22);
+  If CdLoadSeg = 0 Then CdLoadSeg := $07C0;
+  CdBootCnt := RdW(A + $26);
+  If CdBootCnt < 1 Then CdBootCnt := 1;
+  CdBootLba := RdL(A + $28);
+  CdOn := True;
+  If M = 0 Then Exit;
+  { unite emulee : meme fichier, a partir de l'image d'amorce }
+  DkH[DkEmu] := DkH[DkCd]; DkKind[DkEmu] := DK_RAW; DkRO[DkEmu] := 1;
+  DkData[DkEmu] := CdBootLba * 2048; DkPath[DkEmu] := Path; DkFmt[DkEmu] := 'El Torito';
+  DkReads[DkEmu] := 0; DkWrites[DkEmu] := 0;
+  Case M Of
+    1 : DkSect[DkEmu] := 2400;
+    2 : DkSect[DkEmu] := 2880;
+    3 : DkSect[DkEmu] := 5760;
+  Else
+    Begin
+      { disque dur : jusqu'a la fin de la derniere partition (ou du CD) }
+      DkSect[DkEmu] := DkSect[DkCd] - CdBootLba * 4;
+      If DkReadSec(DkEmu, 0, A) Then
+      Begin
+        N := 0;
+        For K := 0 To 3 Do
+        Begin
+          S := RdL(A + 446 + K * 16 + 8); E := RdL(A + 446 + K * 16 + 12);
+          If (RdB(A + 446 + K * 16 + 4) <> 0) And (S + E > N) Then N := S + E;
+        End;
+        If (N > 0) And (N < DkSect[DkEmu]) Then DkSect[DkEmu] := N;
+      End;
+    End;
+  End;
+  If DkSect[DkEmu] > DkSect[DkCd] - CdBootLba * 4 Then DkSect[DkEmu] := DkSect[DkCd] - CdBootLba * 4;
+  ZeroB(A, 512);
+  If DkReadSec(DkEmu, 0, A) Then ;
+  DkGeom(DkEmu);
 End;
 
 { ==================================================================== }
@@ -2206,9 +3323,546 @@ End;
 { Ports d'E/S de l'invite                                               }
 { ==================================================================== }
 
+{ ==================================================================== }
+{ Controleurs IDE (PIO) : canal primaire 1F0h-1F7h/3F6h (disque 0 maitre,
+  disque 1 esclave, ATA), canal secondaire 170h-177h/376h (CD-ROM ATAPI
+  maitre) ; IRQ 14 et 15 ; commandes ATA usuelles (IDENTIFY, READ/WRITE
+  SECTORS et MULTIPLE, LBA 28 bits et CHS) et paquets ATAPI (READ(10),
+  READ(12), READ CAPACITY, READ TOC, INQUIRY, REQUEST SENSE, MODE SENSE,
+  TEST UNIT READY...) pour les invites en mode protege (OS2-Zero,
+  Pasdows 95 installes, Linux...)                                       }
+{ ==================================================================== }
+
+Const
+  IdeBufSz = 65536;
+
+Var
+  IdeFeat, IdeCnt, IdeLbaL, IdeLbaM, IdeLbaH, IdeDev, IdeSt, IdeErr, IdeCtl : Array[0..1] Of LongInt;
+  IdePos, IdeLen, IdeLeft, IdeLba, IdeWr, IdeUnit, IdePkt, IdeBlk : Array[0..1] Of LongInt;
+  IdeSense, IdeAsc : Array[0..1] Of LongInt;
+  IdeMult : Array[0..3] Of LongInt;
+  IdeBuf : Array[0..2 * IdeBufSz - 1] Of Byte;
+  IdeCmds : LongInt;
+
+Procedure IdeInit;
+Var C : LongInt;
+Begin
+  For C := 0 To 1 Do
+  Begin
+    IdeFeat[C] := 0; IdeCnt[C] := 1; IdeLbaL[C] := 1; IdeLbaM[C] := 0; IdeLbaH[C] := 0; IdeDev[C] := $A0;
+    IdeSt[C] := $50; IdeErr[C] := 1; IdeCtl[C] := 0; IdePos[C] := 0; IdeLen[C] := 0; IdeLeft[C] := 0;
+    IdeWr[C] := 0; IdePkt[C] := 0; IdeSense[C] := 0; IdeAsc[C] := 0;
+  End;
+  For C := 0 To 3 Do IdeMult[C] := 16;
+  { signature ATAPI du CD-ROM }
+  If DkH[DkCd] >= 0 Then
+  Begin
+    IdeLbaM[1] := $14; IdeLbaH[1] := $EB;
+  End;
+  IdeCmds := 0;
+End;
+
+{ unite de la peripherique selectionnee (-1 : absente) }
+Function IdeSel(C : LongInt) : LongInt;
+Var D, U : LongInt;
+Begin
+  D := (IdeDev[C] Shr 4) And 1;
+  U := -1;
+  If C = 0 Then
+  Begin
+    If D = 0 Then U := 0 Else U := 1;
+  End
+  Else If D = 0 Then U := DkCd;
+  If (U >= 0) And (DkH[U] < 0) Then U := -1;
+  IdeSel := U;
+End;
+
+Procedure IdeIrq(C : LongInt);
+Begin
+  If (IdeCtl[C] And 2) = 0 Then Irq(14 + C);
+End;
+
+Procedure IdePutW(C, Off, V : LongInt);
+Begin
+  IdeBuf[C * IdeBufSz + Off] := V And 255;
+  IdeBuf[C * IdeBufSz + Off + 1] := (V Shr 8) And 255;
+End;
+
+{ chaine ATA (octets permutes dans chaque mot) }
+Procedure IdePutS(C, Off, N : LongInt; S : String);
+Var K, Ch : LongInt;
+Begin
+  For K := 0 To N - 1 Do
+  Begin
+    If K < Length(S) Then Ch := Ord(S[K + 1]) Else Ch := 32;
+    IdeBuf[C * IdeBufSz + Off + (K Xor 1)] := Ch;
+  End;
+End;
+
+Procedure IdeError(C, E : LongInt);
+Begin
+  IdeErr[C] := E; IdeSt[C] := $51; IdeLen[C] := 0; IdePos[C] := 0; IdeLeft[C] := 0;
+  IdeIrq(C);
+End;
+
+Procedure IdeDone(C : LongInt);
+Begin
+  IdeErr[C] := 0; IdeSt[C] := $50; IdeLen[C] := 0; IdePos[C] := 0;
+  IdeIrq(C);
+End;
+
+{ IDENTIFY DEVICE (ECh) / IDENTIFY PACKET DEVICE (A1h) }
+Procedure IdeIdentify(C, U : LongInt);
+Var K, T : LongInt;
+Begin
+  For K := 0 To 511 Do IdeBuf[C * IdeBufSz + K] := 0;
+  If U = DkCd Then
+  Begin
+    IdePutW(C, 0, $85C0);                        { ATAPI, CD-ROM, amovible, paquets de 12 octets }
+    IdePutS(C, 20, 20, 'VX-CD0001');
+    IdePutS(C, 46, 8, '1.0');
+    IdePutS(C, 54, 40, 'OS2-0 Virtualisation CD-ROM');
+    IdePutW(C, 98, $0200);                       { LBA }
+    IdePutW(C, 106, 6);
+    IdePutW(C, 160, $7E); IdePutW(C, 162, 0);
+  End
+  Else
+  Begin
+    T := DkSect[U];
+    IdePutW(C, 0, $0040);
+    IdePutW(C, 2, DkCyl[U]); IdePutW(C, 6, DkHeads[U]);
+    IdePutW(C, 8, 512 * DkSpt[U]); IdePutW(C, 10, 512); IdePutW(C, 12, DkSpt[U]);
+    IdePutS(C, 20, 20, 'VX-HD000' + IStr(U));
+    IdePutW(C, 42, 512);
+    IdePutS(C, 46, 8, '1.0');
+    IdePutS(C, 54, 40, 'OS2-0 Virtualisation Disque ' + IStr(U));
+    IdePutW(C, 94, $8010);                       { READ/WRITE MULTIPLE : 16 }
+    IdePutW(C, 98, $0200);                       { LBA }
+    IdePutW(C, 106, 7);
+    IdePutW(C, 108, DkCyl[U]); IdePutW(C, 110, DkHeads[U]); IdePutW(C, 112, DkSpt[U]);
+    IdePutW(C, 114, T And $FFFF); IdePutW(C, 116, T Shr 16);
+    IdePutW(C, 118, $0100 Or IdeMult[U]);
+    IdePutW(C, 120, T And $FFFF); IdePutW(C, 122, T Shr 16);
+    IdePutW(C, 160, $7E); IdePutW(C, 162, 0);
+    IdePutW(C, 164, $4000); IdePutW(C, 166, $4000); IdePutW(C, 168, $4000);
+  End;
+  IdePos[C] := 0; IdeLen[C] := 512; IdeLeft[C] := 0; IdeWr[C] := 0;
+  IdeErr[C] := 0; IdeSt[C] := $58;
+  IdeIrq(C);
+End;
+
+{ adresse de la commande (LBA 28 bits ou CHS) }
+Function IdeAddr(C, U : LongInt) : LongInt;
+Var Cy, H, S : LongInt;
+Begin
+  If (IdeDev[C] And $40) <> 0 Then
+    IdeAddr := IdeLbaL[C] Or (IdeLbaM[C] Shl 8) Or (IdeLbaH[C] Shl 16) Or ((IdeDev[C] And 15) Shl 24)
+  Else
+  Begin
+    Cy := IdeLbaM[C] Or (IdeLbaH[C] Shl 8); H := IdeDev[C] And 15; S := IdeLbaL[C];
+    IdeAddr := (Cy * DkHeads[U] + H) * DkSpt[U] + S - 1;
+  End;
+End;
+
+{ remplit le tampon avec le bloc suivant d'une lecture de disque }
+Procedure IdeReadBlk(C : LongInt);
+Var U, N, K : LongInt;
+Begin
+  U := IdeUnit[C];
+  N := MinI(IdeLeft[C], IdeBlk[C]);
+  For K := 0 To N - 1 Do
+    If Not DkReadSec(U, IdeLba[C] + K, LongInt(@IdeBuf) + C * IdeBufSz + K * 512) Then
+    Begin
+      IdeError(C, $40);
+      Exit;
+    End;
+  IdeLba[C] := IdeLba[C] + N;
+  IdeLeft[C] := IdeLeft[C] - N;
+  IdePos[C] := 0; IdeLen[C] := N * 512;
+  IdeErr[C] := 0; IdeSt[C] := $58;
+  IdeIrq(C);
+End;
+
+{ ecrit le bloc recu ; demande le suivant ou termine }
+Procedure IdeWriteBlk(C : LongInt);
+Var U, N, K : LongInt;
+Begin
+  U := IdeUnit[C];
+  N := IdeLen[C] Div 512;
+  For K := 0 To N - 1 Do
+    If Not DkWriteSec(U, IdeLba[C] + K, LongInt(@IdeBuf) + C * IdeBufSz + K * 512) Then
+    Begin
+      IdeError(C, $40);
+      Exit;
+    End;
+  IdeLba[C] := IdeLba[C] + N;
+  IdeLeft[C] := IdeLeft[C] - N;
+  If IdeLeft[C] <= 0 Then
+  Begin
+    IdeDone(C);
+    Exit;
+  End;
+  IdePos[C] := 0; IdeLen[C] := MinI(IdeLeft[C], IdeBlk[C]) * 512;
+  IdeSt[C] := $58;
+  IdeIrq(C);
+End;
+
+{ ---- ATAPI ---- }
+
+Procedure AtapiSense(C, Key, Asc : LongInt);
+Begin
+  IdeSense[C] := Key; IdeAsc[C] := Asc;
+  IdeErr[C] := Key Shl 4;
+  IdeCnt[C] := 3;
+  IdeSt[C] := $51; IdeLen[C] := 0; IdeLeft[C] := 0;
+  IdeIrq(C);
+End;
+
+{ donnees a rendre a l'hote : N octets deja dans le tampon (ou lecture de
+  Left secteurs de 2048 octets a partir de Lba) }
+Procedure AtapiData(C, N : LongInt);
+Var Lim : LongInt;
+Begin
+  Lim := IdeLbaM[C] Or (IdeLbaH[C] Shl 8);
+  If (Lim = 0) Or (Lim > $FFFE) Then Lim := $FFFE;
+  If N > Lim Then N := Lim And Not 1;
+  If N <= 0 Then
+  Begin
+    IdeCnt[C] := 3; IdeErr[C] := 0; IdeSt[C] := $50; IdeLen[C] := 0;
+    IdeIrq(C);
+    Exit;
+  End;
+  IdeLen[C] := N; IdePos[C] := 0;
+  IdeLbaM[C] := N And 255; IdeLbaH[C] := (N Shr 8) And 255;
+  IdeCnt[C] := 2; IdeErr[C] := 0; IdeSt[C] := $58;
+  IdeIrq(C);
+End;
+
+{ bloc suivant d'un READ : jusqu'a 16 secteurs de 2048 octets, dans la
+  limite d'octets de l'hote }
+Procedure AtapiReadBlk(C : LongInt);
+Var Lim, N, K : LongInt;
+Begin
+  Lim := IdeLbaM[C] Or (IdeLbaH[C] Shl 8);
+  If (Lim = 0) Or (Lim > $FFFE) Then Lim := $FFFE;
+  N := MinI(IdeLeft[C], MaxI(1, Lim Div 2048));
+  N := MinI(N, 16);
+  For K := 0 To N * 4 - 1 Do
+    If Not DkReadSec(DkCd, IdeLba[C] * 4 + K, LongInt(@IdeBuf) + C * IdeBufSz + K * 512) Then
+    Begin
+      AtapiSense(C, 5, $21);
+      Exit;
+    End;
+  IdeLba[C] := IdeLba[C] + N;
+  IdeLeft[C] := IdeLeft[C] - N;
+  IdeLen[C] := N * 2048; IdePos[C] := 0;
+  IdeLbaM[C] := (N * 2048) And 255; IdeLbaH[C] := ((N * 2048) Shr 8) And 255;
+  IdeCnt[C] := 2; IdeErr[C] := 0; IdeSt[C] := $58;
+  IdeIrq(C);
+End;
+
+Function IdeBE(C, Off : LongInt) : LongInt;
+Var B : LongInt;
+Begin
+  B := C * IdeBufSz + Off;
+  IdeBE := (IdeBuf[B] Shl 24) Or (IdeBuf[B + 1] Shl 16) Or (IdeBuf[B + 2] Shl 8) Or IdeBuf[B + 3];
+End;
+
+Procedure IdeSetBE(C, Off, V : LongInt);
+Var B : LongInt;
+Begin
+  B := C * IdeBufSz + Off;
+  IdeBuf[B] := (V Shr 24) And 255; IdeBuf[B + 1] := (V Shr 16) And 255;
+  IdeBuf[B + 2] := (V Shr 8) And 255; IdeBuf[B + 3] := V And 255;
+End;
+
+{ paquet de 12 octets recu : commande SCSI }
+Procedure AtapiCmd(C : LongInt);
+Var Op, B, K, N, Last, Al : LongInt;
+Begin
+  B := C * IdeBufSz;
+  Op := IdeBuf[B];
+  Inc(IdeCmds);
+  IdePkt[C] := 0;
+  Last := DkSect[DkCd] Div 4 - 1;
+  Case Op Of
+    $00, $1B, $1E, $35, $2B, $BB, $A6 : Begin
+                         IdeSense[C] := 0; IdeAsc[C] := 0;
+                         AtapiData(C, 0);
+                       End;
+    $03 : Begin
+            Al := IdeBuf[B + 4];
+            For K := 0 To 17 Do IdeBuf[B + K] := 0;
+            IdeBuf[B] := $70; IdeBuf[B + 2] := IdeSense[C]; IdeBuf[B + 7] := 10; IdeBuf[B + 12] := IdeAsc[C];
+            IdeSense[C] := 0; IdeAsc[C] := 0;
+            AtapiData(C, MinI(18, Al));
+          End;
+    $12 : Begin
+            Al := IdeBuf[B + 4];
+            For K := 0 To 35 Do IdeBuf[B + K] := 32;
+            IdeBuf[B] := 5; IdeBuf[B + 1] := $80; IdeBuf[B + 2] := 0; IdeBuf[B + 3] := $21;
+            IdeBuf[B + 4] := 31; IdeBuf[B + 5] := 0; IdeBuf[B + 6] := 0; IdeBuf[B + 7] := 0;
+            For K := 1 To 8 Do IdeBuf[B + 7 + K] := Ord('OS2-0   '[K]);
+            For K := 1 To 16 Do IdeBuf[B + 15 + K] := Ord('VIRTUAL CD-ROM  '[K]);
+            For K := 1 To 4 Do IdeBuf[B + 31 + K] := Ord('1.0 '[K]);
+            AtapiData(C, MinI(36, Al));
+          End;
+    $25 : Begin
+            IdeSetBE(C, 0, Last); IdeSetBE(C, 4, 2048);
+            AtapiData(C, 8);
+          End;
+    $28, $A8 : Begin
+                 IdeLba[C] := IdeBE(C, 2);
+                 If Op = $28 Then N := (IdeBuf[B + 7] Shl 8) Or IdeBuf[B + 8] Else N := IdeBE(C, 6);
+                 If (IdeLba[C] < 0) Or (IdeLba[C] + N - 1 > Last) Then
+                 Begin
+                   AtapiSense(C, 5, $21);
+                   Exit;
+                 End;
+                 If N = 0 Then Begin AtapiData(C, 0); Exit; End;
+                 IdeLeft[C] := N;
+                 AtapiReadBlk(C);
+               End;
+    $43 : Begin
+            { READ TOC (format 0, une piste de donnees) }
+            Al := (IdeBuf[B + 7] Shl 8) Or IdeBuf[B + 8];
+            For K := 0 To 19 Do IdeBuf[B + K] := 0;
+            IdeBuf[B + 1] := 18; IdeBuf[B + 2] := 1; IdeBuf[B + 3] := 1;
+            IdeBuf[B + 5] := $14; IdeBuf[B + 6] := 1;
+            IdeBuf[B + 13] := $14; IdeBuf[B + 14] := $AA;
+            IdeSetBE(C, 16, Last + 1);
+            AtapiData(C, MinI(20, Al));
+          End;
+    $1A, $5A : Begin
+                 If Op = $1A Then Al := IdeBuf[B + 4] Else Al := (IdeBuf[B + 7] Shl 8) Or IdeBuf[B + 8];
+                 For K := 0 To 7 Do IdeBuf[B + K] := 0;
+                 If Op = $1A Then IdeBuf[B] := 3 Else IdeBuf[B + 1] := 6;
+                 AtapiData(C, MinI(8, Al));
+               End;
+    $46 : Begin
+            Al := (IdeBuf[B + 7] Shl 8) Or IdeBuf[B + 8];
+            For K := 0 To 7 Do IdeBuf[B + K] := 0;
+            IdeBuf[B + 3] := 4; IdeBuf[B + 7] := 8;     { profil courant : CD-ROM }
+            AtapiData(C, MinI(8, Al));
+          End;
+    $4A : Begin
+            Al := (IdeBuf[B + 7] Shl 8) Or IdeBuf[B + 8];
+            For K := 0 To 7 Do IdeBuf[B + K] := 0;
+            IdeBuf[B + 1] := 6; IdeBuf[B + 2] := 4; IdeBuf[B + 3] := $10;
+            AtapiData(C, MinI(8, Al));
+          End;
+    $51 : Begin
+            Al := (IdeBuf[B + 7] Shl 8) Or IdeBuf[B + 8];
+            For K := 0 To 33 Do IdeBuf[B + K] := 0;
+            IdeBuf[B + 1] := 32; IdeBuf[B + 2] := $0E; IdeBuf[B + 3] := 1; IdeBuf[B + 4] := 1;
+            IdeBuf[B + 5] := 1; IdeBuf[B + 6] := 1;
+            AtapiData(C, MinI(34, Al));
+          End;
+    $BD : Begin
+            For K := 0 To 7 Do IdeBuf[B + K] := 0;
+            AtapiData(C, 8);
+          End;
+  Else
+    AtapiSense(C, 5, $20);
+  End;
+End;
+
+{ commande ATA ecrite au port 1F7h/177h }
+Procedure IdeCommand(C, Cmd : LongInt);
+Var U : LongInt;
+Begin
+  U := IdeSel(C);
+  Inc(IdeCmds);
+  If U < 0 Then
+  Begin
+    { peripherique absente : pas de reponse }
+    IdeSt[C] := 0;
+    Exit;
+  End;
+  If U = DkCd Then
+  Begin
+    Case Cmd Of
+      $A1 : IdeIdentify(C, U);
+      $A0 : Begin
+              IdePkt[C] := 1; IdePos[C] := 0; IdeLen[C] := 12; IdeWr[C] := 1;
+              IdeCnt[C] := 1; IdeSt[C] := $58; IdeErr[C] := 0;
+            End;
+      $08 : Begin
+              IdeLbaL[C] := 1; IdeCnt[C] := 1; IdeLbaM[C] := $14; IdeLbaH[C] := $EB;
+              IdeErr[C] := 1; IdeSt[C] := 0;
+            End;
+      $EF, $E0..$E3, $E5, $E6, $E7, $91 : IdeDone(C);
+    Else
+      { ECh et autres : abandon, signature ATAPI }
+      IdeLbaM[C] := $14; IdeLbaH[C] := $EB; IdeCnt[C] := 1; IdeLbaL[C] := 1;
+      IdeError(C, 4);
+    End;
+    Exit;
+  End;
+  Case Cmd Of
+    $EC : IdeIdentify(C, U);
+    $20, $21, $C4 :
+      Begin
+        IdeUnit[C] := U; IdeLba[C] := IdeAddr(C, U); IdeWr[C] := 0;
+        IdeLeft[C] := IdeCnt[C]; If IdeLeft[C] = 0 Then IdeLeft[C] := 256;
+        If Cmd = $C4 Then IdeBlk[C] := IdeMult[U] Else IdeBlk[C] := 1;
+        If IdeLba[C] + IdeLeft[C] > DkSect[U] Then IdeError(C, $10) Else IdeReadBlk(C);
+      End;
+    $30, $31, $C5 :
+      Begin
+        IdeUnit[C] := U; IdeLba[C] := IdeAddr(C, U); IdeWr[C] := 1;
+        IdeLeft[C] := IdeCnt[C]; If IdeLeft[C] = 0 Then IdeLeft[C] := 256;
+        If Cmd = $C5 Then IdeBlk[C] := IdeMult[U] Else IdeBlk[C] := 1;
+        If (IdeLba[C] + IdeLeft[C] > DkSect[U]) Or (DkRO[U] <> 0) Then IdeError(C, $10)
+        Else
+        Begin
+          IdePos[C] := 0; IdeLen[C] := MinI(IdeLeft[C], IdeBlk[C]) * 512;
+          IdeErr[C] := 0; IdeSt[C] := $58;
+        End;
+      End;
+    $C6 : Begin
+            If (IdeCnt[C] >= 1) And (IdeCnt[C] <= 128) Then IdeMult[U] := IdeCnt[C];
+            IdeDone(C);
+          End;
+    $40, $41, $10..$1F, $70..$7F, $91, $EF, $E7, $EA, $E0..$E3, $E6 : IdeDone(C);
+    $E5 : Begin IdeCnt[C] := $FF; IdeDone(C); End;
+    $F8 : Begin
+            { READ NATIVE MAX ADDRESS }
+            IdeLbaL[C] := (DkSect[U] - 1) And 255; IdeLbaM[C] := ((DkSect[U] - 1) Shr 8) And 255;
+            IdeLbaH[C] := ((DkSect[U] - 1) Shr 16) And 255;
+            IdeDev[C] := (IdeDev[C] And $F0) Or (((DkSect[U] - 1) Shr 24) And 15);
+            IdeDone(C);
+          End;
+    $A1 : Begin
+            IdeLbaM[C] := 0; IdeLbaH[C] := 0;
+            IdeError(C, 4);
+          End;
+  Else
+    IdeError(C, 4);
+  End;
+End;
+
+{ lecture du port de donnees (Size = 2 ou 4 octets) }
+Function IdeDataIn(C, Size : LongInt) : LongInt;
+Var V, K, B : LongInt;
+Begin
+  V := 0;
+  If (IdeWr[C] = 0) And (IdeLen[C] > 0) Then
+  Begin
+    B := C * IdeBufSz + IdePos[C];
+    For K := Size - 1 DownTo 0 Do V := (V Shl 8) Or IdeBuf[B + K];
+    IdePos[C] := IdePos[C] + Size;
+    If IdePos[C] >= IdeLen[C] Then
+    Begin
+      IdeLen[C] := 0; IdePos[C] := 0;
+      If IdeSel(C) = DkCd Then
+      Begin
+        If IdeLeft[C] > 0 Then AtapiReadBlk(C)
+        Else
+        Begin
+          IdeCnt[C] := 3; IdeErr[C] := 0; IdeSt[C] := $50;
+          IdeIrq(C);
+        End;
+      End
+      Else If IdeLeft[C] > 0 Then IdeReadBlk(C)
+      Else IdeSt[C] := $50;
+    End;
+  End;
+  IdeDataIn := V;
+End;
+
+Procedure IdeDataOut(C, Size, V : LongInt);
+Var K, B : LongInt;
+Begin
+  If (IdeWr[C] = 0) Or (IdeLen[C] <= 0) Then Exit;
+  B := C * IdeBufSz + IdePos[C];
+  For K := 0 To Size - 1 Do IdeBuf[B + K] := (V Shr (K * 8)) And 255;
+  IdePos[C] := IdePos[C] + Size;
+  If IdePos[C] >= IdeLen[C] Then
+  Begin
+    If IdePkt[C] <> 0 Then
+    Begin
+      IdeWr[C] := 0; IdeLen[C] := 0;
+      AtapiCmd(C);
+    End
+    Else IdeWriteBlk(C);
+  End;
+End;
+
+Function IdeIn(P, Size : LongInt) : LongInt;
+Var C, R, U : LongInt;
+Begin
+  If (P >= $170) And (P <= $177) Or (P = $376) Then C := 1 Else C := 0;
+  U := IdeSel(C);
+  R := 0;
+  Case P And 7 Of
+    0 : If P And $200 = 0 Then
+        Begin
+          IdeIn := IdeDataIn(C, Size);
+          Exit;
+        End;
+  End;
+  If (P = $3F6) Or (P = $376) Then
+  Begin
+    If U < 0 Then R := 0 Else R := IdeSt[C];
+  End
+  Else
+    Case P And 7 Of
+      1 : R := IdeErr[C];
+      2 : R := IdeCnt[C];
+      3 : R := IdeLbaL[C];
+      4 : R := IdeLbaM[C];
+      5 : R := IdeLbaH[C];
+      6 : R := IdeDev[C] Or $A0;
+      7 : If U < 0 Then R := 0 Else R := IdeSt[C];
+    End;
+  IdeIn := R;
+End;
+
+Procedure IdeOut(P, Size, V : LongInt);
+Var C : LongInt;
+Begin
+  If (P >= $170) And (P <= $177) Or (P = $376) Then C := 1 Else C := 0;
+  If (P = $3F6) Or (P = $376) Then
+  Begin
+    { registre de controle : bit 2 = remise a zero, bit 1 = nIEN }
+    If ((V And 4) <> 0) And ((IdeCtl[C] And 4) = 0) Then
+    Begin
+      IdeLen[C] := 0; IdeLeft[C] := 0; IdePkt[C] := 0;
+      IdeErr[C] := 1; IdeCnt[C] := 1; IdeLbaL[C] := 1; IdeDev[C] := $A0;
+      If (C = 1) And (DkH[DkCd] >= 0) Then Begin IdeLbaM[C] := $14; IdeLbaH[C] := $EB; End
+      Else Begin IdeLbaM[C] := 0; IdeLbaH[C] := 0; End;
+      IdeSt[C] := $50;
+    End;
+    IdeCtl[C] := V And 255;
+    Exit;
+  End;
+  Case P And 7 Of
+    0 : IdeDataOut(C, Size, V);
+    1 : IdeFeat[C] := V And 255;
+    2 : IdeCnt[C] := V And 255;
+    3 : IdeLbaL[C] := V And 255;
+    4 : IdeLbaM[C] := V And 255;
+    5 : IdeLbaH[C] := V And 255;
+    6 : IdeDev[C] := V And 255;
+    7 : IdeCommand(C, V And 255);
+  End;
+End;
+
 Function IoIn(P, Size : LongInt) : LongInt;
 Var V : LongInt;
 Begin
+  { IDE : le port de donnees rend 16 ou 32 bits }
+  If ((P >= $1F0) And (P <= $1F7)) Or ((P >= $170) And (P <= $177)) Or (P = $3F6) Or (P = $376) Then
+  Begin
+    V := IdeIn(P, Size);
+    If ((P And 7) <> 0) Or (P = $3F6) Or (P = $376) Then
+    Begin
+      If Size = 2 Then V := V Or $FF00 Else If Size = 4 Then V := V Or LongInt($FFFFFF00);
+    End;
+    IoIn := V;
+    Exit;
+  End;
   V := $FF;
   Case P Of
     $20, $21 : V := PicIn(0, P - $20);
@@ -2226,8 +3880,6 @@ Begin
     $3B0..$3DF : V := VgaIn(P);
     $CF8 : V := PciAddr;
     $CFC..$CFF : V := $FF;
-    { controleur IDE sans disque : etat 0 (ni occupe, ni pret) }
-    $1F0..$1F7, $170..$177, $3F6, $376 : V := 0;
   End;
   If Size = 2 Then V := V Or $FF00
   Else If Size = 4 Then
@@ -2265,7 +3917,956 @@ Begin
                    If Size >= 2 Then VgaOut(P + 1, (V Shr 8) And 255);
                  End;
     $CF8 : PciAddr := V;
+    $1F0..$1F7, $170..$177, $3F6, $376 : IdeOut(P, Size, V);
   End;
+End;
+{ ==================================================================== }
+{ VGA : modes graphiques planaires 16 couleurs (0Dh, 0Eh, 10h, 12h)     }
+{ ==================================================================== }
+
+{ La memoire A0000h-AFFFFh n'est pas de la RAM dans ces modes : quatre
+  plans de 64 Ko (PlMem, plan p a p * 65536), quatre verrous (PlLatch)
+  charges a chaque lecture, et le chemin d'ecriture du controleur
+  graphique (modes d'ecriture 0 a 3, rotation, fonction logique,
+  set/reset, masque de bits GcReg[8], masque de plans SqReg[2]).
+  L'invite n'y accede jamais directement : chaque acces provoque une
+  sortie (page absente des tables imbriquees, ou defaut de page en mode
+  V86) et MmioEmu emule l'instruction fautive. }
+
+Type
+  PlFbArr = Array[0..SW_ * SH_ - 1] Of Byte;
+  PlFbPtr = ^PlFbArr;
+
+Var
+  PlMem : Array[0..262143] Of Byte;
+  PlLatch : Array[0..3] Of Byte;
+  PlPal : Array[0..15] Of LongInt;      { index du DAC des 16 couleurs }
+  PlLine : Array[0..2047] Of Byte;      { une ligne de points }
+  PlFb : LongInt;                       { adresse de Fb (p7) : PlFb := LongInt(@Fb) }
+  PlGen : LongInt;                      { compteur d'ecritures (signature) }
+  MmioDef32 : Boolean;                  { segment de code de 32 bits }
+  MmioCnt : LongInt;                    { instructions emulees }
+  { decodage de l'instruction courante }
+  MmioIp, MmioSeg, MmioRep, MmioMod, MmioReg, MmioRmN, MmioLin : LongInt;
+  MmioOp32, MmioAd32, MmioIsReg : Boolean;
+
+{ ---- registres ---- }
+
+{ mode planaire : chaine-4 et pair/impair inactifs, mode graphique,
+  memoire en A0000h }
+Function PlActive : Boolean;
+Begin
+  PlActive := ((SqReg[4] And 8) = 0) And ((GcReg[5] And $10) = 0) And ((GcReg[6] And 1) <> 0) And
+              ((GcReg[6] And 8) = 0);
+End;
+
+Function PlModeOk(M : LongInt) : Boolean;
+Begin
+  M := M And $7F;
+  PlModeOk := (M = $0D) Or (M = $0E) Or (M = $10) Or (M = $12);
+End;
+
+{ octets par ligne et lignes du mode du BIOS }
+Function PlBpl : LongInt;
+Begin
+  If (BdaB($49) And $7F) = $0D Then PlBpl := 40 Else PlBpl := 80;
+End;
+
+Function PlRows : LongInt;
+Var M : LongInt;
+Begin
+  M := BdaB($49) And $7F;
+  If M = $10 Then PlRows := 350 Else If M = $12 Then PlRows := 480 Else PlRows := 200;
+End;
+
+{ hauteur des caracteres du BIOS }
+Function PlChH : LongInt;
+Var M : LongInt;
+Begin
+  M := BdaB($49) And $7F;
+  If M = $10 Then PlChH := 14 Else If M = $12 Then PlChH := 16 Else PlChH := 8;
+End;
+
+{ ---- acces de l'unite centrale ---- }
+
+Function PlRead(Off : LongInt) : LongInt;
+Var P, R, C : LongInt;
+Begin
+  Off := Off And $FFFF;
+  PlLatch[0] := PlMem[Off]; PlLatch[1] := PlMem[Off + 65536];
+  PlLatch[2] := PlMem[Off + 131072]; PlLatch[3] := PlMem[Off + 196608];
+  If (GcReg[5] And 8) = 0 Then R := PlLatch[GcReg[4] And 3]
+  Else
+  Begin
+    { mode de lecture 1 : bit a 1 si la couleur du point est celle de
+      GcReg[2] (plans retenus par GcReg[7]) }
+    R := 0;
+    For P := 0 To 3 Do
+      If (GcReg[7] And (1 Shl P)) <> 0 Then
+      Begin
+        If (GcReg[2] And (1 Shl P)) <> 0 Then C := $FF Else C := 0;
+        R := R Or (PlLatch[P] Xor C);
+      End;
+    R := (Not R) And $FF;
+  End;
+  PlRead := R;
+End;
+
+Procedure PlWrite(Off, V : LongInt);
+Var P, Md, Fn, Msk, Mm, D, L, Vr, K : LongInt;
+Begin
+  Off := Off And $FFFF;
+  V := V And $FF;
+  Md := GcReg[5] And 3; Fn := (GcReg[3] Shr 3) And 3;
+  Msk := GcReg[8]; Mm := SqReg[2] And 15;
+  Vr := V;
+  If (Md = 0) Or (Md = 3) Then
+  Begin
+    K := GcReg[3] And 7;
+    If K <> 0 Then Vr := ((V Shr K) Or (V Shl (8 - K))) And $FF;
+  End;
+  If Md = 3 Then Msk := Msk And Vr;
+  For P := 0 To 3 Do
+    If (Mm And (1 Shl P)) <> 0 Then
+    Begin
+      L := PlLatch[P];
+      If Md = 1 Then D := L
+      Else
+      Begin
+        If Md = 0 Then
+        Begin
+          If (GcReg[1] And (1 Shl P)) <> 0 Then D := ((GcReg[0] Shr P) And 1) * $FF Else D := Vr;
+        End
+        Else If Md = 2 Then D := ((V Shr P) And 1) * $FF
+        Else D := ((GcReg[0] Shr P) And 1) * $FF;
+        If Fn = 1 Then D := D And L
+        Else If Fn = 2 Then D := D Or L
+        Else If Fn = 3 Then D := D Xor L;
+        D := (D And Msk) Or (L And (Not Msk) And $FF);
+      End;
+      PlMem[P * 65536 + Off] := D And $FF;
+    End;
+  Inc(PlGen);
+End;
+
+{ ---- mode video (tables de la VGA d'IBM) ---- }
+
+Function PlHx(S : String; I : LongInt) : LongInt;
+Begin
+  PlHx := (Pos(S[I * 2 + 1], '0123456789ABCDEF') - 1) * 16 + Pos(S[I * 2 + 2], '0123456789ABCDEF') - 1;
+End;
+
+{ M : 0Dh, 0Eh, 10h, 12h (ou 13h : registres seuls) ; bit 7 : ne pas
+  effacer. A appeler a la fin de SetMode (apres DacDefault). }
+Procedure PlSetMode(M : LongInt);
+Var Clr : Boolean; Mi, Sq, Cr, Ac, Gc : String; K, R, G, B : LongInt;
+Begin
+  Clr := (M And $80) = 0;
+  M := M And $7F;
+  Sq := '03010F0006';
+  Gc := '000000000000050FFF';
+  Ac := '000102030405140738393A3B3C3D3E3F01000F0000';
+  Case M Of
+    $0D : Begin
+            Mi := '63'; Sq := '03090F0006';
+            Cr := '2D2728902B80BF1F00C0' + '000000000000' + '9C8E8F140096B9E3FF';
+            Ac := '0001020304050607101112131415161701000F0000';
+          End;
+    $0E : Begin
+            Mi := '63';
+            Cr := '5F4F50825480BF1F00C0' + '000000000000' + '9C8E8F280096B9E3FF';
+            Ac := '0001020304050607101112131415161701000F0000';
+          End;
+    $10 : Begin
+            Mi := 'A3';
+            Cr := '5F4F50825480BF1F0040' + '000000000000' + '83855D280F63BAE3FF';
+          End;
+    $12 : Begin
+            Mi := 'E3';
+            Cr := '5F4F508254800B3E0040' + '000000000000' + 'EA8CDF2800E704E3FF';
+          End;
+    $13 : Begin
+            Mi := '63'; Sq := '03010F000E';
+            Cr := '5F4F50825480BF1F0041' + '000000000000' + '9C8E8F284096B9A3FF';
+            Ac := '000102030405060708090A0B0C0D0E0F41000F0000';
+            Gc := '000000000040050FFF';
+          End;
+  Else
+    Exit;
+  End;
+  Misc := PlHx(Mi, 0);
+  For K := 0 To 4 Do SqReg[K] := PlHx(Sq, K);
+  For K := 0 To 24 Do CrReg[K] := PlHx(Cr, K);
+  For K := 0 To 20 Do AcReg[K] := PlHx(Ac, K);
+  For K := 0 To 8 Do GcReg[K] := PlHx(Gc, K);
+  AcFlip := 0;
+  If M = $13 Then Exit;
+  { DAC 0-63 : palette de l'EGA (rgbRGB) en 350 et 480 lignes, de la CGA
+    (bit 4 : intensite) en 200 lignes }
+  For K := 0 To 63 Do
+  Begin
+    If (M = $0D) Or (M = $0E) Then
+    Begin
+      R := ((K Shr 2) And 1) * $2A + ((K Shr 4) And 1) * $15;
+      G := ((K Shr 1) And 1) * $2A + ((K Shr 4) And 1) * $15;
+      B := (K And 1) * $2A + ((K Shr 4) And 1) * $15;
+      If (K And $17) = 6 Then G := $15;
+    End
+    Else
+    Begin
+      R := ((K Shr 2) And 1) * $2A + ((K Shr 5) And 1) * $15;
+      G := ((K Shr 1) And 1) * $2A + ((K Shr 4) And 1) * $15;
+      B := (K And 1) * $2A + ((K Shr 3) And 1) * $15;
+    End;
+    Dac[K * 3] := R; Dac[K * 3 + 1] := G; Dac[K * 3 + 2] := B;
+  End;
+  { donnees du BIOS : hauteur des caracteres, taille de la page }
+  If M = $10 Then BdaSB($85, 14) Else If M = $12 Then BdaSB($85, 16) Else BdaSB($85, 8);
+  Case M Of
+    $0D : BdaSW($4C, $2000);
+    $0E : BdaSW($4C, $4000);
+    $10 : BdaSW($4C, $8000);
+  Else
+    BdaSW($4C, $9600);
+  End;
+  If Clr Then FillChar(PlMem, SizeOf(PlMem), 0);
+  For K := 0 To 3 Do PlLatch[K] := 0;
+  Inc(PlGen);
+End;
+
+{ ---- services du BIOS (INT 10h) ---- }
+
+{ AH=0Ch : point (bit 7 de C : ou exclusif), page 0 }
+Procedure PlPutPix(X, Y, C : LongInt);
+Var Off, Msk, P, K, Bpl : LongInt;
+Begin
+  Bpl := PlBpl;
+  If (X < 0) Or (Y < 0) Or (X >= Bpl * 8) Or (Y >= PlRows) Then Exit;
+  Off := Y * Bpl + (X Shr 3);
+  Msk := $80 Shr (X And 7);
+  For P := 0 To 3 Do
+  Begin
+    K := P * 65536 + Off;
+    If (C And $80) <> 0 Then
+    Begin
+      If (C And (1 Shl P)) <> 0 Then PlMem[K] := PlMem[K] Xor Msk;
+    End
+    Else If (C And (1 Shl P)) <> 0 Then PlMem[K] := PlMem[K] Or Msk
+    Else PlMem[K] := PlMem[K] And ($FF Xor Msk);
+  End;
+  Inc(PlGen);
+End;
+
+{ AH=0Dh }
+Function PlGetPix(X, Y : LongInt) : LongInt;
+Var Off, P, R, Sh, Bpl : LongInt;
+Begin
+  R := 0;
+  Bpl := PlBpl;
+  If (X >= 0) And (Y >= 0) And (X < Bpl * 8) And (Y < PlRows) Then
+  Begin
+    Off := Y * Bpl + (X Shr 3);
+    Sh := 7 - (X And 7);
+    For P := 0 To 3 Do R := R Or (((PlMem[P * 65536 + Off] Shr Sh) And 1) Shl P);
+  End;
+  PlGetPix := R;
+End;
+
+{ ligne R de la police du caractere Ch (8 x H) }
+Function PlFont(Ch, R, H : LongInt) : LongInt;
+Var V : LongInt;
+Begin
+  Ch := Ch And 255;
+  If H = 8 Then V := Font8[Ch * 8 + R]
+  Else If H = 14 Then V := GB($F0000 + RomF14 + Ch * 14 + R)
+  Else V := Font16[Ch * 16 + R];
+  PlFont := V;
+End;
+
+{ caractere du BIOS (AH=09h/0Ah/0Eh) : couleur Attr (bit 7 : ou exclusif),
+  fond noir }
+Procedure PlGfxChar(Col, Row, Ch, Attr : LongInt);
+Var H, Bpl, Off, R, B, P, K : LongInt;
+Begin
+  H := PlChH; Bpl := PlBpl;
+  If (Col < 0) Or (Col >= Bpl) Or (Row < 0) Or ((Row + 1) * H > PlRows) Then Exit;
+  Off := Row * H * Bpl + Col;
+  For R := 0 To H - 1 Do
+  Begin
+    B := PlFont(Ch, R, H);
+    For P := 0 To 3 Do
+    Begin
+      K := P * 65536 + Off + R * Bpl;
+      If (Attr And $80) <> 0 Then
+      Begin
+        If (Attr And (1 Shl P)) <> 0 Then PlMem[K] := PlMem[K] Xor B;
+      End
+      Else If (Attr And (1 Shl P)) <> 0 Then PlMem[K] := B
+      Else PlMem[K] := 0;
+    End;
+  End;
+  Inc(PlGen);
+End;
+
+{ AH=06h/07h : defilement d'une fenetre de caracteres ; lignes vides de
+  la couleur Attr }
+Procedure PlScroll(Up : Boolean; N, Attr, R1, C1, R2, C2 : LongInt);
+Var H, Bpl, Rows, R, L, P, C, Src, Dst, F : LongInt;
+Begin
+  H := PlChH; Bpl := PlBpl; Rows := PlRows Div H;
+  If R2 >= Rows Then R2 := Rows - 1;
+  If C2 >= Bpl Then C2 := Bpl - 1;
+  If (R1 > R2) Or (C1 > C2) Or (R1 < 0) Or (C1 < 0) Then Exit;
+  If (N = 0) Or (N > R2 - R1 + 1) Then N := R2 - R1 + 1;
+  For L := 0 To (R2 - R1 + 1) * H - 1 Do
+  Begin
+    If Up Then R := R1 * H + L Else R := R2 * H + H - 1 - L;
+    If Up Then Src := R + N * H Else Src := R - N * H;
+    For P := 0 To 3 Do
+    Begin
+      If (Attr And (1 Shl P)) <> 0 Then F := $FF Else F := 0;
+      For C := C1 To C2 Do
+      Begin
+        Dst := P * 65536 + R * Bpl + C;
+        If (Src >= R1 * H) And (Src < (R2 + 1) * H) Then PlMem[Dst] := PlMem[P * 65536 + Src * Bpl + C]
+        Else PlMem[Dst] := F;
+      End;
+    End;
+  End;
+  Inc(PlGen);
+End;
+
+{ ---- image (Fb de p7, adresse dans PlFb) ---- }
+
+{ index du DAC de la couleur V (0-15) par le controleur d'attributs }
+Function PlDacIdx(V : LongInt) : LongInt;
+Var P : LongInt;
+Begin
+  P := AcReg[(V And AcReg[$12]) And 15] And $3F;
+  If (AcReg[$10] And $80) <> 0 Then P := (P And $0F) Or ((AcReg[$14] And 3) Shl 4);
+  P := P Or ((AcReg[$14] And $0C) Shl 4);
+  PlDacIdx := P;
+End;
+
+Procedure PlRender;
+Var Hd, Vd, Ms, Lw, St, Lc, Dots, Sc, Px, Y, Row, Base, Prev, A, X, I, J, K, Sh, V, Fo, M : LongInt;
+    B0, B1, B2, B3 : LongInt; D2, H256 : Boolean; F : PlFbPtr;
+Begin
+  If PlFb = 0 Then Exit;
+  F := Pointer(PlFb);
+  For K := 0 To 15 Do PlPal[K] := PlDacIdx(K);
+  { geometrie d'apres le CRTC }
+  Hd := CrReg[1] + 1;
+  Vd := CrReg[$12] + ((CrReg[7] And 2) Shl 7) + ((CrReg[7] And $40) Shl 3) + 1;
+  Ms := (CrReg[9] And $1F) + 1;
+  If (CrReg[9] And $80) <> 0 Then Ms := Ms * 2;
+  If (CrReg[$14] And $40) <> 0 Then Lw := CrReg[$13] * 8
+  Else If (CrReg[$17] And $40) = 0 Then Lw := CrReg[$13] * 4
+  Else Lw := CrReg[$13] * 2;
+  D2 := (SqReg[1] And 8) <> 0;
+  If (Hd < 20) Or (Vd < 100) Or (Lw = 0) Then
+  Begin
+    { registres non programmes : valeurs du mode du BIOS }
+    M := BdaB($49) And $7F;
+    Hd := 80; Vd := 400; Ms := 2; Lw := 80; D2 := False;
+    If M = $0D Then Begin Hd := 40; Lw := 40; D2 := True; End
+    Else If M = $10 Then Begin Vd := 350; Ms := 1; End
+    Else If M = $12 Then Begin Vd := 480; Ms := 1; End;
+  End;
+  St := (CrReg[$0C] Shl 8) Or CrReg[$0D];
+  Lc := CrReg[$18] + ((CrReg[7] And $10) Shl 4) + ((CrReg[9] And $40) Shl 3);
+  H256 := (AcReg[$10] And $40) <> 0;
+  Dots := Hd * 8; Sc := 0;
+  If D2 Then Begin Dots := Dots * 2; Sc := 1; End;
+  If H256 Then Sc := Sc + 1;
+  If Dots > SW_ Then Dots := SW_;
+  Px := (Dots + (1 Shl Sc) - 1) Shr Sc;
+  If Px > 2040 Then Px := 2040;
+  Prev := -1;
+  For Y := 0 To SH_ - 1 Do
+  Begin
+    Fo := (SH_ - 1 - Y) * SW_;
+    If Y >= Vd Then
+    Begin
+      For X := 0 To SW_ - 1 Do F^[Fo + X] := 0;
+    End
+    Else
+    Begin
+      If Y > Lc Then
+      Begin
+        Base := 0; Row := (Y - Lc - 1) Div Ms;
+      End
+      Else
+      Begin
+        Base := St; Row := Y Div Ms;
+      End;
+      A := Base + Row * Lw;
+      If A <> Prev Then
+      Begin
+        Prev := A;
+        If H256 Then
+          For X := 0 To Px - 1 Do PlLine[X] := PlMem[(X And 3) * 65536 + ((A + (X Shr 2)) And $FFFF)]
+        Else
+          For I := 0 To (Px + 7) Div 8 - 1 Do
+          Begin
+            K := (A + I) And $FFFF;
+            B0 := PlMem[K]; B1 := PlMem[K + 65536]; B2 := PlMem[K + 131072]; B3 := PlMem[K + 196608];
+            For J := 0 To 7 Do
+            Begin
+              Sh := 7 - J;
+              V := ((B0 Shr Sh) And 1) Or (((B1 Shr Sh) And 1) Shl 1) Or (((B2 Shr Sh) And 1) Shl 2) Or
+                   (((B3 Shr Sh) And 1) Shl 3);
+              PlLine[I * 8 + J] := PlPal[V];
+            End;
+          End;
+      End;
+      If Sc = 0 Then
+        For X := 0 To Dots - 1 Do F^[Fo + X] := PlLine[X]
+      Else
+        For X := 0 To Dots - 1 Do F^[Fo + X] := PlLine[X Shr Sc];
+      For X := Dots To SW_ - 1 Do F^[Fo + X] := 0;
+    End;
+  End;
+End;
+
+{ signature de l'image (ne recopier que si elle change) }
+Function PlSum : LongInt;
+Var S, K : LongInt;
+Begin
+  S := (PlGen * 7 + BdaB($49)) And $7FFFFFFF;
+  For K := 0 To 24 Do S := (S * 31 + CrReg[K]) And $7FFFFFFF;
+  For K := 0 To 20 Do S := (S * 31 + AcReg[K]) And $7FFFFFFF;
+  For K := 0 To 767 Do S := (S * 7 + Dac[K]) And $7FFFFFFF;
+  S := (S * 31 + SqReg[1] + SqReg[4] * 256 + GcReg[5] * 65536) And $7FFFFFFF;
+  PlSum := S;
+End;
+
+{ ==================================================================== }
+{ Emulation d'une instruction qui touche A0000h-AFFFFh                  }
+{ ==================================================================== }
+
+{ octet de l'adresse lineaire Lin : plans du VGA ou memoire de l'invite }
+Function MmioRdB(Lin : LongInt) : LongInt;
+Var P, R : LongInt;
+Begin
+  P := GPhys(Lin);
+  If (P >= $A0000) And (P < $B0000) And PlActive Then R := PlRead(P - $A0000) Else R := GB(P);
+  MmioRdB := R;
+End;
+
+Procedure MmioWrB(Lin, V : LongInt);
+Var P : LongInt;
+Begin
+  P := GPhys(Lin);
+  If (P >= $A0000) And (P < $B0000) And PlActive Then PlWrite(P - $A0000, V) Else SB(P, V And $FF);
+End;
+
+Function MmioRd(Lin, Sz : LongInt) : LongInt;
+Var K, V : LongInt;
+Begin
+  V := 0;
+  For K := 0 To Sz - 1 Do V := V Or (MmioRdB(Lin + K) Shl (K * 8));
+  MmioRd := V;
+End;
+
+Procedure MmioWr(Lin, Sz, V : LongInt);
+Var K : LongInt;
+Begin
+  For K := 0 To Sz - 1 Do MmioWrB(Lin + K, (V Shr (K * 8)) And $FF);
+End;
+
+Function MmioFetch : LongInt;
+Var R : LongInt;
+Begin
+  R := LB(Fr_[fCSB] + MmioIp);
+  MmioIp := MmioIp + 1;
+  If Not MmioDef32 Then MmioIp := MmioIp And $FFFF;
+  MmioFetch := R;
+End;
+
+Function MmioFetchW : LongInt;
+Var R : LongInt;
+Begin
+  R := MmioFetch;
+  R := R Or (MmioFetch Shl 8);
+  MmioFetchW := R;
+End;
+
+Function MmioFetchL : LongInt;
+Var R : LongInt;
+Begin
+  R := MmioFetchW;
+  R := R Or (MmioFetchW Shl 16);
+  MmioFetchL := R;
+End;
+
+Function MmioSx8(V : LongInt) : LongInt;
+Begin
+  V := V And $FF;
+  If V >= $80 Then V := V Or LongInt($FFFFFF00);
+  MmioSx8 := V;
+End;
+
+Function MmioSx16(V : LongInt) : LongInt;
+Begin
+  V := V And $FFFF;
+  If V >= $8000 Then V := V Or LongInt($FFFF0000);
+  MmioSx16 := V;
+End;
+
+{ valeur immediate de Sz octets }
+Function MmioImm(Sz : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  If Sz = 1 Then R := MmioFetch Else If Sz = 2 Then R := MmioFetchW Else R := MmioFetchL;
+  MmioImm := R;
+End;
+
+Function MmioMask(Sz : LongInt) : LongInt;
+Begin
+  If Sz = 1 Then MmioMask := $FF Else If Sz = 2 Then MmioMask := $FFFF Else MmioMask := -1;
+End;
+
+Function MmioSign(Sz : LongInt) : LongInt;
+Begin
+  If Sz = 1 Then MmioSign := $80 Else If Sz = 2 Then MmioSign := $8000 Else MmioSign := LongInt($80000000);
+End;
+
+{ registre n (codage x86 : AX CX DX BX SP BP SI DI) -> indice du cadre }
+Function MmioRi(R : LongInt) : LongInt;
+Var I : LongInt;
+Begin
+  Case R And 7 Of
+    0 : I := fAX;
+    1 : I := fCX;
+    2 : I := fDX;
+    3 : I := fBX;
+    4 : I := fSP;
+    5 : I := fBP;
+    6 : I := fSI;
+  Else
+    I := fDI;
+  End;
+  MmioRi := I;
+End;
+
+Function MmioGetR(R, Sz : LongInt) : LongInt;
+Var V : LongInt;
+Begin
+  If Sz = 1 Then
+  Begin
+    If R < 4 Then V := Fr_[MmioRi(R)] And $FF Else V := (Fr_[MmioRi(R - 4)] Shr 8) And $FF;
+  End
+  Else If Sz = 2 Then V := Fr_[MmioRi(R)] And $FFFF
+  Else V := Fr_[MmioRi(R)];
+  MmioGetR := V;
+End;
+
+Procedure MmioSetR(R, Sz, V : LongInt);
+Begin
+  If Sz = 1 Then
+  Begin
+    If R < 4 Then SetLo(MmioRi(R), V) Else SetHi(MmioRi(R - 4), V);
+  End
+  Else If Sz = 2 Then Set16(MmioRi(R), V)
+  Else Fr_[MmioRi(R)] := V;
+End;
+
+{ octet modR/M (et SIB, deplacement) : MmioIsReg/MmioRmN ou MmioLin }
+Procedure MmioModRm;
+Var M, Rm, Ofs, Sib, Idx, Bs, DSeg : LongInt;
+Begin
+  M := MmioFetch;
+  MmioMod := (M Shr 6) And 3; MmioReg := (M Shr 3) And 7; Rm := M And 7;
+  MmioIsReg := MmioMod = 3; MmioRmN := Rm;
+  MmioLin := 0;
+  If MmioIsReg Then Exit;
+  DSeg := fDSB; Ofs := 0;
+  If Not MmioAd32 Then
+  Begin
+    Case Rm Of
+      0 : Ofs := Fr_[fBX] + Fr_[fSI];
+      1 : Ofs := Fr_[fBX] + Fr_[fDI];
+      2 : Begin Ofs := Fr_[fBP] + Fr_[fSI]; DSeg := fSSB; End;
+      3 : Begin Ofs := Fr_[fBP] + Fr_[fDI]; DSeg := fSSB; End;
+      4 : Ofs := Fr_[fSI];
+      5 : Ofs := Fr_[fDI];
+      6 : If MmioMod = 0 Then Ofs := MmioFetchW Else Begin Ofs := Fr_[fBP]; DSeg := fSSB; End;
+    Else
+      Ofs := Fr_[fBX];
+    End;
+    If MmioMod = 1 Then Ofs := Ofs + MmioSx8(MmioFetch)
+    Else If MmioMod = 2 Then Ofs := Ofs + MmioFetchW;
+    Ofs := Ofs And $FFFF;
+  End
+  Else
+  Begin
+    If Rm = 4 Then
+    Begin
+      Sib := MmioFetch;
+      Idx := (Sib Shr 3) And 7; Bs := Sib And 7;
+      If (Bs = 5) And (MmioMod = 0) Then Ofs := MmioFetchL
+      Else
+      Begin
+        Ofs := Fr_[MmioRi(Bs)];
+        If (Bs = 4) Or (Bs = 5) Then DSeg := fSSB;
+      End;
+      If Idx <> 4 Then Ofs := Ofs + (Fr_[MmioRi(Idx)] Shl ((Sib Shr 6) And 3));
+    End
+    Else If (Rm = 5) And (MmioMod = 0) Then Ofs := MmioFetchL
+    Else
+    Begin
+      Ofs := Fr_[MmioRi(Rm)];
+      If Rm = 5 Then DSeg := fSSB;
+    End;
+    If MmioMod = 1 Then Ofs := Ofs + MmioSx8(MmioFetch)
+    Else If MmioMod = 2 Then Ofs := Ofs + MmioFetchL;
+  End;
+  If MmioSeg >= 0 Then DSeg := MmioSeg;
+  MmioLin := Fr_[DSeg] + Ofs;
+End;
+
+Function MmioRdOp(Sz : LongInt) : LongInt;
+Var V : LongInt;
+Begin
+  If MmioIsReg Then V := MmioGetR(MmioRmN, Sz) Else V := MmioRd(MmioLin, Sz);
+  MmioRdOp := V;
+End;
+
+Procedure MmioWrOp(Sz, V : LongInt);
+Begin
+  If MmioIsReg Then MmioSetR(MmioRmN, Sz, V) Else MmioWr(MmioLin, Sz, V);
+End;
+
+{ ---- drapeaux : CF 1, PF 4, AF 10h, ZF 40h, SF 80h, OF 800h ---- }
+
+Function MmioSZP(R, Sz : LongInt) : LongInt;
+Var F, K, N : LongInt;
+Begin
+  F := 0;
+  R := R And MmioMask(Sz);
+  If R = 0 Then F := F Or $40;
+  If (R And MmioSign(Sz)) <> 0 Then F := F Or $80;
+  N := 0;
+  For K := 0 To 7 Do If (R And (1 Shl K)) <> 0 Then Inc(N);
+  If (N And 1) = 0 Then F := F Or 4;
+  MmioSZP := F;
+End;
+
+{ A + B + C sur Sz octets ; Cy : retenue sortante (0/1) }
+Function MmioAddC(A, B, C, Sz : LongInt; Var Cy : LongInt) : LongInt;
+Var Lo, Hi, R : LongInt;
+Begin
+  Lo := (A And $FFFF) + (B And $FFFF) + C;
+  Hi := ((A Shr 16) And $FFFF) + ((B Shr 16) And $FFFF) + ((Lo Shr 16) And 3);
+  R := ((Hi And $FFFF) Shl 16) Or (Lo And $FFFF);
+  If Sz = 1 Then Cy := (R Shr 8) And 1
+  Else If Sz = 2 Then Cy := (Lo Shr 16) And 1
+  Else Cy := (Hi Shr 16) And 1;
+  MmioAddC := R And MmioMask(Sz);
+End;
+
+{ operation Op (0 ADD 1 OR 2 ADC 3 SBB 4 AND 5 SUB 6 XOR 7 CMP), drapeaux
+  dans Fr_[fFL] }
+Function MmioAlu(Op, A, B, Sz : LongInt) : LongInt;
+Var R, F, Ci, Cy, Msk, Sg : LongInt;
+Begin
+  Msk := MmioMask(Sz); Sg := MmioSign(Sz);
+  A := A And Msk; B := B And Msk;
+  F := 0; Ci := 0; Cy := 0;
+  If Op = 1 Then R := A Or B
+  Else If Op = 4 Then R := A And B
+  Else If Op = 6 Then R := A Xor B
+  Else
+  Begin
+    If (Op = 2) Or (Op = 3) Then Ci := Fr_[fFL] And 1;
+    If (Op = 0) Or (Op = 2) Then
+    Begin
+      R := MmioAddC(A, B, Ci, Sz, Cy);
+      If Cy <> 0 Then F := F Or 1;
+      If ((A Xor R) And (B Xor R) And Sg) <> 0 Then F := F Or $800;
+    End
+    Else
+    Begin
+      R := MmioAddC(A, (Not B) And Msk, 1 - Ci, Sz, Cy);
+      If Cy = 0 Then F := F Or 1;
+      If ((A Xor B) And (A Xor R) And Sg) <> 0 Then F := F Or $800;
+    End;
+    If ((A Xor B Xor R) And $10) <> 0 Then F := F Or $10;
+  End;
+  R := R And Msk;
+  F := F Or MmioSZP(R, Sz);
+  Fr_[fFL] := (Fr_[fFL] And Not $8D5) Or F;
+  MmioAlu := R;
+End;
+
+{ decalages et rotations (0 ROL 1 ROR 2 RCL 3 RCR 4 SHL 5 SHR 6 SAL 7 SAR) }
+Function MmioShift(Op, A, N, Sz : LongInt) : LongInt;
+Var Bits, Msk, Sg, Cf, T, K, F, A0 : LongInt;
+Begin
+  Msk := MmioMask(Sz); Sg := MmioSign(Sz); Bits := Sz * 8;
+  A := A And Msk; A0 := A;
+  N := N And $1F;
+  If N = 0 Then
+  Begin
+    MmioShift := A;
+    Exit;
+  End;
+  Cf := Fr_[fFL] And 1;
+  For K := 1 To N Do
+    Case Op Of
+      0 : Begin Cf := (A Shr (Bits - 1)) And 1; A := ((A Shl 1) Or Cf) And Msk; End;
+      1 : Begin Cf := A And 1; A := ((A Shr 1) Or (Cf Shl (Bits - 1))) And Msk; End;
+      2 : Begin T := (A Shr (Bits - 1)) And 1; A := ((A Shl 1) Or Cf) And Msk; Cf := T; End;
+      3 : Begin T := A And 1; A := ((A Shr 1) Or (Cf Shl (Bits - 1))) And Msk; Cf := T; End;
+      5 : Begin Cf := A And 1; A := (A Shr 1) And Msk; End;
+      7 : Begin Cf := A And 1; A := ((A Shr 1) Or (A And Sg)) And Msk; End;
+    Else
+      Begin Cf := (A Shr (Bits - 1)) And 1; A := (A Shl 1) And Msk; End;
+    End;
+  F := Fr_[fFL];
+  F := (F And Not 1) Or Cf;
+  F := F And Not $800;
+  If (Op = 0) Or (Op = 2) Or (Op = 4) Or (Op = 6) Then
+  Begin
+    If (((A Shr (Bits - 1)) And 1) Xor Cf) <> 0 Then F := F Or $800;
+  End
+  Else If (Op = 1) Or (Op = 3) Then
+  Begin
+    If (((A Shr (Bits - 1)) Xor (A Shr (Bits - 2))) And 1) <> 0 Then F := F Or $800;
+  End
+  Else If Op = 5 Then
+  Begin
+    If (A0 And Sg) <> 0 Then F := F Or $800;
+  End;
+  If Op >= 4 Then F := (F And Not $D4) Or MmioSZP(A, Sz);
+  Fr_[fFL] := F;
+  MmioShift := A;
+End;
+
+{ ---- instructions de chaine ---- }
+
+Function MmioAm(V : LongInt) : LongInt;
+Begin
+  If MmioAd32 Then MmioAm := V Else MmioAm := V And $FFFF;
+End;
+
+Procedure MmioStepR(R, D : LongInt);
+Begin
+  If MmioAd32 Then Fr_[R] := Fr_[R] + D Else Set16(R, Fr_[R] + D);
+End;
+
+{ Op : A4 MOVS, A6 CMPS, AA STOS, AC LODS, AE SCAS }
+Procedure MmioStr(Op, Sz : LongInt);
+Var N, Step, SrcB, K, A, B, S, D : LongInt;
+Begin
+  If MmioRep <> 0 Then N := MmioAm(Fr_[fCX]) Else N := 1;
+  If (Fr_[fFL] And $400) <> 0 Then Step := -Sz Else Step := Sz;
+  SrcB := fDSB;
+  If MmioSeg >= 0 Then SrcB := MmioSeg;
+  While N <> 0 Do
+  Begin
+    S := MmioAm(Fr_[fSI]); D := MmioAm(Fr_[fDI]);
+    If Op = $A4 Then
+    Begin
+      { octet par octet : lecture (verrous) puis ecriture }
+      For K := 0 To Sz - 1 Do
+        MmioWrB(Fr_[fESB] + MmioAm(D + K), MmioRdB(Fr_[SrcB] + MmioAm(S + K)));
+    End
+    Else If Op = $AA Then
+    Begin
+      For K := 0 To Sz - 1 Do MmioWrB(Fr_[fESB] + MmioAm(D + K), (Fr_[fAX] Shr (K * 8)) And $FF);
+    End
+    Else If Op = $AC Then
+    Begin
+      A := 0;
+      For K := 0 To Sz - 1 Do A := A Or (MmioRdB(Fr_[SrcB] + MmioAm(S + K)) Shl (K * 8));
+      MmioSetR(0, Sz, A);
+    End
+    Else
+    Begin
+      B := 0;
+      For K := 0 To Sz - 1 Do B := B Or (MmioRdB(Fr_[fESB] + MmioAm(D + K)) Shl (K * 8));
+      If Op = $A6 Then
+      Begin
+        A := 0;
+        For K := 0 To Sz - 1 Do A := A Or (MmioRdB(Fr_[SrcB] + MmioAm(S + K)) Shl (K * 8));
+      End
+      Else A := MmioGetR(0, Sz);
+      A := MmioAlu(7, A, B, Sz);
+    End;
+    If (Op = $A4) Or (Op = $A6) Or (Op = $AC) Then MmioStepR(fSI, Step);
+    If Op <> $AC Then MmioStepR(fDI, Step);
+    If MmioRep = 0 Then N := 0
+    Else
+    Begin
+      N := MmioAm(N - 1);
+      If MmioAd32 Then Fr_[fCX] := N Else Set16(fCX, N);
+      If (Op = $A6) Or (Op = $AE) Then
+      Begin
+        If (MmioRep = $F3) And ((Fr_[fFL] And $40) = 0) Then N := 0;
+        If (MmioRep = $F2) And ((Fr_[fFL] And $40) <> 0) Then N := 0;
+      End;
+    End;
+  End;
+End;
+
+{ ---- instruction a CS:IP ---- }
+
+Function MmioEmu : Boolean;
+Var Op, Sz, W, A, B, R, Cnt, Cf : LongInt; Done, Ok : Boolean;
+Begin
+  MmioEmu := False;
+  MmioIp := Fr_[fIP];
+  If Not MmioDef32 Then MmioIp := MmioIp And $FFFF;
+  MmioSeg := -1; MmioRep := 0; MmioOp32 := MmioDef32; MmioAd32 := MmioDef32;
+  MmioIsReg := False; MmioLin := 0;
+  Cnt := 0; Op := 0;
+  Repeat
+    Op := MmioFetch;
+    Inc(Cnt);
+    Done := False;
+    Case Op Of
+      $26 : MmioSeg := fESB;
+      $2E : MmioSeg := fCSB;
+      $36 : MmioSeg := fSSB;
+      $3E : MmioSeg := fDSB;
+      $64 : MmioSeg := fFSB;
+      $65 : MmioSeg := fGSB;
+      $66 : MmioOp32 := Not MmioDef32;
+      $67 : MmioAd32 := Not MmioDef32;
+      $F2, $F3 : MmioRep := Op;
+      $F0 : ;
+    Else
+      Done := True;
+    End;
+  Until Done Or (Cnt >= 15);
+  If Not Done Then Exit;
+  If MmioOp32 Then Sz := 4 Else Sz := 2;
+  If (Op And 1) = 0 Then W := 1 Else W := Sz;
+  Ok := True;
+  If (Op < $40) And ((Op And 7) <= 3) Then
+  Begin
+    { ADD OR ADC SBB AND SUB XOR CMP, formes r/m }
+    MmioModRm;
+    If (Op And 2) = 0 Then
+    Begin
+      A := MmioRdOp(W); B := MmioGetR(MmioReg, W);
+    End
+    Else
+    Begin
+      A := MmioGetR(MmioReg, W); B := MmioRdOp(W);
+    End;
+    R := MmioAlu((Op Shr 3) And 7, A, B, W);
+    If ((Op Shr 3) And 7) <> 7 Then
+    Begin
+      If (Op And 2) = 0 Then MmioWrOp(W, R) Else MmioSetR(MmioReg, W, R);
+    End;
+  End
+  Else If (Op >= $80) And (Op <= $83) Then
+  Begin
+    If (Op = $80) Or (Op = $82) Then W := 1 Else W := Sz;
+    MmioModRm;
+    If Op = $83 Then B := MmioSx8(MmioFetch) And MmioMask(W) Else B := MmioImm(W);
+    A := MmioRdOp(W);
+    R := MmioAlu(MmioReg, A, B, W);
+    If MmioReg <> 7 Then MmioWrOp(W, R);
+  End
+  Else If (Op = $84) Or (Op = $85) Then
+  Begin
+    MmioModRm;
+    A := MmioRdOp(W);
+    R := MmioAlu(4, A, MmioGetR(MmioReg, W), W);
+  End
+  Else If (Op = $86) Or (Op = $87) Then
+  Begin
+    MmioModRm;
+    A := MmioRdOp(W);
+    MmioWrOp(W, MmioGetR(MmioReg, W));
+    MmioSetR(MmioReg, W, A);
+  End
+  Else If (Op = $88) Or (Op = $89) Then
+  Begin
+    MmioModRm;
+    MmioWrOp(W, MmioGetR(MmioReg, W));
+  End
+  Else If (Op = $8A) Or (Op = $8B) Then
+  Begin
+    MmioModRm;
+    MmioSetR(MmioReg, W, MmioRdOp(W));
+  End
+  Else If (Op = $C6) Or (Op = $C7) Then
+  Begin
+    MmioModRm;
+    If MmioReg <> 0 Then Exit;
+    MmioWrOp(W, MmioImm(W));
+  End
+  Else If (Op >= $A0) And (Op <= $A3) Then
+  Begin
+    If MmioAd32 Then A := MmioFetchL Else A := MmioFetchW;
+    If MmioSeg >= 0 Then A := Fr_[MmioSeg] + A Else A := Fr_[fDSB] + A;
+    If Op <= $A1 Then MmioSetR(0, W, MmioRd(A, W)) Else MmioWr(A, W, MmioGetR(0, W));
+  End
+  Else If (Op >= $A4) And (Op <= $A7) Then MmioStr(Op And $FE, W)
+  Else If (Op >= $AA) And (Op <= $AF) Then MmioStr(Op And $FE, W)
+  Else If (Op = $C0) Or (Op = $C1) Or ((Op >= $D0) And (Op <= $D3)) Then
+  Begin
+    MmioModRm;
+    If (Op = $C0) Or (Op = $C1) Then B := MmioFetch
+    Else If Op >= $D2 Then B := Fr_[fCX] And $FF
+    Else B := 1;
+    A := MmioRdOp(W);
+    If (B And $1F) <> 0 Then MmioWrOp(W, MmioShift(MmioReg, A, B, W));
+  End
+  Else If (Op = $F6) Or (Op = $F7) Then
+  Begin
+    MmioModRm;
+    If MmioReg >= 4 Then Exit;
+    If MmioReg <= 1 Then
+    Begin
+      B := MmioImm(W);
+      A := MmioRdOp(W);
+      R := MmioAlu(4, A, B, W);
+    End
+    Else If MmioReg = 2 Then MmioWrOp(W, Not MmioRdOp(W))
+    Else
+    Begin
+      A := MmioRdOp(W);
+      MmioWrOp(W, MmioAlu(5, 0, A, W));
+    End;
+  End
+  Else If (Op = $FE) Or (Op = $FF) Then
+  Begin
+    MmioModRm;
+    If MmioReg >= 2 Then Exit;
+    A := MmioRdOp(W);
+    Cf := Fr_[fFL] And 1;
+    If MmioReg = 0 Then R := MmioAlu(0, A, 1, W) Else R := MmioAlu(5, A, 1, W);
+    Fr_[fFL] := (Fr_[fFL] And Not 1) Or Cf;
+    MmioWrOp(W, R);
+  End
+  Else If Op = $0F Then
+  Begin
+    Op := MmioFetch;
+    If (Op <> $B6) And (Op <> $B7) And (Op <> $BE) And (Op <> $BF) Then Exit;
+    MmioModRm;
+    If (Op And 1) = 0 Then
+    Begin
+      A := MmioRdOp(1);
+      If Op = $BE Then A := MmioSx8(A);
+    End
+    Else
+    Begin
+      A := MmioRdOp(2);
+      If Op = $BF Then A := MmioSx16(A);
+    End;
+    MmioSetR(MmioReg, Sz, A);
+  End
+  Else Ok := False;
+  If Not Ok Then Exit;
+  If MmioDef32 Then Fr_[fIP] := MmioIp Else Fr_[fIP] := MmioIp And $FFFF;
+  Inc(MmioCnt);
+  MmioEmu := True;
 End;
 
 { ==================================================================== }
@@ -2348,12 +4949,22 @@ Begin
   DacDefault;
   SqReg[2] := 3; SqReg[4] := 2; GcReg[6] := $0E;
   If M >= $0D Then Begin SqReg[2] := $0F; SqReg[4] := 6; GcReg[6] := 5; End;
+  { modes planaires du VGA (et registres du mode 13h) : tables d'IBM }
+  If PlModeOk(M) Or (M = $13) Then
+  Begin
+    If Clr Then PlSetMode(M) Else PlSetMode(M Or $80);
+  End;
   CrtCursor;
 End;
 
 Procedure ScrollWin(Up : Boolean; N, Attr, R1, C1, R2, C2 : LongInt);
 Var Cols, Rows, R, C, Base, Src : LongInt;
 Begin
+  If PlModeOk(BdaB($49)) Then
+  Begin
+    PlScroll(Up, N, Attr, R1, C1, R2, C2);
+    Exit;
+  End;
   Cols := BdaW($4A); Rows := BdaB($84) + 1;
   If R2 >= Rows Then R2 := Rows - 1;
   If C2 >= Cols Then C2 := Cols - 1;
@@ -2402,6 +5013,11 @@ End;
 Procedure GfxChar(X, Y, Ch, Color : LongInt);
 Var R, C, B, M, A : LongInt;
 Begin
+  If PlModeOk(BdaB($49)) Then
+  Begin
+    PlGfxChar(X, Y, Ch, Color);
+    Exit;
+  End;
   M := BdaB($49);
   For R := 0 To 7 Do
   Begin
@@ -2557,8 +5173,8 @@ Begin
     $09 : PutCh(GAL, GBL, GCX, True);
     $0A : PutCh(GAL, GBL, GCX, False);
     $0B : ;
-    $0C : PutPix(GCX, GDX, GAL);
-    $0D : SetLo(fAX, GetPix(GCX, GDX));
+    $0C : If PlModeOk(BdaB($49)) Then PlPutPix(GCX, GDX, GAL) Else PutPix(GCX, GDX, GAL);
+    $0D : If PlModeOk(BdaB($49)) Then SetLo(fAX, PlGetPix(GCX, GDX)) Else SetLo(fAX, GetPix(GCX, GDX));
     $0E : Tty(GAL, GBL);
     $0F : Begin
             SetLo(fAX, BdaB($49));
@@ -2666,12 +5282,48 @@ End;
 
 { ---- INT 13h ---- }
 
+{ lecteur du BIOS -> unite ; avec l'emulation El Torito, l'image du
+  CD-ROM devient la disquette 00h (la vraie passe en 01h) ou le disque
+  80h (les disques passent en 81h et 82h) ; E0h : le CD-ROM lui-meme }
 Function DiskOf(Dl : LongInt) : LongInt;
+Var D : LongInt;
 Begin
-  DiskOf := -1;
-  If (Dl = $80) And (DkH[0] >= 0) Then DiskOf := 0
-  Else If (Dl = $81) And (DkH[1] >= 0) Then DiskOf := 1
-  Else If (Dl = 0) And (DkH[2] >= 0) Then DiskOf := 2;
+  D := -1;
+  If CdOn And (Dl = $E0) Then D := DkCd
+  Else If CdEmuOn And (CdEmu < 4) Then
+  Begin
+    If Dl = 0 Then D := DkEmu
+    Else If Dl = 1 Then D := 2
+    Else If Dl = $80 Then D := 0
+    Else If Dl = $81 Then D := 1;
+  End
+  Else If CdEmuOn Then
+  Begin
+    If Dl = $80 Then D := DkEmu
+    Else If Dl = $81 Then D := 0
+    Else If Dl = $82 Then D := 1
+    Else If Dl = 0 Then D := 2;
+  End
+  Else If Dl = $80 Then D := 0
+  Else If Dl = $81 Then D := 1
+  Else If Dl = 0 Then D := 2;
+  If (D >= 0) And (DkH[D] < 0) Then D := -1;
+  DiskOf := D;
+End;
+
+{ unite de type disquette (2 ou image El Torito de disquette) }
+Function IsFd(D : LongInt) : Boolean;
+Begin
+  IsFd := (D = 2) Or ((D = DkEmu) And (CdEmu < 4));
+End;
+
+{ type de disquette pour INT 13h 08h : 2 (1,2 Mo), 4 (1,44), 6 (2,88) }
+Function FdType(D : LongInt) : LongInt;
+Begin
+  If DkSect[D] >= 5760 Then FdType := 6
+  Else If DkSect[D] = 2400 Then FdType := 2
+  Else If DkSect[D] <= 1440 Then FdType := 3
+  Else FdType := 4;
 End;
 
 Procedure DiskRet(Dl, St : LongInt);
@@ -2712,6 +5364,12 @@ Begin
   Nh := 0;
   If DkH[0] >= 0 Then Inc(Nh);
   If DkH[1] >= 0 Then Inc(Nh);
+  If CdEmuOn And (CdEmu = 4) Then Inc(Nh);
+  If (D = DkCd) And (Ah >= 2) And (Ah <= $3F) And (Ah <> 8) And (Ah <> $15) Then
+  Begin
+    DiskRet(Dl, 1);
+    Exit;
+  End;
   Case Ah Of
     $00, $0D : If (D >= 0) Or (Dl < $80) Then DiskRet(Dl, 0) Else DiskRet(Dl, 1);
     $01 : Begin
@@ -2741,11 +5399,13 @@ Begin
               Else DiskRet(Dl, 7);
               Exit;
             End;
+            If D = DkCd Then Begin DiskRet(Dl, 1); Exit; End;
             C := DkCyl[D] - 1;
             Set16(fCX, ((C And 255) Shl 8) Or ((C Shr 2) And $C0) Or DkSpt[D]);
-            If D = 2 Then
+            If IsFd(D) Then
             Begin
-              SetHi(fDX, 1); SetLo(fDX, 1); Set16(fBX, 4);
+              SetHi(fDX, 1); SetLo(fDX, 1); Set16(fBX, FdType(D));
+              If CdEmuOn And (CdEmu < 4) And (DkH[2] >= 0) Then SetLo(fDX, 2);
               Fr_[fES] := $F000; Set16(fDI, RomFdpt);
               Fr_[fSET] := Fr_[fSET] Or 1;
             End
@@ -2759,7 +5419,7 @@ Begin
     $10, $11, $0C, $16, $17, $18 :
       Begin
         If D < 0 Then DiskRet(Dl, $80) Else DiskRet(Dl, 0);
-        If (Ah = $18) And (D = 2) Then
+        If (Ah = $18) And IsFd(D) Then
         Begin
           Fr_[fES] := $F000; Set16(fDI, RomFdpt);
           Fr_[fSET] := Fr_[fSET] Or 1;
@@ -2771,7 +5431,8 @@ Begin
               SetHi(fAX, 0); SetCF(Dl >= $80);
               Exit;
             End;
-            If D = 2 Then SetHi(fAX, 2)
+            If IsFd(D) Then SetHi(fAX, 2)
+            Else If D = DkCd Then SetHi(fAX, 0)
             Else
             Begin
               SetHi(fAX, 3);
@@ -2779,7 +5440,7 @@ Begin
             End;
             SetCF(False);
           End;
-    $41 : If (D >= 0) And (D < 2) And (GBX = $55AA) Then
+    $41 : If (D >= 0) And Not IsFd(D) And (GBX = $55AA) Then
           Begin
             Set16(fBX, $AA55); SetHi(fAX, $21); Set16(fCX, 1); SetCF(False);
           End
@@ -2791,18 +5452,51 @@ Begin
         N := LW(A + 2);
         Lba := LL(A + 8);
         If Ah = $44 Then Begin DiskRet(Dl, 0); Exit; End;
-        Done := DiskXfer(D, Lba, N, SegLin(LW(A + 6) Shl 4, LW(A + 4)), Ah = $43);
+        If D = DkCd Then
+        Begin
+          { secteurs de 2048 octets }
+          If Ah = $43 Then Begin DiskRet(Dl, 3); Exit; End;
+          Done := DiskXfer(D, Lba * 4, N * 4, SegLin(LW(A + 6) Shl 4, LW(A + 4)), False) Div 4;
+        End
+        Else Done := DiskXfer(D, Lba, N, SegLin(LW(A + 6) Shl 4, LW(A + 4)), Ah = $43);
         LSW(A + 2, Done);
         If Done = N Then DiskRet(Dl, 0) Else DiskRet(Dl, 4);
       End;
     $48 : Begin
-            If (D < 0) Or (D > 1) Then Begin DiskRet(Dl, 1); Exit; End;
+            If (D < 0) Or IsFd(D) Then Begin DiskRet(Dl, 1); Exit; End;
             A := SegLin(Fr_[fDSB], Fr_[fSI]);
+            If D = DkCd Then
+            Begin
+              LSW(A, 26); LSW(A + 2, $74);
+              For C := 4 To 15 Do LSB(A + C, 0);
+              LSW(A + 16, (DkSect[D] Div 4) And $FFFF); LSW(A + 18, (DkSect[D] Div 4) Shr 16);
+              LSW(A + 20, 0); LSW(A + 22, 0); LSW(A + 24, 2048);
+              DiskRet(Dl, 0);
+              Exit;
+            End;
             LSW(A, 26); LSW(A + 2, 2);
             LSW(A + 4, DkCyl[D]); LSW(A + 6, 0); LSW(A + 8, DkHeads[D]); LSW(A + 10, 0);
             LSW(A + 12, DkSpt[D]); LSW(A + 14, 0);
             LSW(A + 16, DkSect[D] And $FFFF); LSW(A + 18, DkSect[D] Shr 16); LSW(A + 20, 0); LSW(A + 22, 0);
             LSW(A + 24, 512);
+            DiskRet(Dl, 0);
+          End;
+    $4B : Begin
+            { El Torito : AL=00h fin de l'emulation, 01h etat (paquet de
+              13h octets en DS:SI) }
+            If Not CdOn Or (GAL > 1) Then Begin DiskRet(Dl, 1); Exit; End;
+            A := SegLin(Fr_[fDSB], Fr_[fSI]);
+            LSB(A, $13); LSB(A + 1, CdEmu);
+            If CdEmu = 0 Then LSB(A + 2, $E0) Else If CdEmu < 4 Then LSB(A + 2, 0) Else LSB(A + 2, $80);
+            LSB(A + 3, 0); LSW(A + 4, CdBootLba And $FFFF); LSW(A + 6, CdBootLba Shr 16);
+            LSW(A + 8, 0); LSW(A + 10, 0); LSW(A + 12, CdLoadSeg); LSW(A + 14, CdBootCnt);
+            If CdEmu > 0 Then
+            Begin
+              C := DkCyl[DkEmu] - 1;
+              LSB(A + 16, C And 255); LSB(A + 17, ((C Shr 2) And $C0) Or DkSpt[DkEmu]); LSB(A + 18, DkHeads[DkEmu] - 1);
+            End
+            Else Begin LSB(A + 16, 0); LSB(A + 17, 0); LSB(A + 18, 0); End;
+            If GAL = 0 Then CdEmuOn := False;
             DiskRet(Dl, 0);
           End;
   Else
@@ -3077,10 +5771,61 @@ Begin
 End;
 
 { amorcage : disquette (si demandee) puis disque dur }
+{ amorcage par le CD-ROM (El Torito) : sans emulation, CdBootCnt
+  secteurs de 512 octets en CdLoadSeg:0000 (DL = E0h) ; avec emulation,
+  secteur 0 de l'image en 0000:7C00 (DL = 00h ou 80h) }
+Function CdBoot : Boolean;
+Var K : LongInt;
+Begin
+  CdBoot := False;
+  If Not CdOn Then Exit;
+  If CdEmu = 0 Then
+  Begin
+    For K := 0 To CdBootCnt - 1 Do
+    Begin
+      If Not DkReadSec(DkCd, CdBootLba * 4 + K, LongInt(@SecBuf)) Then Exit;
+      CopyB(LongInt(@SecBuf), GMem + CdLoadSeg * 16 + K * 512, 512);
+    End;
+    BootDrive := $E0;
+    Fr_[fCS] := CdLoadSeg; Fr_[fIP] := 0;
+  End
+  Else
+  Begin
+    If Not DkReadSec(DkEmu, 0, LongInt(@SecBuf)) Then Exit;
+    CopyB(LongInt(@SecBuf), GMem + $7C00, 512);
+    CdEmuOn := True;
+    If CdEmu < 4 Then
+    Begin
+      BootDrive := 0;
+      BdaSW($10, BdaW($10) Or 1);
+      If DkH[2] >= 0 Then BdaSW($10, (BdaW($10) And Not $C0) Or $40);
+    End
+    Else
+    Begin
+      BootDrive := $80;
+      BdaSB($75, BdaB($75) + 1);
+    End;
+    Fr_[fCS] := 0; Fr_[fIP] := $7C00;
+  End;
+  Fr_[fDX] := BootDrive;
+  Fr_[fSS] := 0; Fr_[fSP] := $7C00;
+  Fr_[fDS] := 0; Fr_[fES] := 0; Fr_[fFS] := 0; Fr_[fGS] := 0;
+  Fr_[fFL] := $202;
+  Fr_[fSET] := Fr_[fSET] Or 1;
+  CdBoot := True;
+End;
+
 Function Boot : Boolean;
 Var D, K : LongInt; Order : Array[0..1] Of LongInt;
 Begin
   Boot := False;
+  CdEmuOn := False;
+  If (CurVm >= 0) And (Vms[CurVm].BootCd <> 0) And CdOn Then
+    If CdBoot Then
+    Begin
+      Boot := True;
+      Exit;
+    End;
   If (CurVm >= 0) And (Vms[CurVm].BootFd <> 0) Then
   Begin
     Order[0] := 2; Order[1] := 0;
@@ -3107,6 +5852,8 @@ Begin
           Exit;
         End;
   End;
+  { CD-ROM en dernier recours }
+  If CdOn And CdBoot Then Boot := True;
 End;
 
 { POST : vecteurs, donnees du BIOS, ROM, peripheriques, amorcage }
@@ -3187,6 +5934,7 @@ Begin
   PitStartMs := NowMs; PitTicksDone := 0; Port61 := 0;
   KbStat := $10; KbCmdByte := $45; KbCmd := 0; KbDevCmd := 0; KbRN := 0; KbQH := 0; KbQT := 0;
   A20 := 0; SetA20(1);
+  IdeInit;
   Port92 := 0; FontLoad := 0; CmIdx := 0; AcFlip := 0;
   CmosInit;
   IrqWant := -1; IrqWantN := -1;
@@ -3196,7 +5944,7 @@ Begin
   Fr_[fSET] := Fr_[fSET] Or 5;
   If Not Boot Then
   Begin
-    Message(Fr('Aucun disque amor`cable : ins`erez une disquette ou ajoutez un disque dur.'));
+    Message(Fr('Aucun disque amor`cable : ins`erez une disquette, un CD-ROM ou ajoutez un disque dur.'));
     Fr_[fCS] := $F000; Fr_[fIP] := $FFF0; Fr_[fFL] := 2; Fr_[fSET] := Fr_[fSET] Or 1;
     VmHalted := 1;
   End;
@@ -3260,7 +6008,7 @@ End;
 { sortie d'E/S (EXITINFO1 de SVM : bit 0 lecture, 2 chaine, 3 REP,
   4/5/6 taille, 16-31 port) }
 Procedure IoExit;
-Var I1, P, Sz, V, N, K, Lin, Step : LongInt; InDir, Str_, Rep : Boolean;
+Var I1, P, Sz, V, N, K, Lin, Step : LongInt; InDir, Str_, Rep, A32 : Boolean;
 Begin
   Inc(VmIoExits);
   I1 := Fr_[fINFO1];
@@ -3270,28 +6018,40 @@ Begin
   Inc(PortCnt[P And 1023]);
   If Str_ Then
   Begin
-    { INS / OUTS (adresses 16 bits) }
-    If Rep Then N := GCX Else N := 1;
+    { INS / OUTS : adresses de 16 bits (SI, DI, CX) ou de 32 bits (ESI,
+      EDI, ECX : bit 8 des informations de la sortie, invite en mode
+      protege 32 bits comme le pilote ATAPI d'OS2-Zero) }
+    A32 := (I1 And $100) <> 0;
+    If Rep Then
+    Begin
+      If A32 Then N := Fr_[fCX] Else N := GCX;
+    End
+    Else N := 1;
     If (Fr_[fFL] And $400) <> 0 Then Step := -Sz Else Step := Sz;
     For K := 1 To N Do
     Begin
       If InDir Then
       Begin
         Lin := SegLin(Fr_[fESB], Fr_[fDI]);
+        If A32 Then Lin := Fr_[fESB] + Fr_[fDI];
         V := IoIn(P, Sz);
         If Sz = 1 Then LSB(Lin, V) Else If Sz = 2 Then LSW(Lin, V)
         Else Begin LSW(Lin, V); LSW(Lin + 2, V Shr 16); End;
-        Set16(fDI, Fr_[fDI] + Step);
+        If A32 Then Fr_[fDI] := Fr_[fDI] + Step Else Set16(fDI, Fr_[fDI] + Step);
       End
       Else
       Begin
         Lin := SegLin(Fr_[fDSB], Fr_[fSI]);
+        If A32 Then Lin := Fr_[fDSB] + Fr_[fSI];
         If Sz = 1 Then V := LB(Lin) Else If Sz = 2 Then V := LW(Lin) Else V := LL(Lin);
         IoOut(P, Sz, V);
-        Set16(fSI, Fr_[fSI] + Step);
+        If A32 Then Fr_[fSI] := Fr_[fSI] + Step Else Set16(fSI, Fr_[fSI] + Step);
       End;
     End;
-    If Rep Then Set16(fCX, 0);
+    If Rep Then
+    Begin
+      If A32 Then Fr_[fCX] := 0 Else Set16(fCX, 0);
+    End;
     Fr_[fIP] := Fr_[fNEXT];
     Exit;
   End;
@@ -3326,6 +6086,7 @@ Begin
   Fr_[fSET] := 5;
   VmHalted := 0; VmIdleWait := 0; VmReqReset := 0;
   Post;
+  PlSync;
 End;
 
 { codes de touche de l'hote -> file du 8042 }
@@ -3352,7 +6113,7 @@ Var K, Sc : LongInt; Sh : Boolean;
 Begin
   For K := 1 To Length(S) Do
   Begin
-    If S[K] = '|' Then Begin KbKey($1C); KbKey($9C); End
+    If (S[K] = '|') Or (S[K] = '^') Then Begin KbKey($1C); KbKey($9C); End
     Else If S[K] = '#' Then Begin KbKey($3F); KbKey($BF); End
     Else
     Begin
@@ -3368,6 +6129,50 @@ Begin
 End;
 
 { une tranche : interruptions, execution jusqu'a la sortie suivante }
+{ fenetre VGA de l'invite : absente (KrnVirt 7) tant que le mode est
+  planaire, chaque acces y sort et l'instruction est emulee (MmioEmu) }
+Var
+  PlTrap : Boolean;
+
+Procedure PlSync;
+Var T : Boolean;
+Begin
+  T := PlActive;
+  If T <> PlTrap Then
+  Begin
+    PlTrap := T;
+    If T Then Dummy := KrnVirt(7, 1, 0) Else Dummy := KrnVirt(7, 0, 0);
+  End;
+End;
+
+{ sortie due a un acces a A0000h-AFFFFh (defaut de page en V86, NPF des
+  tables imbriquees) : vrai si traitee }
+Function VgaFault(R : LongInt) : Boolean;
+Var A, K : LongInt; S : String;
+Begin
+  VgaFault := False;
+  A := -1;
+  If R = VXE_NPF Then A := Fr_[fINFO2]
+  Else If (R = VXE_EXC) And (VmMethod = VXM_V86) And (Fr_[fINFO1] = 14) Then A := Fr_[fINFO2];
+  If (A < $A0000) Or (A >= $B0000) Then Exit;
+  VgaFault := True;
+  If Not PlActive Then
+  Begin
+    { fenetre restee absente : la remettre et reprendre l'instruction }
+    PlTrap := True;
+    PlSync;
+    Exit;
+  End;
+  MmioDef32 := (VmMethod <> VXM_V86) And ((Fr_[fCR0] And 1) <> 0) And ((Fr_[fFL] And $20000) = 0) And
+               ((Fr_[fCSA] And 1) <> 0);
+  If MmioEmu Then Exit;
+  S := '';
+  For K := 0 To 7 Do S := S + ' ' + Hex(LB(Fr_[fCSB] + Fr_[fIP] + K), 2);
+  VmFailMsg := Fr('Instruction VGA non `emul`ee en ') + Hex(Fr_[fCS], 4) + ':' + Hex(Fr_[fIP], 8) + ' :' + S;
+  VmHalted := 1;
+  VmMsg := VmFailMsg;
+End;
+
 Procedure VmStep;
 Var R, N, V, IrqN : LongInt;
 Begin
@@ -3416,7 +6221,10 @@ Begin
     IrqWant := -1; IrqWantN := -1;
   End;
   Case R Of
-    VXE_IO : IoExit;
+    VXE_IO : Begin
+               IoExit;
+               PlSync;
+             End;
     VXE_HLT : Begin
                 Inc(VmHltExits);
                 Fr_[fIP] := Fr_[fNEXT];
@@ -3433,12 +6241,26 @@ Begin
                  VmReqReset := 1;
                End;
   Else
+    If VgaFault(R) Then
+    Begin
+      PlSync;
+      Exit;
+    End;
     VmLastErr := R;
+    If (R = VXE_EXC) And (VmMethod = VXM_V86) And ((Fr_[fINFO1] = 13) Or (Fr_[fINFO1] = 6)) And
+       (LB(Fr_[fCSB] + Fr_[fIP]) = $0F) And (LB(Fr_[fCSB] + Fr_[fIP] + 1) In [1, $20, $22]) Then
+    Begin
+      { LGDT, LIDT, LMSW, MOV CR0 : l'invite veut le mode protege }
+      VmHalted := 1;
+      VmMsg := Fr('Ce syst`eme passe en mode prot`eg`e : il exige AMD-V ou VT-x (le mode V86 ne fait que le mode r`eel).');
+      VmFailMsg := VmMsg;
+      Exit;
+    End;
     If (R = VXE_EXC) And (VmMethod = VXM_V86) And (Fr_[fINFO1] = 14) And (Fr_[fINFO2] >= $100000) And
        (Fr_[fINFO2] < $110000) Then
     Begin
       VmHalted := 1;
-      VmMsg := Fr('Zone haute (HMA) inaccessible en mode V86 : HIMEM.SYS/DOS=HIGH exigent AMD-V ou VT-x.');
+      VmMsg := Fr('M`emoire au-dessus de 1 Mo (HMA, chargeur en mode prot`eg`e) inaccessible en mode V86 : ce syst`eme exige AMD-V ou VT-x.');
       VmFailMsg := VmMsg;
       Exit;
     End;
@@ -3485,6 +6307,13 @@ Begin
     End;
   If Vms[I].Hd1 <> '' Then If DkOpen(1, Vms[I].Hd1) Then ;
   If Vms[I].Fd <> '' Then If DkOpen(2, Vms[I].Fd) Then ;
+  If Vms[I].Cd <> '' Then
+    If Not CdOpen(Vms[I].Cd) Then
+    Begin
+      Err := Fr('CD-ROM : ') + DkErr;
+      DkCloseAll;
+      Exit;
+    End;
   GSize := Vms[I].MemMb * 1024 * 1024;
   If GSize < $110000 Then GSize := $110000;
   GMem := KrnVirt(VX_CREATE, GSize, 0);
@@ -3500,6 +6329,7 @@ Begin
   VmExits := 0; VmIoExits := 0; VmHltExits := 0; VmIrqs := 0; VmSvc := 0; VmLastErr := 0;
   VmStart := NowMs;
   DbgLine := ''; DbgOut := ''; VmMsg := '';
+  PlTrap := False;
   For K := 0 To 39 Do Fr_[K] := 0;
   Fr_[fIRQ] := -1;
   VmReqReset := 0; VmReqStop := 0; VmReqCad := 0; VmHalted := 0; VmIdleWait := 0;
@@ -3535,7 +6365,7 @@ End;
 Var
   Fb : Array[0..SW_ * SH_ - 1] Of Byte;
   Bmi : Array[0..16 + 256 * 4 - 1] Of Byte;
-  ShadowSum, LastSum, BlinkOn, LastBlink : LongInt;
+  ShadowSum, LastSum, BlinkOn, LastBlink, ScrH : LongInt;
   Hps, CW, CH, StatH, MgrFrame, MgrClient, VmClient, InfoFrame, CfgFrame, CfgClient : LongInt;
   VmTitle, StatText : String;
 
@@ -3694,6 +6524,11 @@ End;
 Function ScreenSum : LongInt;
 Var S, K, M, N, A : LongInt;
 Begin
+  If PlActive Then
+  Begin
+    ScreenSum := (PlSum + VmHalted * 3) And $7FFFFFFF;
+    Exit;
+  End;
   M := BdaB($49);
   S := M * 7 + BlinkOn * 13 + CrReg[$0E] * 31 + CrReg[$0F] * 37 + CrReg[$0C] * 41 + CrReg[$0D] + VmHalted * 3;
   If M = $13 Then Begin A := $A0000; N := 64000; End
@@ -3720,7 +6555,12 @@ Begin
   End;
   DacToBmi;
   M := BdaB($49);
-  If M = $13 Then Render13
+  If PlActive Then
+  Begin
+    PlFb := LongInt(@Fb);
+    PlRender;
+  End
+  Else If M = $13 Then Render13
   Else If (M >= 4) And (M <= 6) Then RenderCga
   Else If (M <= 3) Or (M = 7) Then RenderText
   Else
@@ -3732,11 +6572,23 @@ Begin
   End;
 End;
 
+{ hauteur montree : celle de l'affichage du CRTC en mode planaire (350 ou
+  480 lignes), sinon 400 }
+Function DispH : LongInt;
+Var V : LongInt;
+Begin
+  DispH := 400;
+  If (GMem = 0) Or Not PlActive Then Exit;
+  V := CrReg[$12] Or ((CrReg[7] And 2) Shl 7) Or ((CrReg[7] And $40) Shl 3);
+  If V >= 440 Then DispH := 480 Else If (V >= 340) And (V < 360) Then DispH := 350;
+End;
+
 Procedure BlitScreen(H : LongInt);
 Var P : Array[0..7] Of LongInt;
 Begin
-  P[0] := 0; P[1] := CH - SH_; P[2] := SW_; P[3] := CH;
-  P[4] := 0; P[5] := 0; P[6] := SW_; P[7] := SH_;
+  { les ScrH lignes du haut de l'image (rangee de bas en haut) }
+  P[0] := 0; P[1] := CH - ScrH; P[2] := SW_; P[3] := CH;
+  P[4] := 0; P[5] := SH_ - ScrH; P[6] := SW_; P[7] := SH_;
   Dummy := GpiDrawBits(H, LongInt(@Fb), LongInt(@Bmi), 4, LongInt(@P), $CC, 0);
 End;
 
@@ -3774,14 +6626,14 @@ End;
 Procedure DrawStatus;
 Var S : String; Dt : LongInt;
 Begin
-  FBar(0, SH_, CW - 1, CH - 1, $CCCCCC);
-  Edge(0, SH_, CW - 1, CH - 1, $FFFFFF, $808080);
+  FBar(0, ScrH, CW - 1, CH - 1, $CCCCCC);
+  Edge(0, ScrH, CW - 1, CH - 1, $FFFFFF, $808080);
   Dt := (NowMs - VmStart) Div 1000;
   S := ' ' + MethodName(VmMethod) + '  |  ' + IStr(VmExits) + ' sorties  |  disque ' + IStr(DkReads[0]) + 'L/' +
        IStr(DkWrites[0]) + 'E';
   If VmState = VS_PAUSE Then S := S + '  |  ' + Fr('En pause');
   If VmMsg <> '' Then S := ' ' + VmMsg;
-  OutTxt(4, SH_ + 3, Copy(S, 1, 78), $101010, $CCCCCC);
+  OutTxt(4, ScrH + 3, Copy(S, 1, 78), $101010, $CCCCCC);
 End;
 
 { ==================================================================== }
@@ -3794,7 +6646,9 @@ Var
   CurSel, ListBox, BtnNew, BtnSet, BtnDel, BtnStart, BtnInfo : LongInt;
   CfgEdit : LongInt;                  { machine modifiee (-1 : nouvelle) }
   StartKeys : String;
-  CName, CType, CMem, CHd, CHd2, CFd, CNew, CSize, CBootFd : LongInt;
+  CName, CType, CMem, CHd, CHd2, CFd, CNew, CSize, CBootFd, CCd, CBootCd : LongInt;
+
+Procedure FillList; Forward;
 
 Procedure MB(V : LongInt);
 Begin
@@ -4125,6 +6979,14 @@ Begin
   If (NowMs Div 400) And 1 = 1 Then BlinkOn := 1 Else BlinkOn := 0;
   { pas de dessin par-dessus les boites de l'application }
   If (GMem = 0) Or (InfoFrame <> 0) Or (InDlg <> 0) Then Exit;
+  S := DispH;
+  If S <> ScrH Then
+  Begin
+    { l'invite change de hauteur d'ecran (350, 400, 480) : la fenetre suit }
+    ScrH := S;
+    CenterFrame(VmFrame, SW_, ScrH + 22);
+    LastSum := -1;
+  End;
   S := ScreenSum;
   If (S <> LastSum) Or (StatText <> VmMsg) Or ((NowMs Div 1000) <> LastBlink) Then
   Begin
@@ -4236,7 +7098,8 @@ Begin
   MenuClose(H1, 1);
   MenuClose(H0, 2);
   M := WinCreateMenu(VmFrame, LongInt(@MenuT));
-  CenterFrame(VmFrame, SW_, SH_ + 22);
+  ScrH := 400;
+  CenterFrame(VmFrame, SW_, ScrH + 22);
   InitBmi;
   LastSum := -1;
   VmState := VS_RUN;
@@ -4274,9 +7137,248 @@ Begin
   SafeName := Copy(R, 1, 32);
 End;
 
-Procedure CfgOk;
-Var V : TVm; Hd, Dir : String; Mb, I : LongInt;
+{ ---- types de systeme : distributions de GitHub (image ISO
+  d'installation telechargee) et systemes fournis localement ---- }
+
+Const
+  NDist = 8;
+  DistGit = 4;                        { 0 a 3 : telecharges de GitHub }
+
+Function DistLabel(I : LongInt) : String;
 Begin
+  Case I Of
+    0 : DistLabel := 'MSDOS-0 (t`el`echarger `a partir de GitHub)';
+    1 : DistLabel := 'UNIX-0 (t`el`echarger `a partir de GitHub)';
+    2 : DistLabel := 'OS2-Zero (t`el`echarger `a partir de GitHub)';
+    3 : DistLabel := 'Pasdows95 (t`el`echarger `a partir de GitHub)';
+    4 : DistLabel := 'DOS (fourni par vous localement)';
+    5 : DistLabel := 'Windows (fourni par vous localement)';
+    6 : DistLabel := 'Linux (fourni par vous localement)';
+  Else
+    DistLabel := 'Autre (fourni par vous localement)';
+  End;
+End;
+
+Function DistName(I : LongInt) : String;
+Begin
+  Case I Of
+    0 : DistName := 'MSDOS-0'; 1 : DistName := 'UNIX-0'; 2 : DistName := 'OS2-Zero'; 3 : DistName := 'Pasdows95';
+    4 : DistName := 'DOS'; 5 : DistName := 'Windows'; 6 : DistName := 'Linux';
+  Else
+    DistName := 'Autre';
+  End;
+End;
+
+{ OSType de VirtualBox }
+Function DistOs(I : LongInt) : String;
+Begin
+  Case I Of
+    0, 4 : DistOs := 'DOS';
+    2 : DistOs := 'OS2Warp3';
+    3, 5 : DistOs := 'Windows95';
+    6 : DistOs := 'Linux';
+  Else
+    DistOs := 'Other';
+  End;
+End;
+
+{ depot de GitHub (gladir/...) et image ISO d'installation (branche main) }
+Function DistRepo(I : LongInt) : String;
+Begin
+  Case I Of
+    0 : DistRepo := 'MSDOS-0'; 1 : DistRepo := 'UNIX-0'; 2 : DistRepo := 'OS2-0'; 3 : DistRepo := 'Pasdows95';
+  Else
+    DistRepo := '';
+  End;
+End;
+
+Function DistPath(I : LongInt) : String;
+Begin
+  Case I Of
+    0 : DistPath := 'IMAGE/INSTALLCD.ISO';
+    1 : DistPath := 'IMAGES/UNIX0-CD.ISO';
+    2 : DistPath := 'IMAGE/OS2INST.ISO';
+    3 : DistPath := 'IMAGE/INSTALL.ISO';
+  Else
+    DistPath := '';
+  End;
+End;
+
+Function DistUrl(I : LongInt) : String;
+Begin
+  DistUrl := 'https://raw.githubusercontent.com/gladir/' + DistRepo(I) + '/main/' + DistPath(I);
+End;
+
+{ memoire (Mo) et disque dur (Mo) proposes }
+Function DistMem(I : LongInt) : LongInt;
+Begin
+  If (I = 2) Or (I = 3) Then DistMem := 64 Else If I = 1 Then DistMem := 16 Else DistMem := 32;
+End;
+
+Function DistHd(I : LongInt) : LongInt;
+Begin
+  If (I = 2) Or (I = 3) Then DistHd := 512 Else DistHd := 64;
+End;
+
+{ type d'une machine existante }
+Function DistOf(Var V : TVm) : LongInt;
+Var K : LongInt; T : String;
+Begin
+  For K := 0 To DistGit - 1 Do
+    If UpS(V.Distro) = UpS(DistName(K)) Then
+    Begin
+      DistOf := K;
+      Exit;
+    End;
+  T := UpS(V.OsType);
+  If Copy(T, 1, 3) = 'DOS' Then DistOf := 4
+  Else If Copy(T, 1, 3) = 'WIN' Then DistOf := 5
+  Else If (Copy(T, 1, 5) = 'LINUX') Or (Copy(T, 1, 6) = 'UBUNTU') Or (Copy(T, 1, 6) = 'DEBIAN') Then DistOf := 6
+  Else DistOf := 7;
+End;
+
+{ ---- telechargement de l'image ISO (fenetre de progression) ---- }
+
+Var
+  DwFrame, DwClient, DwDist : LongInt;
+  PendV : TVm;
+  PendHd : String;                    { disque neuf a effacer si le telechargement echoue }
+  DwBtn : LongInt;
+
+Procedure CfgFinish(Var V : TVm; Start : Boolean);
+Var I : LongInt;
+Begin
+  If Not VmSave(V) Then
+  Begin
+    Dummy := Ask('Impossible d''`ecrire ' + V.Vbox + '.', 'Virtualisation', MB_OK Or MB_ERROR, MgrFrame);
+    Exit;
+  End;
+  I := -1;
+  If CfgEdit >= 0 Then
+  Begin
+    Vms[CfgEdit] := V;
+    I := CfgEdit;
+  End
+  Else If NVm < MaxVm Then
+  Begin
+    Vms[NVm] := V;
+    I := NVm;
+    CurSel := NVm;
+    Inc(NVm);
+  End;
+  RegSave;
+  If MgrClient <> 0 Then
+  Begin
+    Dummy := WinPostMsg(MgrClient, WM_VMTITLE, 0, 0);
+    Dummy := WinInvalidateRect(MgrClient, 0, 0);
+  End;
+  { installation : la machine demarre sur le CD-ROM telecharge }
+  If Start And (I >= 0) And (VmFrame = 0) Then
+  Begin
+    CurSel := I;
+    FillList;
+    StartVm(I);
+  End;
+End;
+
+Function MoStr(B : LongInt) : String;
+Begin
+  MoStr := IStr(B Div 1048576) + ',' + IStr(((B Mod 1048576) * 10) Div 1048576) + ' Mo';
+End;
+
+Procedure DwClose;
+Begin
+  If DwFrame <> 0 Then Dummy := WinDestroyWindow(DwFrame);
+  DwFrame := 0; DwClient := 0;
+  If MgrFrame <> 0 Then Dummy := WinEnableWindow(MgrFrame, 1);
+End;
+
+Procedure DwPaint(H : LongInt);
+Var Rc : Array[0..3] Of LongInt; W, P, X : LongInt; S : String;
+Begin
+  Hps := WinBeginPaint(H, 0, 0);
+  Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+  CW := Rc[2]; CH := Rc[3];
+  RgbMode;
+  FBar(0, 0, CW - 1, CH - 1, $CCCCCC);
+  OutTxt(16, 12, Fr('T`el`echargement de ') + DistName(DwDist) + Fr(' `a partir de GitHub'), $000080, $CCCCCC);
+  OutTxt(16, 36, 'Source : github.com/gladir/' + DistRepo(DwDist), $101010, $CCCCCC);
+  OutTxt(16, 54, 'Fichier : ' + Copy(PendV.Cd, 1, 52), $101010, $CCCCCC);
+  { barre de progression }
+  W := CW - 32;
+  Edge(16, 80, 16 + W, 102, $808080, $FFFFFF);
+  FBar(17, 81, 15 + W, 101, $FFFFFF);
+  P := 0;
+  If DlTotal > 0 Then P := (DlDone Div 1024) * 1000 Div MaxI(1, DlTotal Div 1024);
+  If P > 1000 Then P := 1000;
+  X := ((W - 2) * P) Div 1000;
+  If X > 0 Then FBar(17, 81, 17 + X - 1, 101, $2050A0);
+  If DlState <= 1 Then S := Fr('Connexion `a GitHub...')
+  Else
+  Begin
+    S := MoStr(DlDone);
+    If DlTotal > 0 Then S := S + ' sur ' + MoStr(DlTotal) + ' (' + IStr(P Div 10) + ' %)';
+    If DlRate > 0 Then S := S + ' - ' + IStr(DlRate Div 1024) + ' Ko/s';
+  End;
+  OutTxt(16, 110, S, $101010, $CCCCCC);
+  OutTxt(16, 132, Fr('La machine d`emarrera ensuite sur ce CD-ROM pour l''installation.'), $404040, $CCCCCC);
+  Dummy := WinEndPaint(Hps);
+End;
+
+Function DwProc(H, Msg0, Mp1, Mp2 : LongInt) : LongInt;
+Var S : String;
+Begin
+  DwProc := 0;
+  Case Msg0 Of
+    WM_PAINT : DwPaint(H);
+    WM_TIMER : Begin
+                 If DlState = 3 Then
+                 Begin
+                   DwClose;
+                   CfgFinish(PendV, True);
+                 End
+                 Else If DlState = 4 Then
+                 Begin
+                   S := DlErr;
+                   DwClose;
+                   If PendHd <> '' Then Dummy := DosDelete(Z(PendHd));
+                   Dummy := Ask(Fr('Le t`el`echargement de ') + DistName(DwDist) + Fr(' a `echou`e : ') + S,
+                                'Virtualisation', MB_OK Or MB_ERROR, MgrFrame);
+                 End
+                 Else If DlState = 5 Then
+                 Begin
+                   DwClose;
+                   If PendHd <> '' Then Dummy := DosDelete(Z(PendHd));
+                 End
+                 Else Dummy := WinInvalidateRect(H, 0, 0);
+               End;
+    WM_COMMAND : If Lo16(Mp1) = ID_CANCEL Then DlAbort := 1;
+    WM_CLOSE : DlAbort := 1;
+  Else
+    DwProc := WinDefWindowProc(H, Msg0, Mp1, Mp2);
+  End;
+End;
+
+Procedure ShowDl(D : LongInt);
+Var Flg : LongInt;
+Begin
+  DwDist := D;
+  Flg := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER Or FCF_TASKLIST;
+  DwClient := 0;
+  DwFrame := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Flg), Z('VBOXDL'), Z2(Fr('T`el`echargement - Virtualisation')),
+                                0, 0, 0, LongInt(@DwClient));
+  CenterFrame(DwFrame, 540, 200);
+  CH := 200;
+  DwBtn := Ctl(DwClient, WC_BUTTON, 'Annuler', BS_PUSHBUTTON Or WS_TABSTOP, 540 - 110, 200 - 38, 90, 28, ID_CANCEL);
+  If MgrFrame <> 0 Then Dummy := WinEnableWindow(MgrFrame, 0);
+  DlStart(DistUrl(D), PendV.Cd);
+  Dummy := WinStartTimer(Hab, DwClient, 2, 250);
+End;
+
+Procedure CfgOk;
+Var V : TVm; Hd, Dir : String; Mb, Sel : LongInt; Git : Boolean;
+Begin
+  PendHd := '';
   V.Used := True;
   V.Name := CtlText(CName);
   If V.Name = '' Then
@@ -4284,8 +7386,21 @@ Begin
     Dummy := Ask('Donnez un nom `a la machine.', 'Virtualisation', MB_OK Or MB_ICONWARNING, CfgFrame);
     Exit;
   End;
-  V.OsType := CtlText(CType);
+  Sel := WinSendMsg(CType, LM_QUERYSELECTION, -1, 0);
+  If (Sel < 0) Or (Sel >= NDist) Then Sel := 4;
+  Git := (CfgEdit < 0) And (Sel < DistGit);
+  V.OsType := DistOs(Sel);
+  V.Distro := '';
+  If Sel < DistGit Then V.Distro := DistName(Sel);
+  { type inchange d'une machine existante : on garde son OSType }
+  If (CfgEdit >= 0) And (Sel = DistOf(Vms[CfgEdit])) Then
+  Begin
+    V.OsType := Vms[CfgEdit].OsType;
+    V.Distro := Vms[CfgEdit].Distro;
+  End;
+  If Git And (V.Name = Fr('Nouvelle machine')) Then V.Name := DistName(Sel);
   V.MemMb := SVal(CtlText(CMem));
+  If Git And (V.MemMb = 32) Then V.MemMb := DistMem(Sel);
   If (V.MemMb < 1) Or (V.MemMb > 128) Then
   Begin
     Dummy := Ask('La m`emoire vive doit `etre de 1 `a 128 Mo.', 'Virtualisation', MB_OK Or MB_ICONWARNING, CfgFrame);
@@ -4295,21 +7410,30 @@ Begin
   If CfgEdit >= 0 Then
   Begin
     V.Vbox := Vms[CfgEdit].Vbox; V.Uuid := Vms[CfgEdit].Uuid;
-    V.Hd0Uuid := Vms[CfgEdit].Hd0Uuid; V.Hd1Uuid := Vms[CfgEdit].Hd1Uuid;
+    V.Hd0Uuid := Vms[CfgEdit].Hd0Uuid; V.Hd1Uuid := Vms[CfgEdit].Hd1Uuid; V.CdUuid := Vms[CfgEdit].CdUuid;
     If UpS(Hd) <> UpS(Vms[CfgEdit].Hd0) Then V.Hd0Uuid := '';
   End
   Else
   Begin
-    Dir := 'C:\VMS\';
-    Dummy := DosCreateDir(Z('C:\VMS'), 0);
+    Dir := VmsDir;
     Dir := Dir + SafeName(V.Name);
     Dummy := DosCreateDir(Z(Dir), 0);
     V.Vbox := Dir + '\' + SafeName(V.Name) + '.VBOX';
-    V.Uuid := ''; V.Hd0Uuid := ''; V.Hd1Uuid := '';
+    V.Uuid := ''; V.Hd0Uuid := ''; V.Hd1Uuid := ''; V.CdUuid := '';
+    If FExists(V.Vbox) Then
+    Begin
+      Dummy := Ask('Une machine nomm`ee ' + V.Name + ' existe d`ej`a (' + V.Vbox + ').', 'Virtualisation',
+                   MB_OK Or MB_ICONWARNING, CfgFrame);
+      Exit;
+    End;
   End;
+  { installation : un disque dur neuf s'il n'y en a pas }
+  If Git And (Hd = '') Then Dummy := WinSendMsg(CNew, BM_SETCHECK, 1, 0);
   If WinSendMsg(CNew, BM_QUERYCHECK, 0, 0) <> 0 Then
   Begin
     Mb := SVal(CtlText(CSize));
+    If Git And (Mb = 64) Then Mb := DistHd(Sel);
+    If (Mb < 1) Or (Mb > 32768) Then Mb := 64;
     If Hd = '' Then Hd := DirOf(V.Vbox) + SafeName(V.Name) + '.VHD';
     If FExists(Hd) Then
     Begin
@@ -4321,6 +7445,7 @@ Begin
       Dummy := Ask('Impossible de cr`eer le disque ' + Hd + '.', 'Virtualisation', MB_OK Or MB_ERROR, CfgFrame);
       Exit;
     End;
+    PendHd := Hd;
   End
   Else If (Hd <> '') And Not FExists(Hd) Then
   Begin
@@ -4330,26 +7455,54 @@ Begin
   V.Hd0 := Hd;
   V.Hd1 := CtlText(CHd2);
   V.Fd := CtlText(CFd);
-  If WinSendMsg(CBootFd, BM_QUERYCHECK, 0, 0) <> 0 Then V.BootFd := 1 Else V.BootFd := 0;
-  If Not VmSave(V) Then
+  V.Cd := CtlText(CCd);
+  If Copy(V.Cd, 1, 1) = '(' Then V.Cd := '';
+  If (V.Cd <> '') And Not FExists(V.Cd) And Not Git Then
   Begin
-    Dummy := Ask('Impossible d''`ecrire ' + V.Vbox + '.', 'Virtualisation', MB_OK Or MB_ERROR, CfgFrame);
+    Dummy := Ask('Image de CD-ROM introuvable : ' + V.Cd, 'Virtualisation', MB_OK Or MB_ICONWARNING, CfgFrame);
     Exit;
   End;
-  If CfgEdit >= 0 Then Vms[CfgEdit] := V
-  Else If NVm < MaxVm Then
+  If WinSendMsg(CBootFd, BM_QUERYCHECK, 0, 0) <> 0 Then V.BootFd := 1 Else V.BootFd := 0;
+  If WinSendMsg(CBootCd, BM_QUERYCHECK, 0, 0) <> 0 Then V.BootCd := 1 Else V.BootCd := 0;
+  If Git Then
   Begin
-    Vms[NVm] := V;
-    CurSel := NVm;
-    Inc(NVm);
+    { image ISO d'installation de GitHub dans le dossier de la machine }
+    V.Cd := DirOf(V.Vbox) + NameOf(DistPath(Sel));
+    V.BootCd := 1;
+    CfgClose;
+    If FExists(V.Cd) Then
+    Begin
+      CfgFinish(V, True);
+      Exit;
+    End;
+    PendV := V;
+    ShowDl(Sel);
+    Exit;
   End;
-  RegSave;
   CfgClose;
-  If MgrClient <> 0 Then
+  CfgFinish(V, False);
+End;
+
+{ type choisi dans la liste : pour une distribution de GitHub, nom,
+  memoire, disque neuf et amorcage par le CD-ROM proposes }
+Procedure CfgType;
+Var Sel, K : LongInt; N : String; Std : Boolean;
+Begin
+  If CfgEdit >= 0 Then Exit;
+  Sel := WinSendMsg(CType, LM_QUERYSELECTION, -1, 0);
+  If (Sel < 0) Or (Sel >= DistGit) Then Exit;
+  N := CtlText(CName);
+  Std := N = Fr('Nouvelle machine');
+  For K := 0 To DistGit - 1 Do If N = DistName(K) Then Std := True;
+  If Std Then SetText(CName, DistName(Sel));
+  SetText(CMem, IStr(DistMem(Sel)));
+  If CtlText(CHd) = '' Then
   Begin
-    Dummy := WinPostMsg(MgrClient, WM_VMTITLE, 0, 0);
-    Dummy := WinInvalidateRect(MgrClient, 0, 0);
+    Dummy := WinSendMsg(CNew, BM_SETCHECK, 1, 0);
+    SetText(CSize, IStr(DistHd(Sel)));
   End;
+  Dummy := WinSendMsg(CBootCd, BM_SETCHECK, 1, 0);
+  SetText(CCd, Fr('(image t`el`echarg`ee de GitHub)'));
 End;
 
 Function CfgProc(H, Msg0, Mp1, Mp2 : LongInt) : LongInt;
@@ -4367,6 +7520,7 @@ Begin
                    ID_OK : CfgOk;
                    ID_CANCEL : CfgClose;
                  End;
+    WM_CONTROL : If (Lo16(Mp1) = ID_TYPE) And (Hi16(Mp1) = 3) Then CfgType;
     WM_CLOSE : CfgClose;
   Else
     CfgProc := WinDefWindowProc(H, Msg0, Mp1, Mp2);
@@ -4387,7 +7541,7 @@ Begin
 End;
 
 Procedure ShowCfg(I : LongInt);
-Var Flg, W, H : LongInt; V : TVm; T : String;
+Var Flg, W, H, K : LongInt; V : TVm; T : String;
 Begin
   If CfgFrame <> 0 Then Exit;
   CfgEdit := I;
@@ -4395,23 +7549,28 @@ Begin
   Else
   Begin
     V.Name := 'Nouvelle machine'; V.OsType := 'DOS'; V.MemMb := 32; V.Hd0 := ''; V.Hd1 := ''; V.Fd := '';
-    V.BootFd := 0;
+    V.BootFd := 0; V.Cd := ''; V.BootCd := 0; V.Distro := '';
   End;
   If I >= 0 Then T := Fr('Configuration de ') + V.Name Else T := Fr('Nouvelle machine virtuelle');
   Flg := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER Or FCF_TASKLIST;
   CfgClient := 0;
   CfgFrame := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Flg), Z('VBOXCFG'), Z2(T), 0, 0, 0, LongInt(@CfgClient));
-  W := 600; H := 330;
+  W := 600; H := 384;
   CenterFrame(CfgFrame, W, H);
   CH := H;
   Gray(Ctl(CfgClient, WC_STATIC, 'G`en`eral', SS_GROUPBOX, 8, 4, W - 16, 98, 0));
   CfgLabel('Nom :', 24);
   CName := CfgEntry(V.Name, 24, 400, ID_NAME);
   CfgLabel('Type (OSType) :', 50);
-  CType := CfgEntry(V.OsType, 50, 160, ID_TYPE);
+  { liste deroulante : systemes de GitHub (image ISO d'installation
+    telechargee) ou fournis localement }
+  CType := Ctl(CfgClient, WC_COMBOBOX, '', CBS_DROPDOWNLIST Or WS_TABSTOP, 172, 50, 400, 24, ID_TYPE);
+  For K := 0 To NDist - 1 Do Dummy := WinSendMsg(CType, LM_INSERTITEM, -1, Z(Fr(DistLabel(K))));
+  If I >= 0 Then K := DistOf(V) Else K := 4;
+  Dummy := WinSendMsg(CType, LM_SELECTITEM, K, 1);
   CfgLabel('M`emoire vive (Mo) :', 76);
   CMem := CfgEntry(IStr(V.MemMb), 76, 80, ID_MEM);
-  Gray(Ctl(CfgClient, WC_STATIC, 'Stockage', SS_GROUPBOX, 8, 108, W - 16, 174, 0));
+  Gray(Ctl(CfgClient, WC_STATIC, 'Stockage', SS_GROUPBOX, 8, 108, W - 16, 226, 0));
   CfgLabel('Disque dur 0 :', 128);
   CHd := CfgEntry(V.Hd0, 128, 400, ID_HD);
   CNew := Ctl(CfgClient, WC_BUTTON, 'Nouveau disque ~dynamique (VHD) de', BS_AUTOCHECKBOX Or WS_TABSTOP,
@@ -4424,9 +7583,14 @@ Begin
   CHd2 := CfgEntry(V.Hd1, 186, 400, ID_HD2);
   CfgLabel('Disquette (A:) :', 214);
   CFd := CfgEntry(V.Fd, 214, 400, ID_FD);
-  CBootFd := Ctl(CfgClient, WC_BUTTON, '~Amorcer d''abord la disquette', BS_AUTOCHECKBOX Or WS_TABSTOP, 172, 244, 300, 22, 28);
+  CfgLabel('CD-ROM (ISO) :', 242);
+  CCd := CfgEntry(V.Cd, 242, 400, 29);
+  CBootFd := Ctl(CfgClient, WC_BUTTON, '~Amorcer d''abord la disquette', BS_AUTOCHECKBOX Or WS_TABSTOP, 172, 272, 300, 22, 28);
   Gray(CBootFd);
   If V.BootFd <> 0 Then Dummy := WinSendMsg(CBootFd, BM_SETCHECK, 1, 0);
+  CBootCd := Ctl(CfgClient, WC_BUTTON, 'Amorcer d''abord le ~CD-ROM', BS_AUTOCHECKBOX Or WS_TABSTOP, 172, 298, 300, 22, 30);
+  Gray(CBootCd);
+  If V.BootCd <> 0 Then Dummy := WinSendMsg(CBootCd, BM_SETCHECK, 1, 0);
   Dummy := Ctl(CfgClient, WC_BUTTON, 'OK', BS_PUSHBUTTON Or BS_DEFAULT Or WS_TABSTOP, W - 210, H - 38, 90, 28, ID_OK);
   Dummy := Ctl(CfgClient, WC_BUTTON, 'Annuler', BS_PUSHBUTTON Or WS_TABSTOP, W - 110, H - 38, 90, 28, ID_CANCEL);
   If MgrFrame <> 0 Then Dummy := WinEnableWindow(MgrFrame, 0);
@@ -4519,16 +7683,19 @@ Begin
     Y := TbH + 66;
     Section(Y, 'G`en`eral'); Y := Y + 24;
     Field(Y, 'Nom :', V.Name); Y := Y + 18;
-    Field(Y, 'Syst`eme :', V.OsType); Y := Y + 22;
+    If V.Distro <> '' Then S := V.Distro + ' (' + V.OsType + ')' Else S := V.OsType;
+    Field(Y, 'Syst`eme :', S); Y := Y + 22;
     Section(Y, 'Syst`eme'); Y := Y + 24;
     Field(Y, 'M`emoire vive :', IStr(V.MemMb) + ' Mo'); Y := Y + 18;
-    If V.BootFd <> 0 Then S := 'Disquette, disque dur' Else S := 'Disque dur, disquette';
+    If V.BootCd <> 0 Then S := 'CD-ROM, disque dur'
+    Else If V.BootFd <> 0 Then S := 'Disquette, disque dur' Else S := 'Disque dur, disquette';
     Field(Y, 'Ordre d''amor`cage :', S); Y := Y + 18;
     Field(Y, 'Acc`el`eration :', Fr(MethodLong(Best))); Y := Y + 22;
     Section(Y, 'Stockage'); Y := Y + 24;
     If V.Hd0 <> '' Then S := NameOf(V.Hd0) + ' (' + DiskFmt(V.Hd0) + ')' Else S := Fr('vide');
     Field(Y, 'IDE primaire 0 :', S); Y := Y + 18;
     If V.Hd1 <> '' Then Begin Field(Y, 'IDE primaire 1 :', NameOf(V.Hd1)); Y := Y + 18; End;
+    If V.Cd <> '' Then Begin Field(Y, 'IDE secondaire 0 :', NameOf(V.Cd) + ' (CD-ROM)'); Y := Y + 18; End;
     If V.Fd <> '' Then S := NameOf(V.Fd) Else S := Fr('vide');
     Field(Y, 'Disquette :', S); Y := Y + 22;
     Section(Y, 'Fichier'); Y := Y + 24;
@@ -4564,7 +7731,7 @@ Begin
           FillList;
           Dummy := WinInvalidateRect(MgrClient, 0, 0);
         End;
-    CM_REFRESH : Begin ScanDir('C:\VMS\', 0); RegSave; FillList; Dummy := WinInvalidateRect(MgrClient, 0, 0); End;
+    CM_REFRESH : Begin ScanDir(VmsDir, 0); RegSave; FillList; Dummy := WinInvalidateRect(MgrClient, 0, 0); End;
     CM_ADD : Begin
                S := 'C:\VMS';
                Dummy := Ask('Copiez le fichier .vbox (et ses disques) ou un disque .vhd/.vdi dans le dossier ' +
@@ -4745,6 +7912,7 @@ Begin
   Inc(N);
   V.Used := True; V.Name := 'Essai DOS'; V.OsType := 'DOS'; V.MemMb := 4; V.Hd0 := 'D:\VXTEST.VHD'; V.Hd1 := '';
   V.Fd := ''; V.BootFd := 0; V.Uuid := ''; V.Hd0Uuid := ''; V.Hd1Uuid := ''; V.Vbox := 'D:\VXTEST.VBOX';
+  V.Cd := ''; V.CdUuid := ''; V.BootCd := 0; V.Distro := '';
   If VmSave(V) And VmLoad('D:\VXTEST.VBOX', Vms[0]) Then
     If (Vms[0].Name = 'Essai DOS') And (Vms[0].MemMb = 4) And (UpS(Vms[0].Hd0) = 'D:\VXTEST.VHD') Then
     Begin
@@ -4802,23 +7970,86 @@ End;
 
 { diagnostic : demarrer un disque sans fenetre (/BOOTTEST:disque), taper
   /KEYS:texte apres /WAIT:n secondes, puis journal de l'ecran sur COM1 }
+Var
+  BootHd : String;
+  BootHdMb, BootMem, BootRun, NewDlg : LongInt;
+  BootShot : String;
+
+{ ecran de l'invite dans un fichier BMP de 8 bits (essais) }
+Procedure ShotBmp(Path : String);
+Var H, Pos, Sz, Off : LongInt; Hd : Array[0..53] Of Byte; S : String;
+Begin
+  InitBmi;
+  RenderScreen;
+  ScrH := DispH;
+  If UpS(Path) = 'COM' Then
+  Begin
+    { image brute sur COM1 : en-tete puis lignes hexadecimales }
+    Log('SHOT ' + IStr(SW_) + ' ' + IStr(ScrH));
+    For Pos := 0 To 255 Do
+      Log('PAL ' + Hex(RdB(LongInt(@Bmi) + 16 + Pos * 4 + 2), 2) + Hex(RdB(LongInt(@Bmi) + 16 + Pos * 4 + 1), 2) +
+          Hex(RdB(LongInt(@Bmi) + 16 + Pos * 4), 2));
+    For Sz := 0 To ScrH - 1 Do
+    Begin
+      { ligne Sz depuis le haut }
+      Off := (SH_ - 1 - Sz) * SW_;
+      For H := 0 To 7 Do
+      Begin
+        S := 'PIX ' + IStr(Sz) + ' ';
+        For Pos := 0 To 79 Do S := S + Hex(Fb[Off + H * 80 + Pos], 2);
+        Log(S);
+      End;
+    End;
+    Exit;
+  End;
+  H := FCreate(Path);
+  If H < 0 Then Exit;
+  Off := 54 + 1024;
+  Sz := Off + SW_ * ScrH;
+  FillChar(Hd, SizeOf(Hd), 0);
+  Hd[0] := Ord('B'); Hd[1] := Ord('M');
+  WrL(LongInt(@Hd) + 2, Sz); WrL(LongInt(@Hd) + 10, Off);
+  WrL(LongInt(@Hd) + 14, 40); WrL(LongInt(@Hd) + 18, SW_); WrL(LongInt(@Hd) + 22, ScrH);
+  WrW(LongInt(@Hd) + 26, 1); WrW(LongInt(@Hd) + 28, 8); WrL(LongInt(@Hd) + 34, SW_ * ScrH);
+  Pos := 0;
+  If FWrite(H, Pos, LongInt(@Hd), 54) Then ;
+  { palette : celle du BITMAPINFO de PM (bleu, vert, rouge, 0) }
+  If FWrite(H, 54, LongInt(@Bmi) + 16, 1024) Then ;
+  { lignes du bas vers le haut : les ScrH lignes du haut de l'image }
+  If FWrite(H, Off, LongInt(@Fb) + (SH_ - ScrH) * SW_, SW_ * ScrH) Then ;
+  Dummy := DosClose(H);
+End;
+
 Procedure BootTest(Path, Keys : String; Wait : LongInt);
 Var T0, K, Step : LongInt; Err, S : String;
 Begin
   LoadFonts;
   Vms[0].Used := True; Vms[0].Name := BaseOf(Path); Vms[0].OsType := 'DOS'; Vms[0].Hd0 := Path; Vms[0].Hd1 := '';
   Vms[0].Fd := ''; Vms[0].BootFd := 0; Vms[0].Vbox := '';
+  Vms[0].Cd := ''; Vms[0].CdUuid := ''; Vms[0].BootCd := 0; Vms[0].Distro := '';
   NVm := 1;
-  Vms[0].MemMb := 32;
+  Vms[0].MemMb := BootMem;
+  If ExtOf(Path) = 'ISO' Then
+  Begin
+    { CD-ROM d'installation : amorce par le CD, disque dur /HD: (cree par
+      /HDMB:n s'il n'existe pas) }
+    Vms[0].Cd := Path; Vms[0].BootCd := 1; Vms[0].Hd0 := BootHd;
+    If (BootHd <> '') And Not FExists(BootHd) And (BootHdMb > 0) Then
+      If Not VhdCreate(BootHd, BootHdMb) Then Log('VIRTUAL : impossible de creer ' + BootHd);
+  End;
   If Not VmOpen(0, Err) Then
   Begin
     Log('VIRTUAL : ' + Err);
     Exit;
   End;
-  Log('VIRTUAL : ' + Path + ' (' + DkFmt[0] + ', ' + IStr(DkSect[0] Div 2048) + ' Mo, CHS ' + IStr(DkCyl[0]) + '/' +
-      IStr(DkHeads[0]) + '/' + IStr(DkSpt[0]) + ') par ' + MethodName(VmMethod));
+  If Vms[0].Cd <> '' Then
+    Log('VIRTUAL : CD-ROM ' + Path + ' (' + IStr(DkSect[DkCd] Div 4) + ' secteurs, El Torito ' + IStr(CdEmu) +
+        ', image ' + IStr(CdBootLba) + ', ' + IStr(CdBootCnt) + ' secteurs en ' + Hex(CdLoadSeg, 4) + 'h)');
+  If DkH[0] >= 0 Then
+    Log('VIRTUAL : ' + DkPath[0] + ' (' + DkFmt[0] + ', ' + IStr(DkSect[0] Div 2048) + ' Mo, CHS ' + IStr(DkCyl[0]) + '/' +
+        IStr(DkHeads[0]) + '/' + IStr(DkSpt[0]) + ') par ' + MethodName(VmMethod));
   T0 := NowMs; Step := 0;
-  While NowMs - T0 < (Wait + 20) * 1000 Do
+  While NowMs - T0 < (Wait + BootRun) * 1000 Do
   Begin
     VmStep;
     If (Step = 0) And (NowMs - T0 > Wait * 1000) Then
@@ -4828,9 +8059,11 @@ Begin
     End;
   End;
   Log('VIRTUAL : ' + IStr(VmExits) + ' sorties, ' + IStr(VmIrqs) + ' interruptions, ' + IStr(VmSvc) +
-      ' services, disque ' + IStr(DkReads[0]) + ' lectures ' + IStr(DkWrites[0]) + ' ecritures, mode ' +
-      Hex(BdaB($49), 2));
+      ' services, ' + IStr(MmioCnt) + ' instructions VGA emulees, disque ' + IStr(DkReads[0]) + ' lectures ' +
+      IStr(DkWrites[0]) + ' ecritures, CD ' +
+      IStr(DkReads[DkCd] + DkReads[DkEmu]) + ' lectures, mode ' + Hex(BdaB($49), 2));
   If VmMsg <> '' Then Log('VIRTUAL : ' + VmMsg);
+  If BootShot <> '' Then ShotBmp(BootShot);
   If DbgLine <> '' Then Log('VIRTUAL : port E9h "' + DbgLine + '"');
   S := '';
   For K := 0 To 255 Do If SvcCnt[K] > 0 Then S := S + ' ' + Hex(K, 2) + 'h:' + IStr(SvcCnt[K]);
@@ -4858,7 +8091,8 @@ Var
 
 BEGIN
   InDlg := 0; TestMode := 0; TraceOn := 0; NVm := 0; CurVm := -1; CurSel := -1; VmFrame := 0; VmWin := 0; MgrClient := 0;
-  InfoFrame := 0; CfgFrame := 0; GMem := 0; VmState := VS_OFF; StartName := ''; BootPath := ''; BootKeys := ''; AddPath := ''; BootWait := 30;
+  InfoFrame := 0; CfgFrame := 0; DwFrame := 0; GMem := 0; VmsRootS := ''; VmState := VS_OFF; StartName := ''; BootPath := ''; BootKeys := ''; AddPath := ''; BootWait := 30;
+  BootHd := ''; BootHdMb := 0; BootMem := 32; BootRun := 20; NewDlg := 0; BootShot := '';
   For K := 0 To NDk - 1 Do DkH[K] := -1;
   FillChar(Dt, SizeOf(Dt), 0);
   Dummy := DosGetDateTime(LongInt(@Dt));
@@ -4868,11 +8102,23 @@ BEGIN
     S := UpS(ParamStr(K));
     If S = '/TEST' Then TestMode := 1;
     If S = '/TRACE' Then TraceOn := 1;
+    If S = '/NEW' Then NewDlg := 1;
     If Copy(S, 1, 7) = '/START:' Then StartName := Copy(ParamStr(K), 8, 255);
     If Copy(S, 1, 10) = '/BOOTTEST:' Then BootPath := Copy(ParamStr(K), 11, 255);
     If Copy(S, 1, 5) = '/ADD:' Then AddPath := Copy(ParamStr(K), 6, 255);
     If Copy(S, 1, 6) = '/KEYS:' Then BootKeys := Copy(ParamStr(K), 7, 255);
     If Copy(S, 1, 6) = '/WAIT:' Then BootWait := SVal(Copy(S, 7, 9));
+    If Copy(S, 1, 4) = '/HD:' Then BootHd := Copy(ParamStr(K), 5, 255);
+    If Copy(S, 1, 6) = '/HDMB:' Then BootHdMb := SVal(Copy(S, 7, 9));
+    If Copy(S, 1, 5) = '/MEM:' Then BootMem := SVal(Copy(S, 6, 9));
+    If Copy(S, 1, 5) = '/RUN:' Then BootRun := SVal(Copy(S, 6, 9));
+    If Copy(S, 1, 6) = '/SHOT:' Then BootShot := Copy(ParamStr(K), 7, 250);
+    If Copy(S, 1, 5) = '/VMS:' Then
+    Begin
+      VmsRootS := Copy(ParamStr(K), 6, 250);
+      If Copy(VmsRootS, Length(VmsRootS), 1) <> '\' Then VmsRootS := VmsRootS + '\';
+      Dummy := DosCreateDir(Z(Copy(VmsRootS, 1, Length(VmsRootS) - 1)), 0);
+    End;
   End;
   StartKeys := BootKeys;
   If BootPath <> '' Then
@@ -4900,6 +8146,7 @@ BEGIN
   Dummy := WinRegisterClass(Hab, Z('VBOXVM'), LongInt(@VmProc), 0, 0);
   Dummy := WinRegisterClass(Hab, Z('VBOXINFO'), LongInt(@InfoProc), 0, 0);
   Dummy := WinRegisterClass(Hab, Z('VBOXCFG'), LongInt(@CfgProc), 0, 0);
+  Dummy := WinRegisterClass(Hab, Z('VBOXDL'), LongInt(@DwProc), 0, 0);
   RegLoad;
   If AddPath <> '' Then
   Begin
@@ -4908,6 +8155,7 @@ BEGIN
   End;
   If NVm > 0 Then CurSel := 0;
   ShowManager;
+  If NewDlg <> 0 Then ShowCfg(-1);
   If StartName <> '' Then
     For K := 0 To NVm - 1 Do
       If UpS(Vms[K].Name) = UpS(StartName) Then
