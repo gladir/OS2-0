@@ -6003,7 +6003,7 @@ End;
 { sortie d'E/S (EXITINFO1 de SVM : bit 0 lecture, 2 chaine, 3 REP,
   4/5/6 taille, 16-31 port) }
 Procedure IoExit;
-Var I1, P, Sz, V, N, K, Lin, Step : LongInt; InDir, Str_, Rep : Boolean;
+Var I1, P, Sz, V, N, K, Lin, Step : LongInt; InDir, Str_, Rep, A32 : Boolean;
 Begin
   Inc(VmIoExits);
   I1 := Fr_[fINFO1];
@@ -6013,28 +6013,40 @@ Begin
   Inc(PortCnt[P And 1023]);
   If Str_ Then
   Begin
-    { INS / OUTS (adresses 16 bits) }
-    If Rep Then N := GCX Else N := 1;
+    { INS / OUTS : adresses de 16 bits (SI, DI, CX) ou de 32 bits (ESI,
+      EDI, ECX : bit 8 des informations de la sortie, invite en mode
+      protege 32 bits comme le pilote ATAPI d'OS2-Zero) }
+    A32 := (I1 And $100) <> 0;
+    If Rep Then
+    Begin
+      If A32 Then N := Fr_[fCX] Else N := GCX;
+    End
+    Else N := 1;
     If (Fr_[fFL] And $400) <> 0 Then Step := -Sz Else Step := Sz;
     For K := 1 To N Do
     Begin
       If InDir Then
       Begin
         Lin := SegLin(Fr_[fESB], Fr_[fDI]);
+        If A32 Then Lin := Fr_[fESB] + Fr_[fDI];
         V := IoIn(P, Sz);
         If Sz = 1 Then LSB(Lin, V) Else If Sz = 2 Then LSW(Lin, V)
         Else Begin LSW(Lin, V); LSW(Lin + 2, V Shr 16); End;
-        Set16(fDI, Fr_[fDI] + Step);
+        If A32 Then Fr_[fDI] := Fr_[fDI] + Step Else Set16(fDI, Fr_[fDI] + Step);
       End
       Else
       Begin
         Lin := SegLin(Fr_[fDSB], Fr_[fSI]);
+        If A32 Then Lin := Fr_[fDSB] + Fr_[fSI];
         If Sz = 1 Then V := LB(Lin) Else If Sz = 2 Then V := LW(Lin) Else V := LL(Lin);
         IoOut(P, Sz, V);
-        Set16(fSI, Fr_[fSI] + Step);
+        If A32 Then Fr_[fSI] := Fr_[fSI] + Step Else Set16(fSI, Fr_[fSI] + Step);
       End;
     End;
-    If Rep Then Set16(fCX, 0);
+    If Rep Then
+    Begin
+      If A32 Then Fr_[fCX] := 0 Else Set16(fCX, 0);
+    End;
     Fr_[fIP] := Fr_[fNEXT];
     Exit;
   End;

@@ -20736,6 +20736,12 @@ Begin
         Else
           V := V Or 64;
         End;
+        { INS/OUTS : taille d'adresse (bit 7 A16, bit 8 A32 comme SVM),
+          celle du segment de code (bit D des droits d'acces de CS) }
+        If (Q And 16) <> 0 Then
+        Begin
+          If (VxR($4816) And $4000) <> 0 Then V := V Or $100 Else V := V Or $80;
+        End;
         MemL[0:F + xInfo1] := V;
         MemL[0:F + xNext] := MemL[0:F + xEip] + VxR($440C);
       End;
