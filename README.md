@@ -186,6 +186,14 @@ Voici la liste des différents fichiers proposés dans OS2-0 :
 			<td>Virtualisation (dossier Système OS/2 du bureau) : gestionnaire de machines virtuelles à la façon de VirtualBox, avec les menus et l'apparence d'OS/2 ; machines au format de VirtualBox (.vbox, disques VHD, VDI, IMG) exécutées directement sur le processeur par AMD-V, Intel VT-x ou le mode virtuel 8086 du 80386 (KrnVirt du noyau), menu Information de virtualisation ; type de système en liste déroulante, image ISO d'installation de MSDOS-0, UNIX-0, OS2-Zero ou Pasdows95 téléchargée de GitHub puis installée, CD-ROM El Torito, contrôleurs IDE ATA/ATAPI, modes VGA planaires émulés.</td>
 		</tr>
 		<tr>
+			<td><b>APPS/GITCLI.PAS</b></td>
+			<td>Client GitHub (dossier Outils réseau du bureau) : client Git et GitHub dans le genre de GitHub Desktop, celui de Pasdows 95 porté de l'API Win32 vers celle d'OS/2 (PMWIN, PMGPI, DOSCALLS, TCPIP32, TLS32) en un seul fichier source : Git écrit en Pascal (SHA-1, zlib, objets, packs, deltas, index, fusion à trois voies), cloner, récupérer, tirer et pousser en <b>http://</b>, <b>https://</b> et <b>git://</b>, branches, historique, différences, API de GitHub.com ; <code>GITCLI /TEST</code> vérifie le tout sur COM1.</td>
+		</tr>
+		<tr>
+			<td><b>APPS/SVNCLI.PAS</b></td>
+			<td>Client SVN (dossier Outils réseau du bureau) : client <b>Subversion</b> dans le genre du Client GitHub, celui de Pasdows 95 porté de l'API Win32 vers celle d'OS/2 (PMWIN, PMGPI, PMMERGE, DOSCALLS, TCPIP32, TLS32) en un seul fichier source : extraction, mise à jour avec fusion à trois voies, validation, annulation, svn:ignore, branches, historique et différences en couleurs, en <b>svn://</b> (CRAM-MD5), <b>http://</b> et <b>https://</b> (Apache et mod_dav_svn) ; <code>SVNCLI /TEST</code> vérifie le tout sur COM1.</td>
+		</tr>
+		<tr>
 			<td><b>APPS/NOTEPAD.PAS</b></td>
 			<td>Bloc-notes (dossier Productivité du bureau) : le Bloc-notes de Pasdows 95 porté de l'API Win32 vers celle d'OS/2 (PMWIN, DOSCALLS).</td>
 		</tr>
@@ -1248,6 +1256,38 @@ Essayé avec le serveur <b>FreeRDP</b> (shadow, NLA et NTLMv2 obligatoires, 800 
 <img width="640" height="480" alt="OS/2-0 : Connexion Bureau à distance, boîte de connexion" src="IMAGE/BUREAU_DISTANCE.png" />
 <img width="640" height="480" alt="OS/2-0 : Connexion Bureau à distance, session de 800 x 600 dans une fenêtre (serveur FreeRDP avec NLA)" src="IMAGE/BUREAU_DISTANCE_SESSION.png" />
 <img width="640" height="480" alt="OS/2-0 : Connexion Bureau à distance en plein écran" src="IMAGE/BUREAU_DISTANCE_PLEIN_ECRAN.png" />
+
+<h3>Outils réseau : Client GitHub (APPS/GITCLI.PAS)</h3>
+
+Le dossier <b>Outils réseau</b> contient aussi le <b>Client GitHub</b> (GITCLI.EXE, icône du disque noir de GitHub et d'un graphe de branches), dans le genre de GitHub Desktop : celui de <a href="https://github.com/gladir/Pasdows95">Pasdows 95</a>, porté de Win32 vers Presentation Manager, DOSCALLS, TCPIP32 et TLS32 en un seul fichier source compilé par OS2PC (aucune API d'OS/2 n'a manqué).
+
+<ul>
+	<li><b>Git en Pascal</b> : SHA-1, zlib (inflate et deflate), objets libres, <b>packs</b> et index v2, deltas OFS_DELTA et REF_DELTA, index DIRC, .gitignore, statut, <b>fusion à trois voies</b> avec conflits (marqueurs, MERGE_HEAD) et résolution, différences.</li>
+	<li><b>Réseau</b> : protocole intelligent en <b>http://</b>, <b>https://</b> (TLS32) et <b>git://</b> : <b>cloner</b>, récupérer, <b>tirer</b>, <b>pousser</b>, publier ; API de GitHub.com avec un jeton (liste des dépôts, publication) ; WININET n'existant pas sous OS/2, un client HTTP/1.1 sur TCPIP32 (Content-Length, « chunked », redirections) ; proxy des Options ou de <code>SET HTTP_PROXY</code> (tunnel CONNECT).</li>
+	<li><b>Fenêtre</b> : onglets <b>Modifications</b> (cases à cocher, résumé, description, Valider) et <b>Historique</b>, différences en couleurs, branches (nouvelle, renommer, supprimer, extraire une branche distante), liste des dépôts, boîtes Cloner, Options (jeton, identité, proxy), paramètres du dépôt et « Parcourir » (au lieu de SHBrowseForFolder) ; menus et menus contextuels de PM, contrôles natifs (MLE pour la description) ; fil réseau DosCreateThread ; Explorateur, Invite de commandes et Navigateur Web lancés par DosExecPgm ; réglages dans C:\RESEAU\GITCLI.INI (D:\RESEAU quand C: est en lecture seule).</li>
+	<li><b>Corrigé</b> par rapport à Pasdows : le compteur d'avance et de retard (un retard de trop dans un long historique), la touche Tab de la fenêtre principale, le clavier qui ne revenait pas après la fermeture d'une boîte.</li>
+	<li><b>Paramètres</b> : <code>GITCLI chemin</code>, <code>/CLONE:url /DIR:chemin</code>, <code>/TEST [/URL:url]... [/RO:url]...</code> : 23 essais (SHA-1, zlib, objets, packs et deltas, statut, diff, historique, branches, fusion et conflit, puis clonage, validation, push et pull sur des serveurs git://, http:// et https://, et clonages de dépôts publics de GitHub.com).</li>
+</ul>
+
+<img width="800" height="600" alt="OS/2-0 : Client GitHub, modifications et différences" src="IMAGE/CLIENT_GITHUB.png" />
+<img width="800" height="600" alt="OS/2-0 : Client GitHub, historique" src="IMAGE/CLIENT_GITHUB_HISTORIQUE.png" />
+<img width="800" height="600" alt="OS/2-0 : Client GitHub, branches" src="IMAGE/CLIENT_GITHUB_BRANCHES.png" />
+<img width="800" height="600" alt="OS/2-0 : Client GitHub, cloner un dépôt" src="IMAGE/CLIENT_GITHUB_CLONER.png" />
+
+<h3>Outils réseau : Client SVN (APPS/SVNCLI.PAS)</h3>
+
+Le dossier <b>Outils réseau</b> contient aussi le <b>Client SVN</b> (SVNCLI.EXE, icône d'un dossier de copie de travail et des branches d'un dépôt) : le client <b>Subversion</b> de <a href="https://github.com/gladir/Pasdows95">Pasdows 95</a>, dans le genre du Client GitHub, porté de Win32 vers Presentation Manager, DOSCALLS, TCPIP32 et TLS32 en un seul fichier source compilé par OS2PC (aucune API d'OS/2 n'a manqué).
+
+<ul>
+	<li><b>Copie de travail</b> (.pasvn) : statut, <b>extraction</b>, <b>mise à jour</b> avec fusion à trois voies (conflits <i>.mine</i> et <i>.rN</i>, résolution), <b>validation</b> (ajouts, dossiers, suppressions, <b>svn:ignore</b>), annulation, <b>branches</b> (création, changement, retour), <b>historique</b> et <b>différences</b> en couleurs lues sur le serveur.</li>
+	<li><b>Protocoles</b> : <b>svn://</b> (ra_svn, ANONYMOUS et CRAM-MD5, svndiff0) et WebDAV / HTTP v2 de mod_dav_svn en <b>http://</b> et <b>https://</b> : WININET n'existant pas sous OS/2, un client HTTP/1.1 sur TCPIP32 (connexion gardée, corps « chunked », réponses 100) et TLS32 pour https ; proxy des Options ou de <code>HTTP_PROXY</code> (tunnel CONNECT).</li>
+	<li><b>Pour OS/2</b> : fenêtre de PM aux menus, onglets et boîtes de l'original (contrôles PM, MLE pour la description), fil réseau DosCreateThread avec verrou DosCreateMutexSem, réglages dans OS2.INI au lieu de SVNCLI.INI, boîte « Choisir un dossier » (lecteurs et sous-dossiers) au lieu de SHBrowseForFolder, DosExecPgm au lieu de ShellExecute.</li>
+	<li><b>Paramètres</b> : <code>SVNCLI dossier</code> ouvre une copie de travail, <code>SVNCLI url dossier</code> en extrait une, <code>/CHECKOUT url dossier</code> extrait sans fenêtre, <code>/USER:</code> et <code>/PASS:</code>, <code>/TEST [urls]</code> : 45 essais (MD5, HMAC-MD5, svndiff, différences, fusions, protocoles, puis extraction, validation, fusion, conflit, annulation, suppression, historique et branches sur un serveur svn://, http:// et https://).</li>
+</ul>
+
+<img width="640" height="480" alt="OS/2-0 : Client SVN, copie de travail" src="IMAGE/CLIENT_SVN.png" />
+<img width="640" height="480" alt="OS/2-0 : Client SVN, historique et différences" src="IMAGE/CLIENT_SVN_HISTORIQUE.png" />
+<img width="640" height="480" alt="OS/2-0 : Client SVN, extraire une copie de travail" src="IMAGE/CLIENT_SVN_EXTRAIRE.png" />
 
 <h3>Paint (APPS/PAINT.PAS) : dessin bitmap</h3>
 
