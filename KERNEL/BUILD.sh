@@ -20,7 +20,7 @@
 #     Hanoi), BABY.PAS (Baby, sauvetage de bebes), 421.PAS (421, des),
 #     CENTIPED.PAS (Mille-pattes), ASTEROID.PAS (Asteroide), BADUGI.PAS
 #     (Badugi, poker coreen), TTT.PAS (Tic-Tac-Toe), BASEBALL.PAS (Baseball),
-#     EXCAVAT.PAS (Excavateur), PINBALL.PAS (Pinball : tables et sons dans le
+#     EXCAVAT.PAS (Excavateur), PINBALL.PAS (Machine a boule : tables et sons dans le
 #     programme), BARBU.PAS (Barbu), BREAKOUT.PAS (Casse-Brique),
 #     BATAILLE.PAS (Bataille), INVADERS.PAS (Invasion de l'espace),
 #     FREECELL.PAS (FreeCell), MISSILE.PAS (Commandement des missiles),

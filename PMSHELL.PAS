@@ -1671,7 +1671,7 @@ Begin
         If FileExists('C:\TTT.EXE') Then Dummy := NewItem(V, IC_TTT, OB_GAME, 'Tic-Tac-Toe', 'C:\TTT.EXE');
         If FileExists('C:\BASEBALL.EXE') Then Dummy := NewItem(V, IC_BASEBALL, OB_GAME, 'Baseball', 'C:\BASEBALL.EXE');
         If FileExists('C:\EXCAVAT.EXE') Then Dummy := NewItem(V, IC_EXCAVAT, OB_GAME, 'Excavateur', 'C:\EXCAVAT.EXE');
-        If FileExists('C:\PINBALL.EXE') Then Dummy := NewItem(V, IC_PINBALL, OB_GAME, 'Pinball', 'C:\PINBALL.EXE');
+        If FileExists('C:\PINBALL.EXE') Then Dummy := NewItem(V, IC_PINBALL, OB_GAME, 'Machine ' + Chr(133) + ' boule', 'C:\PINBALL.EXE');
         If FileExists('C:\BARBU.EXE') Then Dummy := NewItem(V, IC_BARBU, OB_GAME, 'Barbu', 'C:\BARBU.EXE');
         If FileExists('C:\BREAKOUT.EXE') Then
           Dummy := NewItem(V, IC_BREAKOUT, OB_GAME, 'Casse-Brique', 'C:\BREAKOUT.EXE');

@@ -111,7 +111,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC TTT.PAS                             -> TTT.EXE (Tic-Tac-Toe)
   OS2PC BASEBALL.PAS                        -> BASEBALL.EXE (Baseball)
   OS2PC EXCAVAT.PAS                         -> EXCAVAT.EXE (Excavateur)
-  OS2PC PINBALL.PAS                         -> PINBALL.EXE (Pinball)
+  OS2PC PINBALL.PAS                         -> PINBALL.EXE (Machine a boule)
   OS2PC BARBU.PAS                           -> BARBU.EXE (Barbu)
   OS2PC BREAKOUT.PAS                        -> BREAKOUT.EXE (Casse-Brique)
   OS2PC BATAILLE.PAS                        -> BATAILLE.EXE (Bataille)
@@ -1087,7 +1087,7 @@ traditionnels, composant Jeux de l'installation) :
   effraie. Fleches (une case par appui), P pause, trois vitesses.
   Ecrit a partir des regles d'un clone en Turbo Pascal (DigMan In the
   Rock) ; dessins et niveaux propres a OS/2-0. /AUTO, /LEVEL:n.
-  Pinball (PINBALL.EXE) : flipper a deux tables, Glace et Rat de
+  Machine a boule (PINBALL.EXE) : flipper a deux tables, Glace et Rat de
   l'espace, de 1 a 4 joueurs, trois balles chacun. Maj gauche et Maj
   droite tenues : batteurs ; Espace puis Espace (ou Ctrl tenu puis
   relache) : ressort ; K : secouer (5 fois : TILT). Porte du flipper
@@ -1180,7 +1180,7 @@ traditionnels, composant Jeux de l'installation) :
 Parametre /SEED:n (Klondike, Mahjongg, Sudoku, Othello, TileMan, Hex 2048,
 Backgammon, Poker, Billard, Checkers, Yahtzee, Bataille navale,
 Puissance 4, Baccarat, Baby, 421, Mille-pattes, Asteroide, Badugi,
-Tic-Tac-Toe, Baseball, Excavateur, Pinball, Barbu, Casse-Brique,
+Tic-Tac-Toe, Baseball, Excavateur, Machine a boule, Barbu, Casse-Brique,
 Bataille, Invasion de l'espace, FreeCell, Commandement des missiles) :
 donne reproductible.
 
