@@ -30,8 +30,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               NOTATOR.TXT), DEVMGR.EXE, TASKMGR.EXE, BROWSER.EXE, PASDEV.EXE, GETSRC.EXE,
               OS2PC.EXE, CALC.EXE, EXPLORER.EXE, OUTLINK.EXE, PAINT.EXE, PAYSAGE.BMP,
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
-              BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE,
-              PING.EXE, HOST.EXE, WGET.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
+              BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE, IPCONFIG.EXE,
+              PING.EXE, HOST.EXE, WGET.EXE, CURL.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
               GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, GITCLI.EXE, SVNCLI.EXE, VIRTUAL.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
@@ -163,6 +163,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DLL\PCNET.PAS                       -> PCNET.DLL (pilote AMD PCnet)
   OS2PC DEVMGR.PAS                          -> DEVMGR.EXE (Gestionnaire de peripheriques)
   OS2PC IFCONFIG.PAS, PING.PAS, HOST.PAS, WGET.PAS -> commandes du reseau
+  OS2PC IPCONFIG.PAS, CURL.PAS               -> IPCONFIG et CURL (Pasdows 95)
   OS2PC -Q DLL\SMB.PAS                     -> SMB.IFS (lecteurs reseau SMB2)
   OS2PC NET.PAS                             -> NET.EXE (NET USE)
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
@@ -1446,6 +1447,11 @@ gethostbyname...). Commandes :
   PING hote [n]       echo ICMP
   HOST nom            adresse d'un nom (DNS)
   WGET http[s]://hote[:port]/chemin [fichier]
+  IPCONFIG [/ALL] [/RENEW]  configuration IP comme sous Windows (carte,
+                      adresse physique, DHCP et son serveur, bail, DNS)
+  CURL [options] url  transfert http:// et https:// comme curl : -o, -O,
+                      -I, -i, -X, -d, -H, -A, -L, -s, -v, -f, -x proxy
+                      (sinon SET HTTPS_PROXY ou HTTP_PROXY), -k
   NET USE             lecteurs reseau (voir ci-dessous)
 QEMU : -nic user,model=e1000 (ou pcnet).
 
