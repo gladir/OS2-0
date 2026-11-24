@@ -2,7 +2,7 @@
   @created: 2026
   @website(https://www.gladir.com/os2-0)
   @abstract(Target: OS2PC -COS2 ; Free Pascal 3.2 (-Mtp) pour les essais)
-  @description: Serveur Web d'OS/2-0 (HTTP, HTTPS, PSP, ASP) et sa console
+  @description: Serveur Web d'OS/2-0 (HTTP, HTTPS, PSP, ASP, PHP) et sa console
                 d'administration dans le style d'IIS.
 }
 
@@ -27,7 +27,8 @@ Program WebSrv;
                       n'est pas active et rien n'est charge au demarrage ;
     WEBSRV /STOP      arrete le serveur en marche ;
     WEBSRV /STATUS    etat du serveur (texte) ;
-    WEBSRV /PSP page  execute une page PSP ou ASP et ecrit le resultat (essais) ;
+    WEBSRV /PSP page  execute une page PSP, ASP ou PHP et ecrit le resultat
+                      (essais) ;
     WEBSRV /PSPOUT fichier page [requete]
                       la meme chose, le resultat dans un fichier (Executer la
                       page de Web Developer) ;
@@ -57,6 +58,19 @@ Program WebSrv;
       Database.Connect(chaine), Connexion.Query(sql), RecordSet['col'],
       .Eof, .Next ; ASP : ADODB.Connection et ADODB.Recordset ; une page
       qui attend sa base ne bloque pas les autres connexions ;
+    - PHP (le lexique et les fonctions du compilateur PHPCW32 de DEV-COOLS,
+      recrits ici pour la machine du serveur) : les pages .php sont
+      compilees une fois, comme les pages PSP, vers la meme machine (code
+      opPhp) ; <?php ?>, <?= ?>, interpolation de $x et $a['k'], heredoc et
+      nowdoc, syntaxe alternative (endif, endforeach...), fonctions avec
+      valeurs par defaut, references &, global et static, include/require,
+      tableaux associatifs ordonnes, list()/[...], ??, ??=, <=>, **, ===,
+      try/catch ; environ 280 fonctions (chaines, tableaux, maths, dates,
+      JSON, sprintf, fichiers, en-tetes, sessions, ob_start) ; superglobales
+      $_GET, $_POST, $_REQUEST, $_COOKIE, $_SERVER, $_FILES, $_SESSION ;
+      bases de donnees : mysqli (procedural et objet), pg_* et PDO (mysql:
+      et pgsql:, requetes preparees ? et :nom) sur les memes pilotes ;
+      sorties identiques a PHP 8 pour les essais ;
     - journal W3C par site (C:\WWW\LOGS\W3SVCn\exAAMMJJ.LOG) ;
     - pense pour un fort trafic sans ralentir OS/2 : une seule tache, sockets
       non bloquants et select (jusqu'a 48 connexions par liaison), classe de
@@ -130,7 +144,7 @@ Type
     Docs : Array[0..MaxDocs - 1] Of String[31];
     Browse : Boolean;       { exploration de repertoire }
     LogOn : Boolean;
-    Psp, Asp : Boolean;     { gestionnaires actives }
+    Psp, Asp, Php : Boolean;     { gestionnaires actives }
     NE : LongInt;
     ErrCode : Array[0..MaxErrP - 1] Of LongInt;
     ErrPath : Array[0..MaxErrP - 1] Of String[79];
@@ -2524,10 +2538,10 @@ Begin
   S.Root := WwwData + '\ROOT';
   S.Started := True;
   S.NB := 1; S.B[0].Tls := False; S.B[0].Ip := 0; S.B[0].Port := 80; S.B[0].Host := '';
-  S.ND := 5;
+  S.ND := 6;
   S.Docs[0] := 'index.html'; S.Docs[1] := 'index.htm'; S.Docs[2] := 'default.htm';
-  S.Docs[3] := 'index.psp'; S.Docs[4] := 'default.asp';
-  S.Browse := False; S.LogOn := True; S.Psp := True; S.Asp := True;
+  S.Docs[3] := 'index.psp'; S.Docs[4] := 'default.asp'; S.Docs[5] := 'index.php';
+  S.Browse := False; S.LogOn := True; S.Psp := True; S.Asp := True; S.Php := True;
 End;
 
 Procedure CfgDefaults;
@@ -2701,6 +2715,7 @@ Var Bf : TBuf; K, Cur, I : LongInt; L, U, V : String; C : Char; Tb : TBind;
         Else If Key = 'JOURNAL' Then LogOn := IsYes(V)
         Else If Key = 'PSP' Then Psp := IsYes(V)
         Else If Key = 'ASP' Then Asp := IsYes(V)
+        Else If Key = 'PHP' Then Php := IsYes(V)
         Else If Key = 'ERREUR' Then
         Begin
           P := Pos(',', V);
@@ -2792,6 +2807,7 @@ Begin
         BufAdd(Bf, 'Journal=' + YesNo(LogOn) + Crlf);
         BufAdd(Bf, 'Psp=' + YesNo(Psp) + Crlf);
         BufAdd(Bf, 'Asp=' + YesNo(Asp) + Crlf);
+        BufAdd(Bf, 'Php=' + YesNo(Php) + Crlf);
         For J := 0 To NE - 1 Do BufAdd(Bf, 'Erreur=' + IStr(ErrCode[J]) + ',' + ErrPath[J] + Crlf);
         For J := 0 To NH - 1 Do BufAdd(Bf, 'Entete=' + Hdr[J] + Crlf);
         For J := 0 To NV - 1 Do BufAdd(Bf, 'Virtuel=' + VUrl[J] + ',' + VPath[J] + Crlf);
@@ -3858,6 +3874,7 @@ End;
 Var
   ScriptPath : Array[0..MaxConn - 1] Of String[127];
   ScriptAsp : Array[0..MaxConn - 1] Of Boolean;
+  ScriptPhp : Array[0..MaxConn - 1] Of Boolean;
 
 { requete complete (en-tetes et corps) : y repondre }
 Procedure Dispatch(C : LongInt);
@@ -3937,10 +3954,11 @@ Begin
       End;
     End;
     E := ExtOf(Path);
-    If ((E = '.PSP') And Sites[I].Psp) Or ((E = '.ASP') And Sites[I].Asp) Then
+    If ((E = '.PSP') And Sites[I].Psp) Or ((E = '.ASP') And Sites[I].Asp) Or ((E = '.PHP') And Sites[I].Php) Then
     Begin
       ScriptPath[C] := Path;
       ScriptAsp[C] := E = '.ASP';
+      ScriptPhp[C] := E = '.PHP';
       VmEnqueue(C);
       Exit;
     End;
@@ -4122,6 +4140,14 @@ Const
   okRequest = 1; okResponse = 2; okServer = 3; okSession = 4; okApp = 5; okErr = 6;
   okColl = 10; okItem = 11; okDict = 12; okFso = 13; okStream = 14; okCookieW = 15; okArr = 16;
   obDatabase = 7; okDbF = 7; okDbConn = 17; okDbRs = 18; okDbFlds = 19; okDbFld = 20;
+  okPArr = 21; okDbStmt = 22;      { PHP : tableau, requete preparee de PDO }
+  { PHP : opPhp sous-operation }
+  opPhp = 74;
+  psBool = 1; psNum = 2; psStr = 3; psGet = 4; psSet = 5; psPush = 6; psArrW = 7; psSubW = 8; psSubPushW = 9;
+  psNewArr = 10; psAddK = 11; psAddV = 12; psDup2 = 13; psIdent = 14; psNIdent = 15; psSuper = 16; psCopy = 17;
+  psIsset = 18; psUnset = 19; psEachNext = 20; psEachKey = 21; psEachVal = 22; psIncE = 23; psCast = 24; psCmp = 25;
+  psNotNull = 26; psThrow = 27; psExitMsg = 28; psDrop2 = 29; psSpread = 30; psAdd = 31; psBitAnd = 32;
+  psBitOr = 33; psBitXor = 34;
   { collections de Request }
   rcQuery = 1; rcForm = 2; rcCookies = 3; rcServerVars = 4; rcAll = 5;
   { membres }
@@ -4139,7 +4165,15 @@ Const
   mConnect = 64; mQuery = 65; mExecute = 66; mEof = 67; mNext = 68; mFields = 69; mFieldCount = 70;
   mRecordCount = 71; mMoveFirst = 72; mMoveNext = 73; mOpen = 74; mBof = 75; mName = 76; mValue = 77;
   mRowsAffected = 78; mQuote = 79; mConnected = 80; mFieldName = 81; mState = 82;
-  NMembers = 82;
+  { PHP : mysqli, pg_*, PDO }
+  mFetchAssoc = 83; mFetchRow = 84; mFetchArray = 85; mFetchAllM = 86; mFetch = 87; mFetchAllP = 88;
+  mFetchColumn = 89; mRowCount = 90; mNumRows = 91; mAffectedRows = 92; mPrepare = 93; mExec = 94;
+  mRealEscape = 95; mFree = 96; mInsertId = 97; mLastInsertId = 98; mFieldCountP = 99; mDataSeek = 100;
+  mFetchResult = 101; mCloseCursor = 102; mBindValue = 103; mBindParam = 104; mSetCharset = 105;
+  mSetAttribute = 106; mGetMessage = 107; mConnectError = 108; mError = 109; mErrno = 110; mFieldNameP = 111;
+  mBeginTrans = 112; mCommit = 113; mRollBack = 114; mFetchObject = 115;
+  mQueryParams = 116; mGetResult = 117; mBindParamM = 118;
+  NMembers = 118;
   MemberNames : Array[0..NMembers] Of String[18] = ('', 'QUERYSTRING', 'FORM', 'COOKIES', 'SERVERVARIABLES',
     'TOTALBYTES', 'BINARYREAD', 'WRITE', 'REDIRECT', 'ADDHEADER', 'CONTENTTYPE', 'BUFFER', 'STATUS', 'END',
     'CLEAR', 'FLUSH', 'APPENDTOLOG', 'EXPIRES', 'CACHECONTROL', 'CHARSET', 'MAPPATH', 'URLENCODE', 'HTMLENCODE',
@@ -4149,17 +4183,111 @@ Const
     'CLOSE', 'DELETEFILE', 'ISCLIENTCONNECTED', 'EXPIRESABSOLUTE', 'NUMBER', 'DESCRIPTION', 'RAISE', 'SOURCE',
     'GETFILENAME', 'PATH', 'DOMAIN', 'EXPIRES', 'LCID', 'CODEPAGE', 'BUILDPATH',
     'CONNECT', 'QUERY', 'EXECUTE', 'EOF', 'NEXT', 'FIELDS', 'FIELDCOUNT', 'RECORDCOUNT', 'MOVEFIRST',
-    'MOVENEXT', 'OPEN', 'BOF', 'NAME', 'VALUE', 'ROWSAFFECTED', 'QUOTE', 'CONNECTED', 'FIELDNAME', 'STATE');
+    'MOVENEXT', 'OPEN', 'BOF', 'NAME', 'VALUE', 'ROWSAFFECTED', 'QUOTE', 'CONNECTED', 'FIELDNAME', 'STATE',
+    'FETCH_ASSOC', 'FETCH_ROW', 'FETCH_ARRAY', 'FETCH_ALL', 'FETCH', 'FETCHALL', 'FETCHCOLUMN', 'ROWCOUNT',
+    'NUM_ROWS', 'AFFECTED_ROWS', 'PREPARE', 'EXEC', 'REAL_ESCAPE_STRING', 'FREE', 'INSERT_ID', 'LASTINSERTID',
+    'FIELD_COUNT', 'DATA_SEEK', 'FETCH_RESULT', 'CLOSECURSOR', 'BINDVALUE', 'BINDPARAM', 'SET_CHARSET',
+    'SETATTRIBUTE', 'GETMESSAGE', 'CONNECT_ERROR', 'ERROR', 'ERRNO', 'FIELD_NAME', 'BEGINTRANSACTION', 'COMMIT',
+    'ROLLBACK', 'FETCH_OBJECT', 'QUERY_PARAMS', 'GET_RESULT', 'BIND_PARAM');
 
   MemCells = 262144;          { cellules de la machine (4 Mo) }
   StkCells = 4096;            { pile d'evaluation }
-  MaxObj = 512;
-  MaxDictE = 4096;            { entrees des dictionnaires d'une requete }
+  MaxObj = 4096;
+  MaxDictE = 32768;           { entrees des dictionnaires (et tableaux PHP) d'une requete }
   MaxPage = 16;               { pages compilees gardees }
   MaxSess = 64;               { sessions }
   MaxSVar = 32;               { variables d'une session }
   MaxAVar = 64;               { variables de l'application }
   MaxPair = 128;              { paires d'une collection (QueryString...) }
+
+{ fonctions de PHP (opCallB, 300 et plus) : tableau PhpFnNames }
+Const
+  pfStrlen = 300; pfStrtoupper = 301; pfStrtolower = 302; pfUcfirst = 303; pfLcfirst = 304; pfUcwords = 305;
+  pfTrim = 306; pfLtrim = 307; pfRtrim = 308; pfChop = 309; pfSubstr = 310; pfStrpos = 311; pfStripos = 312;
+  pfStrrpos = 313; pfStrripos = 314; pfStrReplace = 315; pfStrIreplace = 316; pfStrRepeat = 317; pfStrPad = 318;
+  pfStrSplit = 319; pfStrrev = 320; pfStrcmp = 321; pfStrcasecmp = 322; pfStrncmp = 323; pfStrncasecmp = 324;
+  pfStrnatcmp = 325; pfStrstr = 326; pfStristr = 327; pfStrrchr = 328; pfSubstrCount = 329; pfSubstrReplace = 330;
+  pfNl2br = 331; pfHtmlspecialchars = 332; pfHtmlentities = 333; pfHtmlEntityDecode = 334;
+  pfHtmlspecialcharsDecode = 335; pfStripTags = 336; pfAddslashes = 337; pfStripslashes = 338; pfUrlencode = 339;
+  pfRawurlencode = 340; pfUrldecode = 341; pfRawurldecode = 342; pfBase64Encode = 343; pfBase64Decode = 344;
+  pfMd5 = 345; pfSha1 = 346; pfCrc32 = 347; pfNumberFormat = 348; pfSprintf = 349; pfPrintf = 350;
+  pfVsprintf = 351; pfWordwrap = 352; pfImplode = 353; pfJoin = 354; pfExplode = 355; pfChr = 356; pfOrd = 357;
+  pfDechex = 358; pfHexdec = 359; pfDecbin = 360; pfBindec = 361; pfDecoct = 362; pfOctdec = 363; pfBin2hex = 364;
+  pfStrContains = 365; pfStrStartsWith = 366; pfStrEndsWith = 367; pfMbStrlen = 368; pfMbSubstr = 369;
+  pfMbStrtoupper = 370; pfMbStrtolower = 371; pfStrWordCount = 372; pfUniqid = 373; pfLcgValue = 374;
+  pfJsonEncode = 375; pfJsonDecode = 376; pfQuotemeta = 377; pfAbs = 378; pfCeil = 379; pfFloor = 380;
+  pfRound = 381; pfSqrt = 382; pfPow = 383; pfIntdiv = 384; pfMax = 385; pfMin = 386; pfRand = 387; pfMtRand = 388;
+  pfRandomInt = 389; pfMtSrand = 390; pfSrand = 391; pfMtGetrandmax = 392; pfGetrandmax = 393; pfPi = 394;
+  pfFmod = 395; pfExp = 396; pfLog = 397; pfLog10 = 398; pfLog2 = 399; pfSin = 400; pfCos = 401; pfTan = 402;
+  pfAsin = 403; pfAcos = 404; pfAtan = 405; pfAtan2 = 406; pfIsNan = 407; pfIsFinite = 408; pfIsInfinite = 409;
+  pfDeg2rad = 410; pfRad2deg = 411; pfHypot = 412; pfBaseConvert = 413; pfIntval = 414; pfFloatval = 415;
+  pfDoubleval = 416; pfStrval = 417; pfBoolval = 418; pfGettype = 419; pfGetDebugType = 420; pfIsInt = 421;
+  pfIsInteger = 422; pfIsLong = 423; pfIsFloat = 424; pfIsDouble = 425; pfIsString = 426; pfIsBool = 427;
+  pfIsArray = 428; pfIsNumeric = 429; pfIsNull = 430; pfIsScalar = 431; pfIsObject = 432; pfIsIterable = 433;
+  pfIsCountable = 434; pfVarDump = 435; pfPrintR = 436; pfVarExport = 437; pfCount = 438; pfSizeof = 439;
+  pfArrayKeys = 440; pfArrayValues = 441; pfInArray = 442; pfArraySearch = 443; pfArrayKeyExists = 444;
+  pfKeyExists = 445; pfArrayMerge = 446; pfArrayPush = 447; pfArrayPop = 448; pfArrayShift = 449;
+  pfArrayUnshift = 450; pfArraySlice = 451; pfArraySplice = 452; pfArrayReverse = 453; pfArraySum = 454;
+  pfArrayProduct = 455; pfSort = 456; pfRsort = 457; pfAsort = 458; pfArsort = 459; pfKsort = 460; pfKrsort = 461;
+  pfArrayUnique = 462; pfArrayFlip = 463; pfArrayFill = 464; pfArrayFillKeys = 465; pfRange = 466;
+  pfArrayCombine = 467; pfArrayColumn = 468; pfArrayRand = 469; pfShuffle = 470; pfArrayCountValues = 471;
+  pfArrayKeyFirst = 472; pfArrayKeyLast = 473; pfArrayFilter = 474; pfArrayPad = 475; pfArrayChunk = 476;
+  pfArrayDiff = 477; pfArrayDiffKey = 478; pfArrayIntersect = 479; pfArrayIntersectKey = 480; pfArrayIsList = 481;
+  pfReset = 482; pfEnd = 483; pfCurrent = 484; pfKey = 485; pfNext = 486; pfPrev = 487; pfArrayReplace = 488;
+  pfDate = 489; pfGmdate = 490; pfTime = 491; pfMktime = 492; pfGmmktime = 493; pfStrtotime = 494;
+  pfCheckdate = 495; pfDateDefaultTimezoneSet = 496; pfDateDefaultTimezoneGet = 497; pfMicrotime = 498;
+  pfHrtime = 499; pfIdate = 500; pfHeader = 501; pfHeadersSent = 502; pfHttpResponseCode = 503; pfSetcookie = 504;
+  pfSessionStart = 505; pfSessionDestroy = 506; pfSessionId = 507; pfSessionUnset = 508; pfSessionStatus = 509;
+  pfSessionRegenerateId = 510; pfDefined = 511; pfConstant = 512; pfPhpversion = 513; pfPhpUname = 514;
+  pfPhpSapiName = 515; pfErrorReporting = 516; pfIniSet = 517; pfIniGet = 518; pfSetTimeLimit = 519;
+  pfObStart = 520; pfObGetClean = 521; pfObGetContents = 522; pfObEndClean = 523; pfObEndFlush = 524;
+  pfObGetLevel = 525; pfUsleep = 526; pfSleep = 527; pfFlush = 528; pfGetenv = 529; pfGethostname = 530;
+  pfErrorLog = 531; pfTriggerError = 532; pfMail = 533; pfMemoryGetUsage = 534; pfMemoryGetPeakUsage = 535;
+  pfGcCollectCycles = 536; pfFileExists = 537; pfFileGetContents = 538; pfFilePutContents = 539; pfFile = 540;
+  pfIsFile = 541; pfIsDir = 542; pfIsReadable = 543; pfIsWritable = 544; pfBasename = 545; pfDirname = 546;
+  pfPathinfo = 547; pfFilesize = 548; pfFilemtime = 549; pfUnlink = 550; pfMkdir = 551; pfRmdir = 552;
+  pfScandir = 553; pfGlob = 554; pfRealpath = 555; pfFopen = 556; pfFgets = 557; pfFgetc = 558; pfFwrite = 559;
+  pfFputs = 560; pfFclose = 561; pfFeof = 562; pfFileExt = 563; pfMysqliConnect = 564; pfPgConnect = 565;
+  pfMysqliError = 566; pfMysqliErrno = 567; pfMysqliConnectError = 568; pfMysqliConnectErrno = 569;
+  pfMysqliSetCharset = 570; pfMysqliSelectDb = 571; pfPgLastError = 572; pfPgEscapeString = 573;
+  pfPgEscapeLiteral = 574; pfPgConnectionStatus = 575; pfPdoConnstr = 576; pfMysqliConnstr = 577;
+  NPhpFn = 278;
+  PhpFnNames : Array[0..NPhpFn - 1] Of String[24] = (
+    'STRLEN', 'STRTOUPPER', 'STRTOLOWER', 'UCFIRST', 'LCFIRST', 'UCWORDS', 'TRIM', 'LTRIM', 'RTRIM', 'CHOP',
+    'SUBSTR', 'STRPOS', 'STRIPOS', 'STRRPOS', 'STRRIPOS', 'STR_REPLACE', 'STR_IREPLACE', 'STR_REPEAT', 'STR_PAD',
+    'STR_SPLIT', 'STRREV', 'STRCMP', 'STRCASECMP', 'STRNCMP', 'STRNCASECMP', 'STRNATCMP', 'STRSTR', 'STRISTR',
+    'STRRCHR', 'SUBSTR_COUNT', 'SUBSTR_REPLACE', 'NL2BR', 'HTMLSPECIALCHARS', 'HTMLENTITIES', 'HTML_ENTITY_DECODE',
+    'HTMLSPECIALCHARS_DECODE', 'STRIP_TAGS', 'ADDSLASHES', 'STRIPSLASHES', 'URLENCODE', 'RAWURLENCODE',
+    'URLDECODE', 'RAWURLDECODE', 'BASE64_ENCODE', 'BASE64_DECODE', 'MD5', 'SHA1', 'CRC32', 'NUMBER_FORMAT',
+    'SPRINTF', 'PRINTF', 'VSPRINTF', 'WORDWRAP', 'IMPLODE', 'JOIN', 'EXPLODE', 'CHR', 'ORD', 'DECHEX', 'HEXDEC',
+    'DECBIN', 'BINDEC', 'DECOCT', 'OCTDEC', 'BIN2HEX', 'STR_CONTAINS', 'STR_STARTS_WITH', 'STR_ENDS_WITH',
+    'MB_STRLEN', 'MB_SUBSTR', 'MB_STRTOUPPER', 'MB_STRTOLOWER', 'STR_WORD_COUNT', 'UNIQID', 'LCG_VALUE',
+    'JSON_ENCODE', 'JSON_DECODE', 'QUOTEMETA', 'ABS', 'CEIL', 'FLOOR', 'ROUND', 'SQRT', 'POW', 'INTDIV', 'MAX',
+    'MIN', 'RAND', 'MT_RAND', 'RANDOM_INT', 'MT_SRAND', 'SRAND', 'MT_GETRANDMAX', 'GETRANDMAX', 'PI', 'FMOD',
+    'EXP', 'LOG', 'LOG10', 'LOG2', 'SIN', 'COS', 'TAN', 'ASIN', 'ACOS', 'ATAN', 'ATAN2', 'IS_NAN', 'IS_FINITE',
+    'IS_INFINITE', 'DEG2RAD', 'RAD2DEG', 'HYPOT', 'BASE_CONVERT', 'INTVAL', 'FLOATVAL', 'DOUBLEVAL', 'STRVAL',
+    'BOOLVAL', 'GETTYPE', 'GET_DEBUG_TYPE', 'IS_INT', 'IS_INTEGER', 'IS_LONG', 'IS_FLOAT', 'IS_DOUBLE',
+    'IS_STRING', 'IS_BOOL', 'IS_ARRAY', 'IS_NUMERIC', 'IS_NULL', 'IS_SCALAR', 'IS_OBJECT', 'IS_ITERABLE',
+    'IS_COUNTABLE', 'VAR_DUMP', 'PRINT_R', 'VAR_EXPORT', 'COUNT', 'SIZEOF', 'ARRAY_KEYS', 'ARRAY_VALUES',
+    'IN_ARRAY', 'ARRAY_SEARCH', 'ARRAY_KEY_EXISTS', 'KEY_EXISTS', 'ARRAY_MERGE', 'ARRAY_PUSH', 'ARRAY_POP',
+    'ARRAY_SHIFT', 'ARRAY_UNSHIFT', 'ARRAY_SLICE', 'ARRAY_SPLICE', 'ARRAY_REVERSE', 'ARRAY_SUM', 'ARRAY_PRODUCT',
+    'SORT', 'RSORT', 'ASORT', 'ARSORT', 'KSORT', 'KRSORT', 'ARRAY_UNIQUE', 'ARRAY_FLIP', 'ARRAY_FILL',
+    'ARRAY_FILL_KEYS', 'RANGE', 'ARRAY_COMBINE', 'ARRAY_COLUMN', 'ARRAY_RAND', 'SHUFFLE', 'ARRAY_COUNT_VALUES',
+    'ARRAY_KEY_FIRST', 'ARRAY_KEY_LAST', 'ARRAY_FILTER', 'ARRAY_PAD', 'ARRAY_CHUNK', 'ARRAY_DIFF',
+    'ARRAY_DIFF_KEY', 'ARRAY_INTERSECT', 'ARRAY_INTERSECT_KEY', 'ARRAY_IS_LIST', 'RESET', 'END', 'CURRENT', 'KEY',
+    'NEXT', 'PREV', 'ARRAY_REPLACE', 'DATE', 'GMDATE', 'TIME', 'MKTIME', 'GMMKTIME', 'STRTOTIME', 'CHECKDATE',
+    'DATE_DEFAULT_TIMEZONE_SET', 'DATE_DEFAULT_TIMEZONE_GET', 'MICROTIME', 'HRTIME', 'IDATE', 'HEADER',
+    'HEADERS_SENT', 'HTTP_RESPONSE_CODE', 'SETCOOKIE', 'SESSION_START', 'SESSION_DESTROY', 'SESSION_ID',
+    'SESSION_UNSET', 'SESSION_STATUS', 'SESSION_REGENERATE_ID', 'DEFINED', 'CONSTANT', 'PHPVERSION', 'PHP_UNAME',
+    'PHP_SAPI_NAME', 'ERROR_REPORTING', 'INI_SET', 'INI_GET', 'SET_TIME_LIMIT', 'OB_START', 'OB_GET_CLEAN',
+    'OB_GET_CONTENTS', 'OB_END_CLEAN', 'OB_END_FLUSH', 'OB_GET_LEVEL', 'USLEEP', 'SLEEP', 'FLUSH', 'GETENV',
+    'GETHOSTNAME', 'ERROR_LOG', 'TRIGGER_ERROR', 'MAIL', 'MEMORY_GET_USAGE', 'MEMORY_GET_PEAK_USAGE',
+    'GC_COLLECT_CYCLES', 'FILE_EXISTS', 'FILE_GET_CONTENTS', 'FILE_PUT_CONTENTS', 'FILE', 'IS_FILE', 'IS_DIR',
+    'IS_READABLE', 'IS_WRITABLE', 'BASENAME', 'DIRNAME', 'PATHINFO', 'FILESIZE', 'FILEMTIME', 'UNLINK', 'MKDIR',
+    'RMDIR', 'SCANDIR', 'GLOB', 'REALPATH', 'FOPEN', 'FGETS', 'FGETC', 'FWRITE', 'FPUTS', 'FCLOSE', 'FEOF',
+    'FILE_EXT', 'MYSQLI_CONNECT', 'PG_CONNECT', 'MYSQLI_ERROR', 'MYSQLI_ERRNO', 'MYSQLI_CONNECT_ERROR',
+    'MYSQLI_CONNECT_ERRNO', 'MYSQLI_SET_CHARSET', 'MYSQLI_SELECT_DB', 'PG_LAST_ERROR', 'PG_ESCAPE_STRING',
+    'PG_ESCAPE_LITERAL', 'PG_CONNECTION_STATUS', 'PDO_CONNSTR', 'MYSQLI_CONNSTR');
 
 Type
   TCell = Record
@@ -4178,7 +4306,7 @@ Type
     Used : Boolean;
     Path : String[127];
     MTime, Size : LongInt;
-    Asp : Boolean;
+    Asp, Php : Boolean;
     Code : PLongs;
     NCode, CodeCap : LongInt;
     Reals : PDoubles;
@@ -4242,8 +4370,8 @@ Var
   ObjS : Array[0..MaxObj - 1] Of TCell;
   NObj : LongInt;
   { dictionnaires : entrees chainees par objet }
-  DKey, DVal : Array[0..MaxDictE - 1] Of TCell;
-  DObj : Array[0..MaxDictE - 1] Of LongInt;
+  DKey, DVal : PCells;       { MaxDictE cellules chacun, alloues au demarrage (hors image) }
+  DObj : PLongs;
   NDict : LongInt;
   { collections de la requete (cle, valeur) }
   QsN, FmN, CkN : LongInt;
@@ -4395,6 +4523,74 @@ Begin
   VbRealStr := S;
 End;
 
+{ 10 puissance E }
+Function Pow10(E : LongInt) : Double;
+Var R : Double; K : LongInt;
+Begin
+  R := 1;
+  If E >= 0 Then For K := 1 To E Do R := R * 10
+  Else For K := 1 To -E Do R := R / 10;
+  Pow10 := R;
+End;
+
+{ reel en texte a la maniere de PHP (precision 14 : %.14G, 1.0E+25) }
+Function PhpRealStr(R : Double) : String;
+Var S, D : String; E, K : LongInt; Neg : Boolean; M : Double; Bt : Array[0..7] Of Byte;
+Begin
+  If R = 0 Then
+  Begin
+    Move(R, Bt, 8);
+    If (Bt[7] And $80) <> 0 Then PhpRealStr := '-0' Else PhpRealStr := '0';
+    Exit;
+  End;
+  If R <> R Then
+  Begin
+    PhpRealStr := 'NAN';
+    Exit;
+  End;
+  Neg := R < 0;
+  If Neg Then R := -R;
+  If R > 1.7E308 Then
+  Begin
+    If Neg Then PhpRealStr := '-INF' Else PhpRealStr := 'INF';
+    Exit;
+  End;
+  E := Trunc(Ln(R) / Ln(10));
+  If R < 1 Then Dec(E);
+  While (E > -330) And (Pow10(E) > R) Do Dec(E);
+  While (E < 330) And (Pow10(E + 1) <= R) Do Inc(E);
+  { 14 chiffres significatifs }
+  M := R / Pow10(E) * 1E13;
+  M := Int(M + 0.5);
+  If M >= 1E14 Then
+  Begin
+    M := Int(M / 10 + 0.5);
+    Inc(E);
+  End;
+  Str(M:0:0, D);
+  While (Length(D) > 1) And (D[Length(D)] = '0') Do Delete(D, Length(D), 1);
+  If (E < -4) Or (E >= 14) Then
+  Begin
+    S := D[1] + '.';
+    If Length(D) > 1 Then S := S + Copy(D, 2, 20) Else S := S + '0';
+    If E < 0 Then S := S + 'E-' + IStr(-E) Else S := S + 'E+' + IStr(E);
+  End
+  Else If E >= 0 Then
+  Begin
+    While Length(D) < E + 1 Do D := D + '0';
+    S := Copy(D, 1, E + 1);
+    If Length(D) > E + 1 Then S := S + '.' + Copy(D, E + 2, 20);
+  End
+  Else
+  Begin
+    S := '0.';
+    For K := 1 To -E - 1 Do S := S + '0';
+    S := S + D;
+  End;
+  If Neg Then S := '-' + S;
+  PhpRealStr := S;
+End;
+
 { --- dates (jours depuis le 30/12/1899, comme les dates d'OLE) --- }
 
 { secondes Unix -> date d'OLE (calcul en double precision) }
@@ -4511,6 +4707,7 @@ End;
 
 Var
   VbStyle : Boolean;          { conversions de VBScript (page ASP) }
+  PhpStyle : Boolean;         { conversions de PHP (page PHP) }
 
 { texte d'une valeur (Write, concatenation) }
 Procedure CellToStr(Var C : TCell; Var R : TCell);
@@ -4522,7 +4719,8 @@ Begin
     ObjValue(R);
     If R.T = vtObj Then
     Begin
-      MkStr('', R);
+      If PhpStyle And (R.I >= 0) And (R.I < MaxObj) And (ObjK[R.I] = okPArr) Then MkStr('Array', R)
+      Else MkStr('', R);
       Exit;
     End;
     CellToStr(R, R);
@@ -4532,11 +4730,16 @@ Begin
     vtStr, vtKStr : R := C;
     vtInt : MkStr(IStr(C.I), R);
     vtReal :
-      If VbStyle Then MkStr(VbRealStr(C.R), R)
+      If PhpStyle Then MkStr(PhpRealStr(C.R), R)
+      Else If VbStyle Then MkStr(VbRealStr(C.R), R)
       Else MkStr(RealStr(C.R, -1, -1), R);
     vtBool :
       Begin
-        If VbStyle Then
+        If PhpStyle Then
+        Begin
+          If C.I <> 0 Then S := '1' Else S := '';
+        End
+        Else If VbStyle Then
         Begin
           If C.I <> 0 Then S := 'True' Else S := 'False';
         End
@@ -4752,6 +4955,7 @@ Type
     QErr : String;
     QHaveT : Boolean;
     Affected : LongInt;
+    InsId : LongInt;           { MariaDB : identifiant de la derniere insertion }
   End;
 
   TRs = Record
@@ -5912,6 +6116,7 @@ Begin
           Begin
             O := 1;
             Affected := LenEnc(P, O);
+            InsId := LenEnc(P, O);
             DbEat(K, L + 4);
             St := dsReady;
             MyStep := 1;
@@ -6179,7 +6384,7 @@ Begin
       VmFail('base de donn'#130'es : trop de jeux d''enregistrements ouverts (' + IStr(MaxRs) + ')');
       Exit;
     End;
-    DbC[K].QRs := Rs; DbC[K].QErr := ''; DbC[K].QHaveT := False; DbC[K].Affected := 0; DbC[K].Err := '';
+    DbC[K].QRs := Rs; DbC[K].QErr := ''; DbC[K].QHaveT := False; DbC[K].Affected := 0; DbC[K].InsId := 0; DbC[K].Err := '';
     DbC[K].St := dsBusy;
     DbC[K].Deadline := PTicks + 60000;
     If DbC[K].Kind = dbPg Then T := Ord(PgQuery(K, Sql)) Else T := Ord(MyQuery(K, Sql));
@@ -10247,10 +10452,10 @@ Var K : LongInt;
 Begin
   DictFind := -1;
   For K := 0 To NDict - 1 Do
-    If DObj[K] = Ob Then
+    If DObj^[K] = Ob Then
     Begin
-      If (IsStrCell(DKey[K]) And IsStrCell(Key) And (StrCmpCells(DKey[K], Key, False) = 0)) Or
-         ((Not IsStrCell(DKey[K])) And (Not IsStrCell(Key)) And (CellReal(DKey[K]) = CellReal(Key))) Then
+      If (IsStrCell(DKey^[K]) And IsStrCell(Key) And (StrCmpCells(DKey^[K], Key, False) = 0)) Or
+         ((Not IsStrCell(DKey^[K])) And (Not IsStrCell(Key)) And (CellReal(DKey^[K]) = CellReal(Key))) Then
       Begin
         DictFind := K;
         Exit;
@@ -10262,7 +10467,7 @@ Function DictCount(Ob : LongInt) : LongInt;
 Var K, N : LongInt;
 Begin
   N := 0;
-  For K := 0 To NDict - 1 Do If DObj[K] = Ob Then Inc(N);
+  For K := 0 To NDict - 1 Do If DObj^[K] = Ob Then Inc(N);
   DictCount := N;
 End;
 
@@ -10273,7 +10478,7 @@ Begin
     VmFail('dictionnaire plein');
     Exit;
   End;
-  DObj[NDict] := Ob; DKey[NDict] := Key; DVal[NDict] := V;
+  DObj^[NDict] := Ob; DKey^[NDict] := Key; DVal^[NDict] := V;
   Inc(NDict);
 End;
 
@@ -10298,7 +10503,7 @@ Begin
   ArrSlot := -1;
   N := 0;
   For K := 0 To NDict - 1 Do
-    If DObj[K] = Ob Then
+    If DObj^[K] = Ob Then
     Begin
       If N = Idx Then
       Begin
@@ -10385,6 +10590,9 @@ Begin
   If VmOut.Len = 0 Then VmHdrPending := True;
 End;
 
+Function PhpMember(Var Ob : TCell; M, Argc, ABase : LongInt; Var R : TCell; IsSet : Boolean; Var V : TCell) : Boolean;
+  Forward;
+
 Procedure MemberCall(Var Ob : TCell; M, Argc, ABase : LongInt; Var R : TCell; IsSet : Boolean; Var V : TCell);
 Var Id, K, N, Coll, J : LongInt; S, S2 : String; Key : TCell; A0, A1 : TCell; Tb : TBuf; Dr : Boolean; Pq : PBytes;
 Begin
@@ -10404,6 +10612,9 @@ Begin
     VmFail('objet nil');
     Exit;
   End;
+  { PHP : tableaux, mysqli, pg_*, PDO }
+  If PhpStyle And (ObjK[Id] In [okPArr, okDbConn, okDbRs, okDbStmt]) Then
+    If PhpMember(Ob, M, Argc, ABase, R, IsSet, V) Then Exit;
   Case ObjK[Id] Of
     okRequest :
       Case M Of
@@ -10702,31 +10913,31 @@ Begin
             K := DictFind(Id, A0);
             If IsSet Then
             Begin
-              If K >= 0 Then DVal[K] := V Else DictAdd(Id, A0, V);
+              If K >= 0 Then DVal^[K] := V Else DictAdd(Id, A0, V);
             End
-            Else If K >= 0 Then R := DVal[K]
+            Else If K >= 0 Then R := DVal^[K]
             Else MkNil(R);
           End;
         mExists : MkBool(DictFind(Id, A0) >= 0, R);
         mRemove :
           Begin
             K := DictFind(Id, A0);
-            If K >= 0 Then DObj[K] := -1;
+            If K >= 0 Then DObj^[K] := -1;
           End;
-        mRemoveAll : For K := 0 To NDict - 1 Do If DObj[K] = Id Then DObj[K] := -1;
+        mRemoveAll : For K := 0 To NDict - 1 Do If DObj^[K] = Id Then DObj^[K] := -1;
         mCount : MkInt(DictCount(Id), R);
         mKeys, mItems :
           Begin
             N := DictCount(Id);
             J := ObjNew(okArr, N, 0);
             For K := 0 To NDict - 1 Do
-              If DObj[K] = Id Then
+              If DObj^[K] = Id Then
               Begin
-                If M = mKeys Then DictAdd(J, DKey[K], DKey[K]) Else DictAdd(J, DKey[K], DVal[K]);
+                If M = mKeys Then DictAdd(J, DKey^[K], DKey^[K]) Else DictAdd(J, DKey^[K], DVal^[K]);
               End;
             { les elements du tableau : les valeurs (cles en DKey) }
-            For K := 0 To NDict - 1 Do If DObj[K] = J Then DKey[K] := DVal[K];
-            For K := 0 To NDict - 1 Do If DObj[K] = J Then DVal[K] := DKey[K];
+            For K := 0 To NDict - 1 Do If DObj^[K] = J Then DKey^[K] := DVal^[K];
+            For K := 0 To NDict - 1 Do If DObj^[K] = J Then DVal^[K] := DKey^[K];
             MkObj(J, R);
           End;
       Else
@@ -10739,8 +10950,8 @@ Begin
             If (Argc > 1) And (ObjB[Id] > 0) Then K := ArrSlot(Id, CellInt(A0) * ObjB[Id] + CellInt(A1))
             Else K := ArrSlot(Id, CellInt(A0));
             If K < 0 Then VmFail('indice hors limites')
-            Else If IsSet Then DVal[K] := V
-            Else R := DVal[K];
+            Else If IsSet Then DVal^[K] := V
+            Else R := DVal^[K];
           End;
         mCount : MkInt(DictCount(Id), R);
       Else
@@ -10838,6 +11049,509 @@ Begin
   End;
 End;
 
+{ ==================================================================== }
+{ PHP : conversions, tableaux, arithmetique et comparaisons de PHP 8    }
+{ Un tableau de PHP est un objet okPArr de la requete ; ses elements    }
+{ sont des entrees de dictionnaire (cle, valeur) dans l'ordre           }
+{ d'insertion ; ObjA : prochain indice entier (ajout $a[] = ...).       }
+{ ==================================================================== }
+
+Procedure PhpBuiltin(Id, Argc : LongInt; Var Arg : Array Of TCell; Var R : TCell); Forward;
+
+Function HexV(C : Char) : LongInt;
+Begin
+  C := UpCase(C);
+  If (C >= '0') And (C <= '9') Then HexV := Ord(C) - 48
+  Else If (C >= 'A') And (C <= 'F') Then HexV := Ord(C) - 55
+  Else HexV := -1;
+End;
+
+{ UTF-8 d'un point de code }
+Procedure AddUtf8(Var B : TBuf; U : LongInt);
+Begin
+  If U < 128 Then BufAddC(B, U)
+  Else If U < 2048 Then
+  Begin
+    BufAddC(B, 192 Or (U Shr 6)); BufAddC(B, 128 Or (U And 63));
+  End
+  Else If U < 65536 Then
+  Begin
+    BufAddC(B, 224 Or (U Shr 12)); BufAddC(B, 128 Or ((U Shr 6) And 63)); BufAddC(B, 128 Or (U And 63));
+  End
+  Else
+  Begin
+    BufAddC(B, 240 Or (U Shr 18)); BufAddC(B, 128 Or ((U Shr 12) And 63));
+    BufAddC(B, 128 Or ((U Shr 6) And 63)); BufAddC(B, 128 Or (U And 63));
+  End;
+End;
+
+Function PIsArr(Var C : TCell) : Boolean;
+Begin
+  PIsArr := (C.T = vtObj) And (C.I >= 0) And (C.I < NObj) And (ObjK[C.I] = okPArr);
+End;
+
+{ chaine d'une valeur (cellule vtStr ou vtKStr ; caractere converti) }
+Procedure PStrCell(Var C : TCell; Var R : TCell);
+Var Cb : Byte;
+Begin
+  If C.T = vtChar Then
+  Begin
+    Cb := C.I;
+    MkStrB(@Cb, 1, R);
+  End
+  Else If (C.T = vtStr) Or (C.T = vtKStr) Then R := C
+  Else If C.T = vtNil Then
+  Begin
+    R.T := vtKStr; R.I := 0; R.L := 0;
+  End
+  Else CellToStr(C, R);
+End;
+
+{ nombre en tete d'une chaine (PHP) : True si toute la chaine est un nombre }
+Function PParseNum(P : PBytes; N : LongInt; Var IsReal : Boolean; Var IV : LongInt; Var RV : Double) : Boolean;
+Var K, St, E : LongInt; S : String; Dig : Boolean;
+Begin
+  IsReal := False; IV := 0; RV := 0;
+  K := 0;
+  While (K < N) And (P^[K] In [32, 9, 10, 13, 11, 12]) Do Inc(K);
+  St := K;
+  If (K < N) And (P^[K] In [43, 45]) Then Inc(K);
+  Dig := False;
+  While (K < N) And (P^[K] >= 48) And (P^[K] <= 57) Do
+  Begin
+    Inc(K);
+    Dig := True;
+  End;
+  If (K < N) And (P^[K] = 46) Then
+  Begin
+    Inc(K);
+    IsReal := True;
+    While (K < N) And (P^[K] >= 48) And (P^[K] <= 57) Do
+    Begin
+      Inc(K);
+      Dig := True;
+    End;
+  End;
+  If Dig And (K < N) And (P^[K] In [69, 101]) Then
+  Begin
+    E := K + 1;
+    If (E < N) And (P^[E] In [43, 45]) Then Inc(E);
+    If (E < N) And (P^[E] >= 48) And (P^[E] <= 57) Then
+    Begin
+      IsReal := True;
+      K := E;
+      While (K < N) And (P^[K] >= 48) And (P^[K] <= 57) Do Inc(K);
+    End;
+  End;
+  If Not Dig Then
+  Begin
+    PParseNum := False;
+    Exit;
+  End;
+  S := '';
+  For E := St To K - 1 Do If Length(S) < 60 Then S := S + Chr(P^[E]);
+  If (Length(S) > 0) And (S[1] = '+') Then Delete(S, 1, 1);
+  If (S <> '') And (S[1] = '.') Then S := '0' + S;
+  If (Length(S) > 1) And (S[1] = '-') And (S[2] = '.') Then Insert('0', S, 2);
+  If S[Length(S)] = '.' Then S := S + '0';
+  Val(S, RV, E);
+  If Not IsReal Then
+  Begin
+    If (RV > 2147483647.0) Or (RV < -2147483648.0) Then IsReal := True
+    Else IV := Trunc(RV);
+  End;
+  { espaces de fin permis }
+  While (K < N) And (P^[K] In [32, 9, 10, 13, 11, 12]) Do Inc(K);
+  PParseNum := K >= N;
+End;
+
+Function PIsNumStr(Var C : TCell) : Boolean;
+Var T : TCell; R_ : Boolean; I : LongInt; D : Double;
+Begin
+  PIsNumStr := False;
+  If Not IsStrCell(C) Then Exit;
+  PStrCell(C, T);
+  If T.L = 0 Then Exit;
+  PIsNumStr := PParseNum(PoolPtr(T), T.L, R_, I, D);
+End;
+
+{ valeur numerique (entier ou reel) d'une valeur de PHP }
+Procedure PNumCell(Var C : TCell; Var R : TCell);
+Var T : TCell; Rl : Boolean; I : LongInt; D : Double;
+Begin
+  Case C.T Of
+    vtInt : R := C;
+    vtReal : R := C;
+    vtBool : MkInt(C.I, R);
+    vtNil : MkInt(0, R);
+    vtDate : MkReal(C.R, R);
+    vtStr, vtKStr, vtChar :
+      Begin
+        PStrCell(C, T);
+        Dummy := Ord(PParseNum(PoolPtr(T), T.L, Rl, I, D));
+        If Rl Then MkReal(D, R) Else MkInt(I, R);
+      End;
+    vtObj :
+      Begin
+        T := C;
+        ObjValue(T);
+        If T.T = vtObj Then
+        Begin
+          If PIsArr(T) Then MkInt(Ord(DictCount(T.I) > 0), R) Else MkInt(1, R);
+        End
+        Else PNumCell(T, R);
+      End;
+  Else
+    MkInt(CellInt(C), R);
+  End;
+End;
+
+{ verite d'une valeur (PHP) }
+Function PBool(Var C : TCell) : Boolean;
+Var T : TCell; P : PBytes;
+Begin
+  Case C.T Of
+    vtNil : PBool := False;
+    vtBool, vtInt : PBool := C.I <> 0;
+    vtReal, vtDate : PBool := C.R <> 0;
+    vtChar : PBool := C.I <> 48;
+    vtStr, vtKStr :
+      Begin
+        If C.L = 0 Then PBool := False
+        Else If C.L = 1 Then
+        Begin
+          P := PoolPtr(C);
+          PBool := P^[0] <> 48;
+        End
+        Else PBool := True;
+      End;
+    vtObj :
+      Begin
+        T := C;
+        ObjValue(T);
+        If T.T = vtObj Then
+        Begin
+          If PIsArr(T) Then PBool := DictCount(T.I) > 0 Else PBool := True;
+        End
+        Else PBool := PBool(T);
+      End;
+  Else
+    PBool := CellBool(C);
+  End;
+End;
+
+{ --- tableaux --- }
+
+Function PArrNew : LongInt;
+Begin
+  PArrNew := ObjNew(okPArr, 0, 0);
+End;
+
+{ cle d'un tableau : "12" -> 12, reel -> entier, booleen -> 0/1, null -> "" }
+Procedure PKey(Var C : TCell; Var R : TCell);
+Var T : TCell; Rl : Boolean; I, K : LongInt; D : Double; P : PBytes; Ok : Boolean;
+Begin
+  Case C.T Of
+    vtInt : R := C;
+    vtReal, vtDate : MkInt(Trunc(C.R), R);
+    vtBool : MkInt(C.I, R);
+    vtNil : MkStr('', R);
+    vtStr, vtKStr, vtChar :
+      Begin
+        PStrCell(C, T);
+        R := T;
+        { entier decimal canonique seulement }
+        P := PoolPtr(T);
+        If (T.L = 0) Or (T.L > 10) Then Exit;
+        Ok := True;
+        For K := 0 To T.L - 1 Do
+          If Not (((P^[K] >= 48) And (P^[K] <= 57)) Or ((K = 0) And (P^[K] = 45) And (T.L > 1))) Then Ok := False;
+        If Ok And (T.L > 1) And (P^[0] = 48) Then Ok := False;
+        If Ok And (T.L > 2) And (P^[0] = 45) And (P^[1] = 48) Then Ok := False;
+        If Ok And PParseNum(P, T.L, Rl, I, D) And Not Rl Then MkInt(I, R);
+      End;
+    vtObj :
+      Begin
+        T := C;
+        ObjValue(T);
+        If T.T = vtObj Then MkInt(T.I, R) Else PKey(T, R);
+      End;
+  Else
+    R := C;
+  End;
+End;
+
+Function PArrFind(Id : LongInt; Var Key : TCell) : LongInt;
+Var K : TCell;
+Begin
+  PKey(Key, K);
+  PArrFind := DictFind(Id, K);
+End;
+
+Procedure PArrGet(Id : LongInt; Var Key : TCell; Var R : TCell);
+Var K : LongInt;
+Begin
+  K := PArrFind(Id, Key);
+  If K >= 0 Then R := DVal^[K] Else MkNil(R);
+End;
+
+Procedure PArrSet(Id : LongInt; Var Key, V : TCell);
+Var K : LongInt; Kc : TCell;
+Begin
+  PKey(Key, Kc);
+  K := DictFind(Id, Kc);
+  If K >= 0 Then DVal^[K] := V
+  Else
+  Begin
+    DictAdd(Id, Kc, V);
+    If (Kc.T = vtInt) And (Kc.I >= ObjA[Id]) Then ObjA[Id] := Kc.I + 1;
+  End;
+End;
+
+Procedure PArrPush(Id : LongInt; Var V : TCell);
+Var Kc : TCell;
+Begin
+  MkInt(ObjA[Id], Kc);
+  DictAdd(Id, Kc, V);
+  ObjA[Id] := ObjA[Id] + 1;
+End;
+
+{ entree suivante (indice brut >= Pos) ; -1 : fin }
+Function PArrNext(Id, Pos_ : LongInt) : LongInt;
+Var K : LongInt;
+Begin
+  PArrNext := -1;
+  If Pos_ < 0 Then Pos_ := 0;
+  For K := Pos_ To NDict - 1 Do
+    If DObj^[K] = Id Then
+    Begin
+      PArrNext := K;
+      Exit;
+    End;
+End;
+
+{ entree numero N (0..) }
+Function PArrNth(Id, N : LongInt) : LongInt;
+Var K, C : LongInt;
+Begin
+  PArrNth := -1;
+  C := 0;
+  For K := 0 To NDict - 1 Do
+    If DObj^[K] = Id Then
+    Begin
+      If C = N Then
+      Begin
+        PArrNth := K;
+        Exit;
+      End;
+      Inc(C);
+    End;
+End;
+
+{ copie (les tableaux contenus sont copies aussi : valeurs de PHP) }
+Function PArrCopy(Id : LongInt) : LongInt;
+Var K, N, Cnt : LongInt; V : TCell;
+Begin
+  N := PArrNew;
+  ObjA[N] := ObjA[Id];
+  Cnt := NDict;
+  For K := 0 To Cnt - 1 Do
+    If DObj^[K] = Id Then
+    Begin
+      V := DVal^[K];
+      If PIsArr(V) And (V.I <> Id) Then MkObj(PArrCopy(V.I), V);
+      DictAdd(N, DKey^[K], V);
+    End;
+  PArrCopy := N;
+End;
+
+{ renumeroter les cles entieres 0, 1, 2... (les cles chaines gardees) }
+Procedure PArrRenumber(Id : LongInt);
+Var K, N : LongInt;
+Begin
+  N := 0;
+  For K := 0 To NDict - 1 Do
+    If (DObj^[K] = Id) And (DKey^[K].T = vtInt) Then
+    Begin
+      DKey^[K].I := N;
+      Inc(N);
+    End;
+  ObjA[Id] := N;
+End;
+
+{ --- arithmetique de PHP --- }
+
+Procedure PhpArith(Op : LongInt; Var A0, B0 : TCell; Var R : TCell);
+Var A, B : TCell; X, Y : Double; I, J : LongInt;
+Begin
+  If (A0.T = vtObj) And Not PIsArr(A0) Then ObjValue(A0);
+  If (B0.T = vtObj) And Not PIsArr(B0) Then ObjValue(B0);
+  If PIsArr(A0) Or PIsArr(B0) Then
+  Begin
+    VmFail('Unsupported operand types: array');
+    MkNil(R);
+    Exit;
+  End;
+  PNumCell(A0, A); PNumCell(B0, B);
+  If (A.T = vtInt) And (B.T = vtInt) Then
+  Begin
+    I := A.I; J := B.I;
+    Case Op Of
+      opAdd :
+        Begin
+          X := I;
+          X := X + J;
+          If (X > 2147483647.0) Or (X < -2147483648.0) Then MkReal(X, R) Else MkInt(I + J, R);
+        End;
+      opSub :
+        Begin
+          X := I;
+          X := X - J;
+          If (X > 2147483647.0) Or (X < -2147483648.0) Then MkReal(X, R) Else MkInt(I - J, R);
+        End;
+      opMul :
+        Begin
+          X := I;
+          X := X * J;
+          If (X > 2147483647.0) Or (X < -2147483648.0) Then MkReal(X, R) Else MkInt(I * J, R);
+        End;
+      opDivR :
+        If J = 0 Then VmFail('Division by zero')
+        Else If (I Mod J = 0) And Not ((I = -2147483647 - 1) And (J = -1)) Then MkInt(I Div J, R)
+        Else MkReal(I / J, R);
+      opIDiv :
+        If J = 0 Then VmFail('Division by zero') Else MkInt(I Div J, R);
+      opMod :
+        If J = 0 Then VmFail('Modulo by zero') Else MkInt(I Mod J, R);
+    End;
+    Exit;
+  End;
+  If A.T = vtInt Then X := A.I Else X := A.R;
+  If B.T = vtInt Then Y := B.I Else Y := B.R;
+  Case Op Of
+    opAdd : MkReal(X + Y, R);
+    opSub : MkReal(X - Y, R);
+    opMul : MkReal(X * Y, R);
+    opDivR : If Y = 0 Then VmFail('Division by zero') Else MkReal(X / Y, R);
+    opIDiv : If Trunc(Y) = 0 Then VmFail('Division by zero') Else MkInt(Trunc(X) Div Trunc(Y), R);
+    opMod :
+      If Trunc(Y) = 0 Then VmFail('Modulo by zero')
+      Else If (Abs(X) > 2147483647.0) Or (Abs(Y) > 2147483647.0) Then MkReal(X - Int(X / Y) * Y, R)
+      Else MkInt(Trunc(X) Mod Trunc(Y), R);
+  End;
+End;
+
+{ --- comparaison de PHP 8 (==, <, >) : -1, 0, 1 --- }
+
+Function PhpCompare(Var A0, B0 : TCell) : LongInt;
+Var A, B, Na, Nb, Sa, Sb : TCell; X, Y : Double; Ab, Bb : Boolean;
+Begin
+  A := A0; B := B0;
+  If (A.T = vtObj) And Not PIsArr(A) Then ObjValue(A);
+  If (B.T = vtObj) And Not PIsArr(B) Then ObjValue(B);
+  { null <=> chaine : chaine vide }
+  If (A.T = vtNil) And IsStrCell(B) Then
+  Begin
+    PStrCell(B, Sb);
+    If Sb.L = 0 Then PhpCompare := 0 Else PhpCompare := -1;
+    Exit;
+  End;
+  If (B.T = vtNil) And IsStrCell(A) Then
+  Begin
+    PStrCell(A, Sa);
+    If Sa.L = 0 Then PhpCompare := 0 Else PhpCompare := 1;
+    Exit;
+  End;
+  { booleen ou null : comparaison en booleens }
+  If (A.T = vtBool) Or (B.T = vtBool) Or (A.T = vtNil) Or (B.T = vtNil) Then
+  Begin
+    Ab := PBool(A); Bb := PBool(B);
+    If Ab = Bb Then PhpCompare := 0 Else If Ab Then PhpCompare := 1 Else PhpCompare := -1;
+    Exit;
+  End;
+  If PIsArr(A) Or PIsArr(B) Then
+  Begin
+    If PIsArr(A) And PIsArr(B) Then
+    Begin
+      If A.I = B.I Then PhpCompare := 0
+      Else If DictCount(A.I) < DictCount(B.I) Then PhpCompare := -1
+      Else If DictCount(A.I) > DictCount(B.I) Then PhpCompare := 1
+      Else PhpCompare := 0;
+    End
+    Else If PIsArr(A) Then PhpCompare := 1
+    Else PhpCompare := -1;
+    Exit;
+  End;
+  If IsStrCell(A) And IsStrCell(B) Then
+  Begin
+    If PIsNumStr(A) And PIsNumStr(B) Then
+    Begin
+      PNumCell(A, Na); PNumCell(B, Nb);
+    End
+    Else
+    Begin
+      PStrCell(A, Sa); PStrCell(B, Sb);
+      PhpCompare := StrCmpCells(Sa, Sb, False);
+      Exit;
+    End;
+  End
+  Else If IsStrCell(A) Or IsStrCell(B) Then
+  Begin
+    { nombre et chaine : numerique si la chaine est un nombre, sinon en chaines }
+    If (IsStrCell(A) And Not PIsNumStr(A)) Or (IsStrCell(B) And Not PIsNumStr(B)) Then
+    Begin
+      PStrCell(A, Sa); PStrCell(B, Sb);
+      PhpCompare := StrCmpCells(Sa, Sb, False);
+      Exit;
+    End;
+    PNumCell(A, Na); PNumCell(B, Nb);
+  End
+  Else
+  Begin
+    PNumCell(A, Na); PNumCell(B, Nb);
+  End;
+  If Na.T = vtInt Then X := Na.I Else X := Na.R;
+  If Nb.T = vtInt Then Y := Nb.I Else Y := Nb.R;
+  If X < Y Then PhpCompare := -1 Else If X > Y Then PhpCompare := 1 Else PhpCompare := 0;
+End;
+
+{ === et !== }
+Function PhpIdent(Var A0, B0 : TCell) : Boolean;
+Var A, B, Sa, Sb : TCell; K, J, Ka, Kb : LongInt;
+Begin
+  A := A0; B := B0;
+  If (A.T = vtObj) And Not PIsArr(A) Then ObjValue(A);
+  If (B.T = vtObj) And Not PIsArr(B) Then ObjValue(B);
+  PhpIdent := False;
+  If IsStrCell(A) And IsStrCell(B) Then
+  Begin
+    PStrCell(A, Sa); PStrCell(B, Sb);
+    PhpIdent := StrCmpCells(Sa, Sb, False) = 0;
+    Exit;
+  End;
+  If (A.T = vtDate) Then A.T := vtReal;
+  If (B.T = vtDate) Then B.T := vtReal;
+  If A.T <> B.T Then Exit;
+  Case A.T Of
+    vtNil : PhpIdent := True;
+    vtInt, vtBool : PhpIdent := A.I = B.I;
+    vtReal : PhpIdent := A.R = B.R;
+    vtObj :
+      If A.I = B.I Then PhpIdent := True
+      Else If PIsArr(A) And PIsArr(B) And (DictCount(A.I) = DictCount(B.I)) Then
+      Begin
+        { memes cles et valeurs dans le meme ordre }
+        Ka := PArrNext(A.I, 0); Kb := PArrNext(B.I, 0);
+        While (Ka >= 0) And (Kb >= 0) Do
+        Begin
+          If Not PhpIdent(DKey^[Ka], DKey^[Kb]) Or Not PhpIdent(DVal^[Ka], DVal^[Kb]) Then Exit;
+          Ka := PArrNext(A.I, Ka + 1); Kb := PArrNext(B.I, Kb + 1);
+        End;
+        PhpIdent := True;
+      End;
+  End;
+  K := 0; J := 0;
+End;
 { date d'un texte "jj/mm/aaaa [hh:mm[:ss]]" ou "aaaa-mm-jj" }
 Function ParseDate(S : String; Var D : Double) : Boolean;
 Var A, B, C, H, Mi, Sc, P : LongInt; T : String;
@@ -11005,6 +11719,11 @@ End;
 Procedure Arith(Op : LongInt; Var A, B : TCell; Var R : TCell);
 Var X, Y : Double; I, J : LongInt;
 Begin
+  If PhpStyle Then
+  Begin
+    PhpArith(Op, A, B, R);
+    Exit;
+  End;
   If A.T = vtObj Then ObjValue(A);
   If B.T = vtObj Then ObjValue(B);
   If (Op = opAdd) And (IsStrCell(A) Or IsStrCell(B)) Then
@@ -11182,6 +11901,12 @@ Begin
     If (Arg[K].T = vtObj) And (Arg[K].I < NObj) And (ObjK[Arg[K].I] = okItem) Then ObjValue(Arg[K]);
   SP := B0 - 1;
   MkNil(R);
+  If (Id >= 300) And (Id < 1000) Then
+  Begin
+    PhpBuiltin(Id, Argc, Arg, R);
+    Push(R);
+    Exit;
+  End;
   If Id >= 1000 Then
   Begin
     { procedures a parametres variables : Arg[0] adresse }
@@ -11568,10 +12293,10 @@ Begin
         Begin
           N := 0;
           For K := 0 To NDict - 1 Do
-            If DObj[K] = Arg[0].I Then
+            If DObj^[K] = Arg[0].I Then
             Begin
               If N > 0 Then Concat2(R, T, R);
-              Concat2(R, DVal[K], R);
+              Concat2(R, DVal^[K], R);
               Inc(N);
             End;
         End;
@@ -11878,7 +12603,7 @@ Begin
           If (Id = bReDim) And (Arg[0].T = vtObj) And (ObjK[Arg[0].I] = okArr) Then
           Begin
             B0 := ArrSlot(Arg[0].I, K);
-            If B0 >= 0 Then T := DVal[B0];
+            If B0 >= 0 Then T := DVal^[B0];
           End;
           DictAdd(A, U, T);
         End;
@@ -11915,12 +12640,12 @@ Begin
           okArr :
             Begin
               A := ArrSlot(Arg[0].I, K);
-              If A >= 0 Then R := DVal[A];
+              If A >= 0 Then R := DVal^[A];
             End;
           okDict :
             Begin
               A := ArrSlot(Arg[0].I, K);
-              If A >= 0 Then R := DKey[A];
+              If A >= 0 Then R := DKey^[A];
             End;
           okColl :
             Case ObjA[Arg[0].I] Of
@@ -11946,6 +12671,4126 @@ Begin
   Push(R);
 End;
 
+{ ==================================================================== }
+{ PHP : execution (opPhp), superglobales, bases de donnees (mysqli,      }
+{ pg_*, PDO) et fonctions de la bibliotheque de PHP (opCallB >= 300)    }
+{ ==================================================================== }
+
+Var
+  PSupObj : Array[1..9] Of LongInt;      { superglobales de la requete }
+  PObMark : Array[0..7] Of LongInt;      { ob_start : debut des tampons }
+  PNOb : LongInt;
+  PRandSeed : LongInt;
+
+Procedure PhpReset;
+Var K : LongInt;
+Begin
+  For K := 1 To 9 Do PSupObj[K] := -1;
+  PNOb := 0;
+End;
+
+Procedure PSetStrKey(Id : LongInt; Const K : String; Var V : TCell);
+Var Kc : TCell;
+Begin
+  MkStr(K, Kc);
+  PArrSet(Id, Kc, V);
+End;
+
+{ nom=valeur d'un formulaire : a[]=1, a[x]=2 (tableaux de PHP) }
+Procedure PAddPair(Id : LongInt; Var K, V : TCell);
+Var T, Kc, Sub : TCell; P : PBytes; B, E, J : LongInt; Child : LongInt;
+Begin
+  PStrCell(K, T);
+  P := PoolPtr(T);
+  B := -1;
+  For J := 0 To T.L - 1 Do If (B < 0) And (P^[J] = 91) Then B := J;
+  If (B <= 0) Or (P^[T.L - 1] <> 93) Then
+  Begin
+    PArrSet(Id, T, V);
+    Exit;
+  End;
+  MkStrB(P, B, Kc);
+  P := PoolPtr(T);
+  PArrGet(Id, Kc, Sub);
+  If PIsArr(Sub) Then Child := Sub.I
+  Else
+  Begin
+    Child := PArrNew;
+    MkObj(Child, Sub);
+    PArrSet(Id, Kc, Sub);
+  End;
+  E := T.L - 1;
+  If E = B + 1 Then PArrPush(Child, V)
+  Else
+  Begin
+    P := PoolPtr(T);
+    MkStrB(@P^[B + 1], E - B - 1, Kc);
+    PArrSet(Child, Kc, V);
+  End;
+End;
+
+Function PSuperBuild(N : LongInt) : LongInt;
+Var Id, K : LongInt; V : TCell; S : String;
+Const
+  SvNames : Array[0..21] Of String[24] = ('REQUEST_METHOD', 'QUERY_STRING', 'SERVER_NAME', 'SERVER_PORT', 'HTTPS',
+    'REMOTE_ADDR', 'REMOTE_PORT', 'SERVER_ADDR', 'SERVER_SOFTWARE', 'SERVER_PROTOCOL', 'SCRIPT_NAME',
+    'PHP_SELF', 'SCRIPT_FILENAME', 'DOCUMENT_ROOT', 'REQUEST_URI', 'HTTP_HOST', 'HTTP_USER_AGENT',
+    'HTTP_ACCEPT', 'HTTP_ACCEPT_LANGUAGE', 'HTTP_REFERER', 'HTTP_COOKIE', 'CONTENT_TYPE');
+Begin
+  Id := PArrNew;
+  Case N Of
+    1, 3 :
+      Begin
+        LoadQuery;
+        For K := 0 To QsN - 1 Do PAddPair(Id, QsK[K], QsV[K]);
+        If N = 3 Then
+        Begin
+          LoadForm;
+          For K := 0 To FmN - 1 Do PAddPair(Id, FmK[K], FmV[K]);
+        End;
+      End;
+    2 :
+      Begin
+        LoadForm;
+        For K := 0 To FmN - 1 Do PAddPair(Id, FmK[K], FmV[K]);
+      End;
+    4 :
+      Begin
+        LoadCookies;
+        For K := 0 To CkN - 1 Do PArrSet(Id, CkK[K], CkV[K]);
+      End;
+    5 :
+      Begin
+        For K := 0 To 21 Do
+        Begin
+          S := SvNames[K];
+          If S = 'SERVER_ADDR' Then MkStr(ServerVar('LOCAL_ADDR'), V)
+          Else If S = 'PHP_SELF' Then MkStr(ServerVar('SCRIPT_NAME'), V)
+          Else If S = 'SCRIPT_FILENAME' Then MkStr(ScriptPath[VmConn], V)
+          Else If S = 'DOCUMENT_ROOT' Then MkStr(Sites[Conns[VmConn].Site].Root, V)
+          Else If S = 'REQUEST_URI' Then
+          Begin
+            S := Conns[VmConn].Uri;
+            If Conns[VmConn].Query <> '' Then S := S + '?' + Conns[VmConn].Query;
+            MkStr(S, V);
+            S := 'REQUEST_URI';
+          End
+          Else If S = 'HTTPS' Then
+          Begin
+            If Not Conns[VmConn].IsTls Then Continue;
+            MkStr('on', V);
+          End
+          Else MkStr(ServerVar(S), V);
+          If (S = 'HTTP_REFERER') Or (S = 'HTTP_COOKIE') Or (S = 'CONTENT_TYPE') Or (S = 'HTTP_ACCEPT_LANGUAGE') Then
+            If V.L = 0 Then Continue;
+          PSetStrKey(Id, S, V);
+        End;
+        MkInt(NowUnix, V);
+        PSetStrKey(Id, 'REQUEST_TIME', V);
+        MkStr('CGI/1.1', V);
+        PSetStrKey(Id, 'GATEWAY_INTERFACE', V);
+      End;
+  End;
+  PSuperBuild := Id;
+End;
+
+{ element C[K] (sans le creer) }
+Procedure PGetElem(Var C0 : TCell; Var K : TCell; KPos : LongInt; Var R : TCell);
+Var C, T, V : TCell; I, N : LongInt; P : PBytes;
+Begin
+  MkNil(R);
+  C := C0;
+  If (C.T = vtObj) And Not PIsArr(C) And (C.I < NObj) And (ObjK[C.I] = okItem) Then ObjValue(C);
+  If PIsArr(C) Then
+  Begin
+    PArrGet(C.I, K, R);
+    Exit;
+  End;
+  If C.T = vtObj Then
+  Begin
+    { Session, dictionnaire, jeu d'enregistrements... : membre par defaut }
+    MkNil(V);
+    MemberCall(C, mDefault, 1, KPos, R, False, V);
+    If (R.T = vtObj) And (R.I < NObj) And (ObjK[R.I] = okItem) Then ObjValue(R);
+    Exit;
+  End;
+  If IsStrCell(C) Then
+  Begin
+    PStrCell(C, T);
+    I := CellInt(K);
+    N := T.L;
+    If I < 0 Then I := N + I;
+    If (I >= 0) And (I < N) Then
+    Begin
+      P := PoolPtr(T);
+      MkStrB(@P^[I], 1, R);
+    End
+    Else MkStr('', R);
+  End;
+End;
+
+Procedure PSetElem(Var C : TCell; Var K, V : TCell; KPos : LongInt);
+Var R : TCell;
+Begin
+  If PIsArr(C) Then PArrSet(C.I, K, V)
+  Else If C.T = vtObj Then MemberCall(C, mDefault, 1, KPos, R, True, V)
+  Else VmFail('Cannot use a scalar value as an array');
+End;
+
+{ ligne en cours d'un jeu d'enregistrements : Mode 1 associatif, 2 numerique, 3 les deux }
+Function PRowArr(Rs, Mode : LongInt) : LongInt;
+Var Id, C : LongInt; V, S, Kc : TCell;
+Begin
+  Id := PArrNew;
+  For C := 0 To Rss[Rs].NCol - 1 Do
+  Begin
+    RsValue(Rs, C, V);
+    { PHP rend les colonnes en chaines (NULL : null) }
+    If V.T = vtBool Then MkStr(Copy('01', V.I + 1, 1), S)
+    Else If V.T <> vtNil Then PStrCell(V, S)
+    Else S := V;
+    If (Mode And 2) <> 0 Then
+    Begin
+      MkInt(C, Kc);
+      PArrSet(Id, Kc, S);
+    End;
+    If (Mode And 1) <> 0 Then PSetStrKey(Id, Rss[Rs].ColNm[C], S);
+  End;
+  PRowArr := Id;
+End;
+
+{ suivant pour foreach : tableau (indice brut), jeu d'enregistrements (ligne) }
+Function PEachRs(Var C : TCell) : LongInt;
+Var K : LongInt;
+Begin
+  PEachRs := -1;
+  If (C.T <> vtObj) Or (C.I < 0) Or (C.I >= NObj) Then Exit;
+  K := -1;
+  If ObjK[C.I] = okDbRs Then K := ObjA[C.I]
+  Else If ObjK[C.I] = okDbStmt Then K := ObjB[C.I];
+  If (K >= 0) And ((K >= MaxRs) Or Not Rss[K].Used) Then K := -1;
+  PEachRs := K;
+End;
+
+Procedure PhpOp(Sub, A : LongInt);
+Var X, Y, Z, R : TCell; K, Id, Rs, I : LongInt;
+Begin
+  Case Sub Of
+    psBool : MkBool(PBool(Stk[SP]), Stk[SP]);
+    psNum :
+      Begin
+        X := Stk[SP];
+        PNumCell(X, Stk[SP]);
+      End;
+    psStr :
+      Begin
+        X := Stk[SP];
+        PStrCell(X, Stk[SP]);
+      End;
+    psGet :
+      Begin
+        X := Stk[SP - 1];
+        PGetElem(X, Stk[SP], SP, R);
+        Dec(SP);
+        Stk[SP] := R;
+      End;
+    psSet :
+      Begin
+        Y := Stk[SP];
+        X := Stk[SP - 2];
+        PSetElem(X, Stk[SP - 1], Y, SP - 1);
+        SP := SP - 2;
+        Stk[SP] := Y;
+      End;
+    psPush :
+      Begin
+        Y := Stk[SP];
+        X := Stk[SP - 1];
+        Dec(SP);
+        If PIsArr(X) Then PArrPush(X.I, Y) Else VmFail('[] : tableau attendu');
+        Stk[SP] := Y;
+      End;
+    psArrW :
+      Begin
+        K := AddrOf(Stk[SP]);
+        If Not MemOk(K) Then Exit;
+        X := Mem^[K];
+        If (X.T = vtObj) And (X.I < NObj) And (ObjK[X.I] = okItem) Then ObjValue(X);
+        If X.T = vtObj Then Stk[SP] := X
+        Else If (X.T = vtNil) Or ((X.T = vtBool) And (X.I = 0)) Or (IsStrCell(X) And (CellLen(X) = 0)) Then
+        Begin
+          MkObj(PArrNew, Mem^[K]);
+          Stk[SP] := Mem^[K];
+        End
+        Else If IsStrCell(X) Then
+        Begin
+          VmFail('cha'#140'ne modifi'#130'e par [] : non pris en charge');
+        End
+        Else VmFail('Cannot use a scalar value as an array');
+      End;
+    psSubW :
+      Begin
+        X := Stk[SP - 1];
+        PGetElem(X, Stk[SP], SP, R);
+        If (R.T <> vtObj) Then
+        Begin
+          If (R.T <> vtNil) And Not (IsStrCell(R) And (CellLen(R) = 0)) Then
+          Begin
+            VmFail('Cannot use a scalar value as an array');
+            Exit;
+          End;
+          MkObj(PArrNew, R);
+          PSetElem(X, Stk[SP], R, SP);
+        End;
+        Dec(SP);
+        Stk[SP] := R;
+      End;
+    psSubPushW :
+      Begin
+        X := Stk[SP];
+        MkObj(PArrNew, R);
+        If PIsArr(X) Then PArrPush(X.I, R) Else VmFail('[] : tableau attendu');
+        Stk[SP] := R;
+      End;
+    psNewArr :
+      Begin
+        MkObj(PArrNew, X);
+        Push(X);
+      End;
+    psAddK :
+      Begin
+        Y := Stk[SP]; X := Stk[SP - 1];
+        SP := SP - 2;
+        If PIsArr(Stk[SP]) Then PArrSet(Stk[SP].I, X, Y);
+      End;
+    psAddV :
+      Begin
+        Y := Stk[SP];
+        Dec(SP);
+        If PIsArr(Stk[SP]) Then PArrPush(Stk[SP].I, Y);
+      End;
+    psSpread :
+      Begin
+        Y := Stk[SP];
+        Dec(SP);
+        If PIsArr(Stk[SP]) And PIsArr(Y) Then
+        Begin
+          K := PArrNext(Y.I, 0);
+          While K >= 0 Do
+          Begin
+            Z := DVal^[K];
+            If DKey^[K].T = vtInt Then PArrPush(Stk[SP].I, Z) Else PArrSet(Stk[SP].I, DKey^[K], Z);
+            K := PArrNext(Y.I, K + 1);
+          End;
+        End;
+      End;
+    psDup2 :
+      Begin
+        X := Stk[SP - 1]; Y := Stk[SP];
+        Push(X); Push(Y);
+      End;
+    psDrop2 :
+      Begin
+        X := Stk[SP];
+        SP := SP - 2;
+        Stk[SP] := X;
+      End;
+    psIdent, psNIdent :
+      Begin
+        X := Stk[SP - 1]; Y := Stk[SP];
+        Dec(SP);
+        MkBool(PhpIdent(X, Y) = (Sub = psIdent), Stk[SP]);
+      End;
+    psCmp :
+      Begin
+        X := Stk[SP - 1]; Y := Stk[SP];
+        Dec(SP);
+        MkInt(PhpCompare(X, Y), Stk[SP]);
+      End;
+    psAdd :
+      Begin
+        X := Stk[SP - 1]; Y := Stk[SP];
+        Dec(SP);
+        If PIsArr(X) And PIsArr(Y) Then
+        Begin
+          { union : les cles de Y absentes de X }
+          Id := PArrCopy(X.I);
+          K := PArrNext(Y.I, 0);
+          While K >= 0 Do
+          Begin
+            If DictFind(Id, DKey^[K]) < 0 Then
+            Begin
+              Z := DVal^[K];
+              PArrSet(Id, DKey^[K], Z);
+            End;
+            K := PArrNext(Y.I, K + 1);
+          End;
+          MkObj(Id, Stk[SP]);
+        End
+        Else PhpArith(opAdd, X, Y, Stk[SP]);
+      End;
+    psBitAnd, psBitOr, psBitXor :
+      Begin
+        PNumCell(Stk[SP - 1], X); PNumCell(Stk[SP], Y);
+        Dec(SP);
+        If Sub = psBitAnd Then MkInt(CellInt(X) And CellInt(Y), Stk[SP])
+        Else If Sub = psBitOr Then MkInt(CellInt(X) Or CellInt(Y), Stk[SP])
+        Else MkInt(CellInt(X) Xor CellInt(Y), Stk[SP]);
+      End;
+    psSuper :
+      Begin
+        If (A < 1) Or (A > 9) Then A := 8;
+        If PSupObj[A] < 0 Then PSupObj[A] := PSuperBuild(A);
+        MkObj(PSupObj[A], X);
+        Push(X);
+      End;
+    psCopy :
+      If PIsArr(Stk[SP]) Then MkObj(PArrCopy(Stk[SP].I), Stk[SP]);
+    psIsset :
+      Begin
+        X := Stk[SP - 1];
+        PGetElem(X, Stk[SP], SP, R);
+        Dec(SP);
+        MkBool(R.T <> vtNil, Stk[SP]);
+      End;
+    psNotNull :
+      Begin
+        X := Stk[SP];
+        If (X.T = vtObj) And (X.I < NObj) And (ObjK[X.I] = okItem) Then ObjValue(X);
+        MkBool(X.T <> vtNil, Stk[SP]);
+      End;
+    psUnset :
+      Begin
+        X := Stk[SP - 1];
+        If PIsArr(X) Then
+        Begin
+          K := PArrFind(X.I, Stk[SP]);
+          If K >= 0 Then DObj^[K] := -1;
+        End
+        Else If X.T = vtObj Then
+        Begin
+          MkNil(Y);
+          MemberCall(X, mDefault, 1, SP, R, True, Y);
+        End;
+        SP := SP - 2;
+      End;
+    psEachNext :
+      Begin
+        X := Stk[SP - 1];
+        I := CellInt(Stk[SP]);
+        Dec(SP);
+        K := -1;
+        If (X.T = vtObj) And (X.I < NObj) And (ObjK[X.I] = okItem) Then ObjValue(X);
+        If PIsArr(X) Or ((X.T = vtObj) And (X.I < NObj) And (ObjK[X.I] In [okDict, okArr])) Then K := PArrNext(X.I, I)
+        Else
+        Begin
+          Rs := PEachRs(X);
+          If (Rs >= 0) And (I < Rss[Rs].NRow) Then K := I;
+        End;
+        MkInt(K, Stk[SP]);
+      End;
+    psEachKey, psEachVal :
+      Begin
+        X := Stk[SP - 1];
+        I := CellInt(Stk[SP]);
+        Dec(SP);
+        MkNil(R);
+        If (X.T = vtObj) And (X.I < NObj) And (ObjK[X.I] = okItem) Then ObjValue(X);
+        If PIsArr(X) Or ((X.T = vtObj) And (X.I < NObj) And (ObjK[X.I] In [okDict, okArr])) Then
+        Begin
+          If (I >= 0) And (I < NDict) Then
+          Begin
+            If Sub = psEachKey Then R := DKey^[I] Else R := DVal^[I];
+            { Scripting.Dictionary : la valeur de la cle }
+          End;
+        End
+        Else
+        Begin
+          Rs := PEachRs(X);
+          If Rs >= 0 Then
+          Begin
+            If Sub = psEachKey Then MkInt(I, R)
+            Else
+            Begin
+              Rss[Rs].Cur := I;
+              MkObj(PRowArr(Rs, 1), R);
+              Rss[Rs].Cur := I + 1;
+            End;
+          End;
+        End;
+        Stk[SP] := R;
+      End;
+    psIncE :
+      Begin
+        X := Stk[SP - 1];
+        PGetElem(X, Stk[SP], SP, R);
+        If (R.T = vtNil) And ((A = 2) Or (A = 4)) Then Z := R
+        Else
+        Begin
+          MkInt(1, Y);
+          If (A = 1) Or (A = 3) Then PhpArith(opAdd, R, Y, Z) Else PhpArith(opSub, R, Y, Z);
+        End;
+        PSetElem(X, Stk[SP], Z, SP);
+        Dec(SP);
+        If A <= 2 Then Stk[SP] := R Else Stk[SP] := Z;
+      End;
+    psCast :
+      Begin
+        X := Stk[SP];
+        Case A Of
+          1 :
+            Begin
+              PNumCell(X, Y);
+              If Y.T = vtReal Then
+              Begin
+                If (Y.R > 2147483647.0) Or (Y.R < -2147483648.0) Then MkInt(0, Y) Else MkInt(Trunc(Y.R), Y);
+              End;
+              Stk[SP] := Y;
+            End;
+          2 :
+            Begin
+              PNumCell(X, Y);
+              If Y.T = vtInt Then MkReal(Y.I, Y);
+              Stk[SP] := Y;
+            End;
+          3 : PStrCell(X, Stk[SP]);
+          4 : MkBool(PBool(X), Stk[SP]);
+          5 :
+            If Not PIsArr(X) Then
+            Begin
+              Id := PArrNew;
+              If X.T <> vtNil Then PArrPush(Id, X);
+              MkObj(Id, Stk[SP]);
+            End;
+          7 : MkNil(Stk[SP]);
+        End;
+      End;
+    psThrow :
+      Begin
+        PStrCell(Stk[SP], X);
+        Dec(SP);
+        VmFail('exception non attrap'#130'e : ' + CellPStr(X));
+      End;
+    psExitMsg :
+      Begin
+        X := Stk[SP];
+        Dec(SP);
+        If IsStrCell(X) Then OutCell(X, -1, -1);
+      End;
+  Else
+    VmFail('PHP : op'#130'ration ' + IStr(Sub) + ' inconnue');
+  End;
+End;
+
+{ ==================================================================== }
+{ Bases de donnees : mysqli, pg_*, PDO                                  }
+{ ==================================================================== }
+
+{ chaine echappee (sans guillemets) : MariaDB \ ' " ; PostgreSQL '' }
+Procedure PEscapeSql(Var C : TCell; Kind : LongInt; Var R : TCell);
+Var T : TCell; P : PBytes; B : TBuf; K : LongInt;
+Begin
+  PStrCell(C, T);
+  P := PoolPtr(T);
+  BufInit(B);
+  For K := 0 To T.L - 1 Do
+  Begin
+    If Kind = dbMy Then
+    Begin
+      Case P^[K] Of
+        0 : BufAdd(B, '\0');
+        10 : BufAdd(B, '\n');
+        13 : BufAdd(B, '\r');
+        26 : BufAdd(B, '\Z');
+        39, 34, 92 :
+          Begin
+            BufAddC(B, 92); BufAddC(B, P^[K]);
+          End;
+      Else
+        BufAddC(B, P^[K]);
+      End;
+    End
+    Else
+    Begin
+      If P^[K] = 39 Then BufAddC(B, 39);
+      BufAddC(B, P^[K]);
+    End;
+  End;
+  MkStrB(B.P, B.Len, R);
+  BufFree(B);
+End;
+
+{ valeur d'un parametre de requete preparee : texte SQL }
+Procedure PSqlValue(Var V : TCell; Kind : LongInt; Var B : TBuf);
+Var T, Q : TCell; P : PBytes;
+Begin
+  Case V.T Of
+    vtNil : BufAdd(B, 'NULL');
+    vtInt : BufAdd(B, IStr(V.I));
+    vtBool : BufAdd(B, IStr(V.I));
+    vtReal :
+      Begin
+        CellToStr(V, T);
+        P := PoolPtr(T);
+        BufAddB(B, P, T.L);
+      End;
+  Else
+    Begin
+      SqlQuote(V, Q, Kind);
+      P := PoolPtr(Q);
+      BufAddB(B, P, Q.L);
+    End;
+  End;
+End;
+
+{ requete de PDO : ? et :nom remplaces par les valeurs (tableau Params) }
+Procedure PBindSql(Var Sql : TCell; Params, Kind : LongInt; Var Out_ : TBuf);
+Var T, V, Kc : TCell; P : PBytes; K, N, Q, J, Np : LongInt; Nm : String;
+Begin
+  PStrCell(Sql, T);
+  N := 0; Q := 0;
+  K := 0;
+  While K < T.L Do
+  Begin
+    P := PoolPtr(T);
+    If (Q = 0) And ((P^[K] = 39) Or (P^[K] = 34)) Then Q := P^[K]
+    Else If (Q <> 0) And (P^[K] = Q) Then Q := 0;
+    If (Q = 0) And (P^[K] = 63) Then
+    Begin
+      MkNil(V);
+      If Params >= 0 Then
+      Begin
+        J := PArrNth(Params, N);
+        If J >= 0 Then V := DVal^[J];
+      End;
+      PSqlValue(V, Kind, Out_);
+      Inc(N);
+      Inc(K);
+      Continue;
+    End;
+    If (Q = 0) And (P^[K] = 36) And (K + 1 < T.L) And (P^[K + 1] >= 49) And (P^[K + 1] <= 57) Then
+    Begin
+      { $1, $2... de PostgreSQL (pg_query_params) }
+      J := K + 1; Np := 0;
+      While (J < T.L) And (P^[J] >= 48) And (P^[J] <= 57) Do
+      Begin
+        Np := Np * 10 + P^[J] - 48;
+        Inc(J);
+      End;
+      MkNil(V);
+      If Params >= 0 Then
+      Begin
+        Np := PArrNth(Params, Np - 1);
+        If Np >= 0 Then V := DVal^[Np];
+      End;
+      PSqlValue(V, Kind, Out_);
+      K := J;
+      Continue;
+    End;
+    If (Q = 0) And (P^[K] = 58) And (K + 1 < T.L) And (P^[K + 1] <> 58) And
+       (((P^[K + 1] Or 32) >= 97) And ((P^[K + 1] Or 32) <= 122) Or (P^[K + 1] = 95)) And
+       Not ((K > 0) And (P^[K - 1] = 58)) Then
+    Begin
+      Nm := '';
+      J := K + 1;
+      While (J < T.L) And (((P^[J] Or 32) >= 97) And ((P^[J] Or 32) <= 122) Or (P^[J] = 95) Or
+            ((P^[J] >= 48) And (P^[J] <= 57))) Do
+      Begin
+        Nm := Nm + Chr(P^[J]);
+        Inc(J);
+      End;
+      MkNil(V);
+      If Params >= 0 Then
+      Begin
+        MkStr(Nm, Kc);
+        PArrGet(Params, Kc, V);
+        If V.T = vtNil Then
+        Begin
+          MkStr(':' + Nm, Kc);
+          PArrGet(Params, Kc, V);
+        End;
+      End;
+      PSqlValue(V, Kind, Out_);
+      K := J;
+      Continue;
+    End;
+    BufAddC(Out_, P^[K]);
+    Inc(K);
+  End;
+End;
+
+Function PConnKind(ConnObj : LongInt) : LongInt;
+Begin
+  PConnKind := 0;
+  If (ConnObj >= 0) And (ConnObj < NObj) And (ObjK[ConnObj] = okDbConn) And (ObjA[ConnObj] >= 0) Then
+    PConnKind := DbC[ObjA[ConnObj]].Kind;
+End;
+
+{ membres de PHP des objets ; False : membre laisse aux objets d'ASP/PSP }
+Function PhpMember(Var Ob : TCell; M, Argc, ABase : LongInt; Var R : TCell; IsSet : Boolean; Var V : TCell) : Boolean;
+Var Id, K, Rs, Mode, I, C : LongInt; A0, A1, T, Kc : TCell; B : TBuf; S : String;
+Begin
+  PhpMember := True;
+  If Argc > 0 Then A0 := Stk[ABase] Else MkNil(A0);
+  If Argc > 1 Then A1 := Stk[ABase + 1] Else MkNil(A1);
+  Id := Ob.I;
+  MkNil(R);
+  Case ObjK[Id] Of
+    okPArr :
+      Case M Of
+        mCount : MkInt(DictCount(Id), R);
+        mDefault, mItem :
+          If IsSet Then PArrSet(Id, A0, V) Else PArrGet(Id, A0, R);
+      Else
+        VmFail('tableau : ->' + MemberNames[M] + ' impossible (classes non prises en charge)');
+      End;
+    okDbConn :
+      Begin
+        K := ObjA[Id];
+        Case M Of
+          mQuery, mExec :
+            If K < 0 Then VmFail('base de donn'#130'es : connexion non ouverte')
+            Else
+            Begin
+              DbRun(K, A0, M = mExec, R);
+              If (R.T = vtObj) And (R.I < NObj) And (ObjK[R.I] = okDbRs) Then
+              Begin
+                Rs := ObjA[R.I];
+                ObjB[Id] := Rss[Rs].Affected;
+                If Rss[Rs].NCol = 0 Then
+                Begin
+                  { INSERT, UPDATE... : vrai (mysqli), jeu vide (PDO) }
+                  If Rss[Rs].NRow = 0 Then Rss[Rs].NRow := 0;
+                End;
+              End
+              Else If R.T = vtInt Then ObjB[Id] := R.I;
+            End;
+          mQueryParams :
+            If K < 0 Then VmFail('base de donn'#130'es : connexion non ouverte')
+            Else
+            Begin
+              { pg_query_params($c, 'SELECT ... $1', [valeurs]) }
+              If PIsArr(A1) Then I := A1.I Else I := -1;
+              BufInit(B);
+              PBindSql(A0, I, DbC[K].Kind, B);
+              MkStrB(B.P, B.Len, T);
+              BufFree(B);
+              DbRun(K, T, False, R);
+              If (R.T = vtObj) And (R.I < NObj) And (ObjK[R.I] = okDbRs) Then ObjB[Id] := Rss[ObjA[R.I]].Affected;
+            End;
+          mPrepare :
+            Begin
+              I := ObjNew(okDbStmt, Id, -1);
+              PStrCell(A0, ObjS[I]);
+              MkObj(I, R);
+            End;
+          mRealEscape, mQuote :
+            Begin
+              If K >= 0 Then C := DbC[K].Kind Else C := dbMy;
+              PEscapeSql(A0, C, R);
+              If M = mQuote Then
+              Begin
+                T := R;
+                MkStr('''', Kc);
+                Concat2(Kc, T, R);
+                T := R;
+                Concat2(T, Kc, R);
+              End;
+            End;
+          mAffectedRows : MkInt(ObjB[Id], R);
+          mInsertId, mLastInsertId : If K >= 0 Then MkInt(DbC[K].InsId, R) Else MkInt(0, R);
+          mSetCharset, mSetAttribute : MkBool(True, R);
+          mError, mConnectError : MkStr('', R);
+          mErrno : MkInt(0, R);
+          mBeginTrans, mCommit, mRollBack :
+            If K >= 0 Then
+            Begin
+              If M = mBeginTrans Then MkStr('BEGIN', T) Else If M = mCommit Then MkStr('COMMIT', T)
+              Else MkStr('ROLLBACK', T);
+              DbRun(K, T, True, R);
+              If Not VmWait Then MkBool(True, R);
+            End;
+        Else
+          PhpMember := False;
+        End;
+      End;
+    okDbStmt :
+      Begin
+        Case M Of
+          mExecute :
+            Begin
+              C := ObjA[Id];
+              If (C < 0) Or (ObjK[C] <> okDbConn) Or (ObjA[C] < 0) Then
+              Begin
+                VmFail('PDO : connexion ferm'#130'e');
+                Exit;
+              End;
+              If PIsArr(A0) Then I := A0.I Else I := ObjH[Id];
+              BufInit(B);
+              PBindSql(ObjS[Id], I, DbC[ObjA[C]].Kind, B);
+              MkStrB(B.P, B.Len, T);
+              BufFree(B);
+              DbRun(ObjA[C], T, False, R);
+              If (R.T = vtObj) And (R.I < NObj) And (ObjK[R.I] = okDbRs) Then
+              Begin
+                If (ObjB[Id] >= 0) And (ObjB[Id] <> ObjA[R.I]) Then RsFree(ObjB[Id]);
+                ObjB[Id] := ObjA[R.I];
+                ObjB[C] := Rss[ObjB[Id]].Affected;
+                MkBool(True, R);
+              End;
+            End;
+          mBindValue, mBindParam :
+            Begin
+              If ObjH[Id] < 0 Then ObjH[Id] := PArrNew;
+              If A0.T = vtInt Then
+              Begin
+                MkInt(A0.I - 1, Kc);
+                PArrSet(ObjH[Id], Kc, A1);
+              End
+              Else
+              Begin
+                PStrCell(A0, T);
+                S := CellPStr(T);
+                If (S <> '') And (S[1] = ':') Then Delete(S, 1, 1);
+                MkStr(S, Kc);
+                PArrSet(ObjH[Id], Kc, A1);
+              End;
+              MkBool(True, R);
+            End;
+          mBindParamM :
+            Begin
+              { mysqli : bind_param('is', $a, $b) ; les valeurs sont prises a l'appel }
+              If ObjH[Id] < 0 Then ObjH[Id] := PArrNew;
+              For I := 1 To Argc - 1 Do
+              Begin
+                MkInt(I - 1, Kc);
+                PArrSet(ObjH[Id], Kc, Stk[ABase + I]);
+              End;
+              MkBool(True, R);
+            End;
+          mGetResult :
+            Begin
+              Rs := ObjB[Id];
+              If (Rs < 0) Or (Rs >= MaxRs) Or Not Rss[Rs].Used Then MkBool(False, R)
+              Else
+              Begin
+                MkObj(ObjNew(okDbRs, Rs, 0), R);
+                ObjB[Id] := -1;               { le jeu appartient maintenant au resultat }
+              End;
+            End;
+          mCloseCursor, mClose, mFree :
+            Begin
+              If ObjB[Id] >= 0 Then RsFree(ObjB[Id]);
+              ObjB[Id] := -1;
+              MkBool(True, R);
+            End;
+        Else
+          Begin
+            { fetch, fetchAll, rowCount... : le jeu de la derniere execution }
+            Rs := ObjB[Id];
+            If (Rs < 0) Or (Rs >= MaxRs) Or Not Rss[Rs].Used Then
+            Begin
+              If (M = mFetch) Or (M = mFetchColumn) Then MkBool(False, R)
+              Else If (M = mRowCount) Then MkInt(0, R)
+              Else If (M = mFetchAllP) Then MkObj(PArrNew, R)
+              Else VmFail('PDOStatement : execute() d''abord');
+              Exit;
+            End;
+            I := ObjNew(okDbRs, Rs, 0);
+            MkObj(I, T);
+            PhpMember := PhpMember(T, M, Argc, ABase, R, IsSet, V);
+            ObjA[I] := -1;
+          End;
+        End;
+      End;
+    okDbRs :
+      Begin
+        Rs := ObjA[Id];
+        If (Rs < 0) Or (Rs >= MaxRs) Or Not Rss[Rs].Used Then
+        Begin
+          If (M = mFree) Or (M = mClose) Or (M = mCloseCursor) Then Exit;
+          If (M = mFetchAssoc) Or (M = mFetchRow) Or (M = mFetchArray) Or (M = mFetchObject) Then Exit;
+          PhpMember := False;
+          Exit;
+        End;
+        Case M Of
+          mFetchAssoc, mFetchObject, mFetchRow, mFetchArray, mFetch :
+            Begin
+              If Rss[Rs].Cur >= Rss[Rs].NRow Then
+              Begin
+                If M = mFetch Then MkBool(False, R);
+                Exit;
+              End;
+              Mode := 1;
+              If M = mFetchRow Then Mode := 2
+              Else If M = mFetchArray Then
+              Begin
+                Mode := 3;
+                If Argc > 0 Then Mode := CellInt(A0);
+              End
+              Else If (M = mFetch) And (Argc > 0) Then
+              Begin
+                Case CellInt(A0) Of
+                  3 : Mode := 2;
+                  4 : Mode := 3;
+                  7 : Mode := 7;
+                Else
+                  Mode := 1;
+                End;
+              End;
+              If Mode = 7 Then RsValue(Rs, 0, R)
+              Else MkObj(PRowArr(Rs, Mode), R);
+              Inc(Rss[Rs].Cur);
+            End;
+          mFetchColumn :
+            Begin
+              If Rss[Rs].Cur >= Rss[Rs].NRow Then
+              Begin
+                MkBool(False, R);
+                Exit;
+              End;
+              RsValue(Rs, CellInt(A0), T);
+              If T.T <> vtNil Then PStrCell(T, R);
+              Inc(Rss[Rs].Cur);
+            End;
+          mFetchAllM, mFetchAllP :
+            Begin
+              Mode := 1;
+              If Argc > 0 Then
+              Begin
+                I := CellInt(A0);
+                If M = mFetchAllM Then
+                Begin
+                  If I = 2 Then Mode := 2 Else If I = 3 Then Mode := 3;
+                End
+                Else If I = 3 Then Mode := 2 Else If I = 4 Then Mode := 3 Else If I = 7 Then Mode := 7;
+              End;
+              I := PArrNew;
+              While Rss[Rs].Cur < Rss[Rs].NRow Do
+              Begin
+                If Mode = 7 Then
+                Begin
+                  RsValue(Rs, 0, T);
+                  If T.T <> vtNil Then PStrCell(T, Kc) Else Kc := T;
+                  PArrPush(I, Kc);
+                End
+                Else
+                Begin
+                  MkObj(PRowArr(Rs, Mode), T);
+                  PArrPush(I, T);
+                End;
+                Inc(Rss[Rs].Cur);
+              End;
+              MkObj(I, R);
+            End;
+          mRowCount, mNumRows :
+            If (Rss[Rs].NCol = 0) Or (M = mRowCount) And (Rss[Rs].NRow = 0) Then MkInt(Rss[Rs].Affected, R)
+            Else MkInt(Rss[Rs].NRow, R);
+          mAffectedRows : MkInt(Rss[Rs].Affected, R);
+          mFieldCountP : MkInt(Rss[Rs].NCol, R);
+          mFieldNameP :
+            Begin
+              C := CellInt(A0);
+              If (C >= 0) And (C < Rss[Rs].NCol) Then MkStr(Rss[Rs].ColNm[C], R) Else MkBool(False, R);
+            End;
+          mDataSeek :
+            Begin
+              Rss[Rs].Cur := CellInt(A0);
+              MkBool(True, R);
+            End;
+          mFetchResult :
+            Begin
+              { pg_fetch_result(res, ligne, colonne) }
+              I := Rss[Rs].Cur;
+              If Argc >= 2 Then
+              Begin
+                Rss[Rs].Cur := CellInt(A0);
+                C := RsCol(Rs, A1);
+              End
+              Else C := RsCol(Rs, A0);
+              If C >= 0 Then
+              Begin
+                RsValue(Rs, C, T);
+                If T.T <> vtNil Then PStrCell(T, R);
+              End;
+              Rss[Rs].Cur := I;
+            End;
+          mFree, mCloseCursor :
+            Begin
+              RsFree(Rs);
+              ObjA[Id] := -1;
+              MkBool(True, R);
+            End;
+        Else
+          PhpMember := False;
+        End;
+      End;
+  Else
+    PhpMember := False;
+  End;
+End;
+
+{ ==================================================================== }
+{ Bibliotheque de fonctions de PHP                                      }
+{ ==================================================================== }
+
+Var
+  PFhH, PFhMode, PFhPos : Array[0..15] Of LongInt;     { fopen }
+  PFhBuf : Array[0..15] Of TBuf;
+  PFhUsed : Array[0..15] Of Boolean;
+  PMd5Out : TBlk;
+  PShaOut : TB20;
+
+{ hasard dans [0, 1[ (en double precision) }
+Function PRnd : Double;
+Var D : Double;
+Begin
+  D := VmRand;
+  PRnd := D / 2147483648.0;
+End;
+
+Function PDiff(A, B : LongInt) : Double;
+Var D : Double;
+Begin
+  D := A;
+  PDiff := D - B;
+End;
+
+Procedure PRet(Var B : TBuf; Var R : TCell);
+Begin
+  MkStrB(B.P, B.Len, R);
+  BufFree(B);
+End;
+
+Function PInt(Var C : TCell) : LongInt;
+Var T : TCell;
+Begin
+  PNumCell(C, T);
+  If T.T = vtReal Then
+  Begin
+    If (T.R > 2147483647.0) Or (T.R < -2147483648.0) Then PInt := 0 Else PInt := Trunc(T.R);
+  End
+  Else PInt := T.I;
+End;
+
+Function PReal(Var C : TCell) : Double;
+Var T : TCell;
+Begin
+  PNumCell(C, T);
+  If T.T = vtReal Then PReal := T.R Else PReal := T.I;
+End;
+
+Function PLow(C : Byte) : Byte;
+Begin
+  If (C >= 65) And (C <= 90) Then PLow := C + 32 Else PLow := C;
+End;
+
+Function PUp(C : Byte) : Byte;
+Begin
+  If (C >= 97) And (C <= 122) Then PUp := C - 32 Else PUp := C;
+End;
+
+{ position de N dans H a partir de From (-1 : absent) }
+Function PFind(H : PBytes; HN : LongInt; N : PBytes; NN, From : LongInt; NoCase : Boolean) : LongInt;
+Var K, J : LongInt;
+Begin
+  PFind := -1;
+  If NN = 0 Then
+  Begin
+    If From <= HN Then PFind := From;
+    Exit;
+  End;
+  For K := From To HN - NN Do
+  Begin
+    J := 0;
+    If NoCase Then
+      While (J < NN) And (PLow(H^[K + J]) = PLow(N^[J])) Do Inc(J)
+    Else
+      While (J < NN) And (H^[K + J] = N^[J]) Do Inc(J);
+    If J = NN Then
+    Begin
+      PFind := K;
+      Exit;
+    End;
+  End;
+End;
+
+Function PFindRev(H : PBytes; HN : LongInt; N : PBytes; NN : LongInt; NoCase : Boolean) : LongInt;
+Var K, J : LongInt;
+Begin
+  PFindRev := -1;
+  For K := HN - NN DownTo 0 Do
+  Begin
+    J := 0;
+    If NoCase Then
+      While (J < NN) And (PLow(H^[K + J]) = PLow(N^[J])) Do Inc(J)
+    Else
+      While (J < NN) And (H^[K + J] = N^[J]) Do Inc(J);
+    If J = NN Then
+    Begin
+      PFindRev := K;
+      Exit;
+    End;
+  End;
+End;
+
+Function PSp(N : LongInt) : String;
+Var S : String;
+Begin
+  S := '';
+  While Length(S) < N Do S := S + ' ';
+  PSp := S;
+End;
+
+{ texte d'une cle (print_r, json...) }
+Procedure PAddCell(Var B : TBuf; Var C : TCell);
+Var T : TCell;
+Begin
+  PStrCell(C, T);
+  If T.L > 0 Then BufAddB(B, PoolPtr(T), T.L);
+End;
+
+Procedure PPrintR(Var V : TCell; Ind : LongInt; Var B : TBuf);
+Var K : LongInt; X : TCell;
+Begin
+  If PIsArr(V) Then
+  Begin
+    BufAdd(B, 'Array' + #10 + PSp(Ind) + '(' + #10);
+    K := PArrNext(V.I, 0);
+    While K >= 0 Do
+    Begin
+      BufAdd(B, PSp(Ind + 4) + '[');
+      PAddCell(B, DKey^[K]);
+      BufAdd(B, '] => ');
+      X := DVal^[K];
+      PPrintR(X, Ind + 8, B);
+      BufAdd(B, #10);
+      K := PArrNext(V.I, K + 1);
+    End;
+    BufAdd(B, PSp(Ind) + ')' + #10);
+  End
+  Else PAddCell(B, V);
+End;
+
+Procedure PVarDump(Var V : TCell; Ind : LongInt; Var B : TBuf);
+Var K : LongInt; X, T : TCell;
+Begin
+  BufAdd(B, PSp(Ind));
+  X := V;
+  If (X.T = vtObj) And Not PIsArr(X) Then ObjValue(X);
+  If PIsArr(X) Then
+  Begin
+    BufAdd(B, 'array(' + IStr(DictCount(X.I)) + ') {' + #10);
+    K := PArrNext(X.I, 0);
+    While K >= 0 Do
+    Begin
+      BufAdd(B, PSp(Ind + 2) + '[');
+      If DKey^[K].T = vtInt Then BufAdd(B, IStr(DKey^[K].I))
+      Else
+      Begin
+        BufAdd(B, '"');
+        PAddCell(B, DKey^[K]);
+        BufAdd(B, '"');
+      End;
+      BufAdd(B, ']=>' + #10);
+      T := DVal^[K];
+      PVarDump(T, Ind + 2, B);
+      K := PArrNext(X.I, K + 1);
+    End;
+    BufAdd(B, PSp(Ind) + '}' + #10);
+    Exit;
+  End;
+  Case X.T Of
+    vtNil : BufAdd(B, 'NULL');
+    vtInt : BufAdd(B, 'int(' + IStr(X.I) + ')');
+    vtReal, vtDate : BufAdd(B, 'float(' + PhpRealStr(X.R) + ')');
+    vtBool : If X.I <> 0 Then BufAdd(B, 'bool(true)') Else BufAdd(B, 'bool(false)');
+    vtObj : BufAdd(B, 'object(' + IStr(X.I) + ')');
+  Else
+    Begin
+      PStrCell(X, T);
+      BufAdd(B, 'string(' + IStr(T.L) + ') "');
+      PAddCell(B, T);
+      BufAdd(B, '"');
+    End;
+  End;
+  BufAdd(B, #10);
+End;
+
+Procedure PVarExport(Var V : TCell; Ind : LongInt; Var B : TBuf);
+Var K, J : LongInt; X, T : TCell; P : PBytes;
+Begin
+  X := V;
+  If PIsArr(X) Then
+  Begin
+    BufAdd(B, 'array (' + #10);
+    K := PArrNext(X.I, 0);
+    While K >= 0 Do
+    Begin
+      BufAdd(B, PSp(Ind + 2));
+      T := DKey^[K];
+      PVarExport(T, Ind + 2, B);
+      BufAdd(B, ' => ');
+      T := DVal^[K];
+      If PIsArr(T) Then BufAdd(B, #10 + PSp(Ind + 2));
+      PVarExport(T, Ind + 2, B);
+      BufAdd(B, ',' + #10);
+      K := PArrNext(X.I, K + 1);
+    End;
+    BufAdd(B, PSp(Ind) + ')');
+    Exit;
+  End;
+  Case X.T Of
+    vtNil : BufAdd(B, 'NULL');
+    vtInt : BufAdd(B, IStr(X.I));
+    vtReal :
+      Begin
+        BufAdd(B, PhpRealStr(X.R));
+        If (X.R = Int(X.R)) And (Abs(X.R) < 1E15) Then BufAdd(B, '.0');
+      End;
+    vtBool : If X.I <> 0 Then BufAdd(B, 'true') Else BufAdd(B, 'false');
+  Else
+    Begin
+      PStrCell(X, T);
+      BufAddC(B, 39);
+      P := PoolPtr(T);
+      For J := 0 To T.L - 1 Do
+      Begin
+        If (P^[J] = 39) Or (P^[J] = 92) Then BufAddC(B, 92);
+        BufAddC(B, P^[J]);
+      End;
+      BufAddC(B, 39);
+    End;
+  End;
+End;
+
+{ --- JSON --- }
+
+Function PIsList(Id : LongInt) : Boolean;
+Var K, N : LongInt;
+Begin
+  PIsList := True;
+  N := 0;
+  K := PArrNext(Id, 0);
+  While K >= 0 Do
+  Begin
+    If (DKey^[K].T <> vtInt) Or (DKey^[K].I <> N) Then
+    Begin
+      PIsList := False;
+      Exit;
+    End;
+    Inc(N);
+    K := PArrNext(Id, K + 1);
+  End;
+End;
+
+Procedure PJsonStr(P : PBytes; N, Flags : LongInt; Var B : TBuf);
+Var K, U, L : LongInt; C : Byte;
+Begin
+  BufAddC(B, 34);
+  K := 0;
+  While K < N Do
+  Begin
+    C := P^[K];
+    Case C Of
+      34 : BufAdd(B, '\"');
+      92 : BufAdd(B, '\\');
+      47 : If (Flags And 64) <> 0 Then BufAddC(B, 47) Else BufAdd(B, '\/');
+      8 : BufAdd(B, '\b');
+      12 : BufAdd(B, '\f');
+      10 : BufAdd(B, '\n');
+      13 : BufAdd(B, '\r');
+      9 : BufAdd(B, '\t');
+    Else
+      If C < 32 Then BufAdd(B, '\u' + LoStr(Hex(C, 4)))
+      Else If (C < 128) Or ((Flags And 256) <> 0) Then BufAddC(B, C)
+      Else
+      Begin
+        { UTF-8 -> \uXXXX }
+        If (C And $E0) = $C0 Then
+        Begin
+          U := C And $1F; L := 1;
+        End
+        Else If (C And $F0) = $E0 Then
+        Begin
+          U := C And $0F; L := 2;
+        End
+        Else If (C And $F8) = $F0 Then
+        Begin
+          U := C And $07; L := 3;
+        End
+        Else
+        Begin
+          U := C; L := 0;
+        End;
+        While (L > 0) And (K + 1 < N) Do
+        Begin
+          Inc(K);
+          U := (U Shl 6) Or (P^[K] And $3F);
+          Dec(L);
+        End;
+        If U >= $10000 Then
+        Begin
+          U := U - $10000;
+          BufAdd(B, '\u' + LoStr(Hex($D800 + (U Shr 10), 4)) + '\u' + LoStr(Hex($DC00 + (U And $3FF), 4)));
+        End
+        Else BufAdd(B, '\u' + LoStr(Hex(U, 4)));
+      End;
+    End;
+    Inc(K);
+  End;
+  BufAddC(B, 34);
+End;
+
+Procedure PJsonEnc(Var V : TCell; Flags, Ind : LongInt; Var B : TBuf);
+Var K, N : LongInt; X, T : TCell; List, Pretty : Boolean;
+Begin
+  X := V;
+  If (X.T = vtObj) And Not PIsArr(X) Then ObjValue(X);
+  Pretty := (Flags And 128) <> 0;
+  If PIsArr(X) Then
+  Begin
+    List := PIsList(X.I);
+    If List Then BufAddC(B, 91) Else BufAddC(B, 123);
+    N := 0;
+    K := PArrNext(X.I, 0);
+    While K >= 0 Do
+    Begin
+      If N > 0 Then BufAddC(B, 44);
+      If Pretty Then BufAdd(B, #10 + PSp(Ind + 4));
+      If Not List Then
+      Begin
+        PStrCell(DKey^[K], T);
+        PJsonStr(PoolPtr(T), T.L, Flags, B);
+        BufAddC(B, 58);
+        If Pretty Then BufAddC(B, 32);
+      End;
+      T := DVal^[K];
+      PJsonEnc(T, Flags, Ind + 4, B);
+      Inc(N);
+      K := PArrNext(X.I, K + 1);
+    End;
+    If Pretty And (N > 0) Then BufAdd(B, #10 + PSp(Ind));
+    If List Then BufAddC(B, 93) Else BufAddC(B, 125);
+    Exit;
+  End;
+  Case X.T Of
+    vtNil : BufAdd(B, 'null');
+    vtInt : BufAdd(B, IStr(X.I));
+    vtBool : If X.I <> 0 Then BufAdd(B, 'true') Else BufAdd(B, 'false');
+    vtReal :
+      Begin
+        BufAdd(B, PhpRealStr(X.R));
+        If (X.R = Int(X.R)) And (Abs(X.R) < 1E15) Then BufAdd(B, '.0');
+      End;
+  Else
+    Begin
+      PStrCell(X, T);
+      PJsonStr(PoolPtr(T), T.L, Flags, B);
+    End;
+  End;
+End;
+
+{ decodage JSON (objets -> tableaux associatifs) }
+Var
+  JP : PBytes;
+  JN, JK : LongInt;
+  JErr : Boolean;
+
+Procedure JWs;
+Begin
+  While (JK < JN) And (JP^[JK] In [32, 9, 10, 13]) Do Inc(JK);
+End;
+
+Procedure JValue(Var R : TCell);
+Var B : TBuf; U, K : LongInt; S : String; Id : LongInt; Kc, V : TCell; D : Double; E : LongInt; Rl : Boolean;
+Begin
+  MkNil(R);
+  JWs;
+  If JK >= JN Then
+  Begin
+    JErr := True;
+    Exit;
+  End;
+  Case JP^[JK] Of
+    123, 91 :
+      Begin
+        Id := PArrNew;
+        MkObj(Id, R);
+        If JP^[JK] = 91 Then
+        Begin
+          Inc(JK);
+          JWs;
+          If (JK < JN) And (JP^[JK] = 93) Then
+          Begin
+            Inc(JK);
+            Exit;
+          End;
+          Repeat
+            JValue(V);
+            If JErr Then Exit;
+            PArrPush(Id, V);
+            JWs;
+            If (JK < JN) And (JP^[JK] = 44) Then Inc(JK) Else Break;
+          Until False;
+          If (JK < JN) And (JP^[JK] = 93) Then Inc(JK) Else JErr := True;
+        End
+        Else
+        Begin
+          Inc(JK);
+          JWs;
+          If (JK < JN) And (JP^[JK] = 125) Then
+          Begin
+            Inc(JK);
+            Exit;
+          End;
+          Repeat
+            JValue(Kc);
+            If JErr Or Not IsStrCell(Kc) Then
+            Begin
+              JErr := True;
+              Exit;
+            End;
+            JWs;
+            If (JK < JN) And (JP^[JK] = 58) Then Inc(JK) Else
+            Begin
+              JErr := True;
+              Exit;
+            End;
+            JValue(V);
+            If JErr Then Exit;
+            PArrSet(Id, Kc, V);
+            JWs;
+            If (JK < JN) And (JP^[JK] = 44) Then Inc(JK) Else Break;
+          Until False;
+          If (JK < JN) And (JP^[JK] = 125) Then Inc(JK) Else JErr := True;
+        End;
+      End;
+    34 :
+      Begin
+        BufInit(B);
+        Inc(JK);
+        While (JK < JN) And (JP^[JK] <> 34) Do
+        Begin
+          If (JP^[JK] = 92) And (JK + 1 < JN) Then
+          Begin
+            Inc(JK);
+            Case JP^[JK] Of
+              110 : BufAddC(B, 10);
+              116 : BufAddC(B, 9);
+              114 : BufAddC(B, 13);
+              98 : BufAddC(B, 8);
+              102 : BufAddC(B, 12);
+              117 :
+                Begin
+                  U := 0;
+                  For K := 1 To 4 Do
+                    If JK + 1 < JN Then
+                    Begin
+                      Inc(JK);
+                      U := U * 16 + HexV(Chr(JP^[JK]));
+                    End;
+                  AddUtf8(B, U);
+                End;
+            Else
+              BufAddC(B, JP^[JK]);
+            End;
+          End
+          Else BufAddC(B, JP^[JK]);
+          Inc(JK);
+        End;
+        Inc(JK);
+        PRet(B, R);
+      End;
+    116 :
+      Begin
+        MkBool(True, R);
+        JK := JK + 4;
+      End;
+    102 :
+      Begin
+        MkBool(False, R);
+        JK := JK + 5;
+      End;
+    110 : JK := JK + 4;
+  Else
+    Begin
+      S := '';
+      While (JK < JN) And (JP^[JK] In [43, 45, 46, 48..57, 69, 101]) Do
+      Begin
+        S := S + Chr(JP^[JK]);
+        Inc(JK);
+      End;
+      If S = '' Then
+      Begin
+        JErr := True;
+        Exit;
+      End;
+      If PParseNum(@S[1], Length(S), Rl, E, D) Then
+      Begin
+        If Rl Then MkReal(D, R) Else MkInt(E, R);
+      End
+      Else JErr := True;
+    End;
+  End;
+End;
+
+{ --- tri --- }
+Var
+  SortFlags : LongInt;
+  SortByKey, SortRev : Boolean;
+
+Function SortCmp(A, B : LongInt) : LongInt;
+Var X, Y, Sx, Sy : TCell; R : LongInt;
+Begin
+  If SortByKey Then
+  Begin
+    X := DKey^[A]; Y := DKey^[B];
+  End
+  Else
+  Begin
+    X := DVal^[A]; Y := DVal^[B];
+  End;
+  If (SortFlags And 2) <> 0 Then
+  Begin
+    PStrCell(X, Sx); PStrCell(Y, Sy);
+    R := StrCmpCells(Sx, Sy, (SortFlags And 8) <> 0);
+  End
+  Else R := PhpCompare(X, Y);
+  If SortRev Then R := -R;
+  SortCmp := R;
+End;
+
+{ trier les entrees du tableau (tri par fusion, stable) ; Renum : cles 0.. }
+Procedure PSortArr(Id : LongInt; ByKey, Rev, Renum : Boolean; Flags : LongInt);
+Var Idx, Tmp : PLongs; N, K, W, L, M, H, I, J, O : LongInt; KCopy, VCopy : PCells;
+Begin
+  N := DictCount(Id);
+  If N < 2 Then
+  Begin
+    If Renum Then PArrRenumber(Id);
+    Exit;
+  End;
+  SortByKey := ByKey; SortRev := Rev; SortFlags := Flags;
+  GetMem(Idx, N * 4); GetMem(Tmp, N * 4);
+  N := 0;
+  K := PArrNext(Id, 0);
+  While K >= 0 Do
+  Begin
+    Idx^[N] := K;
+    Inc(N);
+    K := PArrNext(Id, K + 1);
+  End;
+  W := 1;
+  While W < N Do
+  Begin
+    L := 0;
+    While L < N Do
+    Begin
+      M := L + W; If M > N Then M := N;
+      H := L + 2 * W; If H > N Then H := N;
+      I := L; J := M; O := L;
+      While (I < M) And (J < H) Do
+      Begin
+        If SortCmp(Idx^[J], Idx^[I]) < 0 Then
+        Begin
+          Tmp^[O] := Idx^[J]; Inc(J);
+        End
+        Else
+        Begin
+          Tmp^[O] := Idx^[I]; Inc(I);
+        End;
+        Inc(O);
+      End;
+      While I < M Do
+      Begin
+        Tmp^[O] := Idx^[I]; Inc(I); Inc(O);
+      End;
+      While J < H Do
+      Begin
+        Tmp^[O] := Idx^[J]; Inc(J); Inc(O);
+      End;
+      L := L + 2 * W;
+    End;
+    For I := 0 To N - 1 Do Idx^[I] := Tmp^[I];
+    W := W * 2;
+  End;
+  { recopier dans l'ordre trie, dans les memes entrees }
+  GetMem(KCopy, N * SizeOf(TCell)); GetMem(VCopy, N * SizeOf(TCell));
+  For I := 0 To N - 1 Do
+  Begin
+    KCopy^[I] := DKey^[Idx^[I]]; VCopy^[I] := DVal^[Idx^[I]];
+  End;
+  I := 0;
+  K := PArrNext(Id, 0);
+  While (K >= 0) And (I < N) Do
+  Begin
+    DKey^[K] := KCopy^[I]; DVal^[K] := VCopy^[I];
+    Inc(I);
+    K := PArrNext(Id, K + 1);
+  End;
+  FreeMem(KCopy, N * SizeOf(TCell)); FreeMem(VCopy, N * SizeOf(TCell));
+  FreeMem(Idx, N * 4); FreeMem(Tmp, N * 4);
+  If Renum Then
+  Begin
+    K := PArrNext(Id, 0);
+    I := 0;
+    While K >= 0 Do
+    Begin
+      MkInt(I, DKey^[K]);
+      Inc(I);
+      K := PArrNext(Id, K + 1);
+    End;
+    ObjA[Id] := I;
+  End;
+End;
+
+{ nombre en base 2..36 (negatif : sur 32 bits, comme un entier non signe) }
+Function PBaseStr(D : Double; Base : LongInt; Upper : Boolean) : String;
+Var S : String; J : LongInt;
+Begin
+  D := Int(D);
+  If D < 0 Then D := D + 4294967296.0;
+  If D = 0 Then
+  Begin
+    PBaseStr := '0';
+    Exit;
+  End;
+  S := '';
+  While D >= 1 Do
+  Begin
+    J := Trunc(D - Int(D / Base) * Base);
+    D := Int(D / Base);
+    If J < 10 Then S := Chr(48 + J) + S
+    Else If Upper Then S := Chr(55 + J) + S
+    Else S := Chr(87 + J) + S;
+  End;
+  PBaseStr := S;
+End;
+
+{ --- sprintf --- }
+Procedure PSprintf(Var Arg : Array Of TCell; Argc, First : LongInt; Var B : TBuf);
+Var F, T, X : TCell; P : PBytes; K, N, An, W, Pr, J, V, Base : LongInt; Left, Plus, Zero : Boolean; PadC : Byte;
+    Cv : Char; S, Ds : String; D : Double; Neg : Boolean;
+Begin
+  PStrCell(Arg[First], F);
+  An := First + 1;
+  K := 0;
+  While K < F.L Do
+  Begin
+    P := PoolPtr(F);
+    If P^[K] <> 37 Then
+    Begin
+      BufAddC(B, P^[K]);
+      Inc(K);
+      Continue;
+    End;
+    Inc(K);
+    If (K < F.L) And (P^[K] = 37) Then
+    Begin
+      BufAddC(B, 37);
+      Inc(K);
+      Continue;
+    End;
+    { numero d'argument n$ }
+    J := K; V := 0;
+    While (J < F.L) And (P^[J] >= 48) And (P^[J] <= 57) Do
+    Begin
+      V := V * 10 + P^[J] - 48;
+      Inc(J);
+    End;
+    If (J < F.L) And (P^[J] = 36) And (V > 0) Then
+    Begin
+      An := First + V;
+      K := J + 1;
+    End;
+    Left := False; Plus := False; Zero := False; PadC := 32;
+    While (K < F.L) And (P^[K] In [45, 43, 48, 32, 39]) Do
+    Begin
+      Case P^[K] Of
+        45 : Left := True;
+        43 : Plus := True;
+        48 : PadC := 48;
+        32 : PadC := 32;
+        39 :
+          Begin
+            Inc(K);
+            If K < F.L Then PadC := P^[K];
+          End;
+      End;
+      Inc(K);
+    End;
+    W := 0;
+    While (K < F.L) And (P^[K] >= 48) And (P^[K] <= 57) Do
+    Begin
+      W := W * 10 + P^[K] - 48;
+      Inc(K);
+    End;
+    Pr := -1;
+    If (K < F.L) And (P^[K] = 46) Then
+    Begin
+      Inc(K);
+      Pr := 0;
+      While (K < F.L) And (P^[K] >= 48) And (P^[K] <= 57) Do
+      Begin
+        Pr := Pr * 10 + P^[K] - 48;
+        Inc(K);
+      End;
+    End;
+    If K >= F.L Then Break;
+    Cv := Chr(P^[K]);
+    Inc(K);
+    If An < Argc Then X := Arg[An] Else MkNil(X);
+    Inc(An);
+    S := '';
+    Case Cv Of
+      'd', 'i', 'u' :
+        Begin
+          D := PReal(X);
+          If Abs(D) < 2147483648.0 Then S := IStr(Trunc(D)) Else Str(Int(D):0:0, S);
+          If Plus And (D >= 0) Then S := '+' + S;
+        End;
+      'f', 'F', 'e', 'E', 'g', 'G' :
+        Begin
+          D := PReal(X);
+          If Pr < 0 Then Pr := 6;
+          If (Cv = 'e') Or (Cv = 'E') Then
+          Begin
+            Str(D:Pr + 8, S);
+            S := Trim(S);
+            { 1.234560E+002 -> 1.234560e+2 }
+            J := Pos('E', S);
+            If J > 0 Then
+            Begin
+              Ds := Copy(S, J + 2, 10);
+              While (Length(Ds) > 1) And (Ds[1] = '0') Do Delete(Ds, 1, 1);
+              S := Copy(S, 1, J - 1) + Cv + S[J + 1] + Ds;
+            End;
+          End
+          Else If (Cv = 'g') Or (Cv = 'G') Then S := PhpRealStr(D)
+          Else Str(D:0:Pr, S);
+          If Plus And (D >= 0) Then S := '+' + S;
+        End;
+      'x', 'X', 'o', 'b' :
+        Begin
+          If Cv = 'o' Then Base := 8 Else If Cv = 'b' Then Base := 2 Else Base := 16;
+          S := PBaseStr(PReal(X), Base, Cv = 'X');
+        End;
+      'c' : S := Chr(PInt(X) And 255);
+      's' :
+        Begin
+          PStrCell(X, T);
+          If (T.L > 255) And (W <= T.L) And ((Pr < 0) Or (Pr >= T.L)) Then
+          Begin
+            BufAddB(B, PoolPtr(T), T.L);
+            Continue;
+          End;
+          S := CellPStr(T);
+          If (Pr >= 0) And (Pr < Length(S)) Then S := Copy(S, 1, Pr);
+        End;
+    Else
+      S := '';
+    End;
+    { largeur }
+    While Length(S) < W Do
+      If Left Then S := S + ' '
+      Else If (PadC = 48) And (Length(S) > 0) And (S[1] In ['-', '+']) And (Cv In ['d', 'f', 'F', 'e', 'E']) Then
+        Insert('0', S, 2)
+      Else S := Chr(PadC) + S;
+    BufAdd(B, S);
+  End;
+End;
+
+{ arrondi de PHP (moitie loin de zero) }
+Function PRound(X : Double; Prec : LongInt) : Double;
+Var M, Y : Double;
+Begin
+  M := Pow10(Abs(Prec));
+  If Prec >= 0 Then Y := X * M Else Y := X / M;
+  { petites erreurs de representation : 1.005 * 100 = 100.49999... }
+  If Abs(Y - Int(Y)) > 0.4999999999 Then
+    If Abs(Y - Int(Y)) < 0.5000000001 Then
+      If Y >= 0 Then Y := Int(Y) + 1 Else Y := Int(Y) - 1
+    Else If Y >= 0 Then Y := Int(Y + 0.5) Else Y := -Int(-Y + 0.5)
+  Else If Y >= 0 Then Y := Int(Y + 0.5) Else Y := -Int(-Y + 0.5);
+  If Prec >= 0 Then PRound := Y / M Else PRound := Y * M;
+End;
+
+Function PNumFmt(X : Double; Dec : LongInt; Dp, Ts : String) : String;
+Var S, I, F : String; K, N : LongInt; Neg : Boolean;
+Begin
+  X := PRound(X, Dec);
+  Neg := X < 0;
+  If Neg Then X := -X;
+  Str(X:0:Dec, S);
+  K := Pos('.', S);
+  If K > 0 Then
+  Begin
+    I := Copy(S, 1, K - 1);
+    F := Copy(S, K + 1, 255);
+  End
+  Else
+  Begin
+    I := S;
+    F := '';
+  End;
+  S := '';
+  N := 0;
+  For K := Length(I) DownTo 1 Do
+  Begin
+    If (N > 0) And (N Mod 3 = 0) Then S := Ts + S;
+    S := I[K] + S;
+    Inc(N);
+  End;
+  If Dec > 0 Then S := S + Dp + F;
+  If Neg And (X <> 0) Then S := '-' + S;
+  PNumFmt := S;
+End;
+
+{ --- dates --- }
+Const
+  PDayL : Array[0..6] Of String[9] = ('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday');
+  PMonL : Array[1..12] Of String[9] = ('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+    'September', 'October', 'November', 'December');
+
+Function PDaysIn(Mo, Y : LongInt) : LongInt;
+Begin
+  Case Mo Of
+    4, 6, 9, 11 : PDaysIn := 30;
+    2 : If ((Y Mod 4 = 0) And (Y Mod 100 <> 0)) Or (Y Mod 400 = 0) Then PDaysIn := 29 Else PDaysIn := 28;
+  Else
+    PDaysIn := 31;
+  End;
+End;
+
+{ mktime : mois, jours, heures hors limites normalises }
+Function PMkTime(H, Mi, S, Mo, D, Y : LongInt) : LongInt;
+Var T : LongInt;
+Begin
+  Dec(Mo);
+  Y := Y + Mo Div 12;
+  Mo := Mo Mod 12;
+  If Mo < 0 Then
+  Begin
+    Mo := Mo + 12;
+    Dec(Y);
+  End;
+  T := UnixTime(Y, Mo + 1, 1, 0, 0, 0);
+  PMkTime := T + (D - 1) * 86400 + H * 3600 + Mi * 60 + S;
+End;
+
+Procedure PDate(Var F : TCell; T : LongInt; Var B : TBuf);
+Var Y, Mo, D, H, Mi, S, Wd, K, Doy, Wk : LongInt; P : PBytes; C : Char;
+Begin
+  UnixSplit(T, Y, Mo, D, H, Mi, S, Wd);
+  Doy := (T - UnixTime(Y, 1, 1, 0, 0, 0)) Div 86400;
+  K := 0;
+  While K < F.L Do
+  Begin
+    P := PoolPtr(F);
+    C := Chr(P^[K]);
+    Case C Of
+      'd' : BufAdd(B, Pad2(D));
+      'D' : BufAdd(B, Copy(PDayL[Wd], 1, 3));
+      'j' : BufAdd(B, IStr(D));
+      'l' : BufAdd(B, PDayL[Wd]);
+      'N' : If Wd = 0 Then BufAdd(B, '7') Else BufAdd(B, IStr(Wd));
+      'S' :
+        If (D = 1) Or (D = 21) Or (D = 31) Then BufAdd(B, 'st')
+        Else If (D = 2) Or (D = 22) Then BufAdd(B, 'nd')
+        Else If (D = 3) Or (D = 23) Then BufAdd(B, 'rd')
+        Else BufAdd(B, 'th');
+      'w' : BufAdd(B, IStr(Wd));
+      'z' : BufAdd(B, IStr(Doy));
+      'W' :
+        Begin
+          Wk := (Doy - ((Wd + 6) Mod 7) + 10) Div 7;
+          If Wk < 1 Then Wk := 52;
+          BufAdd(B, Pad2(Wk));
+        End;
+      'F' : BufAdd(B, PMonL[Mo]);
+      'm' : BufAdd(B, Pad2(Mo));
+      'M' : BufAdd(B, Copy(PMonL[Mo], 1, 3));
+      'n' : BufAdd(B, IStr(Mo));
+      't' : BufAdd(B, IStr(PDaysIn(Mo, Y)));
+      'L' : BufAdd(B, IStr(Ord(PDaysIn(2, Y) = 29)));
+      'Y', 'o' : BufAdd(B, IStr(Y));
+      'y' : BufAdd(B, Pad2(Y Mod 100));
+      'a' : If H < 12 Then BufAdd(B, 'am') Else BufAdd(B, 'pm');
+      'A' : If H < 12 Then BufAdd(B, 'AM') Else BufAdd(B, 'PM');
+      'g' : If H Mod 12 = 0 Then BufAdd(B, '12') Else BufAdd(B, IStr(H Mod 12));
+      'G' : BufAdd(B, IStr(H));
+      'h' : If H Mod 12 = 0 Then BufAdd(B, '12') Else BufAdd(B, Pad2(H Mod 12));
+      'H' : BufAdd(B, Pad2(H));
+      'i' : BufAdd(B, Pad2(Mi));
+      's' : BufAdd(B, Pad2(S));
+      'u' : BufAdd(B, '000000');
+      'v' : BufAdd(B, '000');
+      'e' : BufAdd(B, 'UTC');
+      'T' : BufAdd(B, 'UTC');
+      'P' : BufAdd(B, '+00:00');
+      'p' : BufAdd(B, 'Z');
+      'O' : BufAdd(B, '+0000');
+      'Z' : BufAdd(B, '0');
+      'I' : BufAdd(B, '0');
+      'U' : BufAdd(B, IStr(T));
+      'c' : BufAdd(B, IStr(Y) + '-' + Pad2(Mo) + '-' + Pad2(D) + 'T' + Pad2(H) + ':' + Pad2(Mi) + ':' + Pad2(S) + '+00:00');
+      'r' : BufAdd(B, Copy(PDayL[Wd], 1, 3) + ', ' + Pad2(D) + ' ' + Copy(PMonL[Mo], 1, 3) + ' ' + IStr(Y) + ' ' +
+                      Pad2(H) + ':' + Pad2(Mi) + ':' + Pad2(S) + ' +0000');
+      '\' :
+        Begin
+          Inc(K);
+          If K < F.L Then BufAddC(B, PoolPtr(F)^[K]);
+        End;
+    Else
+      BufAddC(B, Ord(C));
+    End;
+    Inc(K);
+  End;
+End;
+
+{ strtotime : maintenant, aujourd'hui, demain, hier, AAAA-MM-JJ [HH:MM[:SS]], +n unite }
+Function PStrToTime(S : String; Base : LongInt; Var T : LongInt) : Boolean;
+Var Y, Mo, D, H, Mi, Sc, Wd, N, K, E : LongInt; U, W : String; Sign : LongInt;
+Begin
+  PStrToTime := True;
+  S := LoStr(Trim(S));
+  T := Base;
+  UnixSplit(Base, Y, Mo, D, H, Mi, Sc, Wd);
+  If (S = 'now') Or (S = '') Then Exit;
+  If S = 'today' Then
+  Begin
+    T := UnixTime(Y, Mo, D, 0, 0, 0);
+    Exit;
+  End;
+  If S = 'tomorrow' Then
+  Begin
+    T := UnixTime(Y, Mo, D, 0, 0, 0) + 86400;
+    Exit;
+  End;
+  If S = 'yesterday' Then
+  Begin
+    T := UnixTime(Y, Mo, D, 0, 0, 0) - 86400;
+    Exit;
+  End;
+  If (Length(S) >= 10) And (S[5] = '-') And (S[8] = '-') Then
+  Begin
+    Y := SVal(Copy(S, 1, 4)); Mo := SVal(Copy(S, 6, 2)); D := SVal(Copy(S, 9, 2));
+    H := 0; Mi := 0; Sc := 0;
+    If (Length(S) >= 16) And (S[14] = ':') Then
+    Begin
+      H := SVal(Copy(S, 12, 2)); Mi := SVal(Copy(S, 15, 2));
+      If (Length(S) >= 19) And (S[17] = ':') Then Sc := SVal(Copy(S, 18, 2));
+    End;
+    T := PMkTime(H, Mi, Sc, Mo, D, Y);
+    Exit;
+  End;
+  { +1 day, -2 weeks, +3 months... (plusieurs termes) }
+  While S <> '' Do
+  Begin
+    Sign := 1;
+    If S[1] = '+' Then Delete(S, 1, 1)
+    Else If S[1] = '-' Then
+    Begin
+      Sign := -1;
+      Delete(S, 1, 1);
+    End;
+    S := Trim(S);
+    K := 1;
+    While (K <= Length(S)) And (S[K] In ['0'..'9']) Do Inc(K);
+    If K = 1 Then
+    Begin
+      PStrToTime := False;
+      Exit;
+    End;
+    Val(Copy(S, 1, K - 1), N, E);
+    Delete(S, 1, K - 1);
+    S := Trim(S);
+    K := 1;
+    While (K <= Length(S)) And (S[K] In ['a'..'z']) Do Inc(K);
+    W := Copy(S, 1, K - 1);
+    Delete(S, 1, K - 1);
+    S := Trim(S);
+    N := N * Sign;
+    If Copy(W, 1, 3) = 'sec' Then T := T + N
+    Else If Copy(W, 1, 3) = 'min' Then T := T + N * 60
+    Else If Copy(W, 1, 4) = 'hour' Then T := T + N * 3600
+    Else If Copy(W, 1, 3) = 'day' Then T := T + N * 86400
+    Else If Copy(W, 1, 4) = 'week' Then T := T + N * 604800
+    Else If Copy(W, 1, 5) = 'month' Then
+    Begin
+      UnixSplit(T, Y, Mo, D, H, Mi, Sc, Wd);
+      T := PMkTime(H, Mi, Sc, Mo + N, D, Y);
+    End
+    Else If Copy(W, 1, 4) = 'year' Then
+    Begin
+      UnixSplit(T, Y, Mo, D, H, Mi, Sc, Wd);
+      T := PMkTime(H, Mi, Sc, Mo, D, Y + N);
+    End
+    Else
+    Begin
+      PStrToTime := False;
+      Exit;
+    End;
+  End;
+End;
+
+{ chemin d'un fichier : relatif au dossier de la page }
+Function PPath(S : String) : String;
+Var Dir : String; K : LongInt;
+Begin
+  {$IFDEF OS2PC}
+  For K := 1 To Length(S) Do If S[K] = '/' Then S[K] := '\';
+  If (Length(S) >= 2) And (S[2] = ':') Then
+  Begin
+    PPath := S;
+    Exit;
+  End;
+  If (S <> '') And (S[1] = '\') Then
+  Begin
+    PPath := Copy(ScriptPath[VmConn], 1, 2) + S;
+    Exit;
+  End;
+  Dir := ScriptPath[VmConn];
+  While (Length(Dir) > 0) And (Dir[Length(Dir)] <> '\') Do Delete(Dir, Length(Dir), 1);
+  PPath := Dir + S;
+  {$ELSE}
+  If (S <> '') And (S[1] = '/') Then
+  Begin
+    PPath := S;
+    Exit;
+  End;
+  Dir := ScriptPath[VmConn];
+  While (Length(Dir) > 0) And (Dir[Length(Dir)] <> '/') Do Delete(Dir, Length(Dir), 1);
+  PPath := Dir + S;
+  K := 0;
+  {$ENDIF}
+End;
+
+Function PWild(Pat, S : String) : Boolean;
+Var P, K : LongInt;
+Begin
+  If Pat = '' Then
+  Begin
+    PWild := S = '';
+    Exit;
+  End;
+  If Pat[1] = '*' Then
+  Begin
+    For K := 0 To Length(S) Do
+      If PWild(Copy(Pat, 2, 255), Copy(S, K + 1, 255)) Then
+      Begin
+        PWild := True;
+        Exit;
+      End;
+    PWild := False;
+    Exit;
+  End;
+  If (S <> '') And ((Pat[1] = '?') Or (UpCase(Pat[1]) = UpCase(S[1]))) Then
+    PWild := PWild(Copy(Pat, 2, 255), Copy(S, 2, 255))
+  Else PWild := False;
+  P := 0;
+End;
+
+{ chaine de connexion : mysqli(hote, utilisateur, mot de passe, base, port) }
+Function PConnMy(Var Arg : Array Of TCell; Argc : LongInt) : String;
+Var H, S : String; K : LongInt;
+Begin
+  H := '';
+  If Argc > 0 Then H := ArgPStr(Arg[0]);
+  If Copy(H, 1, 2) = 'p:' Then Delete(H, 1, 2);
+  If H = '' Then H := 'localhost';
+  S := 'Driver=MariaDB;Server=' + H;
+  If Argc > 1 Then S := S + ';User=' + ArgPStr(Arg[1]);
+  If Argc > 2 Then S := S + ';Password=' + ArgPStr(Arg[2]);
+  If (Argc > 3) And (Arg[3].T <> vtNil) Then S := S + ';Database=' + ArgPStr(Arg[3]);
+  If (Argc > 4) And (Arg[4].T <> vtNil) Then S := S + ';Port=' + IStr(PInt(Arg[4]));
+  PConnMy := S;
+  K := 0;
+End;
+
+{ pg_connect("host=... port=... dbname=... user=... password=...") }
+Function PConnPg(S : String) : String;
+Var R, K, V : String; I : LongInt; Q : Char;
+Begin
+  If (Copy(LoStr(S), 1, 11) = 'postgres://') Or (Copy(LoStr(S), 1, 13) = 'postgresql://') Then
+  Begin
+    PConnPg := S;
+    Exit;
+  End;
+  R := 'Driver=PostgreSQL';
+  I := 1;
+  While I <= Length(S) Do
+  Begin
+    While (I <= Length(S)) And (S[I] = ' ') Do Inc(I);
+    K := '';
+    While (I <= Length(S)) And (S[I] <> '=') And (S[I] <> ' ') Do
+    Begin
+      K := K + S[I];
+      Inc(I);
+    End;
+    While (I <= Length(S)) And (S[I] = ' ') Do Inc(I);
+    If (I <= Length(S)) And (S[I] = '=') Then Inc(I);
+    While (I <= Length(S)) And (S[I] = ' ') Do Inc(I);
+    V := '';
+    If (I <= Length(S)) And (S[I] = '''') Then
+    Begin
+      Q := S[I];
+      Inc(I);
+      While (I <= Length(S)) And (S[I] <> Q) Do
+      Begin
+        V := V + S[I];
+        Inc(I);
+      End;
+      Inc(I);
+    End
+    Else
+      While (I <= Length(S)) And (S[I] <> ' ') Do
+      Begin
+        V := V + S[I];
+        Inc(I);
+      End;
+    K := LoStr(K);
+    If (K = 'host') Or (K = 'hostaddr') Then R := R + ';Server=' + V
+    Else If K = 'port' Then R := R + ';Port=' + V
+    Else If K = 'dbname' Then R := R + ';Database=' + V
+    Else If K = 'user' Then R := R + ';User=' + V
+    Else If K = 'password' Then R := R + ';Password=' + V;
+  End;
+  PConnPg := R;
+End;
+
+{ new PDO('mysql:host=...;dbname=...', utilisateur, mot de passe) }
+Function PConnPdo(Var Arg : Array Of TCell; Argc : LongInt) : String;
+Var D, Drv, R : String; K : LongInt;
+Begin
+  D := '';
+  If Argc > 0 Then D := ArgPStr(Arg[0]);
+  K := Pos(':', D);
+  Drv := LoStr(Copy(D, 1, K - 1));
+  D := Copy(D, K + 1, 255);
+  If Drv = 'pgsql' Then R := 'Driver=PostgreSQL' Else R := 'Driver=MariaDB';
+  { les cles de la DSN (host, port, dbname, user, password) : comme la chaine d'ADO }
+  R := R + ';' + D;
+  If (Argc > 1) And (Arg[1].T <> vtNil) Then R := R + ';User=' + ArgPStr(Arg[1]);
+  If (Argc > 2) And (Arg[2].T <> vtNil) Then R := R + ';Password=' + ArgPStr(Arg[2]);
+  PConnPdo := R;
+End;
+
+{ --- tableaux : aides --- }
+Function PArrArg(Var C : TCell; Fn : String) : LongInt;
+Begin
+  If PIsArr(C) Then PArrArg := C.I
+  Else
+  Begin
+    VmFail(Fn + '() : tableau attendu');
+    PArrArg := -1;
+  End;
+End;
+
+{ entree derniere (indice brut) }
+Function PArrLast(Id : LongInt) : LongInt;
+Var K : LongInt;
+Begin
+  PArrLast := -1;
+  For K := NDict - 1 DownTo 0 Do
+    If DObj^[K] = Id Then
+    Begin
+      PArrLast := K;
+      Exit;
+    End;
+End;
+
+{ valeur dans le tableau ? (Strict : ===) ; rend l'entree ou -1 }
+Function PArrSearch(Id : LongInt; Var V : TCell; Strict : Boolean) : LongInt;
+Var K : LongInt; X : TCell;
+Begin
+  PArrSearch := -1;
+  K := PArrNext(Id, 0);
+  While K >= 0 Do
+  Begin
+    X := DVal^[K];
+    If (Strict And PhpIdent(X, V)) Or (Not Strict And (PhpCompare(X, V) = 0)) Then
+    Begin
+      PArrSearch := K;
+      Exit;
+    End;
+    K := PArrNext(Id, K + 1);
+  End;
+End;
+
+Procedure PhpBuiltin(Id, Argc : LongInt; Var Arg : Array Of TCell; Var R : TCell);
+Var T, T2, T3, X, Y, Kc : TCell; P, Q : PBytes; B : TBuf; K, J, N, M, I, A, St, Len, Ob, Ob2, Pos_ : LongInt;
+    D, D2 : Double; S, S2, S3 : String; Ok, NoCase : Boolean; Y_, Mo_, D_, H_, Mi_, Sc_, Wd_ : LongInt;
+Begin
+  MkNil(R);
+  BufInit(B);
+  Case Id Of
+    { --- chaines --- }
+    pfStrlen, pfMbStrlen :
+      Begin
+        PStrCell(Arg[0], T);
+        If Id = pfMbStrlen Then
+        Begin
+          P := PoolPtr(T);
+          N := 0;
+          For K := 0 To T.L - 1 Do If (P^[K] And $C0) <> $80 Then Inc(N);
+          MkInt(N, R);
+        End
+        Else MkInt(T.L, R);
+      End;
+    pfStrtoupper, pfStrtolower, pfMbStrtoupper, pfMbStrtolower, pfUcfirst, pfLcfirst, pfUcwords :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        BufAddB(B, P, T.L);
+        For K := 0 To B.Len - 1 Do
+          Case Id Of
+            pfStrtoupper, pfMbStrtoupper : B.P^[K] := PUp(B.P^[K]);
+            pfStrtolower, pfMbStrtolower : B.P^[K] := PLow(B.P^[K]);
+            pfUcfirst : If K = 0 Then B.P^[K] := PUp(B.P^[K]);
+            pfLcfirst : If K = 0 Then B.P^[K] := PLow(B.P^[K]);
+            pfUcwords : If (K = 0) Or (B.P^[K - 1] In [32, 9, 10, 13, 11, 12]) Then B.P^[K] := PUp(B.P^[K]);
+          End;
+        PRet(B, R);
+      End;
+    pfTrim, pfLtrim, pfRtrim, pfChop :
+      Begin
+        PStrCell(Arg[0], T);
+        If Argc > 1 Then S := ArgPStr(Arg[1])
+        Else
+        Begin
+          S := ' '#9#10#13#11' ';
+          S[Length(S)] := Chr(0);        { NUL : pas de #0 dans un litteral (OS2PC) }
+        End;
+        { a..z : intervalle }
+        K := Pos('..', S);
+        While K > 1 Do
+        Begin
+          S2 := '';
+          For J := Ord(S[K - 1]) To Ord(S[K + 2]) Do S2 := S2 + Chr(J);
+          S := Copy(S, 1, K - 2) + S2 + Copy(S, K + 3, 255);
+          K := Pos('..', S);
+        End;
+        P := PoolPtr(T);
+        St := 0; Len := T.L;
+        If (Id = pfTrim) Or (Id = pfLtrim) Then
+          While (St < Len) And (Pos(Chr(P^[St]), S) > 0) Do Inc(St);
+        If Id <> pfLtrim Then
+          While (Len > St) And (Pos(Chr(P^[Len - 1]), S) > 0) Do Dec(Len);
+        BufAddB(B, @P^[St], Len - St);
+        PRet(B, R);
+      End;
+    pfSubstr, pfMbSubstr :
+      Begin
+        PStrCell(Arg[0], T);
+        N := T.L;
+        St := PInt(Arg[1]);
+        If St < 0 Then St := N + St;
+        If St < 0 Then St := 0;
+        If St > N Then St := N;
+        If (Argc > 2) And (Arg[2].T <> vtNil) Then
+        Begin
+          Len := PInt(Arg[2]);
+          If Len < 0 Then Len := N - St + Len;
+        End
+        Else Len := N - St;
+        If Len < 0 Then Len := 0;
+        If St + Len > N Then Len := N - St;
+        P := PoolPtr(T);
+        BufAddB(B, @P^[St], Len);
+        PRet(B, R);
+      End;
+    pfStrpos, pfStripos, pfStrrpos, pfStrripos, pfStrContains, pfStrStartsWith, pfStrEndsWith :
+      Begin
+        PStrCell(Arg[0], T); PStrCell(Arg[1], T2);
+        St := 0;
+        If Argc > 2 Then St := PInt(Arg[2]);
+        If St < 0 Then St := T.L + St;
+        If St < 0 Then St := 0;
+        P := PoolPtr(T); Q := PoolPtr(T2);
+        NoCase := (Id = pfStripos) Or (Id = pfStrripos);
+        If Id = pfStrContains Then MkBool(PFind(P, T.L, Q, T2.L, 0, False) >= 0, R)
+        Else If Id = pfStrStartsWith Then MkBool((T2.L <= T.L) And (PFind(P, T2.L, Q, T2.L, 0, False) = 0), R)
+        Else If Id = pfStrEndsWith Then
+          MkBool((T2.L <= T.L) And (PFind(@P^[T.L - T2.L], T2.L, Q, T2.L, 0, False) = 0), R)
+        Else
+        Begin
+          If (Id = pfStrrpos) Or (Id = pfStrripos) Then K := PFindRev(P, T.L, Q, T2.L, NoCase)
+          Else K := PFind(P, T.L, Q, T2.L, St, NoCase);
+          If (K >= 0) And (K >= St) Then MkInt(K, R) Else MkBool(False, R);
+        End;
+      End;
+    pfStrReplace, pfStrIreplace :
+      Begin
+        { str_replace(cherche, remplace, sujet) : chaines ou tableaux }
+        If PIsArr(Arg[2]) Then
+        Begin
+          Ob := PArrNew;
+          Ob2 := Arg[2].I;
+          T := Arg[0]; T2 := Arg[1];
+          K := PArrNext(Ob2, 0);
+          While K >= 0 Do
+          Begin
+            Arg[0] := T; Arg[1] := T2; Arg[2] := DVal^[K];
+            PhpBuiltin(Id, 3, Arg, T3);
+            PArrSet(Ob, DKey^[K], T3);
+            K := PArrNext(Ob2, K + 1);
+          End;
+          MkObj(Ob, R);
+          Exit;
+        End;
+        If PIsArr(Arg[0]) Then
+        Begin
+          Ob := Arg[0].I;
+          X := Arg[1];
+          PStrCell(Arg[2], T3);
+          N := 0;
+          K := PArrNext(Ob, 0);
+          While K >= 0 Do
+          Begin
+            If PIsArr(X) Then
+            Begin
+              J := PArrNth(X.I, N);
+              If J >= 0 Then Y := DVal^[J] Else MkStr('', Y);
+            End
+            Else Y := X;
+            Arg[0] := DVal^[K]; Arg[1] := Y; Arg[2] := T3;
+            PhpBuiltin(Id, 3, Arg, T);
+            T3 := T;
+            Inc(N);
+            K := PArrNext(Ob, K + 1);
+          End;
+          R := T3;
+          Exit;
+        End;
+        PStrCell(Arg[2], T3);
+        PStrCell(Arg[0], T); PStrCell(Arg[1], T2);
+        B.Len := 0;
+        P := PoolPtr(T3); Q := PoolPtr(T);
+        If T.L = 0 Then
+        Begin
+          BufAddB(B, P, T3.L);
+          PRet(B, R);
+          Exit;
+        End;
+        K := 0;
+        While K < T3.L Do
+        Begin
+          J := PFind(P, T3.L, Q, T.L, K, Id = pfStrIreplace);
+          If J < 0 Then
+          Begin
+            BufAddB(B, @P^[K], T3.L - K);
+            Break;
+          End;
+          BufAddB(B, @P^[K], J - K);
+          BufAddB(B, PoolPtr(T2), T2.L);
+          K := J + T.L;
+        End;
+        PRet(B, R);
+      End;
+    pfStrRepeat :
+      Begin
+        PStrCell(Arg[0], T);
+        N := PInt(Arg[1]);
+        For K := 1 To N Do BufAddB(B, PoolPtr(T), T.L);
+        PRet(B, R);
+      End;
+    pfStrPad :
+      Begin
+        PStrCell(Arg[0], T);
+        N := PInt(Arg[1]);
+        If Argc > 2 Then PStrCell(Arg[2], T2) Else MkStr(' ', T2);
+        If Argc > 3 Then M := PInt(Arg[3]) Else M := 1;
+        Len := N - T.L;
+        If (Len <= 0) Or (T2.L = 0) Then
+        Begin
+          R := T;
+          Exit;
+        End;
+        If M = 0 Then A := Len Else If M = 2 Then A := Len Div 2 Else A := 0;
+        Q := PoolPtr(T2);
+        For K := 0 To A - 1 Do BufAddC(B, Q^[K Mod T2.L]);
+        BufAddB(B, PoolPtr(T), T.L);
+        For K := 0 To Len - A - 1 Do BufAddC(B, Q^[K Mod T2.L]);
+        PRet(B, R);
+      End;
+    pfStrSplit :
+      Begin
+        PStrCell(Arg[0], T);
+        If Argc > 1 Then N := PInt(Arg[1]) Else N := 1;
+        If N < 1 Then N := 1;
+        Ob := PArrNew;
+        K := 0;
+        Repeat
+          P := PoolPtr(T);
+          Len := N;
+          If K + Len > T.L Then Len := T.L - K;
+          MkStrB(@P^[K], Len, X);
+          PArrPush(Ob, X);
+          K := K + N;
+        Until K >= T.L;
+        MkObj(Ob, R);
+      End;
+    pfStrrev :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        For K := T.L - 1 DownTo 0 Do BufAddC(B, P^[K]);
+        PRet(B, R);
+      End;
+    pfStrcmp, pfStrcasecmp, pfStrncmp, pfStrncasecmp, pfStrnatcmp :
+      Begin
+        PStrCell(Arg[0], T); PStrCell(Arg[1], T2);
+        If (Id = pfStrncmp) Or (Id = pfStrncasecmp) Then
+        Begin
+          N := PInt(Arg[2]);
+          If T.L > N Then T.L := N;
+          If T2.L > N Then T2.L := N;
+        End;
+        If (Id = pfStrnatcmp) And PIsNumStr(T) And PIsNumStr(T2) Then MkInt(PhpCompare(T, T2), R)
+        Else MkInt(StrCmpCells(T, T2, (Id = pfStrcasecmp) Or (Id = pfStrncasecmp)), R);
+      End;
+    pfStrstr, pfStristr, pfStrrchr :
+      Begin
+        PStrCell(Arg[0], T); PStrCell(Arg[1], T2);
+        P := PoolPtr(T); Q := PoolPtr(T2);
+        If Id = pfStrrchr Then
+        Begin
+          K := -1;
+          If T2.L > 0 Then For J := 0 To T.L - 1 Do If P^[J] = Q^[0] Then K := J;
+        End
+        Else K := PFind(P, T.L, Q, T2.L, 0, Id = pfStristr);
+        If K < 0 Then MkBool(False, R)
+        Else
+        Begin
+          If (Argc > 2) And PBool(Arg[2]) Then BufAddB(B, P, K) Else BufAddB(B, @P^[K], T.L - K);
+          PRet(B, R);
+        End;
+      End;
+    pfSubstrCount :
+      Begin
+        PStrCell(Arg[0], T); PStrCell(Arg[1], T2);
+        N := 0; K := 0;
+        If T2.L > 0 Then
+          Repeat
+            K := PFind(PoolPtr(T), T.L, PoolPtr(T2), T2.L, K, False);
+            If K >= 0 Then
+            Begin
+              Inc(N);
+              K := K + T2.L;
+            End;
+          Until K < 0;
+        MkInt(N, R);
+      End;
+    pfSubstrReplace :
+      Begin
+        PStrCell(Arg[0], T); PStrCell(Arg[1], T2);
+        N := T.L;
+        St := PInt(Arg[2]);
+        If St < 0 Then St := N + St;
+        If St < 0 Then St := 0;
+        If St > N Then St := N;
+        If (Argc > 3) And (Arg[3].T <> vtNil) Then
+        Begin
+          Len := PInt(Arg[3]);
+          If Len < 0 Then Len := N - St + Len;
+        End
+        Else Len := N - St;
+        If Len < 0 Then Len := 0;
+        If St + Len > N Then Len := N - St;
+        P := PoolPtr(T);
+        BufAddB(B, P, St);
+        BufAddB(B, PoolPtr(T2), T2.L);
+        BufAddB(B, @P^[St + Len], N - St - Len);
+        PRet(B, R);
+      End;
+    pfNl2br :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        For K := 0 To T.L - 1 Do
+        Begin
+          If (P^[K] = 10) And Not ((K > 0) And (P^[K - 1] = 13)) Then BufAdd(B, '<br />')
+          Else If P^[K] = 13 Then BufAdd(B, '<br />');
+          BufAddC(B, P^[K]);
+        End;
+        PRet(B, R);
+      End;
+    pfHtmlspecialchars, pfHtmlentities :
+      Begin
+        PStrCell(Arg[0], T);
+        If Argc > 1 Then M := PInt(Arg[1]) Else M := 3;
+        P := PoolPtr(T);
+        For K := 0 To T.L - 1 Do
+          Case P^[K] Of
+            38 : BufAdd(B, '&amp;');
+            60 : BufAdd(B, '&lt;');
+            62 : BufAdd(B, '&gt;');
+            34 : If (M And 2) <> 0 Then BufAdd(B, '&quot;') Else BufAddC(B, 34);
+            39 : If (M And 1) <> 0 Then BufAdd(B, '&#039;') Else BufAddC(B, 39);
+          Else
+            BufAddC(B, P^[K]);
+          End;
+        PRet(B, R);
+      End;
+    pfHtmlEntityDecode, pfHtmlspecialcharsDecode :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        K := 0;
+        While K < T.L Do
+        Begin
+          If P^[K] = 38 Then
+          Begin
+            S := '';
+            J := K + 1;
+            While (J < T.L) And (J - K < 10) And (P^[J] <> 59) Do
+            Begin
+              S := S + Chr(P^[J]);
+              Inc(J);
+            End;
+            If (J < T.L) And (P^[J] = 59) Then
+            Begin
+              N := -1;
+              If S = 'amp' Then N := 38 Else If S = 'lt' Then N := 60 Else If S = 'gt' Then N := 62
+              Else If S = 'quot' Then N := 34 Else If (S = '#039') Or (S = '#39') Or (S = 'apos') Then N := 39
+              Else If (S = 'nbsp') And (Id = pfHtmlEntityDecode) Then N := 160
+              Else If (Length(S) > 1) And (S[1] = '#') And (Id = pfHtmlEntityDecode) Then
+              Begin
+                If UpCase(S[2]) = 'X' Then
+                Begin
+                  N := 0;
+                  For J := 3 To Length(S) Do If HexV(S[J]) >= 0 Then N := N * 16 + HexV(S[J]);
+                End
+                Else N := SVal(Copy(S, 2, 10));
+              End;
+              If N >= 0 Then
+              Begin
+                AddUtf8(B, N);
+                K := J + 1;
+                Continue;
+              End;
+            End;
+          End;
+          BufAddC(B, P^[K]);
+          Inc(K);
+        End;
+        PRet(B, R);
+      End;
+    pfStripTags :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        N := 0;
+        For K := 0 To T.L - 1 Do
+          If P^[K] = 60 Then Inc(N)
+          Else If (P^[K] = 62) And (N > 0) Then Dec(N)
+          Else If N = 0 Then BufAddC(B, P^[K]);
+        PRet(B, R);
+      End;
+    pfAddslashes, pfQuotemeta :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        For K := 0 To T.L - 1 Do
+        Begin
+          If Id = pfAddslashes Then
+          Begin
+            If P^[K] = 0 Then
+            Begin
+              BufAdd(B, '\0');
+              Continue;
+            End;
+            If P^[K] In [39, 34, 92] Then BufAddC(B, 92);
+          End
+          Else If Chr(P^[K]) In ['.', '\', '+', '*', '?', '[', '^', ']', '$', '(', ')'] Then BufAddC(B, 92);
+          BufAddC(B, P^[K]);
+        End;
+        PRet(B, R);
+      End;
+    pfStripslashes :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        K := 0;
+        While K < T.L Do
+        Begin
+          If (P^[K] = 92) And (K + 1 < T.L) Then
+          Begin
+            Inc(K);
+            If P^[K] = 48 Then BufAddC(B, 0) Else BufAddC(B, P^[K]);
+          End
+          Else If P^[K] <> 92 Then BufAddC(B, P^[K]);
+          Inc(K);
+        End;
+        PRet(B, R);
+      End;
+    pfUrlencode, pfRawurlencode :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        For K := 0 To T.L - 1 Do
+          If Chr(P^[K]) In ['A'..'Z', 'a'..'z', '0'..'9', '-', '_', '.'] Then BufAddC(B, P^[K])
+          Else If (P^[K] = 126) And (Id = pfRawurlencode) Then BufAddC(B, 126)
+          Else If (P^[K] = 32) And (Id = pfUrlencode) Then BufAddC(B, 43)
+          Else BufAdd(B, '%' + Hex(P^[K], 2));
+        PRet(B, R);
+      End;
+    pfUrldecode, pfRawurldecode :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        K := 0;
+        While K < T.L Do
+        Begin
+          If (P^[K] = 37) And (K + 2 < T.L) And (HexV(Chr(P^[K + 1])) >= 0) And (HexV(Chr(P^[K + 2])) >= 0) Then
+          Begin
+            BufAddC(B, HexV(Chr(P^[K + 1])) * 16 + HexV(Chr(P^[K + 2])));
+            K := K + 3;
+            Continue;
+          End;
+          If (P^[K] = 43) And (Id = pfUrldecode) Then BufAddC(B, 32) Else BufAddC(B, P^[K]);
+          Inc(K);
+        End;
+        PRet(B, R);
+      End;
+    pfBase64Encode :
+      Begin
+        PStrCell(Arg[0], T);
+        B64Enc(PoolPtr(T), T.L, B, 0);
+        PRet(B, R);
+      End;
+    pfBase64Decode :
+      Begin
+        PStrCell(Arg[0], T);
+        BufGrow(B, T.L + 4);
+        B.Len := B64Dec(PoolPtr(T), T.L, B.P, T.L + 4);
+        If B.Len < 0 Then B.Len := 0;
+        PRet(B, R);
+      End;
+    pfMd5, pfSha1 :
+      Begin
+        PStrCell(Arg[0], T);
+        BufAddB(B, PoolPtr(T), T.L);
+        If Id = pfMd5 Then
+        Begin
+          Md5(B.P, B.Len, PMd5Out);
+          S := LoStr(HexBytes(@PMd5Out, 16));
+        End
+        Else
+        Begin
+          Sha1(B.P, B.Len, PShaOut);
+          S := LoStr(HexBytes(@PShaOut, 20));
+        End;
+        BufFree(B);
+        MkStr(S, R);
+      End;
+    pfCrc32 :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        A := -1;
+        For K := 0 To T.L - 1 Do
+        Begin
+          A := A Xor P^[K];
+          For J := 1 To 8 Do
+            If (A And 1) <> 0 Then A := ((A Shr 1) And $7FFFFFFF) Xor LongInt($EDB88320)
+            Else A := (A Shr 1) And $7FFFFFFF;
+        End;
+        A := Not A;
+        D := A;
+        If A < 0 Then MkReal(D + 4294967296.0, R) Else MkInt(A, R);
+      End;
+    pfNumberFormat :
+      Begin
+        If Argc > 1 Then N := PInt(Arg[1]) Else N := 0;
+        If Argc > 2 Then S := ArgPStr(Arg[2]) Else S := '.';
+        If Argc > 3 Then S2 := ArgPStr(Arg[3]) Else S2 := ',';
+        MkStr(PNumFmt(PReal(Arg[0]), N, S, S2), R);
+      End;
+    pfSprintf, pfPrintf, pfVsprintf :
+      Begin
+        If Id = pfVsprintf Then
+        Begin
+          { vsprintf(format, tableau) : les valeurs en arguments }
+          X := Arg[1];
+          N := 1;
+          If PIsArr(X) Then
+          Begin
+            K := PArrNext(X.I, 0);
+            While (K >= 0) And (N < 16) Do
+            Begin
+              Arg[N] := DVal^[K];
+              Inc(N);
+              K := PArrNext(X.I, K + 1);
+            End;
+          End;
+          Argc := N;
+        End;
+        PSprintf(Arg, Argc, 0, B);
+        If Id = pfPrintf Then
+        Begin
+          BufAddB(VmOut, B.P, B.Len);
+          If B.Len > 0 Then VmHdrPending := False;
+          MkInt(B.Len, R);
+          BufFree(B);
+        End
+        Else PRet(B, R);
+      End;
+    pfWordwrap :
+      Begin
+        { wordwrap(texte, largeur, coupure, couper) : coupe aux espaces }
+        PStrCell(Arg[0], T);
+        If Argc > 1 Then N := PInt(Arg[1]) Else N := 75;
+        If Argc > 2 Then S := ArgPStr(Arg[2]) Else S := #10;
+        Ok := (Argc > 3) And PBool(Arg[3]);
+        P := PoolPtr(T);
+        Len := 0;           { longueur de la ligne en cours }
+        K := 0;
+        While K < T.L Do
+        Begin
+          If P^[K] = 10 Then
+          Begin
+            BufAddC(B, 10);
+            Len := 0;
+            Inc(K);
+            Continue;
+          End;
+          If P^[K] = 32 Then
+          Begin
+            { mot suivant : coupure si la ligne deborde }
+            J := K + 1;
+            While (J < T.L) And (P^[J] <> 32) And (P^[J] <> 10) Do Inc(J);
+            If (Len > 0) And (Len + 1 + (J - K - 1) > N) Then
+            Begin
+              BufAdd(B, S);
+              Len := 0;
+            End
+            Else
+            Begin
+              BufAddC(B, 32);
+              Inc(Len);
+            End;
+            Inc(K);
+            Continue;
+          End;
+          If Ok And (Len >= N) Then
+          Begin
+            BufAdd(B, S);
+            Len := 0;
+          End;
+          BufAddC(B, P^[K]);
+          Inc(Len);
+          Inc(K);
+        End;
+        PRet(B, R);
+      End;
+    pfImplode, pfJoin :
+      Begin
+        If PIsArr(Arg[0]) Then
+        Begin
+          X := Arg[0];
+          If Argc > 1 Then PStrCell(Arg[1], T) Else MkStr('', T);
+        End
+        Else
+        Begin
+          PStrCell(Arg[0], T);
+          X := Arg[1];
+        End;
+        If Not PIsArr(X) Then
+        Begin
+          VmFail('implode() : tableau attendu');
+          Exit;
+        End;
+        N := 0;
+        K := PArrNext(X.I, 0);
+        While K >= 0 Do
+        Begin
+          If N > 0 Then BufAddB(B, PoolPtr(T), T.L);
+          Y := DVal^[K];
+          PAddCell(B, Y);
+          Inc(N);
+          K := PArrNext(X.I, K + 1);
+        End;
+        PRet(B, R);
+      End;
+    pfExplode :
+      Begin
+        PStrCell(Arg[0], T); PStrCell(Arg[1], T2);
+        If T.L = 0 Then
+        Begin
+          VmFail('explode() : s'#130'parateur vide');
+          Exit;
+        End;
+        If Argc > 2 Then M := PInt(Arg[2]) Else M := 2147483647;
+        Ob := PArrNew;
+        K := 0;
+        N := 0;
+        Repeat
+          If (M > 0) And (N >= M - 1) Then J := -1
+          Else J := PFind(PoolPtr(T2), T2.L, PoolPtr(T), T.L, K, False);
+          P := PoolPtr(T2);
+          If J < 0 Then
+          Begin
+            MkStrB(@P^[K], T2.L - K, X);
+            PArrPush(Ob, X);
+            Break;
+          End;
+          MkStrB(@P^[K], J - K, X);
+          PArrPush(Ob, X);
+          Inc(N);
+          K := J + T.L;
+        Until False;
+        If M < 0 Then
+          For K := 1 To -M Do
+          Begin
+            J := PArrLast(Ob);
+            If J >= 0 Then DObj^[J] := -1;
+          End;
+        MkObj(Ob, R);
+      End;
+    pfChr :
+      Begin
+        S := Chr(PInt(Arg[0]) And 255);
+        MkStr(S, R);
+      End;
+    pfOrd :
+      Begin
+        PStrCell(Arg[0], T);
+        If T.L > 0 Then MkInt(PoolPtr(T)^[0], R) Else MkInt(0, R);
+      End;
+    pfDechex : MkStr(PBaseStr(PReal(Arg[0]), 16, False), R);
+    pfDecbin : MkStr(PBaseStr(PReal(Arg[0]), 2, False), R);
+    pfDecoct : MkStr(PBaseStr(PReal(Arg[0]), 8, False), R);
+    pfHexdec, pfBindec, pfOctdec, pfBaseConvert :
+      Begin
+        PStrCell(Arg[0], T);
+        If Id = pfHexdec Then A := 16 Else If Id = pfBindec Then A := 2 Else If Id = pfOctdec Then A := 8
+        Else A := PInt(Arg[1]);
+        P := PoolPtr(T);
+        D := 0;
+        For K := 0 To T.L - 1 Do
+        Begin
+          J := HexV(Chr(P^[K]));
+          If (J < 0) And (Chr(P^[K]) In ['g'..'z', 'G'..'Z']) Then J := Ord(UpCase(Chr(P^[K]))) - 55;
+          If (J >= 0) And (J < A) Then D := D * A + J;
+        End;
+        If Id = pfBaseConvert Then MkStr(PBaseStr(D, PInt(Arg[2]), False), R)
+        Else If D <= 2147483647.0 Then MkInt(Trunc(D), R) Else MkReal(D, R);
+      End;
+    pfBin2hex :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        For K := 0 To T.L - 1 Do BufAdd(B, LoStr(Hex(P^[K], 2)));
+        PRet(B, R);
+      End;
+    pfStrWordCount :
+      Begin
+        PStrCell(Arg[0], T);
+        P := PoolPtr(T);
+        N := 0; Ok := False;
+        For K := 0 To T.L - 1 Do
+          If Chr(P^[K]) In ['A'..'Z', 'a'..'z', '''', '-'] Then
+          Begin
+            If Not Ok Then Inc(N);
+            Ok := True;
+          End
+          Else Ok := False;
+        MkInt(N, R);
+      End;
+    pfUniqid :
+      Begin
+        If Argc > 0 Then S := ArgPStr(Arg[0]) Else S := '';
+        MkStr(S + LoStr(Hex(NowUnix, 8)) + LoStr(Hex(PTicks And $FFFFF, 5)), R);
+      End;
+    pfLcgValue : MkReal(PRnd, R);
+    pfJsonEncode :
+      Begin
+        If Argc > 1 Then N := PInt(Arg[1]) Else N := 0;
+        PJsonEnc(Arg[0], N, 0, B);
+        PRet(B, R);
+      End;
+    pfJsonDecode :
+      Begin
+        PStrCell(Arg[0], T);
+        JP := PoolPtr(T); JN := T.L; JK := 0; JErr := False;
+        JValue(R);
+        JWs;
+        If JErr Or (JK < JN) Then MkNil(R);
+      End;
+    { --- mathematiques --- }
+    pfAbs :
+      Begin
+        PNumCell(Arg[0], X);
+        If X.T = vtInt Then
+        Begin
+          If X.I < 0 Then MkInt(-X.I, R) Else R := X;
+        End
+        Else MkReal(Abs(X.R), R);
+      End;
+    pfCeil :
+      Begin
+        D := PReal(Arg[0]);
+        If (D > 0) And (Frac(D) <> 0) Then MkReal(Int(D) + 1, R) Else MkReal(Int(D), R);
+      End;
+    pfFloor :
+      Begin
+        D := PReal(Arg[0]);
+        If (D < 0) And (Frac(D) <> 0) Then MkReal(Int(D) - 1, R) Else MkReal(Int(D), R);
+      End;
+    pfRound :
+      Begin
+        If Argc > 1 Then N := PInt(Arg[1]) Else N := 0;
+        MkReal(PRound(PReal(Arg[0]), N), R);
+      End;
+    pfSqrt :
+      Begin
+        D := PReal(Arg[0]);
+        If D < 0 Then MkReal(0, R) Else MkReal(Sqrt(D), R);
+      End;
+    pfPow :
+      Begin
+        PNumCell(Arg[0], X); PNumCell(Arg[1], Y);
+        If (X.T = vtInt) And (Y.T = vtInt) And (Y.I >= 0) Then
+        Begin
+          D := 1;
+          For K := 1 To Y.I Do
+          Begin
+            D := D * X.I;
+            If Abs(D) > 1E300 Then Break;
+          End;
+          If Abs(D) <= 2147483647.0 Then MkInt(Trunc(D), R) Else MkReal(D, R);
+        End
+        Else
+        Begin
+          If X.T = vtInt Then D := X.I Else D := X.R;
+          If Y.T = vtInt Then D2 := Y.I Else D2 := Y.R;
+          If D = 0 Then MkReal(0, R)
+          Else If D > 0 Then MkReal(Exp(D2 * Ln(D)), R)
+          Else If D2 = Int(D2) Then
+          Begin
+            If Trunc(D2) Mod 2 = 0 Then MkReal(Exp(D2 * Ln(-D)), R) Else MkReal(-Exp(D2 * Ln(-D)), R);
+          End
+          Else MkReal(0, R);
+        End;
+      End;
+    pfIntdiv :
+      Begin
+        N := PInt(Arg[1]);
+        If N = 0 Then VmFail('Division by zero') Else MkInt(PInt(Arg[0]) Div N, R);
+      End;
+    pfMax, pfMin :
+      Begin
+        If (Argc = 1) And PIsArr(Arg[0]) Then
+        Begin
+          K := PArrNext(Arg[0].I, 0);
+          If K < 0 Then
+          Begin
+            VmFail('max()/min() : tableau vide');
+            Exit;
+          End;
+          R := DVal^[K];
+          K := PArrNext(Arg[0].I, K + 1);
+          While K >= 0 Do
+          Begin
+            X := DVal^[K];
+            If ((Id = pfMax) And (PhpCompare(X, R) > 0)) Or ((Id = pfMin) And (PhpCompare(X, R) < 0)) Then R := X;
+            K := PArrNext(Arg[0].I, K + 1);
+          End;
+        End
+        Else
+        Begin
+          R := Arg[0];
+          For K := 1 To Argc - 1 Do
+            If ((Id = pfMax) And (PhpCompare(Arg[K], R) > 0)) Or ((Id = pfMin) And (PhpCompare(Arg[K], R) < 0)) Then
+              R := Arg[K];
+        End;
+      End;
+    pfRand, pfMtRand, pfRandomInt :
+      Begin
+        If Argc >= 2 Then
+        Begin
+          A := PInt(Arg[0]); N := PInt(Arg[1]);
+          If N < A Then MkInt(A, R)
+          Else MkInt(A + Trunc(PRnd * (PDiff(N, A) + 1)), R);
+        End
+        Else MkInt(VmRand, R);
+      End;
+    pfMtSrand, pfSrand : ;
+    pfMtGetrandmax, pfGetrandmax : MkInt(2147483647, R);
+    pfPi : MkReal(Pi, R);
+    pfFmod :
+      Begin
+        D := PReal(Arg[0]); D2 := PReal(Arg[1]);
+        If D2 = 0 Then MkReal(0, R) Else MkReal(D - Int(D / D2) * D2, R);
+      End;
+    pfExp : MkReal(Exp(PReal(Arg[0])), R);
+    pfLog, pfLog10, pfLog2 :
+      Begin
+        D := PReal(Arg[0]);
+        If D <= 0 Then MkReal(-1.7976931348623157E308, R)
+        Else If Id = pfLog10 Then MkReal(Ln(D) / Ln(10), R)
+        Else If Id = pfLog2 Then MkReal(Ln(D) / Ln(2), R)
+        Else If Argc > 1 Then MkReal(Ln(D) / Ln(PReal(Arg[1])), R)
+        Else MkReal(Ln(D), R);
+      End;
+    pfSin : MkReal(Sin(PReal(Arg[0])), R);
+    pfCos : MkReal(Cos(PReal(Arg[0])), R);
+    pfTan : MkReal(Sin(PReal(Arg[0])) / Cos(PReal(Arg[0])), R);
+    pfAtan : MkReal(ArcTan(PReal(Arg[0])), R);
+    pfAsin, pfAcos :
+      Begin
+        D := PReal(Arg[0]);
+        If Abs(D) >= 1 Then D2 := Pi / 2 * D Else D2 := ArcTan(D / Sqrt(1 - D * D));
+        If Id = pfAcos Then D2 := Pi / 2 - D2;
+        MkReal(D2, R);
+      End;
+    pfAtan2 :
+      Begin
+        D := PReal(Arg[0]); D2 := PReal(Arg[1]);
+        If D2 > 0 Then MkReal(ArcTan(D / D2), R)
+        Else If (D2 < 0) And (D >= 0) Then MkReal(ArcTan(D / D2) + Pi, R)
+        Else If D2 < 0 Then MkReal(ArcTan(D / D2) - Pi, R)
+        Else If D > 0 Then MkReal(Pi / 2, R)
+        Else If D < 0 Then MkReal(-Pi / 2, R)
+        Else MkReal(0, R);
+      End;
+    pfIsNan : MkBool(PReal(Arg[0]) <> PReal(Arg[0]), R);
+    pfIsFinite : MkBool(Abs(PReal(Arg[0])) < 1.7E308, R);
+    pfIsInfinite : MkBool(Abs(PReal(Arg[0])) >= 1.7E308, R);
+    pfDeg2rad : MkReal(PReal(Arg[0]) * Pi / 180, R);
+    pfRad2deg : MkReal(PReal(Arg[0]) * 180 / Pi, R);
+    pfHypot : MkReal(Sqrt(Sqr(PReal(Arg[0])) + Sqr(PReal(Arg[1]))), R);
+    { --- types --- }
+    pfIntval :
+      Begin
+        If (Argc > 1) And (PInt(Arg[1]) <> 10) Then
+        Begin
+          MkInt(10, Arg[2]);
+          PhpBuiltin(pfBaseConvert, 3, Arg, T);
+          MkInt(SVal(CellPStr(T)), R);
+        End
+        Else
+        Begin
+          X := Arg[0];
+          PNumCell(X, Y);
+          If Y.T = vtReal Then
+          Begin
+            If (Y.R > 2147483647.0) Or (Y.R < -2147483648.0) Then MkInt(0, R) Else MkInt(Trunc(Y.R), R);
+          End
+          Else R := Y;
+          If PIsArr(X) Then MkInt(Ord(DictCount(X.I) > 0), R);
+        End;
+      End;
+    pfFloatval, pfDoubleval :
+      Begin
+        PNumCell(Arg[0], Y);
+        If Y.T = vtInt Then MkReal(Y.I, R) Else R := Y;
+      End;
+    pfStrval : PStrCell(Arg[0], R);
+    pfBoolval : MkBool(PBool(Arg[0]), R);
+    pfGettype, pfGetDebugType :
+      Begin
+        X := Arg[0];
+        If (X.T = vtObj) And Not PIsArr(X) Then ObjValue(X);
+        If PIsArr(X) Then S := 'array'
+        Else
+          Case X.T Of
+            vtNil : If Id = pfGettype Then S := 'NULL' Else S := 'null';
+            vtInt : If Id = pfGettype Then S := 'integer' Else S := 'int';
+            vtReal, vtDate : If Id = pfGettype Then S := 'double' Else S := 'float';
+            vtBool : If Id = pfGettype Then S := 'boolean' Else S := 'bool';
+            vtObj : S := 'object';
+          Else
+            S := 'string';
+          End;
+        MkStr(S, R);
+      End;
+    pfIsInt, pfIsInteger, pfIsLong : MkBool(Arg[0].T = vtInt, R);
+    pfIsFloat, pfIsDouble : MkBool(Arg[0].T = vtReal, R);
+    pfIsString : MkBool(IsStrCell(Arg[0]), R);
+    pfIsBool : MkBool(Arg[0].T = vtBool, R);
+    pfIsArray, pfIsIterable, pfIsCountable : MkBool(PIsArr(Arg[0]), R);
+    pfIsNumeric : MkBool((Arg[0].T = vtInt) Or (Arg[0].T = vtReal) Or PIsNumStr(Arg[0]), R);
+    pfIsNull : MkBool(Arg[0].T = vtNil, R);
+    pfIsScalar : MkBool(Arg[0].T In [vtInt, vtReal, vtBool, vtStr, vtKStr, vtChar], R);
+    pfIsObject : MkBool((Arg[0].T = vtObj) And Not PIsArr(Arg[0]), R);
+    pfVarDump :
+      Begin
+        For K := 0 To Argc - 1 Do PVarDump(Arg[K], 0, B);
+        BufAddB(VmOut, B.P, B.Len);
+        If B.Len > 0 Then VmHdrPending := False;
+        BufFree(B);
+      End;
+    pfPrintR, pfVarExport :
+      Begin
+        If Id = pfPrintR Then PPrintR(Arg[0], 0, B) Else PVarExport(Arg[0], 0, B);
+        If (Argc > 1) And PBool(Arg[1]) Then PRet(B, R)
+        Else
+        Begin
+          BufAddB(VmOut, B.P, B.Len);
+          If B.Len > 0 Then VmHdrPending := False;
+          BufFree(B);
+          If Id = pfPrintR Then MkBool(True, R);
+        End;
+      End;
+    { --- tableaux --- }
+    pfCount, pfSizeof :
+      If PIsArr(Arg[0]) Then
+      Begin
+        If (Argc > 1) And (PInt(Arg[1]) = 1) Then
+        Begin
+          { recursif }
+          N := 0;
+          Ob := Arg[0].I;
+          K := PArrNext(Ob, 0);
+          While K >= 0 Do
+          Begin
+            Inc(N);
+            X := DVal^[K];
+            If PIsArr(X) Then
+            Begin
+              Arg[0] := X;
+              PhpBuiltin(pfCount, 2, Arg, T);
+              N := N + T.I;
+            End;
+            K := PArrNext(Ob, K + 1);
+          End;
+          MkInt(N, R);
+        End
+        Else MkInt(DictCount(Arg[0].I), R);
+      End
+      Else If Arg[0].T = vtNil Then MkInt(0, R)
+      Else If (Arg[0].T = vtObj) And (Arg[0].I < NObj) And (ObjK[Arg[0].I] = okDbRs) And (ObjA[Arg[0].I] >= 0) Then
+        MkInt(Rss[ObjA[Arg[0].I]].NRow, R)
+      Else MkInt(1, R);
+    pfArrayKeys, pfArrayValues :
+      Begin
+        A := PArrArg(Arg[0], 'array_keys');
+        If A < 0 Then Exit;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          If Id = pfArrayKeys Then
+          Begin
+            X := DVal^[K];
+            If (Argc < 2) Or (PhpCompare(X, Arg[1]) = 0) Then
+            Begin
+              X := DKey^[K];
+              PArrPush(Ob, X);
+            End;
+          End
+          Else
+          Begin
+            X := DVal^[K];
+            PArrPush(Ob, X);
+          End;
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfInArray, pfArraySearch :
+      Begin
+        A := PArrArg(Arg[1], 'in_array');
+        If A < 0 Then Exit;
+        K := PArrSearch(A, Arg[0], (Argc > 2) And PBool(Arg[2]));
+        If Id = pfInArray Then MkBool(K >= 0, R)
+        Else If K >= 0 Then R := DKey^[K]
+        Else MkBool(False, R);
+      End;
+    pfArrayKeyExists, pfKeyExists :
+      If PIsArr(Arg[1]) Then MkBool(PArrFind(Arg[1].I, Arg[0]) >= 0, R)
+      Else If Arg[1].T = vtObj Then
+      Begin
+        PGetElem(Arg[1], Arg[0], -1, T);
+        MkBool(T.T <> vtNil, R);
+      End
+      Else MkBool(False, R);
+    pfArrayMerge, pfArrayReplace :
+      Begin
+        Ob := PArrNew;
+        For J := 0 To Argc - 1 Do
+          If PIsArr(Arg[J]) Then
+          Begin
+            K := PArrNext(Arg[J].I, 0);
+            While K >= 0 Do
+            Begin
+              X := DVal^[K];
+              If (DKey^[K].T = vtInt) And (Id = pfArrayMerge) Then PArrPush(Ob, X)
+              Else PArrSet(Ob, DKey^[K], X);
+              K := PArrNext(Arg[J].I, K + 1);
+            End;
+          End;
+        MkObj(Ob, R);
+      End;
+    pfArrayPush :
+      Begin
+        A := PArrArg(Arg[0], 'array_push');
+        If A < 0 Then Exit;
+        For K := 1 To Argc - 1 Do PArrPush(A, Arg[K]);
+        MkInt(DictCount(A), R);
+      End;
+    pfArrayPop, pfArrayShift :
+      Begin
+        A := PArrArg(Arg[0], 'array_pop');
+        If A < 0 Then Exit;
+        If Id = pfArrayPop Then K := PArrLast(A) Else K := PArrNext(A, 0);
+        If K >= 0 Then
+        Begin
+          R := DVal^[K];
+          DObj^[K] := -1;
+          If Id = pfArrayShift Then PArrRenumber(A)
+          Else
+          Begin
+            { prochain indice : le plus grand + 1 }
+            ObjA[A] := 0;
+            J := PArrNext(A, 0);
+            While J >= 0 Do
+            Begin
+              If (DKey^[J].T = vtInt) And (DKey^[J].I >= ObjA[A]) Then ObjA[A] := DKey^[J].I + 1;
+              J := PArrNext(A, J + 1);
+            End;
+          End;
+        End;
+      End;
+    pfArrayUnshift :
+      Begin
+        A := PArrArg(Arg[0], 'array_unshift');
+        If A < 0 Then Exit;
+        { nouvelles entrees : les valeurs puis les anciennes (meme objet) }
+        Ob := PArrCopy(A);
+        For K := 0 To NDict - 1 Do If DObj^[K] = A Then DObj^[K] := -1;
+        ObjA[A] := 0;
+        For K := 1 To Argc - 1 Do PArrPush(A, Arg[K]);
+        K := PArrNext(Ob, 0);
+        While K >= 0 Do
+        Begin
+          X := DVal^[K];
+          If DKey^[K].T = vtInt Then PArrPush(A, X) Else PArrSet(A, DKey^[K], X);
+          K := PArrNext(Ob, K + 1);
+        End;
+        MkInt(DictCount(A), R);
+      End;
+    pfArraySlice, pfArraySplice :
+      Begin
+        A := PArrArg(Arg[0], 'array_slice');
+        If A < 0 Then Exit;
+        N := DictCount(A);
+        St := PInt(Arg[1]);
+        If St < 0 Then St := N + St;
+        If St < 0 Then St := 0;
+        If (Argc > 2) And (Arg[2].T <> vtNil) Then
+        Begin
+          Len := PInt(Arg[2]);
+          If Len < 0 Then Len := N - St + Len;
+        End
+        Else Len := N - St;
+        If Len < 0 Then Len := 0;
+        Ok := (Id = pfArraySlice) And (Argc > 3) And PBool(Arg[3]);
+        Ob := PArrNew;
+        I := 0;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          If (I >= St) And (I < St + Len) Then
+          Begin
+            X := DVal^[K];
+            If (DKey^[K].T = vtInt) And Not Ok Then PArrPush(Ob, X) Else PArrSet(Ob, DKey^[K], X);
+            If Id = pfArraySplice Then DObj^[K] := -1;
+          End;
+          Inc(I);
+          K := PArrNext(A, K + 1);
+        End;
+        If Id = pfArraySplice Then
+        Begin
+          { remplacement : insere a la place (reconstruit le tableau) }
+          If Argc > 3 Then
+          Begin
+            Ob2 := PArrCopy(A);
+            For K := 0 To NDict - 1 Do If DObj^[K] = A Then DObj^[K] := -1;
+            ObjA[A] := 0;
+            I := 0;
+            K := PArrNext(Ob2, 0);
+            Ok := False;
+            While (K >= 0) Or Not Ok Do
+            Begin
+              If (I = St) And Not Ok Then
+              Begin
+                If PIsArr(Arg[3]) Then
+                Begin
+                  J := PArrNext(Arg[3].I, 0);
+                  While J >= 0 Do
+                  Begin
+                    X := DVal^[J];
+                    PArrPush(A, X);
+                    J := PArrNext(Arg[3].I, J + 1);
+                  End;
+                End
+                Else PArrPush(A, Arg[3]);
+                Ok := True;
+              End;
+              If K < 0 Then Break;
+              X := DVal^[K];
+              If DKey^[K].T = vtInt Then PArrPush(A, X) Else PArrSet(A, DKey^[K], X);
+              Inc(I);
+              K := PArrNext(Ob2, K + 1);
+            End;
+          End
+          Else PArrRenumber(A);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayReverse :
+      Begin
+        A := PArrArg(Arg[0], 'array_reverse');
+        If A < 0 Then Exit;
+        Ob := PArrNew;
+        K := PArrLast(A);
+        While K >= 0 Do
+        Begin
+          X := DVal^[K];
+          If (DKey^[K].T = vtInt) And Not ((Argc > 1) And PBool(Arg[1])) Then PArrPush(Ob, X)
+          Else PArrSet(Ob, DKey^[K], X);
+          J := K - 1;
+          K := -1;
+          While J >= 0 Do
+          Begin
+            If DObj^[J] = A Then
+            Begin
+              K := J;
+              Break;
+            End;
+            Dec(J);
+          End;
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArraySum, pfArrayProduct :
+      Begin
+        A := PArrArg(Arg[0], 'array_sum');
+        If A < 0 Then Exit;
+        If Id = pfArraySum Then MkInt(0, R) Else MkInt(1, R);
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          X := DVal^[K];
+          T := R;
+          If Id = pfArraySum Then PhpArith(opAdd, T, X, R) Else PhpArith(opMul, T, X, R);
+          K := PArrNext(A, K + 1);
+        End;
+      End;
+    pfSort, pfRsort, pfAsort, pfArsort, pfKsort, pfKrsort :
+      Begin
+        A := PArrArg(Arg[0], 'sort');
+        If A < 0 Then Exit;
+        If Argc > 1 Then N := PInt(Arg[1]) Else N := 0;
+        PSortArr(A, (Id = pfKsort) Or (Id = pfKrsort), (Id = pfRsort) Or (Id = pfArsort) Or (Id = pfKrsort),
+                 (Id = pfSort) Or (Id = pfRsort), N);
+        MkBool(True, R);
+      End;
+    pfArrayUnique :
+      Begin
+        A := PArrArg(Arg[0], 'array_unique');
+        If A < 0 Then Exit;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          X := DVal^[K];
+          PStrCell(X, T);
+          Ok := True;
+          J := PArrNext(Ob, 0);
+          While J >= 0 Do
+          Begin
+            PStrCell(DVal^[J], T2);
+            If StrCmpCells(T, T2, False) = 0 Then
+            Begin
+              Ok := False;
+              Break;
+            End;
+            J := PArrNext(Ob, J + 1);
+          End;
+          If Ok Then PArrSet(Ob, DKey^[K], X);
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayFlip :
+      Begin
+        A := PArrArg(Arg[0], 'array_flip');
+        If A < 0 Then Exit;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          X := DKey^[K];
+          PArrSet(Ob, DVal^[K], X);
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayFill :
+      Begin
+        Ob := PArrNew;
+        St := PInt(Arg[0]);
+        For K := 0 To PInt(Arg[1]) - 1 Do
+        Begin
+          MkInt(St + K, Kc);
+          PArrSet(Ob, Kc, Arg[2]);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayFillKeys :
+      Begin
+        A := PArrArg(Arg[0], 'array_fill_keys');
+        If A < 0 Then Exit;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          PArrSet(Ob, DVal^[K], Arg[1]);
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfRange :
+      Begin
+        Ob := PArrNew;
+        If IsStrCell(Arg[0]) And IsStrCell(Arg[1]) And Not PIsNumStr(Arg[0]) And (CellLen(Arg[0]) = 1) Then
+        Begin
+          { range('a', 'e') }
+          PStrCell(Arg[0], T); PStrCell(Arg[1], T2);
+          A := PoolPtr(T)^[0]; N := PoolPtr(T2)^[0];
+          If Argc > 2 Then M := Abs(PInt(Arg[2])) Else M := 1;
+          If M = 0 Then M := 1;
+          K := A;
+          While ((A <= N) And (K <= N)) Or ((A > N) And (K >= N)) Do
+          Begin
+            S := Chr(K);
+            MkStr(S, X);
+            PArrPush(Ob, X);
+            If A <= N Then K := K + M Else K := K - M;
+          End;
+        End
+        Else
+        Begin
+          PNumCell(Arg[0], X); PNumCell(Arg[1], Y);
+          If Argc > 2 Then PNumCell(Arg[2], T) Else MkInt(1, T);
+          If (X.T = vtInt) And (Y.T = vtInt) And (T.T = vtInt) Then
+          Begin
+            M := Abs(T.I);
+            If M = 0 Then M := 1;
+            K := X.I;
+            While ((X.I <= Y.I) And (K <= Y.I)) Or ((X.I > Y.I) And (K >= Y.I)) Do
+            Begin
+              MkInt(K, T2);
+              PArrPush(Ob, T2);
+              If X.I <= Y.I Then K := K + M Else K := K - M;
+              If DictCount(Ob) > 100000 Then Break;
+            End;
+          End
+          Else
+          Begin
+            D := PReal(X); D2 := PReal(Y);
+            If T.T = vtInt Then Y.R := Abs(T.I) Else Y.R := Abs(T.R);
+            If Y.R = 0 Then Y.R := 1;
+            N := 0;
+            While ((D <= D2) And (D + N * Y.R <= D2 + 1E-9)) Or ((D > D2) And (D - N * Y.R >= D2 - 1E-9)) Do
+            Begin
+              If D <= D2 Then MkReal(D + N * Y.R, T2) Else MkReal(D - N * Y.R, T2);
+              PArrPush(Ob, T2);
+              Inc(N);
+              If N > 100000 Then Break;
+            End;
+          End;
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayCombine :
+      Begin
+        A := PArrArg(Arg[0], 'array_combine');
+        If (A < 0) Or Not PIsArr(Arg[1]) Then Exit;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        J := PArrNext(Arg[1].I, 0);
+        While (K >= 0) And (J >= 0) Do
+        Begin
+          X := DVal^[J];
+          PArrSet(Ob, DVal^[K], X);
+          K := PArrNext(A, K + 1);
+          J := PArrNext(Arg[1].I, J + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayColumn :
+      Begin
+        A := PArrArg(Arg[0], 'array_column');
+        If A < 0 Then Exit;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          X := DVal^[K];
+          If PIsArr(X) Then
+          Begin
+            If Arg[1].T = vtNil Then Y := X Else PArrGet(X.I, Arg[1], Y);
+            If (Argc > 2) And (Arg[2].T <> vtNil) Then
+            Begin
+              PArrGet(X.I, Arg[2], T);
+              PArrSet(Ob, T, Y);
+            End
+            Else If (Arg[1].T = vtNil) Or (PArrFind(X.I, Arg[1]) >= 0) Then PArrPush(Ob, Y);
+          End;
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayRand :
+      Begin
+        A := PArrArg(Arg[0], 'array_rand');
+        If A < 0 Then Exit;
+        N := DictCount(A);
+        If N = 0 Then Exit;
+        K := PArrNth(A, Trunc(PRnd * N));
+        If K >= 0 Then R := DKey^[K];
+      End;
+    pfShuffle :
+      Begin
+        A := PArrArg(Arg[0], 'shuffle');
+        If A < 0 Then Exit;
+        N := DictCount(A);
+        For I := N - 1 DownTo 1 Do
+        Begin
+          J := Trunc(PRnd * (I + 1));
+          K := PArrNth(A, I); M := PArrNth(A, J);
+          X := DVal^[K]; DVal^[K] := DVal^[M]; DVal^[M] := X;
+        End;
+        PArrRenumber(A);
+        MkBool(True, R);
+      End;
+    pfArrayCountValues :
+      Begin
+        A := PArrArg(Arg[0], 'array_count_values');
+        If A < 0 Then Exit;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          PArrGet(Ob, DVal^[K], X);
+          MkInt(CellInt(X) + 1, X);
+          PArrSet(Ob, DVal^[K], X);
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayKeyFirst, pfArrayKeyLast :
+      Begin
+        A := PArrArg(Arg[0], 'array_key_first');
+        If A < 0 Then Exit;
+        If Id = pfArrayKeyFirst Then K := PArrNext(A, 0) Else K := PArrLast(A);
+        If K >= 0 Then R := DKey^[K];
+      End;
+    pfArrayFilter :
+      Begin
+        A := PArrArg(Arg[0], 'array_filter');
+        If A < 0 Then Exit;
+        If Argc > 1 Then
+        Begin
+          VmFail('array_filter() : fonction de rappel non prise en charge');
+          Exit;
+        End;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          X := DVal^[K];
+          If PBool(X) Then PArrSet(Ob, DKey^[K], X);
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayPad :
+      Begin
+        A := PArrArg(Arg[0], 'array_pad');
+        If A < 0 Then Exit;
+        N := PInt(Arg[1]);
+        Ob := PArrNew;
+        M := DictCount(A);
+        If N < 0 Then For K := 1 To -N - M Do PArrPush(Ob, Arg[2]);
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          X := DVal^[K];
+          If DKey^[K].T = vtInt Then PArrPush(Ob, X) Else PArrSet(Ob, DKey^[K], X);
+          K := PArrNext(A, K + 1);
+        End;
+        If N > 0 Then For K := 1 To N - M Do PArrPush(Ob, Arg[2]);
+        MkObj(Ob, R);
+      End;
+    pfArrayChunk :
+      Begin
+        A := PArrArg(Arg[0], 'array_chunk');
+        If A < 0 Then Exit;
+        N := PInt(Arg[1]);
+        If N < 1 Then N := 1;
+        Ob := PArrNew;
+        Ob2 := -1;
+        I := 0;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          If I Mod N = 0 Then
+          Begin
+            Ob2 := PArrNew;
+            MkObj(Ob2, T);
+            PArrPush(Ob, T);
+          End;
+          X := DVal^[K];
+          If (Argc > 2) And PBool(Arg[2]) Then PArrSet(Ob2, DKey^[K], X) Else PArrPush(Ob2, X);
+          Inc(I);
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayDiff, pfArrayDiffKey, pfArrayIntersect, pfArrayIntersectKey :
+      Begin
+        A := PArrArg(Arg[0], 'array_diff');
+        If A < 0 Then Exit;
+        Ob := PArrNew;
+        K := PArrNext(A, 0);
+        While K >= 0 Do
+        Begin
+          { present dans tous (intersect) / dans aucun (diff) des autres }
+          N := 0;
+          For J := 1 To Argc - 1 Do
+            If PIsArr(Arg[J]) Then
+            Begin
+              If (Id = pfArrayDiffKey) Or (Id = pfArrayIntersectKey) Then
+              Begin
+                If PArrFind(Arg[J].I, DKey^[K]) >= 0 Then Inc(N);
+              End
+              Else
+              Begin
+                PStrCell(DVal^[K], T);
+                M := PArrNext(Arg[J].I, 0);
+                While M >= 0 Do
+                Begin
+                  PStrCell(DVal^[M], T2);
+                  If StrCmpCells(T, T2, False) = 0 Then
+                  Begin
+                    Inc(N);
+                    Break;
+                  End;
+                  M := PArrNext(Arg[J].I, M + 1);
+                End;
+              End;
+            End;
+          If ((Id = pfArrayDiff) Or (Id = pfArrayDiffKey)) And (N = 0) Or
+             ((Id = pfArrayIntersect) Or (Id = pfArrayIntersectKey)) And (N = Argc - 1) Then
+          Begin
+            X := DVal^[K];
+            PArrSet(Ob, DKey^[K], X);
+          End;
+          K := PArrNext(A, K + 1);
+        End;
+        MkObj(Ob, R);
+      End;
+    pfArrayIsList : If PIsArr(Arg[0]) Then MkBool(PIsList(Arg[0].I), R) Else MkBool(False, R);
+    pfReset, pfEnd, pfCurrent, pfKey, pfNext, pfPrev :
+      Begin
+        A := PArrArg(Arg[0], 'reset');
+        If A < 0 Then Exit;
+        { pointeur interne : ObjB (indice brut) }
+        Case Id Of
+          pfReset : ObjB[A] := PArrNext(A, 0);
+          pfEnd : ObjB[A] := PArrLast(A);
+          pfNext : If ObjB[A] >= 0 Then ObjB[A] := PArrNext(A, ObjB[A] + 1);
+          pfPrev :
+            Begin
+              K := ObjB[A] - 1;
+              ObjB[A] := -1;
+              While K >= 0 Do
+              Begin
+                If DObj^[K] = A Then
+                Begin
+                  ObjB[A] := K;
+                  Break;
+                End;
+                Dec(K);
+              End;
+            End;
+          pfCurrent, pfKey :
+            If (ObjB[A] = 0) And (PArrNext(A, 0) > 0) Then ObjB[A] := PArrNext(A, 0);
+        End;
+        K := ObjB[A];
+        If (K < 0) Or (K >= NDict) Or (DObj^[K] <> A) Then
+        Begin
+          If Id = pfKey Then MkNil(R) Else MkBool(False, R);
+        End
+        Else If Id = pfKey Then R := DKey^[K]
+        Else R := DVal^[K];
+      End;
+    { --- dates --- }
+    pfDate, pfGmdate :
+      Begin
+        If Argc > 1 Then K := PInt(Arg[1]) Else K := NowUnix;
+        PStrCell(Arg[0], T);
+        PDate(T, K, B);
+        PRet(B, R);
+      End;
+    pfTime : MkInt(NowUnix, R);
+    pfMktime, pfGmmktime :
+      Begin
+        UnixSplit(NowUnix, Y_, Mo_, D_, H_, Mi_, Sc_, Wd_);
+        If Argc > 0 Then H_ := PInt(Arg[0]);
+        If Argc > 1 Then Mi_ := PInt(Arg[1]);
+        If Argc > 2 Then Sc_ := PInt(Arg[2]);
+        If Argc > 3 Then Mo_ := PInt(Arg[3]);
+        If Argc > 4 Then D_ := PInt(Arg[4]);
+        If Argc > 5 Then Y_ := PInt(Arg[5]);
+        MkInt(PMkTime(H_, Mi_, Sc_, Mo_, D_, Y_), R);
+      End;
+    pfStrtotime :
+      Begin
+        If Argc > 1 Then N := PInt(Arg[1]) Else N := NowUnix;
+        If PStrToTime(ArgPStr(Arg[0]), N, K) Then MkInt(K, R) Else MkBool(False, R);
+      End;
+    pfCheckdate :
+      Begin
+        Mo_ := PInt(Arg[0]); D_ := PInt(Arg[1]); Y_ := PInt(Arg[2]);
+        MkBool((Mo_ >= 1) And (Mo_ <= 12) And (D_ >= 1) And (Y_ >= 1) And (D_ <= PDaysIn(Mo_, Y_)), R);
+      End;
+    pfDateDefaultTimezoneSet : MkBool(True, R);
+    pfDateDefaultTimezoneGet : MkStr('UTC', R);
+    pfMicrotime :
+      Begin
+        D := NowUnix + (PTicks Mod 1000) / 1000.0;
+        If (Argc > 0) And PBool(Arg[0]) Then MkReal(D, R)
+        Else MkStr('0.' + Copy(IStr(1000 + PTicks Mod 1000), 2, 3) + '00000 ' + IStr(NowUnix), R);
+      End;
+    pfHrtime :
+      Begin
+        If (Argc > 0) And PBool(Arg[0]) Then MkReal(PDiff(PTicks, 0) * 1000000.0, R)
+        Else
+        Begin
+          Ob := PArrNew;
+          MkInt(PTicks Div 1000, X); PArrPush(Ob, X);
+          MkInt((PTicks Mod 1000) * 1000000, X); PArrPush(Ob, X);
+          MkObj(Ob, R);
+        End;
+      End;
+    pfIdate :
+      Begin
+        PStrCell(Arg[0], T);
+        If Argc > 1 Then K := PInt(Arg[1]) Else K := NowUnix;
+        PDate(T, K, B);
+        S := '';
+        For K := 0 To B.Len - 1 Do If Length(S) < 20 Then S := S + Chr(B.P^[K]);
+        MkInt(SVal(S), R);
+        BufFree(B);
+      End;
+    { --- reponse, session, divers --- }
+    pfHeader :
+      Begin
+        S := ArgPStr(Arg[0]);
+        If UpStr(Copy(S, 1, 5)) = 'HTTP/' Then
+        Begin
+          K := Pos(' ', S);
+          VmStatus := Copy(S, K + 1, 63);
+          If VmOut.Len = 0 Then VmHdrPending := True;
+        End
+        Else
+        Begin
+          K := Pos(':', S);
+          S2 := Trim(Copy(S, 1, K - 1)); S3 := Trim(Copy(S, K + 1, 255));
+          If UpStr(S2) = 'LOCATION' Then
+          Begin
+            If (Copy(VmStatus, 1, 1) <> '3') Then VmStatus := '302 Found';
+            VmPendLoc := S3;
+            AddHdr('Location', S3);
+          End
+          Else If UpStr(S2) = 'CONTENT-TYPE' Then
+          Begin
+            VmCType := S3;
+            If VmOut.Len = 0 Then VmHdrPending := True;
+          End
+          Else If K > 0 Then AddHdr(S2, S3);
+        End;
+        If (Argc > 2) And (PInt(Arg[2]) > 0) Then VmStatus := IStr(PInt(Arg[2])) + Copy(VmStatus, 4, 60);
+      End;
+    pfHeadersSent : MkBool(False, R);
+    pfHttpResponseCode :
+      Begin
+        MkInt(SVal(Copy(VmStatus, 1, 3)), R);
+        If (Argc > 0) And (PInt(Arg[0]) > 0) Then
+        Begin
+          N := PInt(Arg[0]);
+          Case N Of
+            200 : S := 'OK'; 201 : S := 'Created'; 204 : S := 'No Content'; 301 : S := 'Moved Permanently';
+            302 : S := 'Found'; 303 : S := 'See Other'; 304 : S := 'Not Modified'; 400 : S := 'Bad Request';
+            401 : S := 'Unauthorized'; 403 : S := 'Forbidden'; 404 : S := 'Not Found'; 405 : S := 'Method Not Allowed';
+            500 : S := 'Internal Server Error'; 503 : S := 'Service Unavailable';
+          Else
+            S := 'Status';
+          End;
+          VmStatus := IStr(N) + ' ' + S;
+          If VmOut.Len = 0 Then VmHdrPending := True;
+        End;
+      End;
+    pfSetcookie :
+      Begin
+        S := ArgPStr(Arg[0]) + '=';
+        If Argc > 1 Then
+        Begin
+          PStrCell(Arg[1], T);
+          S := S + UrlEncode(CellPStr(T));
+        End;
+        If (Argc > 2) And (PInt(Arg[2]) > 0) Then S := S + '; expires=' + HttpDate(PInt(Arg[2]));
+        If (Argc > 3) And (CellLen(Arg[3]) > 0) Then S := S + '; path=' + ArgPStr(Arg[3]) Else S := S + '; path=/';
+        If (Argc > 4) And (CellLen(Arg[4]) > 0) Then S := S + '; domain=' + ArgPStr(Arg[4]);
+        If (Argc > 5) And PBool(Arg[5]) Then S := S + '; secure';
+        If (Argc > 6) And PBool(Arg[6]) Then S := S + '; HttpOnly';
+        AddHdr('Set-Cookie', S);
+        MkBool(True, R);
+      End;
+    pfSessionStart, pfSessionRegenerateId :
+      Begin
+        SessEnsure;
+        MkBool(True, R);
+      End;
+    pfSessionId :
+      Begin
+        SessEnsure;
+        MkStr(Sess[VmSess].Id, R);
+      End;
+    pfSessionDestroy, pfSessionUnset :
+      Begin
+        SessEnsure;
+        For K := 0 To Sess[VmSess].N - 1 Do PVarFree(Sess[VmSess].V[K]);
+        Sess[VmSess].N := 0;
+        If Id = pfSessionDestroy Then Sess[VmSess].Timeout := 0;
+        MkBool(True, R);
+      End;
+    pfSessionStatus : MkInt(2, R);
+    pfPhpversion : MkStr('8.2.0', R);
+    pfPhpUname : MkStr('OS/2-0 ' + ServerName, R);
+    pfPhpSapiName : MkStr('os2-0', R);
+    pfErrorReporting : MkInt(32767, R);
+    pfIniSet, pfIniGet, pfSetTimeLimit : MkBool(False, R);
+    pfObStart :
+      Begin
+        If PNOb < 8 Then
+        Begin
+          PObMark[PNOb] := VmOut.Len;
+          Inc(PNOb);
+        End;
+        MkBool(True, R);
+      End;
+    pfObGetClean, pfObGetContents, pfObEndClean, pfObEndFlush :
+      If PNOb > 0 Then
+      Begin
+        K := PObMark[PNOb - 1];
+        If (Id = pfObGetClean) Or (Id = pfObGetContents) Then MkStrB(@VmOut.P^[K], VmOut.Len - K, R)
+        Else MkBool(True, R);
+        If (Id = pfObGetClean) Or (Id = pfObEndClean) Then VmOut.Len := K;
+        If Id <> pfObGetContents Then Dec(PNOb);
+      End
+      Else MkBool(False, R);
+    pfObGetLevel : MkInt(PNOb, R);
+    pfUsleep, pfSleep, pfFlush, pfGcCollectCycles : MkInt(0, R);
+    pfGetenv : If Argc > 0 Then MkStr(PEnv(ArgPStr(Arg[0])), R) Else MkObj(PArrNew, R);
+    pfGethostname : MkStr(ServerName, R);
+    pfErrorLog :
+      Begin
+        SysLog('PHP : ' + ArgPStr(Arg[0]));
+        MkBool(True, R);
+      End;
+    pfTriggerError :
+      Begin
+        If Argc > 1 Then N := PInt(Arg[1]) Else N := 1024;
+        If N = 256 Then VmFail(ArgPStr(Arg[0]))
+        Else
+        Begin
+          If N = 512 Then S := 'Warning' Else If N = 8192 Then S := 'Deprecated' Else S := 'Notice';
+          PStrCell(Arg[0], T);
+          BufAdd(VmOut, #10 + '<br />' + #10 + '<b>' + S + '</b>:  ');
+          BufAddB(VmOut, PoolPtr(T), T.L);
+          BufAdd(VmOut, '<br />' + #10);
+          VmHdrPending := False;
+          MkBool(True, R);
+        End;
+      End;
+    pfMail : MkBool(False, R);
+    pfMemoryGetUsage, pfMemoryGetPeakUsage : MkInt(VmPool.Len + NDict * 32 + 2097152, R);
+    { --- fichiers --- }
+    pfFileExists, pfIsFile, pfIsDir, pfIsReadable, pfIsWritable, pfFilesize, pfFilemtime :
+      Begin
+        S := PPath(ArgPStr(Arg[0]));
+        Ok := PStat(S, N, M, NoCase);
+        Case Id Of
+          pfFileExists, pfIsReadable, pfIsWritable : MkBool(Ok, R);
+          pfIsFile : MkBool(Ok And Not NoCase, R);
+          pfIsDir : MkBool(Ok And NoCase, R);
+          pfFilesize : If Ok Then MkInt(N, R) Else MkBool(False, R);
+          pfFilemtime : If Ok Then MkInt(M, R) Else MkBool(False, R);
+        End;
+      End;
+    pfFileGetContents, pfFile :
+      Begin
+        S := ArgPStr(Arg[0]);
+        If Pos('://', S) > 0 Then
+        Begin
+          MkBool(False, R);
+          Exit;
+        End;
+        If Not ReadFileBuf(PPath(S), B, 33554432) Then
+        Begin
+          MkBool(False, R);
+          Exit;
+        End;
+        If Id = pfFileGetContents Then PRet(B, R)
+        Else
+        Begin
+          If Argc > 1 Then M := PInt(Arg[1]) Else M := 0;
+          Ob := PArrNew;
+          St := 0;
+          For K := 0 To B.Len Do
+            If (K = B.Len) Or (B.P^[K] = 10) Then
+            Begin
+              If K = B.Len Then N := K Else N := K + 1;
+              If (M And 2) <> 0 Then
+              Begin
+                Len := K - St;
+                If (Len > 0) And (K > 0) And (B.P^[K - 1] = 13) And (K < B.Len) Then Dec(Len);
+              End
+              Else Len := N - St;
+              If (St < B.Len) And Not (((M And 4) <> 0) And (Len = 0)) Then
+              Begin
+                MkStrB(@B.P^[St], Len, X);
+                PArrPush(Ob, X);
+              End;
+              St := K + 1;
+            End;
+          BufFree(B);
+          MkObj(Ob, R);
+        End;
+      End;
+    pfFilePutContents :
+      Begin
+        S := PPath(ArgPStr(Arg[0]));
+        If PIsArr(Arg[1]) Then
+        Begin
+          K := PArrNext(Arg[1].I, 0);
+          While K >= 0 Do
+          Begin
+            X := DVal^[K];
+            PAddCell(B, X);
+            K := PArrNext(Arg[1].I, K + 1);
+          End;
+        End
+        Else PAddCell(B, Arg[1]);
+        Ok := (Argc > 2) And ((PInt(Arg[2]) And 8) <> 0);
+        If POpenWrite(S, Ok, N) Then
+        Begin
+          If B.Len > 0 Then Dummy := PWrite(N, B.P, B.Len);
+          PClose(N);
+          MkInt(B.Len, R);
+        End
+        Else MkBool(False, R);
+        BufFree(B);
+      End;
+    pfBasename, pfDirname :
+      Begin
+        S := ArgPStr(Arg[0]);
+        While (Length(S) > 1) And (S[Length(S)] In ['/', '\']) Do Delete(S, Length(S), 1);
+        K := Length(S);
+        While (K > 0) And Not (S[K] In ['/', '\']) Do Dec(K);
+        If Id = pfBasename Then
+        Begin
+          S := Copy(S, K + 1, 255);
+          If (Argc > 1) And (Copy(S, Length(S) - CellLen(Arg[1]) + 1, 255) = ArgPStr(Arg[1])) Then
+            S := Copy(S, 1, Length(S) - CellLen(Arg[1]));
+        End
+        Else If K = 0 Then S := '.'
+        Else If K = 1 Then S := Copy(S, 1, 1)
+        Else S := Copy(S, 1, K - 1);
+        MkStr(S, R);
+      End;
+    pfPathinfo :
+      Begin
+        S := ArgPStr(Arg[0]);
+        Ob := PArrNew;
+        K := Length(S);
+        While (K > 0) And Not (S[K] In ['/', '\']) Do Dec(K);
+        If K > 0 Then
+        Begin
+          MkStr(Copy(S, 1, K - 1), X);
+          PSetStrKey(Ob, 'dirname', X);
+        End;
+        S2 := Copy(S, K + 1, 255);
+        MkStr(S2, X);
+        PSetStrKey(Ob, 'basename', X);
+        J := Length(S2);
+        While (J > 0) And (S2[J] <> '.') Do Dec(J);
+        If J > 0 Then
+        Begin
+          MkStr(Copy(S2, J + 1, 255), X);
+          PSetStrKey(Ob, 'extension', X);
+          MkStr(Copy(S2, 1, J - 1), X);
+        End
+        Else MkStr(S2, X);
+        PSetStrKey(Ob, 'filename', X);
+        MkObj(Ob, R);
+      End;
+    pfRealpath :
+      Begin
+        S := PPath(ArgPStr(Arg[0]));
+        If PExists(S) Then MkStr(S, R) Else MkBool(False, R);
+      End;
+    pfUnlink : MkBool(PDelete(PPath(ArgPStr(Arg[0]))), R);
+    pfMkdir :
+      Begin
+        S := PPath(ArgPStr(Arg[0]));
+        PMkDir(S);
+        MkBool(PExists(S), R);
+      End;
+    pfRmdir : MkBool(False, R);
+    pfScandir, pfGlob :
+      Begin
+        S := ArgPStr(Arg[0]);
+        S2 := '*';
+        If Id = pfGlob Then
+        Begin
+          K := Length(S);
+          While (K > 0) And Not (S[K] In ['/', '\']) Do Dec(K);
+          S2 := Copy(S, K + 1, 255);
+          S3 := Copy(S, 1, K);
+          If K > 0 Then S := Copy(S, 1, K - 1) Else S := '.';
+        End;
+        Ob := PArrNew;
+        If Id = pfScandir Then
+        Begin
+          MkStr('.', X); PArrPush(Ob, X);
+          MkStr('..', X); PArrPush(Ob, X);
+        End;
+        If PFindFirst(PPath(S), S, N, M, NoCase) Then
+        Begin
+          Repeat
+            If (S <> '.') And (S <> '..') And PWild(S2, S) Then
+            Begin
+              If Id = pfGlob Then MkStr(S3 + S, X) Else MkStr(S, X);
+              PArrPush(Ob, X);
+            End;
+          Until Not PFindNext(S, N, M, NoCase);
+          PFindClose;
+        End;
+        PSortArr(Ob, False, False, True, 2);
+        MkObj(Ob, R);
+      End;
+    pfFopen :
+      Begin
+        S := ArgPStr(Arg[0]);
+        S2 := LoStr(ArgPStr(Arg[1]));
+        K := -1;
+        For J := 15 DownTo 0 Do If Not PFhUsed[J] Then K := J;
+        If (K < 0) Or (Pos('://', S) > 0) Then
+        Begin
+          MkBool(False, R);
+          Exit;
+        End;
+        S := PPath(S);
+        BufInit(PFhBuf[K]);
+        PFhPos[K] := 0;
+        If (S2 <> '') And (S2[1] = 'r') Then
+        Begin
+          If Not ReadFileBuf(S, PFhBuf[K], 33554432) Then
+          Begin
+            MkBool(False, R);
+            Exit;
+          End;
+          PFhMode[K] := 0;
+        End
+        Else
+        Begin
+          If Not POpenWrite(S, (S2 <> '') And (S2[1] = 'a'), N) Then
+          Begin
+            MkBool(False, R);
+            Exit;
+          End;
+          PFhH[K] := N;
+          PFhMode[K] := 1;
+        End;
+        PFhUsed[K] := True;
+        MkInt(K + 1, R);
+      End;
+    pfFgets, pfFgetc, pfFeof :
+      Begin
+        K := PInt(Arg[0]) - 1;
+        If (K < 0) Or (K > 15) Or Not PFhUsed[K] Or (PFhMode[K] <> 0) Then
+        Begin
+          MkBool(Id = pfFeof, R);
+          Exit;
+        End;
+        If Id = pfFeof Then MkBool(PFhPos[K] >= PFhBuf[K].Len, R)
+        Else If PFhPos[K] >= PFhBuf[K].Len Then MkBool(False, R)
+        Else
+        Begin
+          St := PFhPos[K];
+          J := St;
+          If Id = pfFgets Then
+          Begin
+            While (J < PFhBuf[K].Len) And (PFhBuf[K].P^[J] <> 10) Do Inc(J);
+            If J < PFhBuf[K].Len Then Inc(J);
+          End
+          Else Inc(J);
+          MkStrB(@PFhBuf[K].P^[St], J - St, R);
+          PFhPos[K] := J;
+        End;
+      End;
+    pfFwrite, pfFputs :
+      Begin
+        K := PInt(Arg[0]) - 1;
+        If (K < 0) Or (K > 15) Or Not PFhUsed[K] Or (PFhMode[K] <> 1) Then
+        Begin
+          MkBool(False, R);
+          Exit;
+        End;
+        PStrCell(Arg[1], T);
+        If T.L > 0 Then Dummy := PWrite(PFhH[K], PoolPtr(T), T.L);
+        MkInt(T.L, R);
+      End;
+    pfFclose :
+      Begin
+        K := PInt(Arg[0]) - 1;
+        If (K >= 0) And (K <= 15) And PFhUsed[K] Then
+        Begin
+          If PFhMode[K] = 1 Then PClose(PFhH[K]);
+          BufFree(PFhBuf[K]);
+          PFhUsed[K] := False;
+        End;
+        MkBool(True, R);
+      End;
+    pfFileExt : ;
+    { --- bases de donnees --- }
+    pfMysqliConnstr : MkStr(PConnMy(Arg, Argc), R);
+    pfPgConnect : MkStr(PConnPg(ArgPStr(Arg[0])), R);
+    pfPdoConnstr : MkStr(PConnPdo(Arg, Argc), R);
+    pfMysqliError, pfMysqliConnectError, pfPgLastError : MkStr('', R);
+    pfMysqliErrno, pfMysqliConnectErrno, pfPgConnectionStatus : MkInt(0, R);
+    pfMysqliSetCharset, pfMysqliSelectDb : MkBool(True, R);
+    pfPgEscapeString, pfPgEscapeLiteral :
+      Begin
+        T := Arg[Argc - 1];
+        If Id = pfPgEscapeString Then PEscapeSql(T, dbPg, R) Else SqlQuote(T, R, dbPg);
+      End;
+  Else
+    VmFail('fonction PHP non disponible : ' + LoStr(PhpFnNames[Id - 300]) + '()');
+  End;
+  If B.P <> Nil Then BufFree(B);
+End;
 { --- boucle de la machine : Budget instructions au plus --- }
 
 Function LineOf(Pc_ : LongInt) : LongInt;
@@ -12170,6 +17015,7 @@ Begin
           Begin
             If X.I < Y.I Then K := -1 Else If X.I > Y.I Then K := 1 Else K := 0;
           End
+          Else If PhpStyle Then K := PhpCompare(X, Y)
           Else K := Compare(X, Y);
           Case Op Of
             opEq : MkBool(K = 0, Stk[SP]);
@@ -12381,6 +17227,18 @@ Begin
             Else If K < 32 Then Stk[SP].I := Stk[SP].I Or (1 Shl K)
             Else Stk[SP].L := Stk[SP].L Or (1 Shl (K - 32));
         End;
+      opPhp :
+        Begin
+          A := Code^[PC];
+          Inc(PC);
+          If (A = psSuper) Or (A = psIncE) Or (A = psCast) Or (A = psDrop2) Then
+          Begin
+            B := Code^[PC];
+            Inc(PC);
+          End
+          Else B := 0;
+          PhpOp(A, B);
+        End;
       opInSet :
         Begin
           X := Stk[SP];
@@ -12424,8 +17282,10 @@ End;
 { --- pages : cache et compilation --- }
 
 Function CompileAsp(K : LongInt; Path, Root : String) : String; Forward;
+Function CompilePhp(K : LongInt; Path, Root : String) : String; Forward;
 
-Function PageFor(Path : String; Asp : Boolean; Var Err : String) : LongInt;
+{ Lang : 0 PSP, 1 ASP, 2 PHP }
+Function PageFor(Path : String; Lang : LongInt; Var Err : String) : LongInt;
 Var K, Best, Sz, Mt : LongInt; Dr : Boolean;
 Begin
   PageFor := -1;
@@ -12460,10 +17320,12 @@ Begin
     For K := 1 To MaxPage - 1 Do If Pages[K].LastUse < Pages[Best].LastUse Then Best := K;
     ResetPage(Best);
   End;
-  If Asp Then Err := CompileAsp(Best, Path, Sites[Conns[VmConn].Site].Root)
+  If Lang = 1 Then Err := CompileAsp(Best, Path, Sites[Conns[VmConn].Site].Root)
+  Else If Lang = 2 Then Err := CompilePhp(Best, Path, Sites[Conns[VmConn].Site].Root)
   Else Err := CompilePsp(Best, Path, Sites[Conns[VmConn].Site].Root);
   If Err <> '' Then Exit;
-  Pages[Best].Path := Path; Pages[Best].MTime := Mt; Pages[Best].Size := Sz; Pages[Best].Asp := Asp;
+  Pages[Best].Path := Path; Pages[Best].MTime := Mt; Pages[Best].Size := Sz; Pages[Best].Asp := Lang = 1;
+  Pages[Best].Php := Lang = 2;
   Pages[Best].Hits := 1; Pages[Best].LastUse := PTicks;
   PageFor := Best;
 End;
@@ -12507,10 +17369,12 @@ Procedure VmStart(C : LongInt);
 Var Err : String; K : LongInt;
 Begin
   VmConn := C;
-  Prog := PageFor(ScriptPath[C], ScriptAsp[C], Err);
+  If ScriptPhp[C] Then K := 2 Else K := Ord(ScriptAsp[C]);
+  Prog := PageFor(ScriptPath[C], K, Err);
   If Prog < 0 Then
   Begin
-    If ScriptAsp[C] Then ScriptError(C, 'Erreur de compilation ASP', Err, CErrLine)
+    If ScriptPhp[C] Then ScriptError(C, 'Erreur de compilation PHP', Err, CErrLine)
+    Else If ScriptAsp[C] Then ScriptError(C, 'Erreur de compilation ASP', Err, CErrLine)
     Else ScriptError(C, 'Erreur de compilation PSP', Err, CErrLine);
     VmConn := -1;
     Exit;
@@ -12525,6 +17389,8 @@ Begin
   VmBinPos := 0; VmErr := ''; VmErrLine := 0; VmT0 := PTicks; VmScriptTo := ScriptTimeoutS;
   VmAspErrNum := 0; VmAspErrDesc := ''; VmOnErrResume := False;
   VbStyle := Pages[Prog].Asp;
+  PhpStyle := Pages[Prog].Php;
+  PhpReset;
   DbEndRequest;
   NObj := 8;
   For K := 1 To 7 Do
@@ -12656,6 +17522,8 @@ End;
 Procedure VmInit;
 Begin
   GetMem(Mem, MemCells * SizeOf(TCell));
+  GetMem(DKey, MaxDictE * SizeOf(TCell)); GetMem(DVal, MaxDictE * SizeOf(TCell));
+  GetMem(DObj, MaxDictE * 4);
   BufInit(VmPool); BufInit(VmOut); BufInit(VmHdr);
   VmOn := False; VmConn := -1; VmQLen := 0;
   DbInit;
@@ -14297,6 +19165,3464 @@ Begin
 End;
 
 { ==================================================================== }
+{ Compilateur PHP vers la meme machine que PSP et ASP                   }
+{ Le lexique (nombres decimaux, hexadecimaux 0x, octaux 0o et 0,        }
+{ binaires 0b, separateurs _, echappements des chaines \n \t \xHH \u(n) }
+{ \0..\777, mots-cles, constantes PHP_EOL, M_PI...) vient du            }
+{ compilateur PHPCW32.PAS de DEV-COOLS ; l'analyse et la generation     }
+{ visent ici la machine du Serveur Web (pages compilees une fois,       }
+{ executees par tranches) au lieu de l'assembleur 80386.                }
+{ Langage : HTML et <?php ?>, <?= ?>, <? ?> ; variables, tableaux        }
+{ ordonnes (cles entieres et chaines), chaines "..." interpolees        }
+{ ($x, $a[k], $o->p, accolades $expr), heredoc et nowdoc ; if/elseif/else,}
+{ while, do-while, for, foreach, switch (et la syntaxe : ... endif;) ;   }
+{ break n, continue n ; fonctions (valeurs par defaut, &references,     }
+{ global, static, recursion, appel avant la definition) ; include et    }
+{ require (_once) ; list() et [...] = ; operateurs de PHP 8 (. apres +, }
+{ ??, ??=, <=>, **, ===) ; superglobales $_GET, $_POST, $_REQUEST,      }
+{ $_COOKIE, $_SERVER, $_SESSION ; mysqli, pg_* et PDO.                   }
+{ ==================================================================== }
+
+Const
+  tkVar = 31; tkIStr = 32; tkCast = 33;
+  MaxPGlob = 1024;
+
+Var
+  PTokRaw : String;              { identificateur tel qu'ecrit }
+  PIRaw : TBuf;                  { chaine interpolee (texte brut) }
+  PGName : Array[0..MaxPGlob - 1] Of String[47];
+  PGAdr : Array[0..MaxPGlob - 1] Of LongInt;
+  NPG : LongInt;
+  PDefK : Array[0..MaxPar - 1] Of Byte;    { 0 aucune, 1 constante, 2 tableau vide }
+  PDefC : Array[0..MaxPar - 1] Of TCell;
+  PFnExit : LongInt;
+  PInFn : LongInt;
+  PVarLoad : Boolean;            { la derniere expression : une variable lue }
+  PSuperAt : Array[0..7] Of LongInt;
+
+Function PNext0 : Boolean; Forward;
+Procedure PNext; Forward;
+Function ConstExprP(Var C : TCell) : Boolean; Forward;
+Procedure PIssetOne; Forward;
+
+{ --- source : include et require d'un nom constant, recopies --- }
+Var PIncCode : Boolean;            { le dernier fichier lu finit dans le code PHP }
+
+Function LoadPhpSource(Path : String; Depth : LongInt; Var Out_ : TBuf; Var Done_ : String) : Boolean;
+Var B : TBuf; K, E, J, Q, St : LongInt; InCode : Boolean; W, Nm, Dir, Full : String; Once : Boolean; Ch : Byte;
+
+  Function At(I : LongInt) : Byte;
+  Begin
+    If I < B.Len Then At := B.P^[I] Else At := 0;
+  End;
+
+  Function IsW(C : Byte) : Boolean;
+  Begin
+    IsW := ((C >= 65) And (C <= 90)) Or ((C >= 97) And (C <= 122)) Or ((C >= 48) And (C <= 57)) Or (C = 95);
+  End;
+
+Begin
+  LoadPhpSource := False;
+  If Depth > 8 Then Exit;
+  If Not ReadFileBuf(Path, B, 4194304) Then Exit;
+  Dir := Path;
+  While (Length(Dir) > 0) And (Dir[Length(Dir)] <> '\') And (Dir[Length(Dir)] <> '/') Do Delete(Dir, Length(Dir), 1);
+  InCode := False;
+  K := 0;
+  While K < B.Len Do
+  Begin
+    Ch := B.P^[K];
+    If Not InCode Then
+    Begin
+      If (Ch = 60) And (At(K + 1) = 63) Then InCode := True;
+      BufAddC(Out_, Ch);
+      Inc(K);
+      Continue;
+    End;
+    { dans le code : chaines et commentaires recopies tels quels }
+    If (Ch = 63) And (At(K + 1) = 62) Then
+    Begin
+      InCode := False;
+      BufAddC(Out_, Ch);
+      Inc(K);
+      Continue;
+    End;
+    If (Ch = 39) Or (Ch = 34) Then
+    Begin
+      BufAddC(Out_, Ch);
+      Inc(K);
+      While (K < B.Len) And (B.P^[K] <> Ch) Do
+      Begin
+        If B.P^[K] = 92 Then
+        Begin
+          BufAddC(Out_, B.P^[K]);
+          Inc(K);
+        End;
+        If K < B.Len Then BufAddC(Out_, B.P^[K]);
+        Inc(K);
+      End;
+      If K < B.Len Then BufAddC(Out_, B.P^[K]);
+      Inc(K);
+      Continue;
+    End;
+    If ((Ch = 47) And (At(K + 1) = 47)) Or (Ch = 35) Then
+    Begin
+      While (K < B.Len) And (B.P^[K] <> 10) And Not ((B.P^[K] = 63) And (At(K + 1) = 62)) Do
+      Begin
+        BufAddC(Out_, B.P^[K]);
+        Inc(K);
+      End;
+      Continue;
+    End;
+    If (Ch = 47) And (At(K + 1) = 42) Then
+    Begin
+      While (K < B.Len) And Not ((B.P^[K] = 42) And (At(K + 1) = 47)) Do
+      Begin
+        BufAddC(Out_, B.P^[K]);
+        Inc(K);
+      End;
+      Continue;
+    End;
+    { include 'nom.php'; require_once("nom.php"); }
+    If ((Ch Or 32) = Ord('i')) Or ((Ch Or 32) = Ord('r')) Then
+      If (K = 0) Or Not IsW(At(K - 1)) Then
+      Begin
+        W := '';
+        E := K;
+        While IsW(At(E)) And (Length(W) < 20) Do
+        Begin
+          W := W + UpCase(Chr(At(E)));
+          Inc(E);
+        End;
+        If (W = 'INCLUDE') Or (W = 'REQUIRE') Or (W = 'INCLUDE_ONCE') Or (W = 'REQUIRE_ONCE') Then
+        Begin
+          Once := Pos('_ONCE', W) > 0;
+          J := E;
+          While At(J) In [32, 9, 13, 10] Do Inc(J);
+          If At(J) = 40 Then
+          Begin
+            Inc(J);
+            While At(J) In [32, 9] Do Inc(J);
+          End;
+          Q := At(J);
+          If (Q = 39) Or (Q = 34) Then
+          Begin
+            Nm := '';
+            Inc(J);
+            While (J < B.Len) And (At(J) <> Q) And (Length(Nm) < 200) Do
+            Begin
+              Nm := Nm + Chr(At(J));
+              Inc(J);
+            End;
+            Inc(J);
+            While At(J) In [32, 9] Do Inc(J);
+            If At(J) = 41 Then Inc(J);
+            While At(J) In [32, 9] Do Inc(J);
+            If (At(J) = 59) And (Pos('$', Nm) = 0) Then
+            Begin
+              Inc(J);
+              For St := 1 To Length(Nm) Do If Nm[St] = '/' Then Nm[St] := '\';
+              If (Nm <> '') And (Nm[1] = '\') Then Full := SiteRoot + Nm
+              Else If (Length(Nm) > 1) And (Nm[2] = ':') Then Full := Nm
+              Else Full := Dir + Nm;
+              If Not (Once And (Pos('|' + UpStr(Full) + '|', Done_) > 0)) Then
+              Begin
+                Done_ := Done_ + '|' + UpStr(Full) + '|';
+                BufAdd(Out_, '?>');
+                If Not LoadPhpSource(Full, Depth + 1, Out_, Done_) Then
+                  BufAdd(Out_, '<?php trigger_error(''include : fichier introuvable : ' + Nm + '''); ?>')
+                Else If PIncCode Then
+                  BufAdd(Out_, #10'?>');           { le fichier inclus finit dans le code (sans ?>) }
+                BufAdd(Out_, '<?php ');
+              End;
+              K := J;
+              Continue;
+            End;
+          End;
+        End;
+      End;
+    BufAddC(Out_, Ch);
+    Inc(K);
+  End;
+  BufFree(B);
+  PIncCode := InCode;
+  LoadPhpSource := True;
+End;
+
+{ ==================================================================== }
+{ Lexique                                                               }
+{ ==================================================================== }
+
+Function PIsW(C : Char) : Boolean;
+Begin
+  PIsW := ((C >= 'A') And (C <= 'Z')) Or ((C >= 'a') And (C <= 'z')) Or ((C >= '0') And (C <= '9')) Or (C = '_') Or
+          (Ord(C) >= 128);
+End;
+
+{ sequence d'echappement d'une chaine "..." en Src[SPos] (apres \) }
+Procedure PEscape(Var B : TBuf; Var I : LongInt; Var S_ : TBuf);
+Var C : Char; V, N : LongInt;
+Begin
+  C := Chr(S_.P^[I]);
+  Case C Of
+    'n' : BufAddC(B, 10);
+    't' : BufAddC(B, 9);
+    'r' : BufAddC(B, 13);
+    'v' : BufAddC(B, 11);
+    'e' : BufAddC(B, 27);
+    'f' : BufAddC(B, 12);
+    '\', '$', '"' : BufAddC(B, Ord(C));
+    'x' :
+      If (I + 1 < S_.Len) And (HexV(Chr(S_.P^[I + 1])) >= 0) Then
+      Begin
+        V := 0; N := 0;
+        While (N < 2) And (I + 1 < S_.Len) And (HexV(Chr(S_.P^[I + 1])) >= 0) Do
+        Begin
+          V := V * 16 + HexV(Chr(S_.P^[I + 1]));
+          Inc(I); Inc(N);
+        End;
+        BufAddC(B, V);
+      End
+      Else
+      Begin
+        BufAddC(B, 92); BufAddC(B, Ord(C));
+      End;
+    'u' :
+      If (I + 1 < S_.Len) And (S_.P^[I + 1] = 123) Then
+      Begin
+        Inc(I);
+        V := 0;
+        While (I + 1 < S_.Len) And (HexV(Chr(S_.P^[I + 1])) >= 0) Do
+        Begin
+          V := V * 16 + HexV(Chr(S_.P^[I + 1]));
+          Inc(I);
+        End;
+        If (I + 1 < S_.Len) And (S_.P^[I + 1] = 125) Then Inc(I);
+        AddUtf8(B, V);
+      End
+      Else
+      Begin
+        BufAddC(B, 92); BufAddC(B, Ord(C));
+      End;
+    '0'..'7' :
+      Begin
+        V := Ord(C) - 48; N := 1;
+        While (N < 3) And (I + 1 < S_.Len) And (S_.P^[I + 1] >= 48) And (S_.P^[I + 1] <= 55) Do
+        Begin
+          V := V * 8 + S_.P^[I + 1] - 48;
+          Inc(I); Inc(N);
+        End;
+        BufAddC(B, V And 255);
+      End;
+  Else
+    BufAddC(B, 92); BufAddC(B, Ord(C));
+  End;
+End;
+
+Procedure PSetStr(Var B : TBuf);
+Var V : LongInt;
+Begin
+  Tok := tkStr;
+  TokOff := AddStrB(B.P, B.Len);
+  TokLen := B.Len;
+  V := B.Len;
+  If V > 255 Then V := 255;
+  TokS[0] := Chr(V);
+  If V > 0 Then Move(B.P^[0], TokS[1], V);
+End;
+
+{ chaine "..." ou heredoc : texte brut en Raw ; sans $ a interpoler :
+  lexeme chaine, sinon tkIStr (PIRaw) }
+Procedure PDqString(Var Raw : TBuf);
+Var B : TBuf; K : LongInt; Interp : Boolean; C : Byte;
+Begin
+  Interp := False;
+  K := 0;
+  While K < Raw.Len Do
+  Begin
+    C := Raw.P^[K];
+    If C = 92 Then Inc(K)
+    Else If (C = 36) And (K + 1 < Raw.Len) And (PIsW(Chr(Raw.P^[K + 1])) And Not ((Raw.P^[K + 1] >= 48) And
+            (Raw.P^[K + 1] <= 57))) Then Interp := True
+    Else If (C = 123) And (K + 1 < Raw.Len) And (Raw.P^[K + 1] = 36) Then Interp := True;
+    Inc(K);
+  End;
+  If Interp Then
+  Begin
+    PIRaw.Len := 0;
+    BufAddB(PIRaw, Raw.P, Raw.Len);
+    Tok := tkIStr;
+    Exit;
+  End;
+  BufInit(B);
+  K := 0;
+  While K < Raw.Len Do
+  Begin
+    If (Raw.P^[K] = 92) And (K + 1 < Raw.Len) Then
+    Begin
+      Inc(K);
+      PEscape(B, K, Raw);
+    End
+    Else BufAddC(B, Raw.P^[K]);
+    Inc(K);
+  End;
+  PSetStr(B);
+  BufFree(B);
+End;
+
+Function PNext0 : Boolean;
+Var C, Q : Char; S, U : String; V, K, Base, J, Ind : LongInt; Lit, Raw : TBuf; R : Double; Real_ : Boolean;
+    Id, Lbl : String; Nowdoc : Boolean;
+Begin
+  PNext0 := True;
+  TokLine := SLine;
+  If SPos >= Src.Len Then
+  Begin
+    Tok := tkEof;
+    Exit;
+  End;
+  If InHtml Then
+  Begin
+    V := SPos;
+    While (SPos < Src.Len) And Not ((SrcCh(SPos) = '<') And (SrcCh(SPos + 1) = '?') And
+          Not ((UpCase(SrcCh(SPos + 2)) = 'X') And (UpCase(SrcCh(SPos + 3)) = 'M') And (UpCase(SrcCh(SPos + 4)) = 'L'))) Do
+    Begin
+      If SrcCh(SPos) = #10 Then Inc(SLine);
+      Inc(SPos);
+    End;
+    If SPos > V Then
+    Begin
+      Tok := tkHtml; TokOff := V; TokLen := SPos - V;
+      Exit;
+    End;
+    If SPos >= Src.Len Then
+    Begin
+      Tok := tkEof;
+      Exit;
+    End;
+    SPos := SPos + 2;
+    InHtml := False;
+    If SrcCh(SPos) = '=' Then
+    Begin
+      Inc(SPos);
+      InEcho := True;
+      Tok := tkEcho;
+      Exit;
+    End;
+    If (UpCase(SrcCh(SPos)) = 'P') And (UpCase(SrcCh(SPos + 1)) = 'H') And (UpCase(SrcCh(SPos + 2)) = 'P') Then
+      SPos := SPos + 3;
+    PNext0 := False;
+    Exit;
+  End;
+  C := SrcCh(SPos);
+  If (C = ' ') Or (C = #9) Or (C = #13) Then
+  Begin
+    Inc(SPos);
+    PNext0 := False;
+    Exit;
+  End;
+  If C = #10 Then
+  Begin
+    Inc(SPos); Inc(SLine);
+    PNext0 := False;
+    Exit;
+  End;
+  { commentaires }
+  If ((C = '/') And (SrcCh(SPos + 1) = '/')) Or ((C = '#') And (SrcCh(SPos + 1) <> '[')) Then
+  Begin
+    While (SPos < Src.Len) And (SrcCh(SPos) <> #10) And Not ((SrcCh(SPos) = '?') And (SrcCh(SPos + 1) = '>')) Do
+      Inc(SPos);
+    PNext0 := False;
+    Exit;
+  End;
+  If (C = '#') And (SrcCh(SPos + 1) = '[') Then
+  Begin
+    { attribut #[...] : ignore }
+    While (SPos < Src.Len) And (SrcCh(SPos) <> ']') Do Inc(SPos);
+    Inc(SPos);
+    PNext0 := False;
+    Exit;
+  End;
+  If (C = '/') And (SrcCh(SPos + 1) = '*') Then
+  Begin
+    SPos := SPos + 2;
+    While (SPos < Src.Len) And Not ((SrcCh(SPos) = '*') And (SrcCh(SPos + 1) = '/')) Do
+    Begin
+      If SrcCh(SPos) = #10 Then Inc(SLine);
+      Inc(SPos);
+    End;
+    SPos := SPos + 2;
+    PNext0 := False;
+    Exit;
+  End;
+  TokLine := SLine;
+  { fin du code : ?> vaut un ; (et mange une fin de ligne) }
+  If (C = '?') And (SrcCh(SPos + 1) = '>') Then
+  Begin
+    SPos := SPos + 2;
+    InHtml := True;
+    If SrcCh(SPos) = #10 Then
+    Begin
+      Inc(SPos); Inc(SLine);
+    End
+    Else If (SrcCh(SPos) = #13) And (SrcCh(SPos + 1) = #10) Then
+    Begin
+      SPos := SPos + 2; Inc(SLine);
+    End;
+    If InEcho Then
+    Begin
+      InEcho := False;
+      Tok := tkEchoEnd;
+      Exit;
+    End;
+    Tok := tkSym; TokS := ';';
+    Exit;
+  End;
+  { variable }
+  If (C = '$') And PIsW(SrcCh(SPos + 1)) And Not ((SrcCh(SPos + 1) >= '0') And (SrcCh(SPos + 1) <= '9')) Then
+  Begin
+    Inc(SPos);
+    S := '';
+    While PIsW(SrcCh(SPos)) Do
+    Begin
+      If Length(S) < 40 Then S := S + SrcCh(SPos);
+      Inc(SPos);
+    End;
+    Tok := tkVar; TokS := S;
+    Exit;
+  End;
+  { identificateur (\ de tete d'un nom d'espace ignore) }
+  If (C = '\') And PIsW(SrcCh(SPos + 1)) Then
+  Begin
+    Inc(SPos);
+    C := SrcCh(SPos);
+  End;
+  If PIsW(C) And Not ((C >= '0') And (C <= '9')) Then
+  Begin
+    S := ''; U := '';
+    While PIsW(SrcCh(SPos)) Or ((SrcCh(SPos) = '\') And PIsW(SrcCh(SPos + 1))) Do
+    Begin
+      If SrcCh(SPos) = '\' Then
+      Begin
+        { Espace\Nom : on garde le dernier nom }
+        S := ''; U := '';
+      End
+      Else If Length(S) < 40 Then
+      Begin
+        S := S + SrcCh(SPos);
+        U := U + UpCase(SrcCh(SPos));
+      End;
+      Inc(SPos);
+    End;
+    { heredoc ou nowdoc ? non : seulement apres <<< }
+    Tok := tkId; TokS := U; PTokRaw := S;
+    Exit;
+  End;
+  { nombre }
+  If ((C >= '0') And (C <= '9')) Or ((C = '.') And (SrcCh(SPos + 1) >= '0') And (SrcCh(SPos + 1) <= '9')) Then
+  Begin
+    Base := 10;
+    If (C = '0') And (UpCase(SrcCh(SPos + 1)) = 'X') Then Base := 16
+    Else If (C = '0') And (UpCase(SrcCh(SPos + 1)) = 'B') Then Base := 2
+    Else If (C = '0') And (UpCase(SrcCh(SPos + 1)) = 'O') Then Base := 8
+    Else If (C = '0') And (SrcCh(SPos + 1) >= '0') And (SrcCh(SPos + 1) <= '7') Then Base := 9;
+    If Base <> 10 Then
+    Begin
+      If Base = 9 Then
+      Begin
+        Base := 8;
+        Inc(SPos);
+      End
+      Else SPos := SPos + 2;
+      R := 0;
+      While (HexV(SrcCh(SPos)) >= 0) And (HexV(SrcCh(SPos)) < Base) Or (SrcCh(SPos) = '_') Do
+      Begin
+        If SrcCh(SPos) <> '_' Then R := R * Base + HexV(SrcCh(SPos));
+        Inc(SPos);
+      End;
+      If R <= 2147483647.0 Then
+      Begin
+        Tok := tkInt; TokI := Trunc(R);
+      End
+      Else
+      Begin
+        Tok := tkReal; TokR := R;
+      End;
+      Exit;
+    End;
+    S := '';
+    Real_ := False;
+    While ((SrcCh(SPos) >= '0') And (SrcCh(SPos) <= '9')) Or (SrcCh(SPos) = '_') Or
+          ((SrcCh(SPos) = '.') And Not Real_ And (SrcCh(SPos + 1) <> '.')) Do
+    Begin
+      If SrcCh(SPos) = '.' Then Real_ := True;
+      If SrcCh(SPos) <> '_' Then S := S + SrcCh(SPos);
+      Inc(SPos);
+    End;
+    If (UpCase(SrcCh(SPos)) = 'E') And ((SrcCh(SPos + 1) In ['0'..'9']) Or
+       ((SrcCh(SPos + 1) In ['+', '-']) And (SrcCh(SPos + 2) In ['0'..'9']))) Then
+    Begin
+      Real_ := True;
+      S := S + 'E';
+      Inc(SPos);
+      If SrcCh(SPos) In ['+', '-'] Then
+      Begin
+        S := S + SrcCh(SPos);
+        Inc(SPos);
+      End;
+      While SrcCh(SPos) In ['0'..'9'] Do
+      Begin
+        S := S + SrcCh(SPos);
+        Inc(SPos);
+      End;
+    End;
+    If S[1] = '.' Then S := '0' + S;
+    If S[Length(S)] = '.' Then S := S + '0';
+    Val(S, R, K);
+    If Real_ Or (R > 2147483647.0) Then
+    Begin
+      Tok := tkReal; TokR := R;
+    End
+    Else
+    Begin
+      Tok := tkInt; TokI := Trunc(R);
+    End;
+    Exit;
+  End;
+  { chaine '...' }
+  If C = '''' Then
+  Begin
+    BufInit(Lit);
+    Inc(SPos);
+    While (SPos < Src.Len) And (SrcCh(SPos) <> '''') Do
+    Begin
+      If (SrcCh(SPos) = '\') And ((SrcCh(SPos + 1) = '''') Or (SrcCh(SPos + 1) = '\')) Then Inc(SPos);
+      If SrcCh(SPos) = #10 Then Inc(SLine);
+      BufAddC(Lit, Src.P^[SPos]);
+      Inc(SPos);
+    End;
+    Inc(SPos);
+    PSetStr(Lit);
+    BufFree(Lit);
+    Exit;
+  End;
+  { chaine "..." }
+  If C = '"' Then
+  Begin
+    BufInit(Raw);
+    Inc(SPos);
+    While (SPos < Src.Len) And (SrcCh(SPos) <> '"') Do
+    Begin
+      If SrcCh(SPos) = '\' Then
+      Begin
+        BufAddC(Raw, 92);
+        Inc(SPos);
+      End;
+      If SrcCh(SPos) = #10 Then Inc(SLine);
+      If SPos < Src.Len Then BufAddC(Raw, Src.P^[SPos]);
+      Inc(SPos);
+    End;
+    Inc(SPos);
+    PDqString(Raw);
+    BufFree(Raw);
+    Exit;
+  End;
+  { heredoc <<<ID et nowdoc <<<'ID' }
+  If (C = '<') And (SrcCh(SPos + 1) = '<') And (SrcCh(SPos + 2) = '<') Then
+  Begin
+    SPos := SPos + 3;
+    While SrcCh(SPos) In [' ', #9] Do Inc(SPos);
+    Nowdoc := SrcCh(SPos) = '''';
+    If (SrcCh(SPos) = '''') Or (SrcCh(SPos) = '"') Then Inc(SPos);
+    Lbl := '';
+    While PIsW(SrcCh(SPos)) Do
+    Begin
+      Lbl := Lbl + SrcCh(SPos);
+      Inc(SPos);
+    End;
+    If (SrcCh(SPos) = '''') Or (SrcCh(SPos) = '"') Then Inc(SPos);
+    While (SPos < Src.Len) And (SrcCh(SPos) <> #10) Do Inc(SPos);
+    Inc(SPos); Inc(SLine);
+    BufInit(Raw);
+    { lignes jusqu'a celle qui ne contient que l'etiquette (en retrait) }
+    Ind := 0;
+    Repeat
+      J := SPos;
+      K := 0;
+      While SrcCh(J) In [' ', #9] Do
+      Begin
+        Inc(J); Inc(K);
+      End;
+      Id := '';
+      V := J;
+      While PIsW(SrcCh(V)) Do
+      Begin
+        Id := Id + SrcCh(V);
+        Inc(V);
+      End;
+      If (Id = Lbl) And Not PIsW(SrcCh(V)) Then
+      Begin
+        Ind := K;
+        SPos := V;
+        Break;
+      End;
+      While (SPos < Src.Len) And (SrcCh(SPos) <> #10) Do
+      Begin
+        BufAddC(Raw, Src.P^[SPos]);
+        Inc(SPos);
+      End;
+      If SPos >= Src.Len Then Break;
+      BufAddC(Raw, 10);
+      Inc(SPos); Inc(SLine);
+    Until False;
+    { derniere fin de ligne retiree ; CR des fins de ligne retires }
+    If (Raw.Len > 0) And (Raw.P^[Raw.Len - 1] = 10) Then Dec(Raw.Len);
+    BufInit(Lit);
+    K := 0; J := 0;
+    While K < Raw.Len Do
+    Begin
+      { retrait de la ligne de fin retire de chaque ligne }
+      If (J < Ind) And (Raw.P^[K] In [32, 9]) Then
+      Begin
+        Inc(J); Inc(K);
+        Continue;
+      End;
+      J := Ind;
+      If Raw.P^[K] = 10 Then J := 0;
+      If Raw.P^[K] <> 13 Then BufAddC(Lit, Raw.P^[K]);
+      Inc(K);
+    End;
+    BufFree(Raw);
+    If Nowdoc Then PSetStr(Lit) Else PDqString(Lit);
+    BufFree(Lit);
+    Exit;
+  End;
+  { conversion (int) (string)... }
+  If C = '(' Then
+  Begin
+    J := SPos + 1;
+    While SrcCh(J) In [' ', #9] Do Inc(J);
+    Id := '';
+    While PIsW(SrcCh(J)) Do
+    Begin
+      Id := Id + UpCase(SrcCh(J));
+      Inc(J);
+    End;
+    While SrcCh(J) In [' ', #9] Do Inc(J);
+    If SrcCh(J) = ')' Then
+    Begin
+      K := 0;
+      If (Id = 'INT') Or (Id = 'INTEGER') Then K := 1
+      Else If (Id = 'FLOAT') Or (Id = 'DOUBLE') Or (Id = 'REAL') Then K := 2
+      Else If Id = 'STRING' Then K := 3
+      Else If (Id = 'BOOL') Or (Id = 'BOOLEAN') Then K := 4
+      Else If Id = 'ARRAY' Then K := 5
+      Else If Id = 'OBJECT' Then K := 6
+      Else If Id = 'UNSET' Then K := 7;
+      If K > 0 Then
+      Begin
+        SPos := J + 1;
+        Tok := tkCast; TokI := K;
+        Exit;
+      End;
+    End;
+  End;
+  { symboles (le plus long d'abord) }
+  Tok := tkSym;
+  S := C + SrcCh(SPos + 1) + SrcCh(SPos + 2);
+  If (S = '===') Or (S = '!==') Or (S = '<=>') Or (S = '**=') Or (S = '...') Or (S = '<<=') Or (S = '>>=') Or
+     (S = '??=') Or (S = '?->') Then
+  Begin
+    TokS := S;
+    SPos := SPos + 3;
+    Exit;
+  End;
+  S := Copy(S, 1, 2);
+  If (S = '==') Or (S = '!=') Or (S = '<>') Or (S = '<=') Or (S = '>=') Or (S = '&&') Or (S = '||') Or (S = '++') Or
+     (S = '--') Or (S = '+=') Or (S = '-=') Or (S = '*=') Or (S = '/=') Or (S = '.=') Or (S = '%=') Or (S = '->') Or
+     (S = '=>') Or (S = '::') Or (S = '<<') Or (S = '>>') Or (S = '??') Or (S = '**') Or (S = '&=') Or (S = '|=') Or
+     (S = '^=') Then
+  Begin
+    TokS := S;
+    SPos := SPos + 2;
+    Exit;
+  End;
+  TokS := C;
+  Inc(SPos);
+End;
+
+Procedure PNext;
+Begin
+  If CErr <> '' Then
+  Begin
+    Tok := tkEof;
+    Exit;
+  End;
+  Repeat
+  Until PNext0 Or (CErr <> '');
+  If CErr <> '' Then Tok := tkEof;
+End;
+
+{ lexeme suivant (sans avancer) }
+Function PPeekSym : String;
+Var X : TLexSave;
+Begin
+  LexSave(X);
+  PNext;
+  If (Tok = tkSym) Or (Tok = tkId) Then PPeekSym := TokS Else PPeekSym := '';
+  LexRestore(X);
+End;
+
+Procedure PExpect(S : String);
+Begin
+  If ((Tok = tkSym) Or (Tok = tkId)) And (TokS = S) Then PNext
+  Else If CErr = '' Then
+  Begin
+    If Tok = tkEof Then CError('''' + S + ''' attendu (fin du fichier)')
+    Else If Tok = tkVar Then CError('''' + S + ''' attendu au lieu de $' + TokS)
+    Else If (Tok = tkSym) Or (Tok = tkId) Then CError('''' + S + ''' attendu au lieu de ''' + TokS + '''')
+    Else CError('''' + S + ''' attendu');
+  End;
+End;
+
+{ fin d'instruction : ; (ou ?> qui en tient lieu) }
+Procedure PSemi;
+Begin
+  If IsSym(';') Then PNext
+  Else If (Tok = tkEchoEnd) Or (Tok = tkEof) Or (Tok = tkHtml) Then
+  Else PExpect(';');
+End;
+
+{ ==================================================================== }
+{ Variables                                                             }
+{ ==================================================================== }
+
+Function PGlobSlot(Name : String) : LongInt;
+Var K : LongInt;
+Begin
+  For K := 0 To NPG - 1 Do
+    If PGName[K] = Name Then
+    Begin
+      PGlobSlot := PGAdr[K];
+      Exit;
+    End;
+  If NPG >= MaxPGlob Then
+  Begin
+    CError('trop de variables globales');
+    PGlobSlot := 0;
+    Exit;
+  End;
+  PGName[NPG] := Name;
+  PGAdr[NPG] := GlobTop;
+  Inc(GlobTop);
+  PGlobSlot := PGAdr[NPG];
+  Inc(NPG);
+End;
+
+{ symbole (dans une fonction) ou cellule globale de la variable $Name }
+Procedure PVarDes(Name : String; Var D : TDes);
+Var S, K : LongInt;
+Begin
+  D.Kind := dkVar; D.Ty := TyVar; D.Ref := False; D.Up := 0;
+  If CurLvl = 0 Then
+  Begin
+    D.Mode := 0;
+    D.Adr := PGlobSlot(Name);
+    Exit;
+  End;
+  S := -1;
+  For K := NSym - 1 DownTo 0 Do
+    If (Syms[K].Kind = skVar) And (Syms[K].Name = '$' + Copy(Name, 1, 30)) Then
+    Begin
+      S := K;
+      Break;
+    End;
+  If S < 0 Then
+  Begin
+    S := AddSym('$' + Copy(Name, 1, 30), skVar);
+    Syms[S].Ty := TyVar;
+    Syms[S].Adr := AllocVar(1);
+  End;
+  DesFromSym(S, D);
+End;
+
+Procedure PAddrOf(Var D : TDes);
+Begin
+  If D.Ref Then EmitSlotLoad(D) Else EmitSlotAddr(D);
+End;
+
+Procedure PLoad(Var D : TDes);
+Var X : TDes;
+Begin
+  X := D;
+  DesLoad(X);
+End;
+
+{ ranger le sommet de la pile dans la variable (la valeur est retiree) }
+Procedure PStore(Var D : TDes);
+Var X : TDes;
+Begin
+  X := D;
+  If X.Ref Then
+  Begin
+    EmitSlotLoad(X);
+    Emit(opSwap);
+    Emit(opStInd);
+  End
+  Else DesStore(X);
+End;
+
+Function PSuperNo(N : String) : LongInt;
+Begin
+  If N = '_GET' Then PSuperNo := 1 Else If N = '_POST' Then PSuperNo := 2 Else If N = '_REQUEST' Then PSuperNo := 3
+  Else If N = '_COOKIE' Then PSuperNo := 4 Else If N = '_SERVER' Then PSuperNo := 5 Else If N = '_SESSION' Then PSuperNo := 6
+  Else If N = '_FILES' Then PSuperNo := 7 Else If N = '_ENV' Then PSuperNo := 8 Else If N = 'GLOBALS' Then PSuperNo := 9
+  Else PSuperNo := 0;
+End;
+
+Procedure PEmitSuper(N : LongInt);
+Begin
+  If N = 6 Then Emit1(opIsObj, obSession)
+  Else Emit2(opPhp, psSuper, N);
+End;
+
+{ ==================================================================== }
+{ Expressions                                                           }
+{ ==================================================================== }
+
+Function PExpr : LongInt; Forward;
+Function PAssignE : LongInt; Forward;
+Procedure PStatement; Forward;
+Function PUnary : LongInt; Forward;
+
+Procedure PToBool(T : LongInt);
+Begin
+  If T <> TyBool Then Emit1(opPhp, psBool);
+End;
+
+Procedure PCopyIfVar;
+Begin
+  If PVarLoad Then Emit1(opPhp, psCopy);
+  PVarLoad := False;
+End;
+
+{ l'assignation qui suit un designateur : '=' '+=' ... '++' '--' ('' : aucune) }
+Function PAssignAhead : String;
+Var X : TLexSave; Depth : LongInt; Op : String;
+Begin
+  PAssignAhead := '';
+  LexSave(X);
+  PNext;
+  Repeat
+    If IsSym('[') Or IsSym('{') Then
+    Begin
+      Depth := 0;
+      Repeat
+        If IsSym('[') Or IsSym('{') Or IsSym('(') Then Inc(Depth)
+        Else If IsSym(']') Or IsSym('}') Or IsSym(')') Then Dec(Depth);
+        PNext;
+      Until (Depth = 0) Or (Tok = tkEof);
+    End
+    Else If IsSym('->') Or IsSym('?->') Then
+    Begin
+      PNext;
+      PNext;
+      If IsSym('(') Then Break;
+    End
+    Else Break;
+  Until CErr <> '';
+  If Tok = tkSym Then
+  Begin
+    Op := TokS;
+    If (Op = '=') Or (Op = '+=') Or (Op = '-=') Or (Op = '*=') Or (Op = '/=') Or (Op = '.=') Or (Op = '%=') Or
+       (Op = '**=') Or (Op = '??=') Or (Op = '&=') Or (Op = '|=') Or (Op = '^=') Or (Op = '<<=') Or (Op = '>>=') Or
+       (Op = '++') Or (Op = '--') Then PAssignAhead := Op;
+  End;
+  LexRestore(X);
+End;
+
+{ cible d'une assignation : variable (Kind 1), element (2 : conteneur et
+  cle sur la pile ; 3 : conteneur, ajout []), propriete (4 : objet sur la
+  pile, membre Mem) }
+Type
+  TPTarget = Record
+    Kind : LongInt;
+    D : TDes;
+    Mem : LongInt;
+  End;
+
+Procedure PTarget(Var T : TPTarget);
+Var Nm : String; Sn, M : LongInt;
+Begin
+  T.Kind := 1;
+  If Tok <> tkVar Then
+  Begin
+    CError('variable attendue');
+    Exit;
+  End;
+  Nm := TokS;
+  PNext;
+  Sn := PSuperNo(Nm);
+  If (Sn > 0) And Not (IsSym('[')) Then
+  Begin
+    CError('$' + Nm + ' : un '#130'l'#130'ment est attendu ($' + Nm + '[...])');
+    Exit;
+  End;
+  If Sn = 0 Then PVarDes(Nm, T.D);
+  If Not IsSym('[') And Not IsSym('->') And Not IsSym('{') Then Exit;
+  If IsSym('->') Then
+  Begin
+    PLoad(T.D);
+    While IsSym('->') Do
+    Begin
+      PNext;
+      M := MemberCode(TokS);
+      If (Tok <> tkId) Or (M < 0) Then
+      Begin
+        CError('propri'#130't'#130' inconnue : ' + TokS);
+        Exit;
+      End;
+      PNext;
+      If IsSym('->') Then Emit2(opMember, M, 0)
+      Else
+      Begin
+        T.Kind := 4; T.Mem := M;
+        Exit;
+      End;
+    End;
+    Exit;
+  End;
+  If Sn > 0 Then PEmitSuper(Sn)
+  Else
+  Begin
+    PAddrOf(T.D);
+    Emit1(opPhp, psArrW);
+  End;
+  While CErr = '' Do
+  Begin
+    If IsSym('[') Or IsSym('{') Then PNext Else Break;
+    If IsSym(']') Then
+    Begin
+      PNext;
+      If IsSym('[') Then
+      Begin
+        Emit1(opPhp, psSubPushW);
+        Continue;
+      End;
+      T.Kind := 3;
+      Exit;
+    End;
+    Dummy := PExpr;
+    If IsSym('}') Then PNext Else PExpect(']');
+    If IsSym('[') Then
+    Begin
+      Emit1(opPhp, psSubW);
+      Continue;
+    End;
+    T.Kind := 2;
+    Exit;
+  End;
+End;
+
+{ valeur de la cible (la cible reste utilisable : Kind 2 dupliquee) }
+Procedure PTargetLoad(Var T : TPTarget);
+Begin
+  Case T.Kind Of
+    1 : PLoad(T.D);
+    2 :
+      Begin
+        Emit1(opPhp, psDup2);
+        Emit1(opPhp, psGet);
+      End;
+    4 :
+      Begin
+        Emit(opDup);
+        Emit2(opMember, T.Mem, 0);
+      End;
+  End;
+End;
+
+{ ranger la valeur du sommet ; la valeur reste sur la pile }
+Procedure PTargetStore(Var T : TPTarget);
+Var Tmp : LongInt;
+Begin
+  Case T.Kind Of
+    1 :
+      Begin
+        Emit(opDup);
+        PStore(T.D);
+      End;
+    2 : Emit1(opPhp, psSet);
+    3 : Emit1(opPhp, psPush);
+    4 :
+      Begin
+        Tmp := AllocVar(1);
+        Emit(opDup);
+        PopTmp(Tmp);
+        Emit2(opSetMember, T.Mem, 0);
+        PushTmp(Tmp);
+      End;
+  End;
+End;
+
+{ operateur arithmetique ou de chaine d'une assignation composee }
+Procedure PEmitOp(Op : String);
+Begin
+  If (Op = '+') Or (Op = '+=') Then Emit(opAdd)
+  Else If (Op = '-') Or (Op = '-=') Then Emit(opSub)
+  Else If (Op = '*') Or (Op = '*=') Then Emit(opMul)
+  Else If (Op = '/') Or (Op = '/=') Then Emit(opDivR)
+  Else If (Op = '%') Or (Op = '%=') Then Emit(opMod)
+  Else If (Op = '.') Or (Op = '.=') Then Emit(opConcat)
+  Else If (Op = '**') Or (Op = '**=') Then Emit2(opCallB, pfPow, 2)
+  Else If (Op = '&') Or (Op = '&=') Then Emit(opAnd)
+  Else If (Op = '|') Or (Op = '|=') Then Emit(opOr)
+  Else If (Op = '^') Or (Op = '^=') Then Emit(opXor)
+  Else If (Op = '<<') Or (Op = '<<=') Then Emit(opShl)
+  Else If (Op = '>>') Or (Op = '>>=') Then Emit(opShr);
+End;
+
+{ assignation : la cible est en Tok (variable) ; la valeur reste sur la pile }
+Procedure PAssign;
+Var T : TPTarget; Op : String; J, J2 : LongInt;
+Begin
+  PTarget(T);
+  If CErr <> '' Then Exit;
+  Op := TokS;
+  PNext;
+  If Op = '=' Then
+  Begin
+    If IsSym('&') Then PNext;           { =& : copie (references non gerees) }
+    If T.Kind = 2 Then
+    Begin
+      Dummy := PAssignE;
+      PCopyIfVar;
+      Emit1(opPhp, psSet);
+    End
+    Else
+    Begin
+      Dummy := PAssignE;
+      PCopyIfVar;
+      PTargetStore(T);
+    End;
+    Exit;
+  End;
+  If T.Kind = 3 Then
+  Begin
+    CError('[] ne peut '#136'tre lu');
+    Exit;
+  End;
+  If (Op = '++') Or (Op = '--') Then
+  Begin
+    { postfixe : la valeur d'avant reste }
+    If T.Kind = 1 Then
+    Begin
+      PLoad(T.D);
+      Emit(opDup);
+      Emit1(opPushI, 1);
+      If Op = '++' Then Emit(opAdd) Else Emit(opSub);
+      PStore(T.D);
+    End
+    Else If T.Kind = 2 Then
+    Begin
+      If Op = '++' Then Emit2(opPhp, psIncE, 1) Else Emit2(opPhp, psIncE, 2);
+    End
+    Else
+    Begin
+      PTargetLoad(T);
+      Emit1(opPushI, 1);
+      If Op = '++' Then Emit(opAdd) Else Emit(opSub);
+      PTargetStore(T);
+      Emit1(opPushI, 1);
+      If Op = '++' Then Emit(opSub) Else Emit(opAdd);
+    End;
+    Exit;
+  End;
+  If Op = '??=' Then
+  Begin
+    PTargetLoad(T);
+    Emit(opDup);
+    Emit1(opPhp, psNotNull);
+    Emit1(opJnz, 0);
+    J := Here - 1;
+    Emit(opPop);
+    Dummy := PAssignE;
+    PCopyIfVar;
+    PTargetStore(T);
+    Emit1(opJmp, 0);
+    J2 := Here - 1;
+    PatchAt(J, Here);
+    { valeur deja presente : la cible (cle et conteneur) est retiree }
+    If T.Kind = 2 Then Emit2(opPhp, psDrop2, 0)
+    Else If T.Kind = 4 Then
+    Begin
+      Emit(opSwap);
+      Emit(opPop);
+    End;
+    PatchAt(J2, Here);
+    Exit;
+  End;
+  PTargetLoad(T);
+  Dummy := PAssignE;
+  PEmitOp(Op);
+  PTargetStore(T);
+End;
+
+{ arguments d'un appel : nombre d'arguments }
+Function PArgs : LongInt;
+Var N : LongInt;
+Begin
+  N := 0;
+  PExpect('(');
+  If Not IsSym(')') Then
+    Repeat
+      If IsSym('...') Then PNext;
+      { argument nomme nom: valeur (ignore le nom) }
+      If (Tok = tkId) And (PPeekSym = ':') Then
+      Begin
+        PNext;
+        PNext;
+      End;
+      Dummy := PExpr;
+      PVarLoad := False;
+      Inc(N);
+      If IsSym(',') Then PNext Else Break;
+    Until (CErr <> '') Or IsSym(')');
+  PExpect(')');
+  PArgs := N;
+End;
+
+{ appel d'une fonction de l'utilisateur }
+Procedure PCallUser(S : LongInt);
+Var N, K, P, Tmp : LongInt; T : TPTarget; X : TLexSave; Simple : Boolean;
+Begin
+  N := 0;
+  PExpect('(');
+  If Not IsSym(')') Then
+    Repeat
+      If N >= Syms[S].NPar Then
+      Begin
+        { arguments en trop : evalues puis oublies }
+        Dummy := PExpr;
+        Emit(opPop);
+      End
+      Else
+      Begin
+        P := Syms[S].PBase + N;
+        If PRef[P] Then
+        Begin
+          { &$x : adresse de la variable }
+          Simple := False;
+          If Tok = tkVar Then
+          Begin
+            LexSave(X);
+            PNext;
+            Simple := IsSym(',') Or IsSym(')');
+            LexRestore(X);
+          End;
+          If Simple And (PSuperNo(TokS) = 0) Then
+          Begin
+            PVarDes(TokS, T.D);
+            PNext;
+            PAddrOf(T.D);
+          End
+          Else
+          Begin
+            Dummy := PExpr;
+            Tmp := AllocVar(1);
+            PopTmp(Tmp);
+            If CurLvl = 0 Then Emit1(opLdGA, Tmp) Else Emit1(opLdLA, Tmp);
+          End;
+        End
+        Else
+        Begin
+          Dummy := PExpr;
+          PCopyIfVar;
+        End;
+      End;
+      PVarLoad := False;
+      Inc(N);
+      If IsSym(',') Then PNext Else Break;
+    Until (CErr <> '') Or IsSym(')');
+  PExpect(')');
+  If N > Syms[S].NPar Then N := Syms[S].NPar;
+  { valeurs par defaut }
+  While N < Syms[S].NPar Do
+  Begin
+    K := Syms[S].PBase + N;
+    If PRef[K] Then
+    Begin
+      Tmp := AllocVar(1);
+      If CurLvl = 0 Then Emit1(opLdGA, Tmp) Else Emit1(opLdLA, Tmp);
+    End
+    Else If PDefK[K] = 1 Then EmitConst(PDefC[K])
+    Else If PDefK[K] = 2 Then Emit1(opPhp, psNewArr)
+    Else If CErr = '' Then
+    Begin
+      CError('argument manquant pour ' + Syms[S].Name + '()');
+      Exit;
+    End;
+    Inc(N);
+  End;
+  Emit(opCall);
+  If Syms[S].Adr < 0 Then
+  Begin
+    Emit(Syms[S].Patch);
+    Syms[S].Patch := Here - 1;
+  End
+  Else Emit(Syms[S].Adr);
+  Emit(N); Emit(CurLvl);
+End;
+
+Function PFindFn(Nm : String) : LongInt;
+Var K : LongInt;
+Begin
+  PFindFn := -1;
+  For K := 0 To NSym - 1 Do
+    If (Syms[K].Kind = skFunc) And (Syms[K].Name = Nm) Then
+    Begin
+      PFindFn := K;
+      Exit;
+    End;
+End;
+
+Function PBuiltinId(Nm : String) : LongInt;
+Var K : LongInt;
+Begin
+  PBuiltinId := 0;
+  For K := 0 To NPhpFn - 1 Do
+    If PhpFnNames[K] = Nm Then
+    Begin
+      PBuiltinId := 300 + K;
+      Exit;
+    End;
+End;
+
+{ constantes predefinies de PHP }
+Function PConst(Nm : String; Var C : TCell) : Boolean;
+Var R : Double;
+Begin
+  PConst := True;
+  R := 0;
+  If Nm = 'PHP_EOL' Then
+  Begin
+    C.T := vtKStr; C.I := AddStr(#10); C.L := 1;
+  End
+  Else If (Nm = 'PHP_INT_MAX') Then MkInt(2147483647, C)
+  Else If (Nm = 'PHP_INT_MIN') Then MkInt(-2147483647 - 1, C)
+  Else If (Nm = 'PHP_INT_SIZE') Then MkInt(4, C)
+  Else If Nm = 'PHP_VERSION' Then
+  Begin
+    C.T := vtKStr; C.I := AddStr('8.2.0'); C.L := 5;
+  End
+  Else If (Nm = 'PHP_MAJOR_VERSION') Then MkInt(8, C)
+  Else If (Nm = 'PHP_MINOR_VERSION') Then MkInt(2, C)
+  Else If Nm = 'PHP_OS' Then
+  Begin
+    C.T := vtKStr; C.I := AddStr('OS2'); C.L := 3;
+  End
+  Else If Nm = 'PHP_OS_FAMILY' Then
+  Begin
+    C.T := vtKStr; C.I := AddStr('OS/2'); C.L := 4;
+  End
+  Else If Nm = 'DIRECTORY_SEPARATOR' Then
+  Begin
+    C.T := vtKStr; C.I := AddStr('\'); C.L := 1;
+  End
+  Else If Nm = 'PHP_FLOAT_EPSILON' Then MkReal(2.220446049250313E-16, C)
+  Else If Nm = 'PHP_FLOAT_MAX' Then MkReal(1.7976931348623157E308, C)
+  Else If Nm = 'M_PI' Then MkReal(Pi, C)
+  Else If Nm = 'M_E' Then MkReal(Exp(1), C)
+  Else If Nm = 'M_SQRT2' Then MkReal(Sqrt(2), C)
+  Else If Nm = 'M_PI_2' Then MkReal(Pi / 2, C)
+  Else If Nm = 'M_PI_4' Then MkReal(Pi / 4, C)
+  Else If Nm = 'M_1_PI' Then MkReal(1 / Pi, C)
+  Else If Nm = 'M_LN2' Then MkReal(Ln(2), C)
+  Else If Nm = 'M_LN10' Then MkReal(Ln(10), C)
+  Else If Nm = 'NAN' Then MkReal(0, C)
+  Else If Nm = 'INF' Then MkReal(1.7976931348623157E308, C)
+  Else If (Nm = 'E_ALL') Then MkInt(32767, C)
+  Else If (Nm = 'E_ERROR') Then MkInt(1, C)
+  Else If (Nm = 'E_WARNING') Then MkInt(2, C)
+  Else If (Nm = 'E_NOTICE') Then MkInt(8, C)
+  Else If (Nm = 'E_STRICT') Then MkInt(2048, C)
+  Else If (Nm = 'E_DEPRECATED') Then MkInt(8192, C)
+  Else If (Nm = 'E_USER_ERROR') Then MkInt(256, C)
+  Else If (Nm = 'E_USER_WARNING') Then MkInt(512, C)
+  Else If (Nm = 'E_USER_NOTICE') Then MkInt(1024, C)
+  Else If (Nm = 'ENT_QUOTES') Then MkInt(3, C)
+  Else If (Nm = 'ENT_COMPAT') Then MkInt(2, C)
+  Else If (Nm = 'ENT_NOQUOTES') Then MkInt(0, C)
+  Else If (Nm = 'ENT_HTML5') Or (Nm = 'ENT_HTML401') Or (Nm = 'ENT_SUBSTITUTE') Then MkInt(0, C)
+  Else If (Nm = 'SORT_REGULAR') Then MkInt(0, C)
+  Else If (Nm = 'SORT_NUMERIC') Then MkInt(1, C)
+  Else If (Nm = 'SORT_STRING') Then MkInt(2, C)
+  Else If (Nm = 'SORT_FLAG_CASE') Then MkInt(8, C)
+  Else If (Nm = 'SORT_NATURAL') Then MkInt(6, C)
+  Else If (Nm = 'COUNT_RECURSIVE') Then MkInt(1, C)
+  Else If (Nm = 'JSON_PRETTY_PRINT') Then MkInt(128, C)
+  Else If (Nm = 'JSON_UNESCAPED_SLASHES') Then MkInt(64, C)
+  Else If (Nm = 'JSON_UNESCAPED_UNICODE') Then MkInt(256, C)
+  Else If (Nm = 'JSON_THROW_ON_ERROR') Or (Nm = 'JSON_NUMERIC_CHECK') Or (Nm = 'JSON_HEX_TAG') Then MkInt(0, C)
+  Else If (Nm = 'STR_PAD_RIGHT') Then MkInt(1, C)
+  Else If (Nm = 'STR_PAD_LEFT') Then MkInt(0, C)
+  Else If (Nm = 'STR_PAD_BOTH') Then MkInt(2, C)
+  Else If (Nm = 'PHP_ROUND_HALF_UP') Then MkInt(1, C)
+  Else If (Nm = 'MYSQLI_ASSOC') Then MkInt(1, C)
+  Else If (Nm = 'MYSQLI_NUM') Then MkInt(2, C)
+  Else If (Nm = 'MYSQLI_BOTH') Then MkInt(3, C)
+  Else If (Nm = 'PGSQL_ASSOC') Then MkInt(1, C)
+  Else If (Nm = 'PGSQL_NUM') Then MkInt(2, C)
+  Else If (Nm = 'PGSQL_BOTH') Then MkInt(3, C)
+  Else If (Nm = 'PGSQL_CONNECTION_OK') Then MkInt(0, C)
+  Else If (Nm = 'PDO::FETCH_ASSOC') Then MkInt(2, C)
+  Else If (Nm = 'PDO::FETCH_NUM') Then MkInt(3, C)
+  Else If (Nm = 'PDO::FETCH_BOTH') Then MkInt(4, C)
+  Else If (Nm = 'PDO::FETCH_OBJ') Then MkInt(2, C)
+  Else If (Nm = 'PDO::FETCH_COLUMN') Then MkInt(7, C)
+  Else If (Nm = 'PDO::ATTR_ERRMODE') Or (Nm = 'PDO::ERRMODE_EXCEPTION') Or (Nm = 'PDO::ATTR_DEFAULT_FETCH_MODE') Or
+          (Nm = 'PDO::ERRMODE_SILENT') Or (Nm = 'PDO::ATTR_EMULATE_PREPARES') Or (Nm = 'PDO::PARAM_STR') Or
+          (Nm = 'PDO::PARAM_INT') Or (Nm = 'PDO::PARAM_BOOL') Or (Nm = 'PDO::PARAM_NULL') Then MkInt(0, C)
+  Else If (Nm = 'PHP_SESSION_ACTIVE') Then MkInt(2, C)
+  Else If (Nm = 'PHP_SESSION_NONE') Then MkInt(1, C)
+  Else If (Nm = 'LC_ALL') Or (Nm = 'LOCK_EX') Or (Nm = 'FILE_APPEND') Or (Nm = 'FILE_IGNORE_NEW_LINES') Then
+  Begin
+    If Nm = 'FILE_APPEND' Then MkInt(8, C) Else If Nm = 'FILE_IGNORE_NEW_LINES' Then MkInt(2, C)
+    Else If Nm = 'LOCK_EX' Then MkInt(2, C) Else MkInt(6, C);
+  End
+  Else If Nm = 'FILE_SKIP_EMPTY_LINES' Then MkInt(4, C)
+  Else If (Nm = '__LINE__') Then MkInt(TokLine, C)
+  Else PConst := False;
+End;
+
+{ mysqli_..., pg_... : membres de l'objet du premier argument }
+Function PProcMember(Nm : String) : LongInt;
+Var M : String;
+Begin
+  PProcMember := -1;
+  M := '';
+  If Copy(Nm, 1, 7) = 'MYSQLI_' Then M := Copy(Nm, 8, 40)
+  Else If Copy(Nm, 1, 3) = 'PG_' Then M := Copy(Nm, 4, 40)
+  Else Exit;
+  If (M = 'QUERY') Or (M = 'FETCH_ASSOC') Or (M = 'FETCH_ROW') Or (M = 'FETCH_ARRAY') Or (M = 'FETCH_ALL') Or
+     (M = 'NUM_ROWS') Or (M = 'AFFECTED_ROWS') Or (M = 'REAL_ESCAPE_STRING') Or (M = 'CLOSE') Or
+     (M = 'FREE_RESULT') Or (M = 'INSERT_ID') Or (M = 'NUM_FIELDS') Or (M = 'FETCH_RESULT') Or (M = 'DATA_SEEK') Or
+     (M = 'FIELD_NAME') Or (M = 'FETCH_OBJECT') Or (M = 'QUERY_PARAMS') Then
+  Begin
+    If M = 'NUM_FIELDS' Then M := 'FIELD_COUNT';
+    If M = 'FETCH_OBJECT' Then M := 'FETCH_ASSOC';
+    If M = 'FREE_RESULT' Then M := 'FREE';
+    PProcMember := MemberCode(M);
+  End;
+End;
+
+{ appel d'une fonction (nom en Nm, Tok sur '(') }
+Function PCall(Nm : String) : LongInt;
+Var S, Id, N, M, J, Tmp : LongInt; T : TPTarget; C : TCell;
+Begin
+  PCall := TyVar;
+  S := PFindFn(Nm);
+  If S >= 0 Then
+  Begin
+    PCallUser(S);
+    Exit;
+  End;
+  { formes particulieres }
+  If Nm = 'ISSET' Then
+  Begin
+    PNext;
+    J := -1;
+    N := 0;
+    Repeat
+      If Tok <> tkVar Then
+      Begin
+        CError('isset : variable attendue');
+        Exit;
+      End;
+      PIssetOne;
+      If N > 0 Then Emit(opAnd);
+      Inc(N);
+      If IsSym(',') Then PNext Else Break;
+    Until CErr <> '';
+    PExpect(')');
+    PCall := TyBool;
+    Exit;
+  End;
+  If Nm = 'EMPTY' Then
+  Begin
+    PNext;
+    Dummy := PExpr;
+    PExpect(')');
+    Emit1(opPhp, psBool);
+    Emit(opNot);
+    PCall := TyBool;
+    Exit;
+  End;
+  If (Nm = 'ARRAY') Then
+  Begin
+    PNext;
+    Emit1(opPhp, psNewArr);
+    While (CErr = '') And Not IsSym(')') Do
+    Begin
+      Dummy := PExpr;
+      PCopyIfVar;
+      If IsSym('=>') Then
+      Begin
+        PNext;
+        Dummy := PExpr;
+        PCopyIfVar;
+        Emit1(opPhp, psAddK);
+      End
+      Else Emit1(opPhp, psAddV);
+      If IsSym(',') Then PNext Else Break;
+    End;
+    PExpect(')');
+    Exit;
+  End;
+  If Nm = 'DEFINE' Then
+  Begin
+    { define('NOM', valeur) : constante de la page }
+    PNext;
+    If Tok <> tkStr Then
+    Begin
+      CError('define : nom constant attendu');
+      Exit;
+    End;
+    S := AddSym(UpStr(TokS), skConst);
+    Syms[S].Lvl := 0;
+    PNext;
+    PExpect(',');
+    If ConstExprP(C) Then
+    Begin
+      Syms[S].CV := C;
+      Syms[S].Ty := TyVar;
+    End;
+    PExpect(')');
+    Emit1(opPushB, 1);
+    PCall := TyBool;
+    Exit;
+  End;
+  If (Nm = 'DEFINED') Or (Nm = 'CONSTANT') Then
+  Begin
+    PNext;
+    If Tok <> tkStr Then
+    Begin
+      CError(Nm + ' : nom constant attendu');
+      Exit;
+    End;
+    J := FindSym(UpStr(TokS));
+    If Not ((J >= 0) And (Syms[J].Kind = skConst)) Then J := -1;
+    If Nm = 'DEFINED' Then
+    Begin
+      Emit1(opPushB, Ord((J >= 0) Or PConst(UpStr(TokS), C)));
+      PCall := TyBool;
+    End
+    Else If J >= 0 Then EmitConst(Syms[J].CV)
+    Else If PConst(UpStr(TokS), C) Then EmitConst(C)
+    Else CError('constante inconnue : ' + TokS);
+    PNext;
+    PExpect(')');
+    Exit;
+  End;
+  If Nm = 'FUNCTION_EXISTS' Then
+  Begin
+    PNext;
+    If Tok = tkStr Then
+    Begin
+      Emit1(opPushB, Ord((PFindFn(UpStr(TokS)) >= 0) Or (PBuiltinId(UpStr(TokS)) > 0)));
+      PNext;
+    End
+    Else
+    Begin
+      Dummy := PExpr;
+      Emit(opPop);
+      Emit1(opPushB, 0);
+    End;
+    PExpect(')');
+    PCall := TyBool;
+    Exit;
+  End;
+  If (Nm = 'COMPACT') Then
+  Begin
+    { compact('a', 'b') : tableau des variables nommees }
+    PNext;
+    Emit1(opPhp, psNewArr);
+    While (CErr = '') And (Tok = tkStr) Do
+    Begin
+      EmitStr(TokS);
+      PVarDes(TokS, T.D);
+      PLoad(T.D);
+      Emit1(opPhp, psAddK);
+      PNext;
+      If IsSym(',') Then PNext Else Break;
+    End;
+    PExpect(')');
+    Exit;
+  End;
+  { mysqli_query($c, $sql)... : membre du premier argument }
+  M := PProcMember(Nm);
+  If M >= 0 Then
+  Begin
+    PNext;
+    Dummy := PExpr;
+    PVarLoad := False;
+    N := 0;
+    While IsSym(',') Do
+    Begin
+      PNext;
+      Dummy := PExpr;
+      PVarLoad := False;
+      Inc(N);
+    End;
+    PExpect(')');
+    Emit2(opMember, M, N);
+    Exit;
+  End;
+  { connexions : Database.Connect(chaine faite des arguments) }
+  If (Nm = 'MYSQLI_CONNECT') Or (Nm = 'PG_CONNECT') Or (Nm = 'PG_PCONNECT') Or (Nm = 'MYSQLI_INIT') Then
+  Begin
+    Emit1(opIsObj, obDatabase);
+    N := PArgs;
+    If Nm = 'MYSQLI_CONNECT' Then Emit2(opCallB, pfMysqliConnstr, N) Else Emit2(opCallB, pfPgConnect, N);
+    Emit2(opMember, mConnect, 1);
+    Exit;
+  End;
+  If (Nm = 'EXIT') Or (Nm = 'DIE') Then
+  Begin
+    PNext;
+    If Not IsSym(')') Then
+    Begin
+      Dummy := PExpr;
+      Emit1(opPhp, psExitMsg);
+    End;
+    PExpect(')');
+    Emit(opHalt);
+    Emit(opPushNil);
+    Exit;
+  End;
+  Id := PBuiltinId(Nm);
+  If Id = 0 Then
+  Begin
+    CError('fonction inconnue : ' + PTokRaw + '()');
+    Exit;
+  End;
+  N := PArgs;
+  Emit2(opCallB, Id, N);
+  If (Id = pfIsInt) Or (Id = pfIsString) Or (Id = pfIsArray) Or (Id = pfIsNumeric) Or (Id = pfInArray) Or
+     (Id = pfIsNull) Or (Id = pfIsBool) Or (Id = pfIsFloat) Or (Id = pfFileExists) Or (Id = pfArrayKeyExists) Then
+    PCall := TyBool
+  Else If (Id = pfStrlen) Or (Id = pfCount) Then PCall := TyInt;
+End;
+
+{ expression constante (valeur par defaut, define, const) }
+Function ConstExprP(Var C : TCell) : Boolean;
+Var Neg : Boolean; Nm : String; S : LongInt;
+Begin
+  ConstExprP := True;
+  Neg := False;
+  If IsSym('-') Then
+  Begin
+    Neg := True;
+    PNext;
+  End;
+  If Tok = tkInt Then
+  Begin
+    If Neg Then MkInt(-TokI, C) Else MkInt(TokI, C);
+    PNext;
+  End
+  Else If Tok = tkReal Then
+  Begin
+    If Neg Then MkReal(-TokR, C) Else MkReal(TokR, C);
+    PNext;
+  End
+  Else If Tok = tkStr Then
+  Begin
+    C.T := vtKStr; C.I := TokOff; C.L := TokLen;
+    PNext;
+  End
+  Else If Tok = tkId Then
+  Begin
+    Nm := TokS;
+    PNext;
+    If IsSym('::') Then
+    Begin
+      PNext;
+      Nm := Nm + '::' + TokS;
+      PNext;
+    End;
+    If Nm = 'TRUE' Then MkBool(True, C)
+    Else If Nm = 'FALSE' Then MkBool(False, C)
+    Else If Nm = 'NULL' Then MkNil(C)
+    Else If PConst(Nm, C) Then
+    Begin
+      If Neg Then
+        If C.T = vtInt Then C.I := -C.I Else If C.T = vtReal Then C.R := -C.R;
+    End
+    Else
+    Begin
+      S := FindSym(Nm);
+      If (S >= 0) And (Syms[S].Kind = skConst) Then C := Syms[S].CV
+      Else
+      Begin
+        CError('constante attendue : ' + Nm);
+        ConstExprP := False;
+      End;
+    End;
+  End
+  Else
+  Begin
+    CError('valeur constante attendue');
+    ConstExprP := False;
+  End;
+End;
+
+{ isset(x) : sans creer les elements absents }
+Procedure PIssetOne;
+Var Nm : String; Sn, M : LongInt; D : TDes;
+Begin
+  Nm := TokS;
+  PNext;
+  Sn := PSuperNo(Nm);
+  If Sn > 0 Then PEmitSuper(Sn)
+  Else
+  Begin
+    PVarDes(Nm, D);
+    PLoad(D);
+  End;
+  If Not IsSym('[') And Not IsSym('->') Then
+  Begin
+    Emit1(opPhp, psNotNull);
+    Exit;
+  End;
+  While CErr = '' Do
+  Begin
+    If IsSym('[') Then
+    Begin
+      PNext;
+      Dummy := PExpr;
+      PExpect(']');
+      If IsSym('[') Or IsSym('->') Then Emit1(opPhp, psGet)
+      Else
+      Begin
+        Emit1(opPhp, psIsset);
+        Exit;
+      End;
+    End
+    Else If IsSym('->') Then
+    Begin
+      PNext;
+      M := MemberCode(TokS);
+      If M < 0 Then
+      Begin
+        CError('propri'#130't'#130' inconnue : ' + TokS);
+        Exit;
+      End;
+      PNext;
+      Emit2(opMember, M, 0);
+      If Not IsSym('[') And Not IsSym('->') Then
+      Begin
+        Emit1(opPhp, psNotNull);
+        Exit;
+      End;
+    End
+    Else Break;
+  End;
+End;
+
+{ ==================================================================== }
+{ Chaines interpolees                                                   }
+{ ==================================================================== }
+
+{ compiler une expression ecrite dans Text (sous-lexique) }
+Procedure PSubExpr(Var Text : TBuf);
+Var X : TLexSave; SaveSrc : TBuf;
+Begin
+  LexSave(X);
+  SaveSrc := Src;
+  Src := Text;
+  SPos := 0; InHtml := False; InEcho := False;
+  PNext;
+  Dummy := PExpr;
+  PVarLoad := False;
+  If (CErr = '') And (Tok <> tkEof) Then CError('expression incorrecte dans une cha'#140'ne');
+  Src := SaveSrc;
+  If CErr = '' Then LexRestore(X);
+End;
+
+Procedure PInterp;
+Var Raw, Lit, Ex : TBuf; K, N, Depth, Parts : LongInt; C : Byte; Nm, Key : String; Q : Byte;
+
+  Procedure FlushLit;
+  Begin
+    If Lit.Len = 0 Then Exit;
+    Emit2(opPushS, AddStrB(Lit.P, Lit.Len), Lit.Len);
+    If Parts > 0 Then Emit(opConcat);
+    Inc(Parts);
+    Lit.Len := 0;
+  End;
+
+  Procedure DoExpr;
+  Begin
+    FlushLit;
+    PSubExpr(Ex);
+    If Parts > 0 Then Emit(opConcat)
+    Else
+    Begin
+      { premiere partie : chaine (une valeur seule doit rester du texte) }
+      EmitStr('');
+      Emit(opSwap);
+      Emit(opConcat);
+    End;
+    Inc(Parts);
+    Ex.Len := 0;
+  End;
+
+Begin
+  BufInit(Raw); BufInit(Lit); BufInit(Ex);
+  BufAddB(Raw, PIRaw.P, PIRaw.Len);
+  Parts := 0;
+  K := 0;
+  While (K < Raw.Len) And (CErr = '') Do
+  Begin
+    C := Raw.P^[K];
+    If (C = 92) And (K + 1 < Raw.Len) Then
+    Begin
+      Inc(K);
+      PEscape(Lit, K, Raw);
+      Inc(K);
+      Continue;
+    End;
+    If (C = 123) And (K + 1 < Raw.Len) And (Raw.P^[K + 1] = 36) Then
+    Begin
+      { accolade dollar : expression jusqu'a l'accolade fermante }
+      Inc(K);
+      Depth := 1;
+      While (K < Raw.Len) And (Depth > 0) Do
+      Begin
+        C := Raw.P^[K];
+        If C = 123 Then Inc(Depth)
+        Else If C = 125 Then
+        Begin
+          Dec(Depth);
+          If Depth = 0 Then Break;
+        End
+        Else If (C = 39) Or (C = 34) Then
+        Begin
+          Q := C;
+          BufAddC(Ex, C);
+          Inc(K);
+          While (K < Raw.Len) And (Raw.P^[K] <> Q) Do
+          Begin
+            BufAddC(Ex, Raw.P^[K]);
+            Inc(K);
+          End;
+          C := Q;
+        End;
+        BufAddC(Ex, C);
+        Inc(K);
+      End;
+      Inc(K);
+      DoExpr;
+      Continue;
+    End;
+    If (C = 36) And (K + 1 < Raw.Len) And PIsW(Chr(Raw.P^[K + 1])) And
+       Not ((Raw.P^[K + 1] >= 48) And (Raw.P^[K + 1] <= 57)) Then
+    Begin
+      Inc(K);
+      Nm := '';
+      While (K < Raw.Len) And PIsW(Chr(Raw.P^[K])) Do
+      Begin
+        Nm := Nm + Chr(Raw.P^[K]);
+        Inc(K);
+      End;
+      BufAdd(Ex, '$' + Nm);
+      If (K < Raw.Len) And (Raw.P^[K] = 91) Then
+      Begin
+        { $a[cle] : cle sans guillemets, nombre ou $variable }
+        Inc(K);
+        Key := '';
+        While (K < Raw.Len) And (Raw.P^[K] <> 93) Do
+        Begin
+          Key := Key + Chr(Raw.P^[K]);
+          Inc(K);
+        End;
+        Inc(K);
+        If (Key <> '') And ((Key[1] = '$') Or (Key[1] In ['0'..'9', '-']) Or (Key[1] = '''') Or (Key[1] = '"')) Then
+          BufAdd(Ex, '[' + Key + ']')
+        Else BufAdd(Ex, '[''' + Key + ''']');
+      End
+      Else If (K + 2 < Raw.Len) And (Raw.P^[K] = 45) And (Raw.P^[K + 1] = 62) And PIsW(Chr(Raw.P^[K + 2])) Then
+      Begin
+        K := K + 2;
+        BufAdd(Ex, '->');
+        While (K < Raw.Len) And PIsW(Chr(Raw.P^[K])) Do
+        Begin
+          BufAddC(Ex, Raw.P^[K]);
+          Inc(K);
+        End;
+      End;
+      DoExpr;
+      Continue;
+    End;
+    BufAddC(Lit, C);
+    Inc(K);
+  End;
+  FlushLit;
+  If Parts = 0 Then EmitStr('');
+  BufFree(Raw); BufFree(Lit); BufFree(Ex);
+End;
+
+{ ==================================================================== }
+{ Expressions                                                           }
+{ ==================================================================== }
+
+{ tableau [a, k => v] ou array(...) ; Close : ']' ou ')' }
+Procedure PArrayLit(Close : String);
+Begin
+  Emit1(opPhp, psNewArr);
+  While (CErr = '') And Not IsSym(Close) Do
+  Begin
+    If IsSym('...') Then
+    Begin
+      PNext;
+      Dummy := PExpr;
+      Emit1(opPhp, psSpread);
+    End
+    Else
+    Begin
+      Dummy := PExpr;
+      PCopyIfVar;
+      If IsSym('=>') Then
+      Begin
+        PNext;
+        Dummy := PExpr;
+        PCopyIfVar;
+        Emit1(opPhp, psAddK);
+      End
+      Else Emit1(opPhp, psAddV);
+    End;
+    If IsSym(',') Then PNext Else Break;
+  End;
+  PExpect(Close);
+End;
+
+{ selecteurs apres une valeur : [cle], ->membre, ->methode(...) }
+Procedure PSelectors;
+Var M, N : LongInt;
+Begin
+  While CErr = '' Do
+  Begin
+    If IsSym('[') Or IsSym('{') Then
+    Begin
+      PNext;
+      If IsSym(']') Then
+      Begin
+        CError('[] ne peut '#136'tre lu');
+        Exit;
+      End;
+      Dummy := PExpr;
+      If IsSym('}') Then PNext Else PExpect(']');
+      Emit1(opPhp, psGet);
+      Continue;
+    End;
+    If IsSym('->') Or IsSym('?->') Then
+    Begin
+      PNext;
+      M := MemberCode(TokS);
+      If (Tok <> tkId) Or (M < 0) Then
+      Begin
+        CError('m'#130'thode ou propri'#130't'#130' inconnue : ' + PTokRaw);
+        Exit;
+      End;
+      PNext;
+      If IsSym('(') Then N := PArgs Else N := 0;
+      Emit2(opMember, M, N);
+      PVarLoad := False;
+      Continue;
+    End;
+    Break;
+  End;
+End;
+
+Function PPrimary : LongInt;
+Var Nm : String; S, Sn, N : LongInt; D : TDes; C : TCell; Ty : LongInt;
+Begin
+  PPrimary := TyVar;
+  PVarLoad := False;
+  Case Tok Of
+    tkInt :
+      Begin
+        Emit1(opPushI, TokI);
+        PNext;
+        PPrimary := TyInt;
+        Exit;
+      End;
+    tkReal :
+      Begin
+        Emit1(opPushR, AddReal(TokR));
+        PNext;
+        PPrimary := TyReal;
+        Exit;
+      End;
+    tkStr :
+      Begin
+        Emit2(opPushS, TokOff, TokLen);
+        PNext;
+        PSelectors;
+        PPrimary := TyStr;
+        Exit;
+      End;
+    tkIStr :
+      Begin
+        PInterp;
+        PNext;
+        PPrimary := TyStr;
+        Exit;
+      End;
+    tkVar :
+      Begin
+        If PAssignAhead <> '' Then
+        Begin
+          PAssign;
+          PVarLoad := False;
+          Exit;
+        End;
+        Nm := TokS;
+        PNext;
+        Sn := PSuperNo(Nm);
+        If Sn > 0 Then PEmitSuper(Sn)
+        Else
+        Begin
+          PVarDes(Nm, D);
+          PLoad(D);
+        End;
+        PVarLoad := True;
+        PSelectors;
+        Exit;
+      End;
+  End;
+  If IsSym('(') Then
+  Begin
+    PNext;
+    Ty := PExpr;
+    PExpect(')');
+    PVarLoad := False;
+    PSelectors;
+    PPrimary := Ty;
+    Exit;
+  End;
+  If IsSym('[') Then
+  Begin
+    PNext;
+    PArrayLit(']');
+    PSelectors;
+    Exit;
+  End;
+  If Tok <> tkId Then
+  Begin
+    If Tok = tkEof Then CError('expression attendue (fin du fichier)')
+    Else CError('expression attendue au lieu de ''' + TokS + '''');
+    Exit;
+  End;
+  Nm := TokS;
+  If (Nm = 'TRUE') Or (Nm = 'FALSE') Then
+  Begin
+    Emit1(opPushB, Ord(Nm = 'TRUE'));
+    PNext;
+    PPrimary := TyBool;
+    Exit;
+  End;
+  If Nm = 'NULL' Then
+  Begin
+    Emit(opPushNil);
+    PNext;
+    Exit;
+  End;
+  If Nm = 'NEW' Then
+  Begin
+    PNext;
+    Nm := TokS;
+    PNext;
+    If Nm = 'PDO' Then
+    Begin
+      Emit1(opIsObj, obDatabase);
+      N := PArgs;
+      Emit2(opCallB, pfPdoConnstr, N);
+      Emit2(opMember, mConnect, 1);
+    End
+    Else If Nm = 'MYSQLI' Then
+    Begin
+      Emit1(opIsObj, obDatabase);
+      N := PArgs;
+      Emit2(opCallB, pfMysqliConnstr, N);
+      Emit2(opMember, mConnect, 1);
+    End
+    Else If (Nm = 'STDCLASS') Or (Nm = 'ARRAYOBJECT') Then
+    Begin
+      If IsSym('(') Then
+      Begin
+        PNext;
+        PExpect(')');
+      End;
+      Emit1(opPhp, psNewArr);
+    End
+    Else If (Pos('EXCEPTION', Nm) > 0) Or (Pos('ERROR', Nm) > 0) Then
+    Begin
+      { exception : son message }
+      If IsSym('(') Then
+      Begin
+        N := PArgs;
+        While N > 1 Do
+        Begin
+          Emit(opPop);
+          Dec(N);
+        End;
+        If N = 0 Then EmitStr(PTokRaw);
+      End
+      Else EmitStr(PTokRaw);
+    End
+    Else CError('classe non prise en charge : ' + Nm);
+    PSelectors;
+    Exit;
+  End;
+  If Nm = 'PRINT' Then
+  Begin
+    PNext;
+    Dummy := PAssignE;
+    Emit1(opPushI, -1); Emit1(opPushI, -1);
+    Emit(opWrite);
+    Emit1(opPushI, 1);
+    PPrimary := TyInt;
+    Exit;
+  End;
+  If (Nm = 'EXIT') Or (Nm = 'DIE') Then
+  Begin
+    PNext;
+    If IsSym('(') Then
+    Begin
+      PNext;
+      If Not IsSym(')') Then
+      Begin
+        Dummy := PExpr;
+        Emit1(opPhp, psExitMsg);
+      End;
+      PExpect(')');
+    End;
+    Emit(opHalt);
+    Emit(opPushNil);
+    Exit;
+  End;
+  If (Nm = 'FUNCTION') Or (Nm = 'FN') Or (Nm = 'MATCH') Then
+  Begin
+    CError(PTokRaw + ' : fonctions anonymes et match non pris en charge');
+    Exit;
+  End;
+  If (Nm = 'INCLUDE') Or (Nm = 'REQUIRE') Or (Nm = 'INCLUDE_ONCE') Or (Nm = 'REQUIRE_ONCE') Then
+  Begin
+    CError(PTokRaw + ' : nom de fichier constant attendu (include ''fichier.php'';)');
+    Exit;
+  End;
+  PNext;
+  If IsSym('(') Then
+  Begin
+    PPrimary := PCall(Nm);
+    PSelectors;
+    Exit;
+  End;
+  If IsSym('::') Then
+  Begin
+    PNext;
+    Nm := Nm + '::' + TokS;
+    PNext;
+  End;
+  If PConst(Nm, C) Then
+  Begin
+    EmitConst(C);
+    Exit;
+  End;
+  S := FindSym(Nm);
+  If (S >= 0) And (Syms[S].Kind = skConst) Then
+  Begin
+    EmitConst(Syms[S].CV);
+    Exit;
+  End;
+  If (Nm = '__FILE__') Or (Nm = '__DIR__') Then
+  Begin
+    If Nm = '__DIR__' Then EmitStr(Copy(SrcDir, 1, Length(SrcDir) - 1)) Else EmitStr(SrcDir);
+    Exit;
+  End;
+  If (Nm = '__FUNCTION__') Then
+  Begin
+    If PInFn >= 0 Then EmitStr(Syms[PInFn].Name) Else EmitStr('');
+    Exit;
+  End;
+  CError('constante inconnue : ' + Nm);
+End;
+
+{ ++$x, --$x }
+Procedure PPreInc(Op : String);
+Var T : TPTarget;
+Begin
+  If Tok <> tkVar Then
+  Begin
+    CError('variable attendue apr'#138's ' + Op);
+    Exit;
+  End;
+  PTarget(T);
+  Case T.Kind Of
+    1 :
+      Begin
+        PLoad(T.D);
+        Emit1(opPushI, 1);
+        If Op = '++' Then Emit(opAdd) Else Emit(opSub);
+        Emit(opDup);
+        PStore(T.D);
+      End;
+    2 : If Op = '++' Then Emit2(opPhp, psIncE, 3) Else Emit2(opPhp, psIncE, 4);
+    4 :
+      Begin
+        PTargetLoad(T);
+        Emit1(opPushI, 1);
+        If Op = '++' Then Emit(opAdd) Else Emit(opSub);
+        PTargetStore(T);
+      End;
+  Else
+    CError('[] ne peut '#136'tre incr'#130'ment'#130);
+  End;
+End;
+
+Function PPow : LongInt;
+Begin
+  PPow := PPrimary;
+  If (CErr = '') And IsSym('**') Then
+  Begin
+    PNext;
+    Dummy := PUnary;
+    Emit2(opCallB, pfPow, 2);
+    PPow := TyVar;
+    PVarLoad := False;
+  End;
+End;
+
+Function PUnary : LongInt;
+Var K : LongInt; Op : String;
+Begin
+  If IsSym('-') Then
+  Begin
+    PNext;
+    K := PUnary;
+    Emit(opNeg);
+    PUnary := K;
+  End
+  Else If IsSym('+') Then
+  Begin
+    PNext;
+    Dummy := PUnary;
+    Emit1(opPhp, psNum);
+    PUnary := TyVar;
+  End
+  Else If IsSym('~') Then
+  Begin
+    PNext;
+    Dummy := PUnary;
+    Emit1(opPhp, psNum);
+    Emit(opNot);
+    PUnary := TyInt;
+  End
+  Else If IsSym('@') Then
+  Begin
+    PNext;
+    PUnary := PUnary;
+  End
+  Else If IsSym('&') Then
+  Begin
+    { &$x (references) : la valeur }
+    PNext;
+    PUnary := PUnary;
+  End
+  Else If Tok = tkCast Then
+  Begin
+    K := TokI;
+    PNext;
+    Dummy := PUnary;
+    Emit2(opPhp, psCast, K);
+    PVarLoad := False;
+    Case K Of
+      1 : PUnary := TyInt;
+      2 : PUnary := TyReal;
+      3 : PUnary := TyStr;
+      4 : PUnary := TyBool;
+    Else
+      PUnary := TyVar;
+    End;
+  End
+  Else If IsSym('++') Or IsSym('--') Then
+  Begin
+    Op := TokS;
+    PNext;
+    PPreInc(Op);
+    PUnary := TyVar;
+  End
+  Else PUnary := PPow;
+End;
+
+Function PNot : LongInt;
+Var T : LongInt;
+Begin
+  If IsSym('!') Then
+  Begin
+    PNext;
+    T := PNot;
+    PToBool(T);
+    Emit(opNot);
+    PVarLoad := False;
+    PNot := TyBool;
+  End
+  Else PNot := PUnary;
+End;
+
+Function PMul : LongInt;
+Var Op : String;
+Begin
+  PMul := PNot;
+  While (CErr = '') And (IsSym('*') Or IsSym('/') Or IsSym('%')) Do
+  Begin
+    Op := TokS;
+    PNext;
+    Dummy := PNot;
+    PEmitOp(Op);
+    PVarLoad := False;
+    PMul := TyVar;
+  End;
+End;
+
+Function PAdd : LongInt;
+Var Op : String;
+Begin
+  PAdd := PMul;
+  While (CErr = '') And (IsSym('+') Or IsSym('-')) Do
+  Begin
+    Op := TokS;
+    PNext;
+    Dummy := PMul;
+    If Op = '+' Then Emit1(opPhp, psAdd) Else Emit(opSub);
+    PVarLoad := False;
+    PAdd := TyVar;
+  End;
+End;
+
+Function PShift : LongInt;
+Var Op : String;
+Begin
+  PShift := PAdd;
+  While (CErr = '') And (IsSym('<<') Or IsSym('>>')) Do
+  Begin
+    Op := TokS;
+    PNext;
+    Dummy := PAdd;
+    PEmitOp(Op);
+    PVarLoad := False;
+    PShift := TyInt;
+  End;
+End;
+
+Function PCat : LongInt;
+Begin
+  PCat := PShift;
+  While (CErr = '') And IsSym('.') Do
+  Begin
+    PNext;
+    Dummy := PShift;
+    Emit(opConcat);
+    PVarLoad := False;
+    PCat := TyStr;
+  End;
+End;
+
+Function PRel : LongInt;
+Var Op : String;
+Begin
+  PRel := PCat;
+  While (CErr = '') And (IsSym('<') Or IsSym('<=') Or IsSym('>') Or IsSym('>=')) Do
+  Begin
+    Op := TokS;
+    PNext;
+    Dummy := PCat;
+    If Op = '<' Then Emit(opLt) Else If Op = '<=' Then Emit(opLe) Else If Op = '>' Then Emit(opGt) Else Emit(opGe);
+    PVarLoad := False;
+    PRel := TyBool;
+  End;
+End;
+
+Function PEqual : LongInt;
+Var Op : String;
+Begin
+  PEqual := PRel;
+  While (CErr = '') And (IsSym('==') Or IsSym('!=') Or IsSym('<>') Or IsSym('===') Or IsSym('!==') Or IsSym('<=>')) Do
+  Begin
+    Op := TokS;
+    PNext;
+    Dummy := PRel;
+    If Op = '==' Then Emit(opEq) Else If (Op = '!=') Or (Op = '<>') Then Emit(opNe)
+    Else If Op = '===' Then Emit1(opPhp, psIdent) Else If Op = '!==' Then Emit1(opPhp, psNIdent)
+    Else Emit1(opPhp, psCmp);
+    PVarLoad := False;
+    If Op = '<=>' Then PEqual := TyInt Else PEqual := TyBool;
+  End;
+End;
+
+Function PBitAnd : LongInt;
+Begin
+  PBitAnd := PEqual;
+  While (CErr = '') And IsSym('&') Do
+  Begin
+    PNext;
+    Dummy := PEqual;
+    Emit1(opPhp, psBitAnd);
+    PVarLoad := False;
+    PBitAnd := TyInt;
+  End;
+End;
+
+Function PBitXor : LongInt;
+Begin
+  PBitXor := PBitAnd;
+  While (CErr = '') And IsSym('^') Do
+  Begin
+    PNext;
+    Dummy := PBitAnd;
+    Emit1(opPhp, psBitXor);
+    PVarLoad := False;
+    PBitXor := TyInt;
+  End;
+End;
+
+Function PBitOr : LongInt;
+Begin
+  PBitOr := PBitXor;
+  While (CErr = '') And IsSym('|') Do
+  Begin
+    PNext;
+    Dummy := PBitXor;
+    Emit1(opPhp, psBitOr);
+    PVarLoad := False;
+    PBitOr := TyInt;
+  End;
+End;
+
+Function PAndAnd : LongInt;
+Var T, J : LongInt;
+Begin
+  T := PBitOr;
+  While (CErr = '') And IsSym('&&') Do
+  Begin
+    PToBool(T);
+    PNext;
+    Emit(opDup);
+    Emit1(opJz, 0);
+    J := Here - 1;
+    Emit(opPop);
+    T := PBitOr;
+    PToBool(T);
+    PatchAt(J, Here);
+    T := TyBool;
+    PVarLoad := False;
+  End;
+  PAndAnd := T;
+End;
+
+Function POrOr : LongInt;
+Var T, J : LongInt;
+Begin
+  T := PAndAnd;
+  While (CErr = '') And IsSym('||') Do
+  Begin
+    PToBool(T);
+    PNext;
+    Emit(opDup);
+    Emit1(opJnz, 0);
+    J := Here - 1;
+    Emit(opPop);
+    T := PAndAnd;
+    PToBool(T);
+    PatchAt(J, Here);
+    T := TyBool;
+    PVarLoad := False;
+  End;
+  POrOr := T;
+End;
+
+Function PCoalesce : LongInt;
+Var J : LongInt;
+Begin
+  PCoalesce := POrOr;
+  If (CErr = '') And IsSym('??') Then
+  Begin
+    PNext;
+    Emit(opDup);
+    Emit1(opPhp, psNotNull);
+    Emit1(opJnz, 0);
+    J := Here - 1;
+    Emit(opPop);
+    Dummy := PCoalesce;
+    PatchAt(J, Here);
+    PVarLoad := False;
+    PCoalesce := TyVar;
+  End;
+End;
+
+Function PTernary : LongInt;
+Var T, J, J2 : LongInt;
+Begin
+  T := PCoalesce;
+  While (CErr = '') And IsSym('?') Do
+  Begin
+    PNext;
+    PVarLoad := False;
+    If IsSym(':') Then
+    Begin
+      { a ?: b }
+      PNext;
+      Emit(opDup);
+      Emit1(opPhp, psBool);
+      Emit1(opJnz, 0);
+      J := Here - 1;
+      Emit(opPop);
+      Dummy := PCoalesce;
+      PatchAt(J, Here);
+    End
+    Else
+    Begin
+      PToBool(T);
+      Emit1(opJz, 0);
+      J := Here - 1;
+      Dummy := PAssignE;
+      PCopyIfVar;
+      Emit1(opJmp, 0);
+      J2 := Here - 1;
+      PatchAt(J, Here);
+      PExpect(':');
+      Dummy := PAssignE;
+      PCopyIfVar;
+      PatchAt(J2, Here);
+    End;
+    T := TyVar;
+  End;
+  PTernary := T;
+End;
+
+Function PAssignE : LongInt;
+Begin
+  PAssignE := PTernary;
+End;
+
+Function PLowAnd : LongInt;
+Var T, J : LongInt;
+Begin
+  T := PAssignE;
+  While (CErr = '') And IsKw('AND') Do
+  Begin
+    PToBool(T);
+    PNext;
+    Emit(opDup);
+    Emit1(opJz, 0);
+    J := Here - 1;
+    Emit(opPop);
+    T := PAssignE;
+    PToBool(T);
+    PatchAt(J, Here);
+    T := TyBool;
+  End;
+  PLowAnd := T;
+End;
+
+Function PLowXor : LongInt;
+Var T : LongInt;
+Begin
+  T := PLowAnd;
+  While (CErr = '') And IsKw('XOR') Do
+  Begin
+    PToBool(T);
+    PNext;
+    T := PLowAnd;
+    PToBool(T);
+    Emit(opXor);
+    T := TyBool;
+  End;
+  PLowXor := T;
+End;
+
+Function PExpr : LongInt;
+Var T, J : LongInt;
+Begin
+  T := PLowXor;
+  While (CErr = '') And IsKw('OR') Do
+  Begin
+    PToBool(T);
+    PNext;
+    Emit(opDup);
+    Emit1(opJnz, 0);
+    J := Here - 1;
+    Emit(opPop);
+    T := PLowXor;
+    PToBool(T);
+    PatchAt(J, Here);
+    T := TyBool;
+  End;
+  PExpr := T;
+End;
+
+{ ==================================================================== }
+{ Instructions                                                          }
+{ ==================================================================== }
+
+Procedure PCond;
+Var T : LongInt;
+Begin
+  PExpect('(');
+  T := PExpr;
+  PToBool(T);
+  PExpect(')');
+End;
+
+{ instructions jusqu'a l'un des mots (syntaxe : ... endif;) }
+Procedure PBlockUntil(S1, S2, S3 : String);
+Begin
+  While (CErr = '') And (Tok <> tkEof) Do
+  Begin
+    If (Tok = tkId) And ((TokS = S1) Or (TokS = S2) Or (TokS = S3)) Then Exit;
+    PStatement;
+  End;
+  If (CErr = '') And (Tok = tkEof) Then CError(S1 + ' attendu (fin du fichier)');
+End;
+
+Procedure PIf;
+Var J, EndCh, K : LongInt; Alt : Boolean;
+Begin
+  PNext;
+  PCond;
+  Emit1(opJz, 0);
+  J := Here - 1;
+  EndCh := -1;
+  Alt := IsSym(':');
+  If Alt Then
+  Begin
+    PNext;
+    PBlockUntil('ELSEIF', 'ELSE', 'ENDIF');
+    While (CErr = '') And IsKw('ELSEIF') Do
+    Begin
+      Emit1(opJmp, EndCh);
+      EndCh := Here - 1;
+      PatchAt(J, Here);
+      PNext;
+      PCond;
+      Emit1(opJz, 0);
+      J := Here - 1;
+      PExpect(':');
+      PBlockUntil('ELSEIF', 'ELSE', 'ENDIF');
+    End;
+    If IsKw('ELSE') Then
+    Begin
+      Emit1(opJmp, EndCh);
+      EndCh := Here - 1;
+      PatchAt(J, Here);
+      J := -1;
+      PNext;
+      PExpect(':');
+      PBlockUntil('ENDIF', 'ENDIF', 'ENDIF');
+    End;
+    PExpect('ENDIF');
+    PSemi;
+  End
+  Else
+  Begin
+    PStatement;
+    While (CErr = '') And (IsKw('ELSEIF') Or (IsKw('ELSE') And (PPeekSym = 'IF'))) Do
+    Begin
+      If IsKw('ELSE') Then PNext;
+      Emit1(opJmp, EndCh);
+      EndCh := Here - 1;
+      PatchAt(J, Here);
+      PNext;
+      PCond;
+      Emit1(opJz, 0);
+      J := Here - 1;
+      PStatement;
+    End;
+    If IsKw('ELSE') Then
+    Begin
+      Emit1(opJmp, EndCh);
+      EndCh := Here - 1;
+      PatchAt(J, Here);
+      J := -1;
+      PNext;
+      PStatement;
+    End;
+  End;
+  If J >= 0 Then PatchAt(J, Here);
+  K := Here;
+  PatchChain(EndCh, K);
+End;
+
+{ corps d'une boucle : instruction, bloc, ou syntaxe : ... EndW; }
+Procedure PLoopBody(EndW : String);
+Begin
+  If IsSym(':') Then
+  Begin
+    PNext;
+    PBlockUntil(EndW, EndW, EndW);
+    PExpect(EndW);
+    PSemi;
+  End
+  Else PStatement;
+End;
+
+Procedure PWhile;
+Var L0, J : LongInt;
+Begin
+  PNext;
+  L0 := Here;
+  PCond;
+  Emit1(opJz, 0);
+  J := Here - 1;
+  BeginLoop;
+  PLoopBody('ENDWHILE');
+  Emit1(opJmp, L0);
+  PatchAt(J, Here);
+  EndLoop(L0, Here);
+End;
+
+Procedure PDo;
+Var L0, LC : LongInt;
+Begin
+  PNext;
+  L0 := Here;
+  BeginLoop;
+  PStatement;
+  LC := Here;
+  PExpect('WHILE');
+  PCond;
+  Emit1(opJnz, L0);
+  PSemi;
+  EndLoop(LC, Here);
+End;
+
+Procedure PFor;
+Var LCond, LStep, JEnd, JBody : LongInt; T : LongInt; HasCond : Boolean;
+Begin
+  PNext;
+  PExpect('(');
+  While (CErr = '') And Not IsSym(';') Do
+  Begin
+    Dummy := PExpr;
+    Emit(opPop);
+    If IsSym(',') Then PNext Else Break;
+  End;
+  PExpect(';');
+  LCond := Here;
+  HasCond := False;
+  T := TyBool;
+  While (CErr = '') And Not IsSym(';') Do
+  Begin
+    If HasCond Then Emit(opPop);
+    T := PExpr;
+    HasCond := True;
+    If IsSym(',') Then PNext Else Break;
+  End;
+  PExpect(';');
+  If HasCond Then PToBool(T) Else Emit1(opPushB, 1);
+  Emit1(opJz, 0);
+  JEnd := Here - 1;
+  Emit1(opJmp, 0);
+  JBody := Here - 1;
+  LStep := Here;
+  While (CErr = '') And Not IsSym(')') Do
+  Begin
+    Dummy := PExpr;
+    Emit(opPop);
+    If IsSym(',') Then PNext Else Break;
+  End;
+  PExpect(')');
+  Emit1(opJmp, LCond);
+  PatchAt(JBody, Here);
+  BeginLoop;
+  PLoopBody('ENDFOR');
+  Emit1(opJmp, LStep);
+  PatchAt(JEnd, Here);
+  EndLoop(LStep, Here);
+End;
+
+Procedure PForeach;
+Var Coll, Posn, L0, J, LC : LongInt; K1, K2 : String; HasKey : Boolean; D : TDes; Lst : Boolean;
+    LNames : Array[0..7] Of String[40]; NL, I : LongInt; ByRef : Boolean;
+Begin
+  PNext;
+  PExpect('(');
+  Dummy := PExpr;
+  PVarLoad := False;
+  Coll := AllocVar(1); Posn := AllocVar(1);
+  PopTmp(Coll);
+  Emit1(opPushI, 0);
+  PopTmp(Posn);
+  PExpect('AS');
+  { cle et valeur }
+  HasKey := False; Lst := False; NL := 0;
+  K1 := ''; K2 := ''; ByRef := False;
+  If IsSym('&') Then
+  Begin
+    ByRef := True;
+    PNext;
+  End;
+  If (Tok = tkVar) Then
+  Begin
+    K1 := TokS;
+    PNext;
+  End
+  Else If IsSym('[') Or IsKw('LIST') Then
+  Begin
+    Lst := True;
+  End
+  Else CError('variable attendue apr'#138's as');
+  If IsSym('=>') Then
+  Begin
+    PNext;
+    HasKey := True;
+    If IsSym('&') Then
+    Begin
+      ByRef := True;
+      PNext;
+    End;
+    If Tok = tkVar Then
+    Begin
+      K2 := TokS;
+      PNext;
+    End
+    Else If IsSym('[') Or IsKw('LIST') Then Lst := True
+    Else CError('variable attendue apr'#138's =>');
+  End;
+  If Lst Then
+  Begin
+    { as [$a, $b] / list($a, $b) }
+    If IsKw('LIST') Then PNext;
+    PNext;
+    While (CErr = '') And (Tok = tkVar) And (NL < 8) Do
+    Begin
+      LNames[NL] := TokS;
+      Inc(NL);
+      PNext;
+      If IsSym(',') Then PNext Else Break;
+    End;
+    If IsSym(']') Then PNext Else PExpect(')');
+  End;
+  PExpect(')');
+  L0 := Here;
+  PushTmp(Coll); PushTmp(Posn);
+  Emit1(opPhp, psEachNext);
+  Emit(opDup);
+  PopTmp(Posn);
+  Emit1(opPushI, -1);
+  Emit(opEq);
+  Emit1(opJnz, 0);
+  J := Here - 1;
+  If HasKey Then
+  Begin
+    PushTmp(Coll); PushTmp(Posn);
+    Emit1(opPhp, psEachKey);
+    PVarDes(K1, D);
+    PStore(D);
+  End;
+  PushTmp(Coll); PushTmp(Posn);
+  Emit1(opPhp, psEachVal);
+  If Lst Then
+  Begin
+    For I := 0 To NL - 1 Do
+    Begin
+      Emit(opDup);
+      Emit1(opPushI, I);
+      Emit1(opPhp, psGet);
+      PVarDes(LNames[I], D);
+      PStore(D);
+    End;
+    Emit(opPop);
+  End
+  Else
+  Begin
+    If HasKey Then PVarDes(K2, D) Else PVarDes(K1, D);
+    PStore(D);
+  End;
+  BeginLoop;
+  PLoopBody('ENDFOREACH');
+  LC := Here;
+  If ByRef And Not Lst Then
+  Begin
+    { foreach ($t as &$v) : la valeur revient dans le tableau a chaque tour }
+    PushTmp(Coll);
+    PushTmp(Coll); PushTmp(Posn);
+    Emit1(opPhp, psEachKey);
+    If HasKey Then PVarDes(K2, D) Else PVarDes(K1, D);
+    PLoad(D);
+    Emit1(opPhp, psSet);
+    Emit(opPop);
+  End;
+  PushTmp(Posn);
+  Emit1(opPushI, 1);
+  Emit(opAdd);
+  PopTmp(Posn);
+  Emit1(opJmp, L0);
+  PatchAt(J, Here);
+  EndLoop(LC, Here);
+End;
+
+Procedure PSwitch;
+Var V, JTest, JFall, JDefSkip, DBody, I : LongInt; Alt, HasDef, HasBody : Boolean; T : LongInt;
+Begin
+  PNext;
+  PExpect('(');
+  Dummy := PExpr;
+  PVarLoad := False;
+  PExpect(')');
+  V := AllocVar(1);
+  PopTmp(V);
+  Alt := IsSym(':');
+  If Alt Then PNext Else PExpect('{');
+  { des fragments HTML (espaces) peuvent preceder le premier case }
+  While Tok = tkHtml Do PNext;
+  BeginLoop;
+  JTest := -1; JFall := -1; HasDef := False; DBody := -1; HasBody := False;
+  While (CErr = '') And (Tok <> tkEof) And Not IsSym('}') And Not IsKw('ENDSWITCH') Do
+  Begin
+    If IsKw('CASE') Then
+    Begin
+      PNext;
+      { fin du corps precedent : il continue dans le corps suivant }
+      If HasBody Then
+      Begin
+        Emit1(opJmp, JFall);
+        JFall := Here - 1;
+      End;
+      HasBody := True;
+      If JTest >= 0 Then PatchAt(JTest, Here);
+      PushTmp(V);
+      T := PExpr;
+      PVarLoad := False;
+      Emit(opEq);
+      Emit1(opJz, 0);
+      JTest := Here - 1;
+      If IsSym(':') Or IsSym(';') Then PNext Else PExpect(':');
+      PatchChain(JFall, Here);
+      JFall := -1;
+    End
+    Else If IsKw('DEFAULT') Then
+    Begin
+      PNext;
+      If IsSym(':') Or IsSym(';') Then PNext Else PExpect(':');
+      If HasBody Then
+      Begin
+        Emit1(opJmp, JFall);
+        JFall := Here - 1;
+      End;
+      HasBody := True;
+      { un test qui echoue saute le corps de default }
+      If JTest >= 0 Then PatchAt(JTest, Here);
+      Emit1(opJmp, 0);
+      JTest := Here - 1;
+      DBody := Here;
+      HasDef := True;
+      PatchChain(JFall, Here);
+      JFall := -1;
+    End
+    Else PStatement;
+  End;
+  { aucun cas : default (s'il existe) }
+  Emit1(opJmp, 0);
+  I := Here - 1;
+  If JTest >= 0 Then
+  Begin
+    If HasDef Then PatchAt(JTest, DBody) Else PatchAt(JTest, Here);
+  End;
+  PatchAt(I, Here);
+  PatchChain(JFall, Here);
+  If Alt Then
+  Begin
+    PExpect('ENDSWITCH');
+    PSemi;
+  End
+  Else PExpect('}');
+  EndLoop(Here, Here);
+  JDefSkip := 0;
+End;
+
+Procedure PBreakCont(IsBreak : Boolean);
+Var N, L : LongInt;
+Begin
+  PNext;
+  N := 1;
+  If Tok = tkInt Then
+  Begin
+    N := TokI;
+    PNext;
+  End;
+  PSemi;
+  L := LoopDepth - N + 1;
+  If (L < 1) Or (L > LoopDepth) Then
+  Begin
+    CError('break ou continue hors d''une boucle');
+    Exit;
+  End;
+  If IsBreak Then
+  Begin
+    Emit1(opJmp, BreakChain[L]);
+    BreakChain[L] := Here - 1;
+  End
+  Else
+  Begin
+    Emit1(opJmp, ContChain[L]);
+    ContChain[L] := Here - 1;
+  End;
+End;
+
+{ definition d'une fonction (deja connue du premier passage) }
+Procedure PFunction;
+Var S, K, J, Save, SLoc, SMax, SExit, SIn, EnterAt, T, P, Depth, SLoop : LongInt; Nm : String;
+Begin
+  PNext;
+  If IsSym('&') Then PNext;
+  Nm := TokS;
+  PNext;
+  S := PFindFn(Nm);
+  If (S < 0) Or (CurLvl > 0) Then
+  Begin
+    CError('fonction : d'#130'finition impossible ici : ' + Nm);
+    Exit;
+  End;
+  { parametres : deja connus ; sauter la liste }
+  Depth := 0;
+  Repeat
+    If IsSym('(') Then Inc(Depth) Else If IsSym(')') Then Dec(Depth);
+    PNext;
+  Until (Depth = 0) Or (Tok = tkEof) Or (CErr <> '');
+  { type de retour }
+  If IsSym(':') Then
+  Begin
+    PNext;
+    While (CErr = '') And Not IsSym('{') And (Tok <> tkEof) Do PNext;
+  End;
+  Emit1(opJmp, 0);
+  J := Here - 1;
+  Syms[S].Adr := Here;
+  PatchChain(Syms[S].Patch, Here);
+  Syms[S].Patch := -1;
+  Save := NSym; SLoc := LocTop; SMax := LocMax; SExit := PFnExit; SIn := PInFn; SLoop := LoopDepth;
+  Inc(CurLvl);
+  PFnExit := -1; PInFn := S; LoopDepth := 0;
+  LocTop := 4 + Syms[S].NPar; LocMax := LocTop;
+  Emit2(opEnter, 0, Syms[S].NPar);
+  EnterAt := Here - 2;
+  For K := 0 To Syms[S].NPar - 1 Do
+  Begin
+    P := Syms[S].PBase + K;
+    T := AddSym('$' + Copy(PName[P], 1, 30), skVar);
+    Syms[T].Ty := TyVar; Syms[T].Lvl := CurLvl; Syms[T].Adr := 4 + K; Syms[T].Ref := PRef[P];
+  End;
+  PExpect('{');
+  While (CErr = '') And (Tok <> tkEof) And Not IsSym('}') Do PStatement;
+  PExpect('}');
+  PatchChain(PFnExit, Here);
+  Emit1(opRet, 1);
+  PatchAt(EnterAt, LocMax);
+  NSym := Save;
+  Dec(CurLvl);
+  LocTop := SLoc; LocMax := SMax; PFnExit := SExit; PInFn := SIn; LoopDepth := SLoop;
+  PatchAt(J, Here);
+End;
+
+Procedure PGlobalStmt;
+Var S : LongInt;
+Begin
+  PNext;
+  Repeat
+    If Tok <> tkVar Then
+    Begin
+      CError('variable attendue apr'#138's global');
+      Exit;
+    End;
+    If CurLvl > 0 Then
+    Begin
+      S := AddSym('$' + Copy(TokS, 1, 30), skVar);
+      Syms[S].Ty := TyVar; Syms[S].Lvl := 0; Syms[S].Adr := PGlobSlot(TokS);
+    End;
+    PNext;
+    If IsSym(',') Then PNext Else Break;
+  Until CErr <> '';
+  PSemi;
+End;
+
+Procedure PStaticStmt;
+Var S, Flag, Slot, J : LongInt; Nm, Fn : String; D : TDes;
+Begin
+  PNext;
+  If PInFn >= 0 Then Fn := Syms[PInFn].Name Else Fn := '';
+  Repeat
+    If Tok <> tkVar Then
+    Begin
+      CError('variable attendue apr'#138's static');
+      Exit;
+    End;
+    Nm := TokS;
+    PNext;
+    Slot := PGlobSlot('#S:' + Fn + ':' + Nm);
+    Flag := PGlobSlot('#F:' + Fn + ':' + Nm);
+    If CurLvl > 0 Then
+    Begin
+      S := AddSym('$' + Copy(Nm, 1, 30), skVar);
+      Syms[S].Ty := TyVar; Syms[S].Lvl := 0; Syms[S].Adr := Slot;
+    End;
+    If IsSym('=') Then
+    Begin
+      PNext;
+      Emit1(opLdG, Flag);
+      Emit1(opJnz, 0);
+      J := Here - 1;
+      Dummy := PExpr;
+      PCopyIfVar;
+      Emit1(opStG, Slot);
+      Emit1(opPushB, 1);
+      Emit1(opStG, Flag);
+      PatchAt(J, Here);
+    End;
+    If IsSym(',') Then PNext Else Break;
+  Until CErr <> '';
+  PSemi;
+End;
+
+Procedure PUnset;
+Var T : TPTarget;
+Begin
+  PNext;
+  PExpect('(');
+  Repeat
+    If Tok <> tkVar Then
+    Begin
+      CError('unset : variable attendue');
+      Exit;
+    End;
+    PTarget(T);
+    Case T.Kind Of
+      1 :
+        Begin
+          Emit(opPushNil);
+          PStore(T.D);
+        End;
+      2 : Emit1(opPhp, psUnset);
+    Else
+      CError('unset : cible impossible');
+    End;
+    If IsSym(',') Then PNext Else Break;
+  Until CErr <> '';
+  PExpect(')');
+  PSemi;
+End;
+
+{ [$a, $b] = ... ; list($a, , $c) = ... }
+Procedure PListAssign;
+Var Names : Array[0..15] Of String[40]; N, I, Tmp : LongInt; Close : String; D : TDes;
+Begin
+  If IsKw('LIST') Then
+  Begin
+    PNext;
+    Close := ')';
+  End
+  Else Close := ']';
+  PNext;
+  N := 0;
+  While (CErr = '') And Not IsSym(Close) And (N < 16) Do
+  Begin
+    Names[N] := '';
+    If Tok = tkVar Then
+    Begin
+      Names[N] := TokS;
+      PNext;
+    End;
+    Inc(N);
+    If IsSym(',') Then PNext Else Break;
+  End;
+  PExpect(Close);
+  PExpect('=');
+  Dummy := PExpr;
+  PVarLoad := False;
+  Tmp := AllocVar(1);
+  PopTmp(Tmp);
+  For I := 0 To N - 1 Do
+    If Names[I] <> '' Then
+    Begin
+      PushTmp(Tmp);
+      Emit1(opPushI, I);
+      Emit1(opPhp, psGet);
+      PVarDes(Names[I], D);
+      PStore(D);
+    End;
+  PSemi;
+End;
+
+Procedure PSkipBlock;
+Var Depth : LongInt;
+Begin
+  { bloc (accolades) compile mais jamais execute (catch) }
+  Depth := 0;
+  Emit1(opJmp, 0);
+  Depth := Here - 1;
+  PStatement;
+  PatchAt(Depth, Here);
+End;
+
+Procedure PStatement;
+Var Nm : String; N, S, J : LongInt; C : TCell; T : LongInt;
+Begin
+  If CErr <> '' Then Exit;
+  EmitLine;
+  If Tok = tkHtml Then
+  Begin
+    Emit2(opHtml, AddStrB(@Src.P^[TokOff], TokLen), TokLen);
+    PNext;
+    Exit;
+  End;
+  If Tok = tkEcho Then
+  Begin
+    PNext;
+    Repeat
+      Dummy := PExpr;
+      PVarLoad := False;
+      Emit1(opPushI, -1); Emit1(opPushI, -1);
+      Emit(opWrite);
+      If IsSym(',') Then PNext Else Break;
+    Until CErr <> '';
+    If IsSym(';') Then PNext;
+    If Tok = tkEchoEnd Then PNext
+    Else If Tok <> tkEof Then CError('''?>'' attendu');
+    Exit;
+  End;
+  If (Tok = tkEchoEnd) Or IsSym(';') Then
+  Begin
+    PNext;
+    Exit;
+  End;
+  If IsSym('{') Then
+  Begin
+    PNext;
+    While (CErr = '') And (Tok <> tkEof) And Not IsSym('}') Do PStatement;
+    PExpect('}');
+    Exit;
+  End;
+  If IsSym('[') Then
+  Begin
+    { [$a, $b] = ... ? }
+    If (PPeekSym = '') Then
+    Begin
+      PListAssign;
+      Exit;
+    End;
+  End;
+  If Tok = tkId Then
+  Begin
+    Nm := TokS;
+    If (Nm = 'ECHO') Then
+    Begin
+      PNext;
+      Repeat
+        Dummy := PExpr;
+        PVarLoad := False;
+        Emit1(opPushI, -1); Emit1(opPushI, -1);
+        Emit(opWrite);
+        If IsSym(',') Then PNext Else Break;
+      Until CErr <> '';
+      PSemi;
+      Exit;
+    End;
+    If Nm = 'IF' Then
+    Begin
+      PIf;
+      Exit;
+    End;
+    If Nm = 'WHILE' Then
+    Begin
+      PWhile;
+      Exit;
+    End;
+    If Nm = 'DO' Then
+    Begin
+      PDo;
+      Exit;
+    End;
+    If Nm = 'FOR' Then
+    Begin
+      PFor;
+      Exit;
+    End;
+    If Nm = 'FOREACH' Then
+    Begin
+      PForeach;
+      Exit;
+    End;
+    If Nm = 'SWITCH' Then
+    Begin
+      PSwitch;
+      Exit;
+    End;
+    If (Nm = 'BREAK') Or (Nm = 'CONTINUE') Then
+    Begin
+      PBreakCont(Nm = 'BREAK');
+      Exit;
+    End;
+    If Nm = 'RETURN' Then
+    Begin
+      PNext;
+      If CurLvl > 0 Then
+      Begin
+        If IsSym(';') Or (Tok = tkEchoEnd) Then Emit(opPushNil)
+        Else
+        Begin
+          Dummy := PExpr;
+          PCopyIfVar;
+        End;
+        Emit1(opStL, 3);
+        Emit1(opJmp, PFnExit);
+        PFnExit := Here - 1;
+      End
+      Else
+      Begin
+        If Not IsSym(';') And (Tok <> tkEchoEnd) Then
+        Begin
+          Dummy := PExpr;
+          Emit(opPop);
+        End;
+        Emit(opHalt);
+      End;
+      PSemi;
+      Exit;
+    End;
+    If (Nm = 'FUNCTION') And (PPeekSym <> '(') Then
+    Begin
+      PFunction;
+      Exit;
+    End;
+    If Nm = 'GLOBAL' Then
+    Begin
+      PGlobalStmt;
+      Exit;
+    End;
+    If (Nm = 'STATIC') And (PPeekSym = '') Then
+    Begin
+      PStaticStmt;
+      Exit;
+    End;
+    If Nm = 'UNSET' Then
+    Begin
+      PUnset;
+      Exit;
+    End;
+    If (Nm = 'LIST') And (PPeekSym = '(') Then
+    Begin
+      PListAssign;
+      Exit;
+    End;
+    If Nm = 'CONST' Then
+    Begin
+      PNext;
+      Repeat
+        S := AddSym(TokS, skConst);
+        Syms[S].Lvl := 0;
+        PNext;
+        PExpect('=');
+        If ConstExprP(C) Then
+        Begin
+          Syms[S].CV := C;
+          Syms[S].Ty := TyVar;
+        End;
+        If IsSym(',') Then PNext Else Break;
+      Until CErr <> '';
+      PSemi;
+      Exit;
+    End;
+    If Nm = 'TRY' Then
+    Begin
+      PNext;
+      PStatement;
+      While (CErr = '') And IsKw('CATCH') Do
+      Begin
+        PNext;
+        PExpect('(');
+        While (CErr = '') And Not IsSym(')') And (Tok <> tkEof) Do PNext;
+        PExpect(')');
+        PSkipBlock;
+      End;
+      If IsKw('FINALLY') Then
+      Begin
+        PNext;
+        PStatement;
+      End;
+      Exit;
+    End;
+    If Nm = 'THROW' Then
+    Begin
+      PNext;
+      Dummy := PExpr;
+      Emit1(opPhp, psThrow);
+      PSemi;
+      Exit;
+    End;
+    If (Nm = 'NAMESPACE') Or (Nm = 'USE') Or (Nm = 'DECLARE') Then
+    Begin
+      While (CErr = '') And Not IsSym(';') And (Tok <> tkEof) And Not IsSym('{') Do PNext;
+      If IsSym(';') Then PNext;
+      Exit;
+    End;
+    If (Nm = 'CLASS') Or (Nm = 'INTERFACE') Or (Nm = 'TRAIT') Or (Nm = 'ENUM') Or (Nm = 'ABSTRACT') Or
+       (Nm = 'FINAL') Or (Nm = 'GOTO') Then
+    Begin
+      CError(PTokRaw + ' : non pris en charge par le moteur PHP du Serveur Web');
+      Exit;
+    End;
+  End;
+  { expression }
+  T := PExpr;
+  PVarLoad := False;
+  Emit(opPop);
+  PSemi;
+End;
+
+{ ==================================================================== }
+{ Premier passage : les fonctions et leurs parametres                   }
+{ ==================================================================== }
+
+Procedure PPrescan;
+Var S, N : LongInt; Nm : String; Ref : Boolean; C : TCell; Prev : String; Depth : LongInt;
+Begin
+  Prev := '';
+  While (CErr = '') And (Tok <> tkEof) Do
+  Begin
+    If IsKw('FUNCTION') And (Prev <> '->') Then
+    Begin
+      PNext;
+      If IsSym('&') Then PNext;
+      If (Tok = tkId) And (PPeekSym = '(') Then
+      Begin
+        Nm := TokS;
+        If PFindFn(Nm) >= 0 Then
+        Begin
+          CError('fonction d'#130'j'#133' d'#130'finie : ' + PTokRaw + '()');
+          Exit;
+        End;
+        S := AddSym(Nm, skFunc);
+        Syms[S].Adr := -1; Syms[S].PBase := NParT; Syms[S].Lvl := 0; Syms[S].RetTy := TyVar; Syms[S].Ty := TyVar;
+        PNext;
+        PNext;
+        N := 0;
+        While (CErr = '') And Not IsSym(')') And (Tok <> tkEof) Do
+        Begin
+          Ref := False;
+          { types (?int, int|string, array...), attributs, ... }
+          While (CErr = '') And (Tok <> tkVar) And Not IsSym(')') And (Tok <> tkEof) Do
+          Begin
+            If IsSym('&') Then Ref := True;
+            PNext;
+          End;
+          If Tok = tkVar Then
+          Begin
+            If NParT >= MaxPar Then
+            Begin
+              CError('trop de param'#138'tres');
+              Exit;
+            End;
+            PName[NParT] := Copy(TokS, 1, 31); PTy[NParT] := TyVar; PRef[NParT] := Ref; PDefK[NParT] := 0;
+            PNext;
+            If IsSym('=') Then
+            Begin
+              PNext;
+              If IsSym('[') Then
+              Begin
+                PNext;
+                PExpect(']');
+                PDefK[NParT] := 2;
+              End
+              Else If IsKw('ARRAY') Then
+              Begin
+                PNext;
+                PExpect('(');
+                PExpect(')');
+                PDefK[NParT] := 2;
+              End
+              Else If ConstExprP(C) Then
+              Begin
+                PDefC[NParT] := C;
+                PDefK[NParT] := 1;
+              End;
+            End;
+            Inc(NParT);
+            Inc(N);
+          End;
+          If IsSym(',') Then PNext;
+        End;
+        Syms[S].NPar := N;
+      End;
+      Continue;
+    End;
+    If IsKw('CLASS') Then
+    Begin
+      CError('class : non pris en charge par le moteur PHP du Serveur Web');
+      Exit;
+    End;
+    If (Tok = tkSym) Then Prev := TokS Else Prev := '';
+    PNext;
+  End;
+End;
+
+Function CompilePhp(K : LongInt; Path, Root : String) : String;
+Var Done_ : String;
+Begin
+  CP := K;
+  ResetPage(K);
+  BufInit(Src);
+  BufInit(PIRaw);
+  CErr := ''; CErrLine := 0;
+  SiteRoot := Root;
+  SrcDir := Path;
+  While (Length(SrcDir) > 0) And (SrcDir[Length(SrcDir)] <> '\') Do Delete(SrcDir, Length(SrcDir), 1);
+  Done_ := '|' + UpStr(Path) + '|';
+  If Not LoadPhpSource(Path, 0, Src, Done_) Then
+  Begin
+    CompilePhp := 'fichier illisible : ' + Path;
+    Exit;
+  End;
+  CurLvl := 0; LocTop := 0; LocMax := 0; GlobTop := 0; CurFunc := -1; NExit := 0; LoopDepth := 0; NWith := 0;
+  NPG := 0; PFnExit := -1; PInFn := -1; PVarLoad := False;
+  PredefSyms;
+  { premier passage }
+  SPos := 0; SLine := 1; InHtml := True; InEcho := False;
+  PNext;
+  PPrescan;
+  { compilation }
+  If CErr = '' Then
+  Begin
+    SPos := 0; SLine := 1; InHtml := True; InEcho := False;
+    PNext;
+    While (CErr = '') And (Tok <> tkEof) Do PStatement;
+  End;
+  Emit(opHalt);
+  Pages[K].NGlob := GlobTop;
+  BufFree(Src);
+  BufFree(PIRaw);
+  If CErr <> '' Then
+  Begin
+    CompilePhp := 'ligne ' + IStr(CErrLine) + ' : ' + CErr;
+    ResetPage(K);
+  End
+  Else
+  Begin
+    Pages[K].Used := True;
+    CompilePhp := '';
+  End;
+End;
+{ ==================================================================== }
 { Site Web par defaut : cree au premier demarrage (comme iisstart.htm)   }
 { ==================================================================== }
 
@@ -14322,9 +22648,10 @@ Begin
   PageLine(B, 'du <i>Site Web par d'#195#169'faut</i> ; remplacez-la par vos propres pages.</p>');
   PageLine(B, '<ul><li><a href="demo.psp">D'#195#169'monstration PSP</a> (Pascal Server Pages)</li>');
   PageLine(B, '<li><a href="demo.asp">D'#195#169'monstration ASP</a> (VBScript)</li>');
+  PageLine(B, '<li><a href="demo.php">D'#195#169'monstration PHP</a> (PHP compil'#195#169')</li>');
   PageLine(B, '<li><a href="infos.psp">Variables du serveur</a> (Request.ServerVariables)</li></ul>');
   PageLine(B, '<p>Administration : <b>Outils r'#195#169'seau &rarr; Serveur Web</b> sur le bureau d''OS/2-0.</p>');
-  PageLine(B, '</div><div class="f">OS2-0-WebSrv ' + AppVer + ' &mdash; HTTP/1.1, HTTPS (TLS 1.3), PSP, ASP</div>');
+  PageLine(B, '</div><div class="f">OS2-0-WebSrv ' + AppVer + ' &mdash; HTTP/1.1, HTTPS (TLS 1.3), PSP, ASP, PHP</div>');
   PageLine(B, '</div></body></html>');
 End;
 
@@ -14393,6 +22720,37 @@ Begin
   PageLine(B, '</body></html>');
 End;
 
+Procedure MakeDemoPhp(Var B : TBuf);
+Begin
+  PageLine(B, '<?php');
+  PageLine(B, 'session_start();');
+  PageLine(B, '$_SESSION[''vues''] = ($_SESSION[''vues''] ?? 0) + 1;');
+  PageLine(B, '$nom = trim($_GET[''nom''] ?? '''');');
+  PageLine(B, 'if ($nom === '''') $nom = ''visiteur'';');
+  PageLine(B, 'function factorielle(int $n): int { return $n <= 1 ? 1 : $n * factorielle($n - 1); }');
+  PageLine(B, '$fruits = [''pomme'' => 3, ''poire'' => 5, ''kiwi'' => 2];');
+  PageLine(B, 'arsort($fruits);');
+  PageLine(B, '?>');
+  PageLine(B, '<!DOCTYPE html>');
+  PageLine(B, '<html><head><meta charset="utf-8"><title>D'#195#169'monstration PHP</title></head>');
+  PageLine(B, '<body style="font-family:Helv,Helvetica,Arial,sans-serif">');
+  PageLine(B, '<h1>PHP compil'#195#169' sur OS/2-0</h1>');
+  PageLine(B, '<p>Bonjour <b><?= htmlspecialchars($nom) ?></b> ! Nous sommes le <?= date(''d/m/Y'') ?>, il est <?= date(''H:i:s'') ?>.</p>');
+  PageLine(B, '<p>Vues de cette page dans la session : <?= $_SESSION[''vues''] ?></p>');
+  PageLine(B, '<form method="get"><input name="nom" placeholder="Votre nom"> <input type="submit" value="Envoyer"></form>');
+  PageLine(B, '<table border="1" cellpadding="4"><tr><th>n</th><th>n!</th><th>n&sup2;</th></tr>');
+  PageLine(B, '<?php for ($i = 1; $i <= 10; $i++): ?>');
+  PageLine(B, '<tr><td><?= $i ?></td><td><?= factorielle($i) ?></td><td><?= $i ** 2 ?></td></tr>');
+  PageLine(B, '<?php endfor; ?>');
+  PageLine(B, '</table>');
+  PageLine(B, '<ul>');
+  PageLine(B, '<?php foreach ($fruits as $f => $q) echo "<li>" . ucfirst($f) . " : $q</li>\n"; ?>');
+  PageLine(B, '</ul>');
+  PageLine(B, '<p>Serveur : <?= htmlspecialchars($_SERVER[''SERVER_SOFTWARE''] ?? '''') ?>, PHP <?= PHP_VERSION ?></p>');
+  PageLine(B, '<p><a href="/">Retour</a></p>');
+  PageLine(B, '</body></html>');
+End;
+
 Procedure MakeInfos(Var B : TBuf);
 Begin
   PageLine(B, '<!DOCTYPE html>');
@@ -14427,6 +22785,7 @@ Begin
   BufInit(B); MakeIndex(B); Dummy := Ord(WriteFileBuf(R + '\index.html', B.P, B.Len)); BufFree(B);
   BufInit(B); MakeDemoPsp(B); Dummy := Ord(WriteFileBuf(R + '\demo.psp', B.P, B.Len)); BufFree(B);
   BufInit(B); MakeDemoAsp(B); Dummy := Ord(WriteFileBuf(R + '\demo.asp', B.P, B.Len)); BufFree(B);
+  BufInit(B); MakeDemoPhp(B); Dummy := Ord(WriteFileBuf(R + '\demo.php', B.P, B.Len)); BufFree(B);
   BufInit(B); MakeInfos(B); Dummy := Ord(WriteFileBuf(R + '\infos.psp', B.P, B.Len)); BufFree(B);
   SysLog('Site Web par defaut cree dans ' + R);
 End;
@@ -16025,10 +24384,11 @@ Begin
         Dummy := Check('*.psp : Pascal Server Pages (moteur PSP int'#130'gr'#130')', Sites[I].Psp, 12, 12, idCtl + 1);
         Dummy := Check('*.asp : Active Server Pages (VBScript, moteur ASP int'#130'gr'#130')', Sites[I].Asp, 12, 40,
                        idCtl + 2);
-        AddLbl(12, 74, 'Les pages sont compil'#130'es une fois en code interm'#130'diaire et', cBlack);
-        AddLbl(12, 92, 'ex'#130'cut'#130'es dans le serveur, par tranches, sans ralentir OS/2.', cBlack);
-        AddLbl(12, 110, 'Objets : Request, Response, Server, Session, Application,', cGray);
-        AddLbl(12, 128, 'Scripting.Dictionary, Scripting.FileSystemObject.', cGray);
+        Dummy := Check('*.php : PHP (moteur PHP int'#130'gr'#130', mysqli, pg, PDO)', Sites[I].Php, 12, 68, idCtl + 3);
+        AddLbl(12, 102, 'Les pages sont compil'#130'es une fois en code interm'#130'diaire et', cBlack);
+        AddLbl(12, 120, 'ex'#130'cut'#130'es dans le serveur, par tranches, sans ralentir OS/2.', cBlack);
+        AddLbl(12, 138, 'Objets : Request, Response, Server, Session, Application,', cGray);
+        AddLbl(12, 156, 'Scripting.Dictionary, Scripting.FileSystemObject.', cGray);
       End;
     nkCert :
       Begin
@@ -16778,6 +25138,7 @@ Begin
       Begin
         Sites[I].Psp := Checked(idCtl + 1);
         Sites[I].Asp := Checked(idCtl + 2);
+        Sites[I].Php := Checked(idCtl + 3);
       End;
     nkCert : Sites[I].Cert := Copy(FieldVal(0), 1, 127);
     nkLog : Sites[I].LogOn := Checked(idCtl + 1);
@@ -17739,6 +26100,7 @@ Begin
   Else Sites[0].Root := '.';
   Asp := UpStr(Copy(Path, Length(Path) - 3, 4)) = '.ASP';
   ScriptPath[0] := Path; ScriptAsp[0] := Asp;
+  ScriptPhp[0] := UpStr(Copy(Path, Length(Path) - 3, 4)) = '.PHP';
   VmStart(0);
   While VmOn Do
   Begin

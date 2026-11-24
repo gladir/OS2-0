@@ -38,8 +38,8 @@ Program WebDev;
   Outils : Parcourir (F12) ouvre la page dans le Navigateur Web d'OS/2-0,
   par http://localhost/ si elle est dans un site du Serveur Web en marche
   (les pages PSP et ASP sont alors executees), sinon par file:/// ;
-  Executer la page (Ctrl+F9) l'execute par WEBSRV /PSP et montre le
-  resultat dans un nouvel onglet.
+  Executer la page (Ctrl+F9) l'execute (PSP, ASP, PHP) par WEBSRV /PSPOUT
+  et montre le resultat dans un nouvel onglet.
 
   Parametres : fichiers a ouvrir. }
 
@@ -3749,7 +3749,7 @@ Begin
   TbAdd(cmReplace, 11, 'Remplacer (Ctrl+H)');
   TbAdd(0, 0, '');
   TbAdd(cmBrowse, 12, 'Parcourir dans le Navigateur Web (F12)');
-  TbAdd(cmRun, 13, 'Ex'#130'cuter la page PSP ou ASP (Ctrl+F9)');
+  TbAdd(cmRun, 13, 'Ex'#130'cuter la page PSP, ASP ou PHP (Ctrl+F9)');
   TbAdd(0, 0, '');
   TbAdd(cmHelp, 14, 'Aide (F1)');
 End;
@@ -4402,9 +4402,9 @@ Procedure RunPage;
 Var Exe, Out_, Nm, Arg : String; D, H : LongInt;
 Begin
   If Cur < 0 Then Exit;
-  If (DLang[Cur] <> lgPsp) And (DLang[Cur] <> lgAsp) Then
+  If (DLang[Cur] <> lgPsp) And (DLang[Cur] <> lgAsp) And (DLang[Cur] <> lgPhp) Then
   Begin
-    Msg('Ex'#130'cuter la page : pour les pages PSP (Pascal) et ASP (VBScript). Pour les autres pages, ' +
+    Msg('Ex'#130'cuter la page : pour les pages PSP (Pascal), ASP (VBScript) et PHP. Pour les autres pages, ' +
         'utilisez Parcourir (F12).');
     Exit;
   End;
@@ -4614,7 +4614,7 @@ Begin
   MnItem(MIS_TEXT Or MIS_SUBMENU, 0, 97, '~Outils');
   H1 := MenuOpen;
   MnItem(MIS_TEXT, 0, cmBrowse, '~Parcourir dans le Navigateur Web' + #9 + 'F12');
-  MnItem(MIS_TEXT, 0, cmRun, '~Ex'#130'cuter la page (PSP, ASP)' + #9 + 'Ctrl+F9');
+  MnItem(MIS_TEXT, 0, cmRun, '~Ex'#130'cuter la page (PSP, ASP, PHP)' + #9 + 'Ctrl+F9');
   Sep;
   MnItem(MIS_TEXT, 0, cmNewFolder, '~Nouveau dossier...');
   MnItem(MIS_TEXT, 0, cmOpenDir, '~Aller au dossier...');
@@ -4740,7 +4740,7 @@ Begin
     HelpBox('Coloration d'#39'apr'#138's l'#39'extension (menu Affichage - Coloration pour la changer).' + #13#10);
     HelpBox('Parcourir (F12) : la page dans le Navigateur Web, par http://localhost/ si elle est ');
     HelpBox('dans un site du Serveur Web en marche (le code PSP ou ASP est alors ex'#130'cut'#130').' + #13#10);
-    HelpBox('Ex'#130'cuter la page (Ctrl+F9) : r'#130'sultat d'#39'une page PSP ou ASP dans un nouvel onglet.');
+    HelpBox('Ex'#130'cuter la page (Ctrl+F9) : r'#130'sultat d'#39'une page PSP, ASP ou PHP dans un nouvel onglet.');
   End
   Else
   Begin
