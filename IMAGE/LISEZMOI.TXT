@@ -1362,6 +1362,21 @@ getsockname, getpeername ; fenetre glissante, retransmission rapide ;
 boucle locale 127.0.0.1 et localhost), anneaux plus grands pour E1000 et
 PCNET, ligne RUN= de CONFIG.SYS et classe de priorite "temps libre" du
 noyau, recherche ISO 9660 du CD-ROM 1000 fois plus rapide.
+Menu contextuel de l'arbre (bouton 2) : Ajouter un site Web, Demarrer,
+Arreter, Redemarrer, Parcourir, Parametres de base, Liaisons, Supprimer...
+Bases de donnees externes, sans pilote : PostgreSQL (SCRAM-SHA-256, md5,
+en clair) et MariaDB/MySQL (mysql_native_password). PSP :
+  Connexion := Database.Connect('Provider=PostgreSQL;Server=hote;
+               Database=base;User Id=nom;Password=mdp');
+  Resultats := Connexion.Query('SELECT * FROM ClientsDemo');
+  While Not Resultats.Eof Do Begin WriteLn(Resultats['Nom']);
+    Resultats.Next; End;
+  Resultats.Close; Connexion.Close;
+  Connexion.Execute(sql) : lignes touchees ; Connexion.Quote(texte).
+ASP : Server.CreateObject("ADODB.Connection"), .Open, .Execute, Rs("Nom"),
+Rs.EOF, Rs.MoveNext. Une page qui attend sa base ne bloque pas le serveur ;
+les connexions restent en reserve d'une requete a l'autre. Pas de TLS vers
+la base ni de SQL Server pour l'instant. WEBSRV /DBTEST : MD5, SHA-1, SCRAM.
   OS2PC APPS\WEBSRV.PAS                     -> WEBSRV.EXE
 OS2PC corrige au passage (tous les programmes) : un parametre chaine
 (litteral, concatenation, resultat de fonction) n'est plus ecrase par un

@@ -27,7 +27,8 @@ Program WebSrv;
                       n'est pas active et rien n'est charge au demarrage ;
     WEBSRV /STOP      arrete le serveur en marche ;
     WEBSRV /STATUS    etat du serveur (texte) ;
-    WEBSRV /PSP page  execute une page PSP ou ASP et ecrit le resultat (essais).
+    WEBSRV /PSP page  execute une page PSP ou ASP et ecrit le resultat (essais) ;
+    WEBSRV /DBTEST    verifie MD5, SHA-1 et SCRAM-SHA-256 (RFC 7677).
 
   Le serveur :
     - HTTP/1.1 (connexions persistantes, HEAD, GET, POST, en-tetes If-Modified-
@@ -48,6 +49,11 @@ Program WebSrv;
       d'ASP : Request, Response, Server, Session, Application, et
       CreateObject (Scripting.Dictionary, Scripting.FileSystemObject) ;
     - ASP (VBScript) : les pages .asp sont compilees vers la meme machine ;
+    - bases de donnees externes, sans pilote : PostgreSQL (SCRAM-SHA-256,
+      md5, en clair) et MariaDB/MySQL (mysql_native_password) ; PSP :
+      Database.Connect(chaine), Connexion.Query(sql), RecordSet['col'],
+      .Eof, .Next ; ASP : ADODB.Connection et ADODB.Recordset ; une page
+      qui attend sa base ne bloque pas les autres connexions ;
     - journal W3C par site (C:\WWW\LOGS\W3SVCn\exAAMMJJ.LOG) ;
     - pense pour un fort trafic sans ralentir OS/2 : une seule tache, sockets
       non bloquants et select (jusqu'a 48 connexions par liaison), classe de
@@ -4112,6 +4118,7 @@ Const
   obRequest = 1; obResponse = 2; obServer = 3; obSession = 4; obApplication = 5; obErr = 6;
   okRequest = 1; okResponse = 2; okServer = 3; okSession = 4; okApp = 5; okErr = 6;
   okColl = 10; okItem = 11; okDict = 12; okFso = 13; okStream = 14; okCookieW = 15; okArr = 16;
+  obDatabase = 7; okDbF = 7; okDbConn = 17; okDbRs = 18; okDbFlds = 19; okDbFld = 20;
   { collections de Request }
   rcQuery = 1; rcForm = 2; rcCookies = 3; rcServerVars = 4; rcAll = 5;
   { membres }
@@ -4125,7 +4132,11 @@ Const
   mReadAll = 46; mAtEndOfStream = 47; mWriteLine = 48; mClose = 49; mDeleteFile = 50; mIsClientConnected = 51;
   mExpiresAbsolute = 52; mNumber = 53; mDescription = 54; mRaise = 55; mSource = 56; mGetFileName = 57;
   mPath = 58; mDomain = 59; mExpiresC = 60; mLCID = 61; mCodePage = 62; mBuildPath = 63;
-  NMembers = 63;
+  { bases de donnees }
+  mConnect = 64; mQuery = 65; mExecute = 66; mEof = 67; mNext = 68; mFields = 69; mFieldCount = 70;
+  mRecordCount = 71; mMoveFirst = 72; mMoveNext = 73; mOpen = 74; mBof = 75; mName = 76; mValue = 77;
+  mRowsAffected = 78; mQuote = 79; mConnected = 80; mFieldName = 81; mState = 82;
+  NMembers = 82;
   MemberNames : Array[0..NMembers] Of String[18] = ('', 'QUERYSTRING', 'FORM', 'COOKIES', 'SERVERVARIABLES',
     'TOTALBYTES', 'BINARYREAD', 'WRITE', 'REDIRECT', 'ADDHEADER', 'CONTENTTYPE', 'BUFFER', 'STATUS', 'END',
     'CLEAR', 'FLUSH', 'APPENDTOLOG', 'EXPIRES', 'CACHECONTROL', 'CHARSET', 'MAPPATH', 'URLENCODE', 'HTMLENCODE',
@@ -4133,7 +4144,9 @@ Const
     'ITEM', 'HASKEYS', 'KEY', 'ADD', 'EXISTS', 'REMOVE', 'REMOVEALL', 'KEYS', 'ITEMS', 'FILEEXISTS',
     'FOLDEREXISTS', 'OPENTEXTFILE', 'CREATETEXTFILE', 'READLINE', 'READALL', 'ATENDOFSTREAM', 'WRITELINE',
     'CLOSE', 'DELETEFILE', 'ISCLIENTCONNECTED', 'EXPIRESABSOLUTE', 'NUMBER', 'DESCRIPTION', 'RAISE', 'SOURCE',
-    'GETFILENAME', 'PATH', 'DOMAIN', 'EXPIRES', 'LCID', 'CODEPAGE', 'BUILDPATH');
+    'GETFILENAME', 'PATH', 'DOMAIN', 'EXPIRES', 'LCID', 'CODEPAGE', 'BUILDPATH',
+    'CONNECT', 'QUERY', 'EXECUTE', 'EOF', 'NEXT', 'FIELDS', 'FIELDCOUNT', 'RECORDCOUNT', 'MOVEFIRST',
+    'MOVENEXT', 'OPEN', 'BOF', 'NAME', 'VALUE', 'ROWSAFFECTED', 'QUOTE', 'CONNECTED', 'FIELDNAME', 'STATE');
 
   MemCells = 262144;          { cellules de la machine (4 Mo) }
   StkCells = 4096;            { pile d'evaluation }
@@ -4681,6 +4694,1769 @@ Begin
   Sess[K].Used := False;
 End;
 
+{ ==================================================================== }
+{ Bases de donnees externes : PostgreSQL et MariaDB (MySQL)              }
+{ ==================================================================== }
+{ Les pages PSP et ASP parlent directement aux serveurs de bases de      }
+{ donnees, sans pilote ni bibliotheque externe :                         }
+{   - PostgreSQL : protocole v3 (requete simple), authentification       }
+{     SCRAM-SHA-256, md5 ou mot de passe en clair ;                      }
+{   - MariaDB et MySQL : protocole client/serveur 4.1,                   }
+{     mysql_native_password (et le chemin rapide de caching_sha2).       }
+{ PSP :                                                                  }
+{   Connexion := Database.Connect('Provider=PostgreSQL;Server=hote;      }
+{                Database=base;User Id=nom;Password=mdp');               }
+{   Resultats := Connexion.Query('SELECT * FROM ClientsDemo');           }
+{   While Not Resultats.Eof Do Begin ... Resultats['Nom'] ...            }
+{     Resultats.Next; End;                                               }
+{   Resultats.Close; Connexion.Close;                                    }
+{   Connexion.Execute('UPDATE ...') : nombre de lignes touchees.         }
+{ ASP : Set Cn = Server.CreateObject("ADODB.Connection") : Cn.Open ... ; }
+{   Set Rs = Cn.Execute("SELECT ...") : Rs("Nom"), Rs.EOF, Rs.MoveNext.  }
+{ Une requete n'arrete pas le serveur : la page attend la reponse de la  }
+{ base (la machine reprend l'instruction plus tard) pendant que les      }
+{ autres connexions sont servies. Les connexions authentifiees sont      }
+{ gardees en reserve (meme chaine de connexion) d'une requete a l'autre. }
+
+Const
+  MaxDbConn = 8;
+  MaxRs = 16;
+  MaxRsCol = 64;
+  dbPg = 1; dbMy = 2;
+  { etats d'une connexion }
+  dsClosed = 0; dsHandshake = 1; dsReady = 2; dsBusy = 3;
+
+Type
+  TDbConn = Record
+    Used : Boolean;
+    Kind, Sock, St, LastUse, Deadline : LongInt;
+    Owned : Boolean;            { prise par la requete en cours }
+    Key : String;               { chaine de connexion }
+    Host : String[79];
+    DbPort : LongInt;
+    User, Pass, Db : String[63];
+    Rx : TBuf;
+    Err : String;
+    { SCRAM-SHA-256 }
+    CNonce : String[63];
+    CFirst, SFirst : String;
+    Salted : TB32;
+    { MySQL }
+    Seq, Phase, NCol, ColDone : LongInt;
+    Scramble : Array[0..19] Of Byte;
+    { requete en cours }
+    QRs : LongInt;
+    QErr : String;
+    QHaveT : Boolean;
+    Affected : LongInt;
+  End;
+
+  TRs = Record
+    Used : Boolean;
+    NCol, NRow, Cur : LongInt;
+    ColNm : Array[0..MaxRsCol - 1] Of String[63];
+    ColTy : Array[0..MaxRsCol - 1] Of Byte;    { 0 chaine, 1 entier, 2 reel, 3 booleen }
+    Data : TBuf;                { octets des valeurs }
+    Idx : TBuf;                 { (debut, longueur ; -1 : NULL) par cellule }
+    Affected : LongInt;
+  End;
+
+Var
+  DbC : Array[0..MaxDbConn - 1] Of TDbConn;
+  Rss : Array[0..MaxRs - 1] Of TRs;
+  DbPend : LongInt;             { connexion dont la page attend la reponse }
+  DbWaitSock : LongInt;         { son socket (select du service) ; -1 : aucun }
+  VmWait : Boolean;             { l'appel de membre attend : a reprendre }
+
+{ --- hachages : MD5 et SHA-1 --- }
+
+Function Rol(X, N : LongInt) : LongInt;
+Begin
+  Rol := (X Shl N) Or Sr(X, 32 - N);
+End;
+
+Procedure Md5(P : PBytes; N : LongInt; Var Out_ : TBlk);
+Const
+  S : Array[0..63] Of Byte = (7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21);
+  { T[i] = partie entiere de abs(sin(i + 1)) * 2^32 (en LongInt) }
+  T : Array[0..63] Of LongInt = (
+    -680876936, -389564586, 606105819, -1044525330, -176418897, 1200080426, -1473231341, -45705983,
+    1770035416, -1958414417, -42063, -1990404162, 1804603682, -40341101, -1502002290, 1236535329,
+    -165796510, -1069501632, 643717713, -373897302, -701558691, 38016083, -660478335, -405537848,
+    568446438, -1019803690, -187363961, 1163531501, -1444681467, -51403784, 1735328473, -1926607734,
+    -378558, -2022574463, 1839030562, -35309556, -1530992060, 1272893353, -155497632, -1094730640,
+    681279174, -358537222, -722521979, 76029189, -640364487, -421815835, 530742520, -995338651,
+    -198630844, 1126891415, -1416354905, -57434055, 1700485571, -1894986606, -1051523, -2054922799,
+    1873313359, -30611744, -1560198380, 1309151649, -145523070, -1120210379, 718787259, -343485551);
+Var
+  M : Array[0..15] Of LongInt; Blk : Array[0..63] Of Byte;
+  A0, B0, C0, D0, A, B, C, D, F, G, K, I, Tot, Tmp : LongInt;
+Begin
+  A0 := $67452301; B0 := LongInt($EFCDAB89); C0 := LongInt($98BADCFE); D0 := $10325476;
+  Tot := ((N + 8) Div 64 + 1) * 64;
+  K := 0;
+  While K < Tot Do
+  Begin
+    For I := 0 To 63 Do
+    Begin
+      If K + I < N Then Blk[I] := P^[K + I]
+      Else If K + I = N Then Blk[I] := $80
+      Else Blk[I] := 0;
+    End;
+    If K + 64 = Tot Then
+    Begin
+      Blk[56] := (N Shl 3) And 255; Blk[57] := (N Shr 5) And 255; Blk[58] := (N Shr 13) And 255;
+      Blk[59] := (N Shr 21) And 255; Blk[60] := Sr(N, 29);
+    End;
+    For I := 0 To 15 Do
+      M[I] := Blk[I * 4] Or (Blk[I * 4 + 1] Shl 8) Or (Blk[I * 4 + 2] Shl 16) Or (Blk[I * 4 + 3] Shl 24);
+    A := A0; B := B0; C := C0; D := D0;
+    For I := 0 To 63 Do
+    Begin
+      If I < 16 Then
+      Begin
+        F := (B And C) Or ((Not B) And D); G := I;
+      End
+      Else If I < 32 Then
+      Begin
+        F := (D And B) Or ((Not D) And C); G := (5 * I + 1) And 15;
+      End
+      Else If I < 48 Then
+      Begin
+        F := B Xor C Xor D; G := (3 * I + 5) And 15;
+      End
+      Else
+      Begin
+        F := C Xor (B Or (Not D)); G := (7 * I) And 15;
+      End;
+      Tmp := D; D := C; C := B;
+      B := B + Rol(A + F + T[I] + M[G], S[I]);
+      A := Tmp;
+    End;
+    A0 := A0 + A; B0 := B0 + B; C0 := C0 + C; D0 := D0 + D;
+    K := K + 64;
+  End;
+  For I := 0 To 3 Do
+  Begin
+    Out_[I] := (A0 Shr (I * 8)) And 255; Out_[4 + I] := (B0 Shr (I * 8)) And 255;
+    Out_[8 + I] := (C0 Shr (I * 8)) And 255; Out_[12 + I] := (D0 Shr (I * 8)) And 255;
+  End;
+End;
+
+Type
+  TB20 = Array[0..19] Of Byte;
+
+Procedure Sha1(P : PBytes; N : LongInt; Var Out_ : TB20);
+Var
+  H : Array[0..4] Of LongInt; W : Array[0..79] Of LongInt; Blk : Array[0..63] Of Byte;
+  A, B, C, D, E, F, K, I, Tot, Tmp, Kc : LongInt;
+Begin
+  H[0] := $67452301; H[1] := LongInt($EFCDAB89); H[2] := LongInt($98BADCFE); H[3] := $10325476;
+  H[4] := LongInt($C3D2E1F0);
+  Tot := ((N + 8) Div 64 + 1) * 64;
+  K := 0;
+  While K < Tot Do
+  Begin
+    For I := 0 To 63 Do
+    Begin
+      If K + I < N Then Blk[I] := P^[K + I]
+      Else If K + I = N Then Blk[I] := $80
+      Else Blk[I] := 0;
+    End;
+    If K + 64 = Tot Then
+    Begin
+      Blk[59] := Sr(N, 29); Blk[60] := (N Shr 21) And 255; Blk[61] := (N Shr 13) And 255;
+      Blk[62] := (N Shr 5) And 255; Blk[63] := (N Shl 3) And 255;
+    End;
+    For I := 0 To 15 Do
+      W[I] := (Blk[I * 4] Shl 24) Or (Blk[I * 4 + 1] Shl 16) Or (Blk[I * 4 + 2] Shl 8) Or Blk[I * 4 + 3];
+    For I := 16 To 79 Do W[I] := Rol(W[I - 3] Xor W[I - 8] Xor W[I - 14] Xor W[I - 16], 1);
+    A := H[0]; B := H[1]; C := H[2]; D := H[3]; E := H[4];
+    For I := 0 To 79 Do
+    Begin
+      If I < 20 Then
+      Begin
+        F := (B And C) Or ((Not B) And D); Kc := $5A827999;
+      End
+      Else If I < 40 Then
+      Begin
+        F := B Xor C Xor D; Kc := $6ED9EBA1;
+      End
+      Else If I < 60 Then
+      Begin
+        F := (B And C) Or (B And D) Or (C And D); Kc := LongInt($8F1BBCDC);
+      End
+      Else
+      Begin
+        F := B Xor C Xor D; Kc := LongInt($CA62C1D6);
+      End;
+      Tmp := Rol(A, 5) + F + E + Kc + W[I];
+      E := D; D := C; C := Rol(B, 30); B := A; A := Tmp;
+    End;
+    H[0] := H[0] + A; H[1] := H[1] + B; H[2] := H[2] + C; H[3] := H[3] + D; H[4] := H[4] + E;
+    K := K + 64;
+  End;
+  For I := 0 To 4 Do
+  Begin
+    Out_[I * 4] := Sr(H[I], 24); Out_[I * 4 + 1] := Sr(H[I], 16) And 255;
+    Out_[I * 4 + 2] := Sr(H[I], 8) And 255; Out_[I * 4 + 3] := H[I] And 255;
+  End;
+End;
+
+Function HexBytes(P : PBytes; N : LongInt) : String;
+Const Hx : String[16] = '0123456789abcdef';
+Var S : String; K : LongInt;
+Begin
+  S := '';
+  For K := 0 To N - 1 Do S := S + Hx[(P^[K] Shr 4) + 1] + Hx[(P^[K] And 15) + 1];
+  HexBytes := S;
+End;
+
+{ PBKDF2-HMAC-SHA256, un bloc (32 octets) }
+Procedure Pbkdf2(Pw : String; Salt : String; Iter : LongInt; Var Out_ : TB32);
+Var U, T : TB32; Msg : String; I, K, L : LongInt;
+Begin
+  { sel suivi du numero de bloc (00 00 00 01), octet par octet : un
+    litteral #0 coupe la chaine sous OS2PC }
+  Msg := Salt;
+  L := Length(Msg);
+  If L > 250 Then L := 250;
+  Msg[L + 1] := Chr(0); Msg[L + 2] := Chr(0); Msg[L + 3] := Chr(0); Msg[L + 4] := Chr(1);
+  Msg[0] := Chr(L + 4);
+  If Length(Pw) = 0 Then
+  Begin
+    Pw[1] := Chr(0); Pw[0] := Chr(1);    { (cle vide : une cle d'un octet nul est equivalente) }
+  End;
+  Hmac(@Pw[1], Length(Pw), @Msg[1], Length(Msg), U);
+  T := U;
+  For I := 2 To Iter Do
+  Begin
+    Hmac(@Pw[1], Length(Pw), @U, 32, U);
+    For K := 0 To 31 Do T[K] := T[K] Xor U[K];
+  End;
+  Out_ := T;
+End;
+
+Procedure HmacStr(Var Key : TB32; S : String; Var R : TB32);
+Begin
+  Hmac(@Key, 32, @S[1], Length(S), R);
+End;
+
+Function B64Bytes(P : PBytes; N : LongInt) : String;
+Var B : TBuf; S : String;
+Begin
+  BufInit(B);
+  B64Enc(P, N, B, 0);
+  S := '';
+  If B.Len > 0 Then
+  Begin
+    If B.Len > 255 Then B.Len := 255;
+    Move(B.P^[0], S[1], B.Len);
+    S[0] := Chr(B.Len);
+  End;
+  While (Length(S) > 0) And (S[Length(S)] < ' ') Do Delete(S, Length(S), 1);
+  BufFree(B);
+  B64Bytes := S;
+End;
+
+{ --- reseau : connexion cliente (bloquante), puis non bloquante --- }
+
+{$IFDEF OS2PC}
+Function SockConnect(S, A, L : LongInt) : LongInt; External 'TCPIP32' Name 'connect';
+Function SockGetHost(P : LongInt) : LongInt; External 'TCPIP32' Name 'gethostbyname';
+{$ENDIF}
+
+Function PResolve(Host : String) : LongInt;
+{$IFDEF OS2PC}
+Var H, L, A : LongInt; P : PBytes;
+Begin
+  A := ParseIp(Host);
+  PResolve := A;
+  If A <> 0 Then Exit;
+  H := SockGetHost(Z(Host));
+  If H = 0 Then Exit;
+  P := Pointer(H);
+  L := P^[16] Or (P^[17] Shl 8) Or (P^[18] Shl 16) Or (P^[19] Shl 24);   { h_addr_list (hostent de TCPIP32) }
+  If L = 0 Then Exit;
+  P := Pointer(L);
+  A := P^[0] Or (P^[1] Shl 8) Or (P^[2] Shl 16) Or (P^[3] Shl 24);
+  If A = 0 Then Exit;
+  P := Pointer(A);
+  PResolve := (P^[0] Shl 24) Or (P^[1] Shl 16) Or (P^[2] Shl 8) Or P^[3];
+End;
+{$ELSE}
+Begin
+  If LoStr(Host) = 'localhost' Then PResolve := $7F000001 Else PResolve := ParseIp(Host);
+End;
+{$ENDIF}
+
+{ socket connecte (non bloquant ensuite) ; -1 : echec }
+Function PConnect(Ip, DbPort : LongInt) : LongInt;
+Var S, One : LongInt;
+{$IFDEF OS2PC}
+    A : Array[0..15] Of Byte; K : LongInt;
+{$ELSE}
+    A : TInetSockAddr;
+{$ENDIF}
+Begin
+  PConnect := -1;
+  {$IFDEF OS2PC}
+  S := SockSocket(2, 1, 0);
+  If S < 0 Then Exit;
+  For K := 0 To 15 Do A[K] := 0;
+  A[0] := 16; A[1] := 2; A[2] := (DbPort Shr 8) And 255; A[3] := DbPort And 255;
+  A[4] := Sr(Ip, 24); A[5] := Sr(Ip, 16) And 255; A[6] := Sr(Ip, 8) And 255; A[7] := Ip And 255;
+  If SockConnect(S, LongInt(@A), 16) <> 0 Then
+  Begin
+    Dummy := SockClose(S);
+    Exit;
+  End;
+  One := 1;
+  Dummy := SockIoctl(S, $8004667E, LongInt(@One), 4);
+  {$ELSE}
+  S := fpSocket(AF_INET, SOCK_STREAM, 0);
+  If S < 0 Then Exit;
+  FillChar(A, SizeOf(A), 0);
+  A.sin_family := AF_INET; A.sin_port := htons(DbPort); A.sin_addr.s_addr := htonl(LongWord(Ip));
+  If fpConnect(S, @A, SizeOf(A)) <> 0 Then
+  Begin
+    fpClose(S);
+    Exit;
+  End;
+  fpFcntl(S, F_SETFL, fpFcntl(S, F_GETFL) Or O_NONBLOCK);
+  One := 1;
+  fpSetSockOpt(S, 6, 1, @One, 4);
+  {$ENDIF}
+  PConnect := S;
+End;
+
+{ envoyer tout (petits messages : quelques essais) }
+Function DbSend(K : LongInt; P : PBytes; N : LongInt) : Boolean;
+Var R, Done, T : LongInt;
+Begin
+  DbSend := False;
+  Done := 0; T := PTicks;
+  While Done < N Do
+  Begin
+    R := PSend(DbC[K].Sock, @P^[Done], N - Done);
+    If R < 0 Then
+    Begin
+      DbC[K].Err := 'connexion interrompue';
+      Exit;
+    End;
+    Done := Done + R;
+    If R = 0 Then
+    Begin
+      If PTicks - T > 10000 Then
+      Begin
+        DbC[K].Err := 'envoi impossible (delai)';
+        Exit;
+      End;
+      PSleep(1);
+    End;
+  End;
+  DbSend := True;
+End;
+
+{ lire ce qui est arrive ; faux : connexion fermee ou erreur }
+Function DbFill(K : LongInt) : Boolean;
+Var R : LongInt;
+Begin
+  DbFill := True;
+  Repeat
+    If Not BufGrow(DbC[K].Rx, 16384) Then
+    Begin
+      DbC[K].Err := 'memoire insuffisante';
+      DbFill := False;
+      Exit;
+    End;
+    R := PRecv(DbC[K].Sock, @DbC[K].Rx.P^[DbC[K].Rx.Len], 16384);
+    If R > 0 Then DbC[K].Rx.Len := DbC[K].Rx.Len + R
+    Else If R = 0 Then
+    Begin
+      DbC[K].Err := 'connexion fermee par le serveur';
+      DbFill := False;
+    End
+    Else If R = -2 Then
+    Begin
+      DbC[K].Err := 'connexion interrompue';
+      DbFill := False;
+    End;
+  Until R <= 0;
+End;
+
+{ retirer N octets du debut du tampon de reception }
+Procedure DbEat(K, N : LongInt);
+Begin
+  With DbC[K] Do
+  Begin
+    If N >= Rx.Len Then Rx.Len := 0
+    Else
+    Begin
+      Move(Rx.P^[N], Rx.P^[0], Rx.Len - N);
+      Rx.Len := Rx.Len - N;
+    End;
+  End;
+End;
+
+Procedure DbClose(K : LongInt);
+Var Q : Array[0..7] Of Byte;
+Begin
+  With DbC[K] Do
+  Begin
+    If Not Used Then Exit;
+    If (Sock >= 0) And (St = dsReady) Then
+    Begin
+      If Kind = dbPg Then
+      Begin
+        Q[0] := Ord('X'); Q[1] := 0; Q[2] := 0; Q[3] := 0; Q[4] := 4;
+        Dummy := PSend(Sock, @Q, 5);
+      End
+      Else
+      Begin
+        Q[0] := 1; Q[1] := 0; Q[2] := 0; Q[3] := 0; Q[4] := 1;
+        Dummy := PSend(Sock, @Q, 5);
+      End;
+    End;
+    If Sock >= 0 Then PSockClose(Sock);
+    Sock := -1; St := dsClosed; Used := False; Owned := False;
+    BufFree(Rx);
+  End;
+End;
+
+{ --- jeux d'enregistrements --- }
+
+Function RsNew : LongInt;
+Var K : LongInt;
+Begin
+  RsNew := -1;
+  For K := 0 To MaxRs - 1 Do
+    If Not Rss[K].Used Then
+    Begin
+      Rss[K].Used := True;
+      Rss[K].NCol := 0; Rss[K].NRow := 0; Rss[K].Cur := 0; Rss[K].Affected := 0;
+      BufInit(Rss[K].Data); BufInit(Rss[K].Idx);
+      RsNew := K;
+      Exit;
+    End;
+End;
+
+Procedure RsFree(K : LongInt);
+Begin
+  If (K < 0) Or (K >= MaxRs) Or Not Rss[K].Used Then Exit;
+  BufFree(Rss[K].Data); BufFree(Rss[K].Idx);
+  Rss[K].Used := False;
+End;
+
+Procedure RsAddInt(K, V : LongInt);
+Var B : Array[0..3] Of Byte;
+Begin
+  B[0] := V And 255; B[1] := Sr(V, 8) And 255; B[2] := Sr(V, 16) And 255; B[3] := Sr(V, 24);
+  BufAddB(Rss[K].Idx, @B, 4);
+End;
+
+{ une valeur (P, N octets ; N < 0 : NULL) de la ligne en cours de lecture }
+Procedure RsAddVal(K : LongInt; P : PBytes; N : LongInt);
+Begin
+  RsAddInt(K, Rss[K].Data.Len);
+  RsAddInt(K, N);
+  If N > 0 Then BufAddB(Rss[K].Data, P, N);
+End;
+
+Function RsIdx(K, Pos : LongInt) : LongInt;
+Var Q : PBytes;
+Begin
+  Q := Rss[K].Idx.P;
+  RsIdx := Q^[Pos] Or (Q^[Pos + 1] Shl 8) Or (Q^[Pos + 2] Shl 16) Or (Q^[Pos + 3] Shl 24);
+End;
+
+{ colonne d'apres un nom (sans egard a la casse) ou un numero (0..) }
+Function RsCol(K : LongInt; Var Key : TCell) : LongInt;
+Var C : LongInt; S : String; T : TCell;
+Begin
+  RsCol := -1;
+  If (Key.T = vtInt) Or (Key.T = vtReal) Then
+  Begin
+    C := CellInt(Key);
+    If (C >= 0) And (C < Rss[K].NCol) Then RsCol := C;
+    Exit;
+  End;
+  CellToStr(Key, T);
+  S := UpStr(CellPStr(T));
+  For C := 0 To Rss[K].NCol - 1 Do
+    If UpStr(Rss[K].ColNm[C]) = S Then
+    Begin
+      RsCol := C;
+      Exit;
+    End;
+End;
+
+{ valeur de la colonne C de la ligne en cours }
+Procedure RsValue(K, C : LongInt; Var R : TCell);
+Var Pos, Ofs, N, V, E : LongInt; P : PBytes; S : String; D : Double;
+Begin
+  MkNil(R);
+  If (Rss[K].Cur < 0) Or (Rss[K].Cur >= Rss[K].NRow) Or (C < 0) Or (C >= Rss[K].NCol) Then Exit;
+  Pos := (Rss[K].Cur * Rss[K].NCol + C) * 8;
+  Ofs := RsIdx(K, Pos); N := RsIdx(K, Pos + 4);
+  If N < 0 Then Exit;
+  P := @Rss[K].Data.P^[Ofs];
+  If (Rss[K].ColTy[C] = 0) Or (N > 40) Then
+  Begin
+    MkStrB(P, N, R);
+    Exit;
+  End;
+  S := '';
+  If N > 0 Then Move(P^[0], S[1], N);
+  S[0] := Chr(N);
+  Case Rss[K].ColTy[C] Of
+    1 :
+      Begin
+        Val(S, D, E);
+        If (E = 0) And (D >= -2147483648.0) And (D <= 2147483647.0) Then
+        Begin
+          Val(S, V, E);
+          MkInt(V, R);
+        End
+        Else If E = 0 Then MkReal(D, R)
+        Else MkStr(S, R);
+      End;
+    2 :
+      Begin
+        Val(S, D, E);
+        If E = 0 Then MkReal(D, R) Else MkStr(S, R);
+      End;
+    3 : MkBool((S = 't') Or (S = 'true') Or (S = '1') Or (S = 'TRUE'), R);
+  Else
+    MkStr(S, R);
+  End;
+End;
+
+{ --- chaine de connexion --- }
+
+Function ConnKey(S, Key : String) : String;
+Var U, P, Q, K, V : String; I : LongInt;
+Begin
+  ConnKey := '';
+  U := S;
+  While U <> '' Do
+  Begin
+    I := Pos(';', U);
+    If I = 0 Then I := Length(U) + 1;
+    P := Copy(U, 1, I - 1);
+    Delete(U, 1, I);
+    I := Pos('=', P);
+    If I > 0 Then
+    Begin
+      K := UpStr(Trim(Copy(P, 1, I - 1)));
+      V := Trim(Copy(P, I + 1, 255));
+      Q := ',' + Key + ',';
+      If Pos(',' + K + ',', Q) > 0 Then
+      Begin
+        ConnKey := V;
+        Exit;
+      End;
+    End;
+  End;
+End;
+
+{ remplir la connexion K d'apres la chaine ; faux : chaine incorrecte }
+Function ConnParse(K : LongInt; S : String) : Boolean;
+Var P, I : LongInt; T, Pv : String;
+Begin
+  ConnParse := False;
+  With DbC[K] Do
+  Begin
+    Kind := 0; Host := ''; DbPort := 0; User := ''; Pass := ''; Db := '';
+    T := LoStr(S);
+    { forme URL : postgresql://nom:mdp@hote:port/base, mysql://, mariadb:// }
+    If (Copy(T, 1, 13) = 'postgresql://') Or (Copy(T, 1, 11) = 'postgres://') Or
+       (Copy(T, 1, 8) = 'mysql://') Or (Copy(T, 1, 10) = 'mariadb://') Then
+    Begin
+      If Copy(T, 1, 5) = 'postg' Then Kind := dbPg Else Kind := dbMy;
+      P := Pos('://', S);
+      T := Copy(S, P + 3, 255);
+      P := Pos('/', T);
+      If P > 0 Then
+      Begin
+        Db := Copy(T, P + 1, 63);
+        T := Copy(T, 1, P - 1);
+        I := Pos('?', Db);
+        If I > 0 Then Db := Copy(Db, 1, I - 1);
+      End;
+      P := Pos('@', T);
+      If P > 0 Then
+      Begin
+        User := Copy(T, 1, P - 1);
+        T := Copy(T, P + 1, 255);
+        I := Pos(':', User);
+        If I > 0 Then
+        Begin
+          Pass := UrlDecode(Copy(User, I + 1, 63), False);
+          User := Copy(User, 1, I - 1);
+        End;
+        User := UrlDecode(User, False);
+      End;
+      P := Pos(':', T);
+      If P > 0 Then
+      Begin
+        DbPort := SVal(Copy(T, P + 1, 10));
+        T := Copy(T, 1, P - 1);
+      End;
+      Host := T;
+    End
+    Else
+    Begin
+      Pv := UpStr(ConnKey(S, 'PROVIDER,DRIVER,TYPE,ENGINE,DBTYPE'));
+      If (Pos('POSTGRE', Pv) > 0) Or (Pos('NPGSQL', Pv) > 0) Or (Pv = 'PG') Or (Pv = 'PGSQL') Then Kind := dbPg
+      Else If (Pos('MYSQL', Pv) > 0) Or (Pos('MARIA', Pv) > 0) Then Kind := dbMy;
+      Host := ConnKey(S, 'SERVER,HOST,DATA SOURCE,ADDRESS,ADDR,HOSTNAME');
+      T := ConnKey(S, 'PORT');
+      If T <> '' Then DbPort := SVal(T);
+      P := Pos(',', Host);
+      If P = 0 Then P := Pos(':', Host);
+      If P > 0 Then
+      Begin
+        DbPort := SVal(Copy(Host, P + 1, 10));
+        Host := Copy(Host, 1, P - 1);
+      End;
+      Db := ConnKey(S, 'DATABASE,INITIAL CATALOG,DBNAME,DB');
+      User := ConnKey(S, 'USER ID,UID,USER,USERNAME,USER NAME');
+      Pass := ConnKey(S, 'PASSWORD,PWD');
+    End;
+    If Host = '' Then Host := 'localhost';
+    If (Kind = 0) And (DbPort = 5432) Then Kind := dbPg;
+    If (Kind = 0) And (DbPort = 3306) Then Kind := dbMy;
+    If Kind = 0 Then
+    Begin
+      Err := 'type de base inconnu : pr'#130'cisez Provider=PostgreSQL ou Provider=MariaDB';
+      Exit;
+    End;
+    If DbPort = 0 Then
+      If Kind = dbPg Then DbPort := 5432 Else DbPort := 3306;
+    If User = '' Then
+    Begin
+      Err := 'nom d''utilisateur absent de la cha'#140'ne de connexion (User Id=...)';
+      Exit;
+    End;
+    If (Kind = dbPg) And (Db = '') Then Db := User;
+  End;
+  ConnParse := True;
+End;
+
+{ ==================================================================== }
+{ PostgreSQL (protocole v3)                                             }
+{ ==================================================================== }
+
+Procedure PgPut32(Var B : TBuf; V : LongInt);
+Begin
+  BufAddC(B, Sr(V, 24)); BufAddC(B, Sr(V, 16) And 255); BufAddC(B, Sr(V, 8) And 255); BufAddC(B, V And 255);
+End;
+
+{ envoyer un message : type (0 : demarrage, sans type), corps }
+Function PgMsg(K : LongInt; Typ : Char; Var Body : TBuf) : Boolean;
+Var B : TBuf;
+Begin
+  BufInit(B);
+  If Typ <> #0 Then BufAddC(B, Ord(Typ));
+  PgPut32(B, Body.Len + 4);
+  BufAddB(B, Body.P, Body.Len);
+  PgMsg := DbSend(K, B.P, B.Len);
+  BufFree(B);
+End;
+
+Procedure BufAddZ(Var B : TBuf; S : String);
+Begin
+  BufAdd(B, S);
+  BufAddC(B, 0);
+End;
+
+Function PgStart(K : LongInt) : Boolean;
+Var B : TBuf;
+Begin
+  BufInit(B);
+  PgPut32(B, 196608);
+  BufAddZ(B, 'user'); BufAddZ(B, DbC[K].User);
+  BufAddZ(B, 'database'); BufAddZ(B, DbC[K].Db);
+  BufAddZ(B, 'client_encoding'); BufAddZ(B, 'UTF8');
+  BufAddZ(B, 'application_name'); BufAddZ(B, 'OS2-0-WebSrv');
+  BufAddC(B, 0);
+  PgStart := PgMsg(K, #0, B);
+  BufFree(B);
+End;
+
+Function PgGet32(P : PBytes) : LongInt;
+Begin
+  PgGet32 := (P^[0] Shl 24) Or (P^[1] Shl 16) Or (P^[2] Shl 8) Or P^[3];
+End;
+
+Function PgGet16(P : PBytes) : LongInt;
+Begin
+  PgGet16 := (P^[0] Shl 8) Or P^[1];
+End;
+
+{ texte d'un message d'erreur ('E' : champs code + texte) }
+Function PgErrText(P : PBytes; N : LongInt) : String;
+Var I : LongInt; F : Char; S, M, C : String;
+Begin
+  I := 0; M := ''; C := '';
+  While (I < N) And (P^[I] <> 0) Do
+  Begin
+    F := Chr(P^[I]); Inc(I);
+    S := '';
+    While (I < N) And (P^[I] <> 0) Do
+    Begin
+      If Length(S) < 200 Then S := S + Chr(P^[I]);
+      Inc(I);
+    End;
+    Inc(I);
+    If F = 'M' Then M := S Else If F = 'C' Then C := S;
+  End;
+  If C <> '' Then M := M + ' (' + C + ')';
+  PgErrText := M;
+End;
+
+{ SCRAM-SHA-256 : premier message du client }
+Procedure PgScramFirst(K : LongInt);
+Var R : Array[0..17] Of Byte; B : TBuf; S : String;
+Begin
+  RandFill(@R, 18);
+  DbC[K].CNonce := B64Bytes(@R, 18);
+  DbC[K].CFirst := 'n=,r=' + DbC[K].CNonce;
+  S := 'n,,' + DbC[K].CFirst;
+  BufInit(B);
+  BufAddZ(B, 'SCRAM-SHA-256');
+  PgPut32(B, Length(S));
+  BufAdd(B, S);
+  Dummy := Ord(PgMsg(K, 'p', B));
+  BufFree(B);
+End;
+
+Function ScramAttr(S : String; A : Char) : String;
+Var P : LongInt;
+Begin
+  ScramAttr := '';
+  S := ',' + S;
+  P := Pos(',' + A + '=', S);
+  If P = 0 Then Exit;
+  S := Copy(S, P + 3, 255);
+  P := Pos(',', S);
+  If P > 0 Then S := Copy(S, 1, P - 1);
+  ScramAttr := S;
+End;
+
+Function PgScramFinal(K : LongInt; SFirst : String) : Boolean;
+Var Nonce, Salt, Fin, Auth : String; It, I : LongInt; CKey, SKey, Sig, Proof : TB32; B : TBuf;
+Begin
+  PgScramFinal := False;
+  Nonce := ScramAttr(SFirst, 'r'); Salt := B64DecStr(ScramAttr(SFirst, 's'));
+  It := SVal(ScramAttr(SFirst, 'i'));
+  If (Copy(Nonce, 1, Length(DbC[K].CNonce)) <> DbC[K].CNonce) Or (It < 1) Or (Salt = '') Then
+  Begin
+    DbC[K].Err := 'SCRAM : r'#130'ponse du serveur incorrecte';
+    Exit;
+  End;
+  DbC[K].SFirst := SFirst;
+  Pbkdf2(DbC[K].Pass, Salt, It, DbC[K].Salted);
+  HmacStr(DbC[K].Salted, 'Client Key', CKey);
+  Sha256(@CKey, 32, SKey);
+  Fin := 'c=biws,r=' + Nonce;
+  Auth := DbC[K].CFirst + ',' + SFirst + ',' + Fin;
+  HmacStr(SKey, Auth, Sig);
+  For I := 0 To 31 Do Proof[I] := CKey[I] Xor Sig[I];
+  DbC[K].CFirst := Auth;    { (garde pour verifier la signature du serveur) }
+  Fin := Fin + ',p=' + B64Bytes(@Proof, 32);
+  BufInit(B);
+  BufAdd(B, Fin);
+  PgScramFinal := PgMsg(K, 'p', B);
+  BufFree(B);
+End;
+
+Function PgScramCheck(K : LongInt; SFinal : String) : Boolean;
+Var SKey, Sig : TB32;
+Begin
+  HmacStr(DbC[K].Salted, 'Server Key', SKey);
+  HmacStr(SKey, DbC[K].CFirst, Sig);
+  PgScramCheck := ScramAttr(SFinal, 'v') = B64Bytes(@Sig, 32);
+End;
+
+{ avancer : 1 fini (ReadyForQuery), 0 a suivre, -1 erreur (Err) }
+Function PgStep(K : LongInt) : LongInt;
+Var Typ : Char; L, Code, N, I, J, C, Ty, O : LongInt; P : PBytes; S : String; B : TBuf; Dg : TBlk;
+    Rs : LongInt;
+Begin
+  PgStep := 0;
+  If Not DbFill(K) Then
+  Begin
+    PgStep := -1;
+    Exit;
+  End;
+  With DbC[K] Do
+    While Rx.Len >= 5 Do
+    Begin
+      Typ := Chr(Rx.P^[0]);
+      L := PgGet32(@Rx.P^[1]);
+      If (L < 4) Or (L > 64 * 1024 * 1024) Then
+      Begin
+        Err := 'r'#130'ponse incorrecte du serveur PostgreSQL';
+        PgStep := -1;
+        Exit;
+      End;
+      If Rx.Len < L + 1 Then Exit;
+      P := @Rx.P^[5]; N := L - 4;
+      Case Typ Of
+        'R' :
+          Begin
+            Code := PgGet32(P);
+            Case Code Of
+              0 : ;
+              3 :
+                Begin
+                  BufInit(B); BufAddZ(B, Pass);
+                  Dummy := Ord(PgMsg(K, 'p', B)); BufFree(B);
+                End;
+              5 :
+                Begin
+                  S := Pass + User;
+                  Md5(@S[1], Length(S), Dg);
+                  S := HexBytes(@Dg, 16);
+                  For I := 0 To 3 Do S[33 + I] := Chr(P^[4 + I]);    { sel (octets quelconques) }
+                  S[0] := Chr(36);
+                  Md5(@S[1], Length(S), Dg);
+                  BufInit(B); BufAddZ(B, 'md5' + HexBytes(@Dg, 16));
+                  Dummy := Ord(PgMsg(K, 'p', B)); BufFree(B);
+                End;
+              10 :
+                Begin
+                  S := '';
+                  For I := 4 To N - 1 Do If P^[I] = 0 Then S := S + ',' Else S := S + Chr(P^[I]);
+                  If Pos('SCRAM-SHA-256,', S + ',') = 0 Then
+                  Begin
+                    Err := 'm'#130'canisme d''authentification non pris en charge : ' + S;
+                    PgStep := -1;
+                    Exit;
+                  End;
+                  PgScramFirst(K);
+                End;
+              11 :
+                Begin
+                  S := '';
+                  For I := 4 To N - 1 Do If Length(S) < 255 Then S := S + Chr(P^[I]);
+                  If Not PgScramFinal(K, S) Then
+                  Begin
+                    PgStep := -1;
+                    Exit;
+                  End;
+                End;
+              12 :
+                Begin
+                  S := '';
+                  For I := 4 To N - 1 Do If Length(S) < 255 Then S := S + Chr(P^[I]);
+                  If Not PgScramCheck(K, S) Then
+                  Begin
+                    Err := 'SCRAM : signature du serveur incorrecte';
+                    PgStep := -1;
+                    Exit;
+                  End;
+                End;
+            Else
+              Begin
+                Err := 'authentification PostgreSQL non prise en charge (code ' + IStr(Code) + ')';
+                PgStep := -1;
+                Exit;
+              End;
+            End;
+          End;
+        'E' :
+          Begin
+            QErr := PgErrText(P, N);
+            If St = dsHandshake Then
+            Begin
+              Err := QErr;
+              PgStep := -1;
+              Exit;
+            End;
+          End;
+        'T' :
+          If (QRs >= 0) And Not QHaveT Then
+          Begin
+            Rs := QRs;
+            QHaveT := True;
+            C := PgGet16(P); O := 2;
+            If C > MaxRsCol Then C := MaxRsCol;
+            Rss[Rs].NCol := C;
+            For J := 0 To C - 1 Do
+            Begin
+              S := '';
+              While (O < N) And (P^[O] <> 0) Do
+              Begin
+                If Length(S) < 63 Then S := S + Chr(P^[O]);
+                Inc(O);
+              End;
+              Inc(O);
+              Ty := PgGet32(@P^[O + 6]);
+              O := O + 18;
+              Rss[Rs].ColNm[J] := S;
+              Case Ty Of
+                20, 21, 23, 26 : Rss[Rs].ColTy[J] := 1;
+                700, 701 : Rss[Rs].ColTy[J] := 2;
+                16 : Rss[Rs].ColTy[J] := 3;
+              Else
+                Rss[Rs].ColTy[J] := 0;
+              End;
+            End;
+          End;
+        'D' :
+          If (QRs >= 0) And QHaveT And (QErr = '') Then
+          Begin
+            Rs := QRs;
+            C := PgGet16(P); O := 2;
+            For J := 0 To Rss[Rs].NCol - 1 Do
+            Begin
+              If J < C Then
+              Begin
+                I := PgGet32(@P^[O]); O := O + 4;
+                If I < 0 Then RsAddVal(Rs, Nil, -1)
+                Else
+                Begin
+                  RsAddVal(Rs, @P^[O], I);
+                  O := O + I;
+                End;
+              End
+              Else RsAddVal(Rs, Nil, -1);
+            End;
+            Inc(Rss[Rs].NRow);
+          End;
+        'C' :
+          Begin
+            { "INSERT 0 3", "UPDATE 2", "SELECT 5" : le dernier nombre }
+            S := '';
+            For I := 0 To N - 2 Do If Length(S) < 60 Then S := S + Chr(P^[I]);
+            I := Length(S);
+            While (I > 0) And (S[I] <> ' ') Do Dec(I);
+            Affected := SVal(Copy(S, I + 1, 20));
+          End;
+        'Z' :
+          Begin
+            DbEat(K, L + 1);
+            If St = dsHandshake Then
+            Begin
+              St := dsReady;
+              PgStep := 1;
+            End
+            Else If QErr <> '' Then
+            Begin
+              Err := QErr;
+              St := dsReady;
+              PgStep := -1;
+            End
+            Else
+            Begin
+              St := dsReady;
+              PgStep := 1;
+            End;
+            Exit;
+          End;
+      End;
+      DbEat(K, L + 1);
+    End;
+End;
+
+Function PgQuery(K : LongInt; Var Sql : TBuf) : Boolean;
+Var B : TBuf;
+Begin
+  BufInit(B);
+  BufAddB(B, Sql.P, Sql.Len);
+  BufAddC(B, 0);
+  PgQuery := PgMsg(K, 'Q', B);
+  BufFree(B);
+End;
+
+{ ==================================================================== }
+{ MariaDB et MySQL                                                      }
+{ ==================================================================== }
+
+Function MySend(K : LongInt; Var Body : TBuf) : Boolean;
+Var B : TBuf;
+Begin
+  BufInit(B);
+  BufAddC(B, Body.Len And 255); BufAddC(B, Sr(Body.Len, 8) And 255); BufAddC(B, Sr(Body.Len, 16) And 255);
+  BufAddC(B, DbC[K].Seq And 255);
+  Inc(DbC[K].Seq);
+  BufAddB(B, Body.P, Body.Len);
+  MySend := DbSend(K, B.P, B.Len);
+  BufFree(B);
+End;
+
+{ entier code en longueur variable a P^[O] ; O avance }
+Function LenEnc(P : PBytes; Var O : LongInt) : LongInt;
+Var V : LongInt;
+Begin
+  V := P^[O];
+  Inc(O);
+  If V = $FC Then
+  Begin
+    V := P^[O] Or (P^[O + 1] Shl 8); O := O + 2;
+  End
+  Else If V = $FD Then
+  Begin
+    V := P^[O] Or (P^[O + 1] Shl 8) Or (P^[O + 2] Shl 16); O := O + 3;
+  End
+  Else If V = $FE Then
+  Begin
+    V := P^[O] Or (P^[O + 1] Shl 8) Or (P^[O + 2] Shl 16) Or (P^[O + 3] Shl 24); O := O + 8;
+  End
+  Else If V = $FB Then V := -1;
+  LenEnc := V;
+End;
+
+{ reponse a l'authentification mysql_native_password : 20 octets }
+Procedure MyNative(K : LongInt; Var Out_ : TB20);
+Var H1, H2, H3 : TB20; S : Array[0..39] Of Byte; I : LongInt; Pw : String;
+Begin
+  Pw := DbC[K].Pass;
+  Sha1(@Pw[1], Length(Pw), H1);
+  Sha1(@H1, 20, H2);
+  For I := 0 To 19 Do
+  Begin
+    S[I] := DbC[K].Scramble[I]; S[20 + I] := H2[I];
+  End;
+  Sha1(@S, 40, H3);
+  For I := 0 To 19 Do Out_[I] := H1[I] Xor H3[I];
+End;
+
+{ caching_sha2_password (chemin rapide) : XOR(SHA256(mdp), SHA256(SHA256(SHA256(mdp)), brouillage)) }
+Procedure MyCachingSha2(K : LongInt; Var Out_ : TB32);
+Var H1, H2, H3 : TB32; S : Array[0..51] Of Byte; I : LongInt; Pw : String;
+Begin
+  Pw := DbC[K].Pass;
+  Sha256(@Pw[1], Length(Pw), H1);
+  Sha256(@H1, 32, H2);
+  For I := 0 To 31 Do S[I] := H2[I];
+  For I := 0 To 19 Do S[32 + I] := DbC[K].Scramble[I];
+  Sha256(@S, 52, H3);
+  For I := 0 To 31 Do Out_[I] := H1[I] Xor H3[I];
+End;
+
+Procedure MyAuthData(K : LongInt; Plugin : String; Var B : TBuf);
+Var H : TB20; H2 : TB32;
+Begin
+  If DbC[K].Pass = '' Then Exit;
+  If Plugin = 'caching_sha2_password' Then
+  Begin
+    MyCachingSha2(K, H2);
+    BufAddB(B, @H2, 32);
+  End
+  Else If Plugin = 'mysql_clear_password' Then
+  Begin
+    BufAdd(B, DbC[K].Pass);
+    BufAddC(B, 0);
+  End
+  Else
+  Begin
+    MyNative(K, H);
+    BufAddB(B, @H, 20);
+  End;
+End;
+
+Function MyErrText(P : PBytes; N : LongInt) : String;
+Var S : String; I, Code : LongInt;
+Begin
+  Code := P^[1] Or (P^[2] Shl 8);
+  S := '';
+  I := 3;
+  If (I < N) And (P^[I] = Ord('#')) Then I := I + 6;
+  While (I < N) And (Length(S) < 200) Do
+  Begin
+    S := S + Chr(P^[I]);
+    Inc(I);
+  End;
+  MyErrText := S + ' (' + IStr(Code) + ')';
+End;
+
+{ salut du serveur -> reponse d'authentification }
+Function MyGreeting(K : LongInt; P : PBytes; N : LongInt) : Boolean;
+Var O, I, Caps, AuthLen : LongInt; Plugin : String; B : TBuf; Ver : String;
+Begin
+  MyGreeting := False;
+  If P^[0] = $FF Then
+  Begin
+    DbC[K].Err := MyErrText(P, N);
+    Exit;
+  End;
+  If P^[0] <> 10 Then
+  Begin
+    DbC[K].Err := 'protocole MySQL non pris en charge (version ' + IStr(P^[0]) + ')';
+    Exit;
+  End;
+  O := 1; Ver := '';
+  While (O < N) And (P^[O] <> 0) Do
+  Begin
+    Ver := Ver + Chr(P^[O]);
+    Inc(O);
+  End;
+  O := O + 1 + 4;
+  For I := 0 To 7 Do DbC[K].Scramble[I] := P^[O + I];
+  O := O + 9;
+  Caps := P^[O] Or (P^[O + 1] Shl 8);
+  O := O + 2 + 1 + 2;
+  Caps := Caps Or (P^[O] Shl 16) Or (P^[O + 1] Shl 24);
+  O := O + 2;
+  AuthLen := P^[O];
+  O := O + 1 + 10;
+  For I := 0 To 11 Do If O + I < N Then DbC[K].Scramble[8 + I] := P^[O + I];
+  O := O + 13;
+  If AuthLen > 21 Then O := O + AuthLen - 21;
+  Plugin := '';
+  While (O < N) And (P^[O] <> 0) Do
+  Begin
+    Plugin := Plugin + Chr(P^[O]);
+    Inc(O);
+  End;
+  If Plugin = '' Then Plugin := 'mysql_native_password';
+  { reponse : CLIENT_LONG_PASSWORD, FOUND_ROWS, CONNECT_WITH_DB, PROTOCOL_41, TRANSACTIONS,
+    SECURE_CONNECTION, PLUGIN_AUTH }
+  BufInit(B);
+  Caps := 1 Or 2 Or 8 Or $200 Or $2000 Or $8000 Or $80000;   { + FOUND_ROWS : lignes trouvees }
+  BufAddC(B, Caps And 255); BufAddC(B, Sr(Caps, 8) And 255); BufAddC(B, Sr(Caps, 16) And 255); BufAddC(B, 0);
+  BufAddC(B, 0); BufAddC(B, 0); BufAddC(B, 0); BufAddC(B, 1);       { paquet de 16 Mo au plus }
+  BufAddC(B, 45);                                                    { utf8mb4 }
+  For I := 1 To 23 Do BufAddC(B, 0);
+  BufAddZ(B, DbC[K].User);
+  I := B.Len;
+  BufAddC(B, 0);
+  MyAuthData(K, Plugin, B);
+  B.P^[I] := B.Len - I - 1;
+  BufAddZ(B, DbC[K].Db);
+  BufAddZ(B, Plugin);
+  MyGreeting := MySend(K, B);
+  BufFree(B);
+End;
+
+{ avancer : 1 fini, 0 a suivre, -1 erreur }
+Function MyStep(K : LongInt) : LongInt;
+Var L, O, I, J, N, V, Rs, Ty : LongInt; P : PBytes; S, Plugin : String; B : TBuf;
+Begin
+  MyStep := 0;
+  If Not DbFill(K) Then
+  Begin
+    MyStep := -1;
+    Exit;
+  End;
+  With DbC[K] Do
+    While Rx.Len >= 4 Do
+    Begin
+      L := Rx.P^[0] Or (Rx.P^[1] Shl 8) Or (Rx.P^[2] Shl 16);
+      If Rx.Len < L + 4 Then Exit;
+      Seq := Rx.P^[3] + 1;
+      P := @Rx.P^[4];
+      Case Phase Of
+        1 :   { salut }
+          Begin
+            If Not MyGreeting(K, P, L) Then
+            Begin
+              MyStep := -1;
+              Exit;
+            End;
+            Phase := 2;
+          End;
+        2 :   { resultat de l'authentification }
+          If P^[0] = 0 Then
+          Begin
+            DbEat(K, L + 4);
+            St := dsReady;
+            MyStep := 1;
+            Exit;
+          End
+          Else If P^[0] = $FF Then
+          Begin
+            Err := MyErrText(P, L);
+            MyStep := -1;
+            Exit;
+          End
+          Else If P^[0] = $FE Then
+          Begin
+            { changement de methode : nom, nouveau brouillage }
+            O := 1; Plugin := '';
+            While (O < L) And (P^[O] <> 0) Do
+            Begin
+              Plugin := Plugin + Chr(P^[O]);
+              Inc(O);
+            End;
+            Inc(O);
+            For I := 0 To 19 Do If O + I < L Then Scramble[I] := P^[O + I];
+            BufInit(B);
+            MyAuthData(K, Plugin, B);
+            Dummy := Ord(MySend(K, B));
+            BufFree(B);
+          End
+          Else If P^[0] = 1 Then
+          Begin
+            { caching_sha2_password : 3 = chemin rapide reussi, 4 = authentification complete }
+            If (L >= 2) And (P^[1] = 4) Then
+            Begin
+              Err := 'caching_sha2_password : authentification compl'#138'te impossible sans TLS ' +
+                     '(cr'#130'ez l''utilisateur avec mysql_native_password)';
+              MyStep := -1;
+              Exit;
+            End;
+          End;
+        10 :  { premiere reponse a une requete }
+          If P^[0] = 0 Then
+          Begin
+            O := 1;
+            Affected := LenEnc(P, O);
+            DbEat(K, L + 4);
+            St := dsReady;
+            MyStep := 1;
+            Exit;
+          End
+          Else If P^[0] = $FF Then
+          Begin
+            Err := MyErrText(P, L);
+            DbEat(K, L + 4);
+            St := dsReady;
+            MyStep := -1;
+            Exit;
+          End
+          Else
+          Begin
+            O := 0;
+            NCol := LenEnc(P, O);
+            ColDone := 0;
+            If QRs >= 0 Then
+            Begin
+              If NCol > MaxRsCol Then Rss[QRs].NCol := MaxRsCol Else Rss[QRs].NCol := NCol;
+            End;
+            If NCol <= 0 Then Phase := 13 Else Phase := 11;
+          End;
+        11 :  { definitions des colonnes }
+          Begin
+            If (P^[0] = $FE) And (L < 9) Then Phase := 13
+            Else
+            Begin
+              O := 0;
+              For J := 1 To 4 Do
+              Begin
+                N := LenEnc(P, O);
+                If N > 0 Then O := O + N;
+              End;
+              N := LenEnc(P, O);
+              S := '';
+              For I := 0 To N - 1 Do If Length(S) < 63 Then S := S + Chr(P^[O + I]);
+              If N > 0 Then O := O + N;
+              N := LenEnc(P, O);
+              If N > 0 Then O := O + N;
+              O := O + 1 + 2 + 4;
+              Ty := P^[O];
+              If (QRs >= 0) And (ColDone < Rss[QRs].NCol) Then
+              Begin
+                Rss[QRs].ColNm[ColDone] := S;
+                Case Ty Of
+                  1, 2, 3, 8, 9, 13 : Rss[QRs].ColTy[ColDone] := 1;
+                  4, 5 : Rss[QRs].ColTy[ColDone] := 2;
+                Else
+                  Rss[QRs].ColTy[ColDone] := 0;
+                End;
+              End;
+              Inc(ColDone);
+              If ColDone >= NCol Then Phase := 12;
+            End;
+          End;
+        12 :  { EOF apres les colonnes (ou deja une ligne) }
+          If (P^[0] = $FE) And (L < 9) Then Phase := 13
+          Else
+          Begin
+            Phase := 13;
+            Continue;      { la ligne est traitee au tour suivant }
+          End;
+        13 :  { lignes, puis EOF }
+          If (P^[0] = $FE) And (L < 9) Then
+          Begin
+            DbEat(K, L + 4);
+            St := dsReady;
+            If QRs >= 0 Then Rss[QRs].Affected := Rss[QRs].NRow;
+            Affected := 0;
+            MyStep := 1;
+            Exit;
+          End
+          Else If P^[0] = $FF Then
+          Begin
+            Err := MyErrText(P, L);
+            DbEat(K, L + 4);
+            St := dsReady;
+            MyStep := -1;
+            Exit;
+          End
+          Else If QRs >= 0 Then
+          Begin
+            Rs := QRs;
+            O := 0;
+            For J := 0 To NCol - 1 Do
+            Begin
+              If O >= L Then V := -1
+              Else If P^[O] = $FB Then
+              Begin
+                V := -1; Inc(O);
+              End
+              Else V := LenEnc(P, O);
+              If J < Rss[Rs].NCol Then
+              Begin
+                If V < 0 Then RsAddVal(Rs, Nil, -1) Else RsAddVal(Rs, @P^[O], V);
+              End;
+              If V > 0 Then O := O + V;
+            End;
+            Inc(Rss[Rs].NRow);
+          End;
+      End;
+      DbEat(K, L + 4);
+    End;
+End;
+
+Function MyQuery(K : LongInt; Var Sql : TBuf) : Boolean;
+Var B : TBuf;
+Begin
+  DbC[K].Seq := 0;
+  DbC[K].Phase := 10;
+  BufInit(B);
+  BufAddC(B, 3);
+  BufAddB(B, Sql.P, Sql.Len);
+  MyQuery := MySend(K, B);
+  BufFree(B);
+End;
+
+{ ==================================================================== }
+{ Operations (avec attente) pour la machine des pages                  }
+{ ==================================================================== }
+
+Function DbStep(K : LongInt) : LongInt;
+Begin
+  If DbC[K].Kind = dbPg Then DbStep := PgStep(K) Else DbStep := MyStep(K);
+End;
+
+Function DbName(K : LongInt) : String;
+Begin
+  If DbC[K].Kind = dbPg Then DbName := 'PostgreSQL' Else DbName := 'MariaDB';
+End;
+
+{ l'operation en cours de la connexion K : fini (1), a suivre (0, la page
+  attend), erreur (-1 : la connexion est fermee si elle est inutilisable) }
+Function DbWait(K : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := DbStep(K);
+  If (R = 0) And (PTicks - DbC[K].Deadline > 0) Then
+  Begin
+    DbC[K].Err := 'pas de r'#130'ponse du serveur (d'#130'lai d'#130'pass'#130')';
+    R := -1;
+    DbC[K].St := dsBusy;
+  End;
+  If R = 0 Then
+  Begin
+    DbPend := K;
+    DbWaitSock := DbC[K].Sock;
+    VmWait := True;
+  End
+  Else
+  Begin
+    DbPend := -1;
+    DbWaitSock := -1;
+    VmWait := False;
+  End;
+  DbWait := R;
+End;
+
+Procedure DbFailK(K : LongInt; What : String);
+Begin
+  VmFail(DbName(K) + ' : ' + What + DbC[K].Err);
+  If DbC[K].St <> dsReady Then DbClose(K);
+End;
+
+{ Database.Connect(chaine) : rend le numero de la connexion (-1 : erreur
+  ou attente) }
+Function DbConnect(Var S : String) : LongInt;
+Var K, Ip, T : LongInt;
+Begin
+  DbConnect := -1;
+  { reprise d'une connexion en cours }
+  If (DbPend >= 0) And DbC[DbPend].Used And (DbC[DbPend].St = dsHandshake) Then
+  Begin
+    K := DbPend;
+    T := DbWait(K);
+    If T = 1 Then DbConnect := K
+    Else If T < 0 Then DbFailK(K, 'connexion impossible : ');
+    Exit;
+  End;
+  { une connexion libre de la reserve, meme chaine }
+  For K := 0 To MaxDbConn - 1 Do
+    If DbC[K].Used And Not DbC[K].Owned And (DbC[K].St = dsReady) And (DbC[K].Key = S) Then
+    Begin
+      DbC[K].Owned := True;
+      DbConnect := K;
+      Exit;
+    End;
+  K := -1;
+  For T := 0 To MaxDbConn - 1 Do If (K < 0) And Not DbC[T].Used Then K := T;
+  If K < 0 Then
+  Begin
+    { reserve pleine : fermer la plus ancienne connexion libre }
+    For T := 0 To MaxDbConn - 1 Do
+      If (K < 0) And Not DbC[T].Owned Then K := T;
+    If K < 0 Then
+    Begin
+      VmFail('base de donn'#130'es : trop de connexions ouvertes (' + IStr(MaxDbConn) + ')');
+      Exit;
+    End;
+    DbClose(K);
+  End;
+  FillChar(DbC[K], SizeOf(TDbConn), 0);
+  DbC[K].Sock := -1; DbC[K].QRs := -1;
+  If Not ConnParse(K, S) Then
+  Begin
+    VmFail('base de donn'#130'es : ' + DbC[K].Err);
+    Exit;
+  End;
+  DbC[K].Used := True; DbC[K].Owned := True; DbC[K].Key := S;
+  BufInit(DbC[K].Rx);
+  Ip := PResolve(DbC[K].Host);
+  If Ip = 0 Then
+  Begin
+    DbC[K].Err := 'h'#147'te inconnu : ' + DbC[K].Host;
+    DbFailK(K, '');
+    Exit;
+  End;
+  DbC[K].Sock := PConnect(Ip, DbC[K].DbPort);
+  If DbC[K].Sock < 0 Then
+  Begin
+    DbC[K].Err := 'connexion refus'#130'e par ' + DbC[K].Host + ':' + IStr(DbC[K].DbPort);
+    DbFailK(K, '');
+    Exit;
+  End;
+  DbC[K].St := dsHandshake;
+  DbC[K].Deadline := PTicks + 15000;
+  If DbC[K].Kind = dbPg Then
+  Begin
+    If Not PgStart(K) Then
+    Begin
+      DbFailK(K, '');
+      Exit;
+    End;
+  End
+  Else DbC[K].Phase := 1;
+  T := DbWait(K);
+  If T = 1 Then DbConnect := K
+  Else If T < 0 Then DbFailK(K, 'connexion impossible : ');
+End;
+
+{ requete : rend le jeu d'enregistrements (>= 0), ou -1 (erreur, ou
+  attente : VmWait) ; Rows : lignes touchees }
+Function DbQuery(K : LongInt; Var Sql : TBuf; Var Rows : LongInt) : LongInt;
+Var T, Rs : LongInt;
+Begin
+  DbQuery := -1;
+  Rows := 0;
+  If (K < 0) Or (K >= MaxDbConn) Or Not DbC[K].Used Or Not DbC[K].Owned Then
+  Begin
+    VmFail('base de donn'#130'es : connexion ferm'#130'e');
+    Exit;
+  End;
+  If Not ((DbPend = K) And (DbC[K].St = dsBusy)) Then
+  Begin
+    If DbC[K].St <> dsReady Then
+    Begin
+      VmFail(DbName(K) + ' : connexion occup'#130'e ou ferm'#130'e');
+      Exit;
+    End;
+    Rs := RsNew;
+    If Rs < 0 Then
+    Begin
+      VmFail('base de donn'#130'es : trop de jeux d''enregistrements ouverts (' + IStr(MaxRs) + ')');
+      Exit;
+    End;
+    DbC[K].QRs := Rs; DbC[K].QErr := ''; DbC[K].QHaveT := False; DbC[K].Affected := 0; DbC[K].Err := '';
+    DbC[K].St := dsBusy;
+    DbC[K].Deadline := PTicks + 60000;
+    If DbC[K].Kind = dbPg Then T := Ord(PgQuery(K, Sql)) Else T := Ord(MyQuery(K, Sql));
+    If T = 0 Then
+    Begin
+      RsFree(Rs);
+      DbFailK(K, '');
+      Exit;
+    End;
+  End;
+  T := DbWait(K);
+  If T = 0 Then Exit;
+  Rs := DbC[K].QRs;
+  DbC[K].QRs := -1;
+  If T < 0 Then
+  Begin
+    RsFree(Rs);
+    DbFailK(K, '');
+    Exit;
+  End;
+  Rows := DbC[K].Affected;
+  If (Rows = 0) And (Rs >= 0) Then Rows := Rss[Rs].NRow;
+  Rss[Rs].Affected := Rows;
+  DbQuery := Rs;
+End;
+
+{ debut et fin d'une requete HTTP : connexions rendues a la reserve }
+Procedure DbEndRequest;
+Var K : LongInt;
+Begin
+  For K := 0 To MaxDbConn - 1 Do
+    If DbC[K].Used And DbC[K].Owned Then
+    Begin
+      If DbC[K].St = dsReady Then
+      Begin
+        DbC[K].Owned := False;
+        DbC[K].LastUse := PTicks;
+      End
+      Else DbClose(K);
+    End;
+  For K := 0 To MaxRs - 1 Do RsFree(K);
+  DbPend := -1; DbWaitSock := -1; VmWait := False;
+End;
+
+{ reserve : connexions libres depuis plus d'une minute fermees }
+Procedure DbHouse;
+Var K : LongInt;
+Begin
+  For K := 0 To MaxDbConn - 1 Do
+    If DbC[K].Used And Not DbC[K].Owned And (PTicks - DbC[K].LastUse > 60000) Then DbClose(K);
+End;
+
+Procedure DbInit;
+Var K : LongInt;
+Begin
+  For K := 0 To MaxDbConn - 1 Do
+  Begin
+    DbC[K].Used := False; DbC[K].Sock := -1;
+  End;
+  For K := 0 To MaxRs - 1 Do Rss[K].Used := False;
+  DbPend := -1; DbWaitSock := -1; VmWait := False;
+End;
+
+{ 'texte' entre apostrophes doublees (litteral SQL) }
+Procedure SqlQuote(Var C : TCell; Var R : TCell; Kind : LongInt);
+Var T : TCell; P : PBytes; B : TBuf; K : LongInt;
+Begin
+  CellToStr(C, T);
+  P := PoolPtr(T);
+  BufInit(B);
+  BufAddC(B, 39);
+  For K := 0 To T.L - 1 Do
+  Begin
+    If P^[K] = 39 Then BufAddC(B, 39);
+    If (P^[K] = 92) And (Kind = dbMy) Then BufAddC(B, 92);    { (MariaDB : barre oblique inverse) }
+    BufAddC(B, P^[K]);
+  End;
+  BufAddC(B, 39);
+  MkStrB(B.P, B.Len, R);
+  BufFree(B);
+End;
+
+{ --- membres des objets : Database, connexion, jeu d'enregistrements,
+  champs --- }
+
+Procedure CellBuf(Var C : TCell; Var B : TBuf);
+Var T : TCell;
+Begin
+  CellToStr(C, T);
+  If T.L > 0 Then BufAddB(B, PoolPtr(T), T.L);
+End;
+
+Procedure DbRelease(K : LongInt);
+Begin
+  If (K < 0) Or (K >= MaxDbConn) Or Not DbC[K].Used Then Exit;
+  If DbC[K].St = dsReady Then
+  Begin
+    DbC[K].Owned := False;
+    DbC[K].LastUse := PTicks;
+  End
+  Else DbClose(K);
+End;
+
+{ requete sur la connexion K ; Exec : Execute (nombre de lignes si la
+  requete ne rend pas de colonnes) }
+Procedure DbRun(K : LongInt; Var Sql : TCell; Exec : Boolean; Var R : TCell);
+Var B : TBuf; Rs, Rows : LongInt;
+Begin
+  BufInit(B);
+  CellBuf(Sql, B);
+  Rs := DbQuery(K, B, Rows);
+  BufFree(B);
+  If Rs < 0 Then Exit;
+  If Exec And (Rss[Rs].NCol = 0) Then
+  Begin
+    MkInt(Rows, R);
+    RsFree(Rs);
+  End
+  Else MkObj(ObjNew(okDbRs, Rs, 0), R);
+End;
+
+Procedure DbMember(Id, M, Argc, ABase : LongInt; Var R : TCell; IsSet : Boolean; Var V : TCell);
+Var A0, A1 : TCell; K, Rs, C : LongInt; S : String;
+Begin
+  If Argc > 0 Then A0 := Stk[ABase] Else MkNil(A0);
+  If Argc > 1 Then A1 := Stk[ABase + 1] Else MkNil(A1);
+  If (A0.T = vtObj) And (A0.I < NObj) And (ObjK[A0.I] = okItem) Then ObjValue(A0);
+  Case ObjK[Id] Of
+    okDbF :
+      Case M Of
+        mConnect, mOpen :
+          Begin
+            S := CellPStr(A0);
+            K := DbConnect(S);
+            If K >= 0 Then MkObj(ObjNew(okDbConn, K, 0), R);
+          End;
+        mQuote : SqlQuote(A0, R, 0);
+      Else
+        VmFail('Database.' + MemberNames[M] + ' inconnu');
+      End;
+    okDbConn :
+      Begin
+        K := ObjA[Id];
+        Case M Of
+          mOpen :
+            Begin
+              S := CellPStr(A0);
+              K := DbConnect(S);
+              If K >= 0 Then ObjA[Id] := K;
+            End;
+          mQuery, mExecute :
+            If K < 0 Then VmFail('base de donn'#130'es : connexion non ouverte')
+            Else DbRun(K, A0, M = mExecute, R);
+          mClose :
+            Begin
+              DbRelease(K);
+              ObjA[Id] := -1;
+            End;
+          mConnected, mState :
+            If M = mState Then MkInt(Ord((K >= 0) And DbC[K].Used), R)
+            Else MkBool((K >= 0) And DbC[K].Used And (DbC[K].St = dsReady), R);
+          mQuote :
+            If K >= 0 Then SqlQuote(A0, R, DbC[K].Kind) Else SqlQuote(A0, R, 0);
+        Else
+          VmFail('Connexion.' + MemberNames[M] + ' inconnu');
+        End;
+      End;
+    okDbRs :
+      Begin
+        Rs := ObjA[Id];
+        If (M = mOpen) And (Rs < 0) Then
+        Begin
+          { ADODB.Recordset : Rs.Open sql, connexion }
+          If (A1.T = vtObj) And (A1.I < NObj) And (ObjK[A1.I] = okDbConn) And (ObjA[A1.I] >= 0) Then
+          Begin
+            DbRun(ObjA[A1.I], A0, False, R);
+            If (R.T = vtObj) And (R.I < NObj) And (ObjK[R.I] = okDbRs) Then ObjA[Id] := ObjA[R.I];
+            MkNil(R);
+          End
+          Else VmFail('Recordset.Open : connexion attendue');
+          Exit;
+        End;
+        If (Rs < 0) Or (Rs >= MaxRs) Or Not Rss[Rs].Used Then
+        Begin
+          If M = mClose Then Exit;
+          VmFail('jeu d''enregistrements ferm'#130);
+          Exit;
+        End;
+        Case M Of
+          mEof : MkBool(Rss[Rs].Cur >= Rss[Rs].NRow, R);
+          mBof : MkBool((Rss[Rs].Cur < 0) Or (Rss[Rs].NRow = 0), R);
+          mNext, mMoveNext : If Rss[Rs].Cur < Rss[Rs].NRow Then Inc(Rss[Rs].Cur);
+          mMoveFirst : Rss[Rs].Cur := 0;
+          mClose :
+            Begin
+              RsFree(Rs);
+              ObjA[Id] := -1;
+            End;
+          mRecordCount, mCount : MkInt(Rss[Rs].NRow, R);
+          mFieldCount : MkInt(Rss[Rs].NCol, R);
+          mRowsAffected : MkInt(Rss[Rs].Affected, R);
+          mFieldName :
+            Begin
+              C := CellInt(A0);
+              If (C >= 0) And (C < Rss[Rs].NCol) Then MkStr(Rss[Rs].ColNm[C], R) Else MkStr('', R);
+            End;
+          mFields :
+            If Argc = 0 Then MkObj(ObjNew(okDbFlds, Rs, 0), R)
+            Else
+            Begin
+              C := RsCol(Rs, A0);
+              If C < 0 Then VmFail('colonne inconnue : ' + CellPStr(A0))
+              Else MkObj(ObjNew(okDbFld, Rs, C), R);
+            End;
+          mDefault, mItem, mValue :
+            Begin
+              C := RsCol(Rs, A0);
+              If C < 0 Then VmFail('colonne inconnue : ' + CellPStr(A0))
+              Else RsValue(Rs, C, R);
+            End;
+        Else
+          VmFail('Recordset.' + MemberNames[M] + ' inconnu');
+        End;
+      End;
+    okDbFlds :
+      Begin
+        Rs := ObjA[Id];
+        If (Rs < 0) Or Not Rss[Rs].Used Then
+        Begin
+          VmFail('jeu d''enregistrements ferm'#130);
+          Exit;
+        End;
+        Case M Of
+          mCount : MkInt(Rss[Rs].NCol, R);
+          mDefault, mItem :
+            Begin
+              C := RsCol(Rs, A0);
+              If C < 0 Then VmFail('colonne inconnue : ' + CellPStr(A0))
+              Else MkObj(ObjNew(okDbFld, Rs, C), R);
+            End;
+        Else
+          VmFail('Fields.' + MemberNames[M] + ' inconnu');
+        End;
+      End;
+    okDbFld :
+      Begin
+        Rs := ObjA[Id]; C := ObjB[Id];
+        If (Rs < 0) Or Not Rss[Rs].Used Then
+        Begin
+          VmFail('jeu d''enregistrements ferm'#130);
+          Exit;
+        End;
+        Case M Of
+          mName : MkStr(Rss[Rs].ColNm[C], R);
+          mValue, mDefault : RsValue(Rs, C, R);
+        Else
+          VmFail('Field.' + MemberNames[M] + ' inconnu');
+        End;
+      End;
+  End;
+End;
+
+{ WEBSRV /DBTEST : MD5, SHA-1, PBKDF2 et SCRAM-SHA-256 (vecteur de la
+  RFC 7677 : utilisateur "user", mot de passe "pencil") }
+Procedure DbSelfTest;
+Var D : TBlk; H : TB20; S, Sf, Auth, Fin : String; Ck, Sk, Sig, Pr, Salted : TB32; I : LongInt;
+Begin
+  S := 'abc';
+  Md5(@S[1], 3, D); WriteLn('MD5 abc = ', HexBytes(@D, 16));
+  Sha1(@S[1], 3, H); WriteLn('SHA1 abc = ', HexBytes(@H, 20));
+  Sf := 'r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096';
+  Pbkdf2('pencil', B64DecStr(ScramAttr(Sf, 's')), 4096, Salted);
+  HmacStr(Salted, 'Client Key', Ck);
+  Sha256(@Ck, 32, Sk);
+  Fin := 'c=biws,r=' + ScramAttr(Sf, 'r');
+  Auth := 'n=user,r=rOprNGfwEbeRWgbNEkqO,' + Sf + ',' + Fin;
+  HmacStr(Sk, Auth, Sig);
+  For I := 0 To 31 Do Pr[I] := Ck[I] Xor Sig[I];
+  WriteLn('SCRAM p = ', B64Bytes(@Pr, 32));
+End;
 { ==================================================================== }
 { Compilateur PSP (Pascal Server Pages) : le Pascal de PSP86/PSPCW32     }
 { (DEV-COOLS) entre les balises <% %>, <%= %>, <%@ %>, <%-- --%>, et      }
@@ -7934,6 +9710,13 @@ Begin
   AddObj('SERVER', obServer);
   AddObj('SESSION', obSession);
   AddObj('APPLICATION', obApplication);
+  AddObj('DATABASE', obDatabase);
+  { types des objets des bases de donnees }
+  S := AddSym('DATABASECONNECTION', skType); Syms[S].Ty := TyVar;
+  S := AddSym('TDATABASECONNECTION', skType); Syms[S].Ty := TyVar;
+  S := AddSym('RECORDSET', skType); Syms[S].Ty := TyVar;
+  S := AddSym('TRECORDSET', skType); Syms[S].Ty := TyVar;
+  S := AddSym('DATASET', skType); Syms[S].Ty := TyVar;
 End;
 
 Procedure ResetPage(K : LongInt);
@@ -8375,6 +10158,12 @@ Begin
         ItemValue(ObjA[Id], ObjS[Id], R);
         C := R;
       End;
+    okDbFld :
+      If (ObjA[Id] >= 0) And Rss[ObjA[Id]].Used Then
+      Begin
+        RsValue(ObjA[Id], ObjB[Id], R);
+        C := R;
+      End;
   End;
 End;
 
@@ -8547,6 +10336,8 @@ Begin
   Name := UpStr(Name);
   If Name = 'SCRIPTING.DICTIONARY' Then MkObj(ObjNew(okDict, 0, 0), R)
   Else If Name = 'SCRIPTING.FILESYSTEMOBJECT' Then MkObj(ObjNew(okFso, 0, 0), R)
+  Else If Name = 'ADODB.CONNECTION' Then MkObj(ObjNew(okDbConn, -1, 0), R)
+  Else If Name = 'ADODB.RECORDSET' Then MkObj(ObjNew(okDbRs, -1, 0), R)
   Else
   Begin
     VmFail('CreateObject : objet inconnu (' + Name + ')');
@@ -9022,6 +10813,7 @@ Begin
           VmFail('TextStream.' + MemberNames[M] + ' inconnu');
         End;
       End;
+    okDbF, okDbConn, okDbRs, okDbFlds, okDbFld : DbMember(Id, M, Argc, ABase, R, IsSet, V);
     okErr :
       Case M Of
         mNumber, mDefault : If IsSet Then VmAspErrNum := CellInt(V) Else MkInt(VmAspErrNum, R);
@@ -10482,8 +12274,21 @@ Begin
           X := Stk[SP - B];
           { Err.xxx dans une page ASP }
           MemberCall(X, A, B, SP - B + 1, Stk[SP - B], Op = opSetMember, Y);
-          SP := SP - B;
-          If Op = opSetMember Then Dec(SP);
+          If VmWait Then
+          Begin
+            { la base de donnees n'a pas encore repondu : reprendre cette
+              instruction plus tard (pile remise), les autres connexions
+              sont servies entre-temps }
+            Stk[SP - B] := X;
+            If Op = opSetMember Then Inc(SP);
+            PC := Pc0;
+            Budget := 0;
+          End
+          Else
+          Begin
+            SP := SP - B;
+            If Op = opSetMember Then Dec(SP);
+          End;
         End;
       opInitS :
         Begin
@@ -10717,8 +12522,9 @@ Begin
   VmBinPos := 0; VmErr := ''; VmErrLine := 0; VmT0 := PTicks; VmScriptTo := ScriptTimeoutS;
   VmAspErrNum := 0; VmAspErrDesc := ''; VmOnErrResume := False;
   VbStyle := Pages[Prog].Asp;
-  NObj := 7;
-  For K := 1 To 6 Do
+  DbEndRequest;
+  NObj := 8;
+  For K := 1 To 7 Do
   Begin
     ObjK[K] := K; ObjA[K] := 0; ObjB[K] := 0;
   End;
@@ -10736,6 +12542,7 @@ Begin
   C := VmConn;
   VmConn := -1;
   VmOn := False;
+  DbEndRequest;
   For K := 0 To MaxStream - 1 Do If StrmUsed[K] Then StreamClose(K);
   If C < 0 Then Exit;
   If Conns[C].State <> csVm Then Exit;
@@ -10791,6 +12598,7 @@ Begin
   Begin
     VmOn := False;
     VmConn := -1;
+    DbEndRequest;
   End;
   J := 0;
   For K := 0 To VmQLen - 1 Do
@@ -10804,7 +12612,9 @@ End;
 
 Function VmBusy : Boolean;
 Begin
-  VmBusy := VmOn Or (VmQLen > 0);
+  { (une page qui attend sa base de donnees n'occupe pas le processeur :
+    le socket de la base est dans le select du service) }
+  VmBusy := (VmOn And Not VmWait) Or ((Not VmOn) And (VmQLen > 0));
 End;
 
 { une tranche : environ 20000 instructions, puis les connexions }
@@ -10837,6 +12647,7 @@ Var K : LongInt;
 Begin
   For K := 0 To MaxSess - 1 Do
     If Sess[K].Used And (NowUnix - Sess[K].Last > Sess[K].Timeout * 60 + 60) Then SessFree(K);
+  DbHouse;
 End;
 
 Procedure VmInit;
@@ -10844,6 +12655,7 @@ Begin
   GetMem(Mem, MemCells * SizeOf(TCell));
   BufInit(VmPool); BufInit(VmOut); BufInit(VmHdr);
   VmOn := False; VmConn := -1; VmQLen := 0;
+  DbInit;
   RndSeed := PRdtsc;
 End;
 
@@ -12968,6 +14780,11 @@ Begin
           If TxPos < TxLen Then FdSet(W, Sock);
           If Sock + 1 > MaxFd Then MaxFd := Sock + 1;
         End;
+    If DbWaitSock >= 0 Then
+    Begin
+      FdSet(R, DbWaitSock);
+      If DbWaitSock + 1 > MaxFd Then MaxFd := DbWaitSock + 1;
+    End;
     Busy := VmBusy;
     For I := 0 To MaxConn - 1 Do
       If (Conns[I].State = csSend) And (Conns[I].TxLen = 0) Then Busy := True;
@@ -13117,7 +14934,7 @@ Const
   { commandes }
   cmSave = 101; cmReloadCfg = 102; cmQuit = 103;
   cmStart = 111; cmStop = 112; cmRestart = 113; cmAddSite = 114; cmDelSite = 115; cmSiteOn = 116;
-  cmSiteOff = 117; cmBrowse = 118; cmSiteProps = 119; cmEditSite = 120;
+  cmSiteOff = 117; cmBrowse = 118; cmSiteProps = 119; cmEditSite = 120; cmGoBind = 121;
   cmActions = 131; cmRefresh = 132; cmExpand = 133; cmCollapse = 134;
   cmCert = 141; cmAutoStart = 142; cmOpenLogs = 143; cmOpenRoot = 144;
   cmHelp = 151; cmAbout = 152;
@@ -14106,7 +15923,7 @@ Begin
   AddAct(cmBrowse, 'Parcourir le site');
   AddAct(0, 'Modifier le site');
   AddAct(cmSiteProps, 'Param'#138'tres de base...');
-  AddAct(-nkBind, 'Liaisons...');
+  AddAct(cmGoBind, 'Liaisons...');
   AddAct(cmOpenRoot, 'Explorer le dossier');
   AddAct(cmDelSite, 'Supprimer le site');
 End;
@@ -15299,6 +17116,7 @@ Begin
     cmBrowse : BrowseSite(I);
     cmSiteProps : If I >= 0 Then GoNode(nkBasic, I);
     cmEditSite : If I >= 0 Then GoNode(nkSite, I);
+    cmGoBind : If SelSite >= 0 Then GoNode(nkBind, SelSite);
     cmActions :
       Begin
         ShowAct := Not ShowAct;
@@ -15358,6 +17176,113 @@ End;
 { ==================================================================== }
 { Souris, clavier, minuterie                                            }
 { ==================================================================== }
+
+{ menu contextuel de l'arbre (bouton 2) : X, Y coordonnees de PM }
+Var
+  CtxMenu, CtxN : LongInt;
+
+Procedure CtxIt(Id : LongInt; S : String);
+Begin
+  MnItem(MIS_TEXT, 0, Id, S);
+  Inc(CtxN);
+End;
+
+Procedure CtxSep;
+Begin
+  MnItem(MIS_SEPARATOR, 0, 0, '');
+  Inc(CtxN);
+End;
+
+Procedure TreePopup(X, Y : LongInt);
+Var Fst : LongInt;
+Begin
+  MenuLen := 0; CtxN := 0;
+  Dummy := MenuOpen;
+  Fst := cmRefresh;
+  Case SelKind Of
+    nkServer, nkSites :
+      Begin
+        Fst := cmAddSite;
+        CtxIt(cmAddSite, 'Ajouter un ~site Web...');
+        CtxSep;
+        If LastAlive Then
+        Begin
+          CtxIt(cmStop, '~Arr'#136'ter le serveur');
+          CtxIt(cmRestart, '~Red'#130'marrer le serveur');
+        End
+        Else CtxIt(cmStart, '~D'#130'marrer le serveur');
+        CtxSep;
+        If SelKind = nkServer Then
+        Begin
+          CtxIt(cmCert, 'Cr'#130'er un ~certificat auto-sign'#130'...');
+          If AutoStartOn Then MnItem(MIS_TEXT, MIA_CHECKED, cmAutoStart, 'D'#130'marrer avec ~OS/2')
+          Else MnItem(MIS_TEXT, 0, cmAutoStart, 'D'#130'marrer avec ~OS/2');
+          Inc(CtxN);
+          CtxSep;
+        End;
+        CtxIt(cmExpand, 'D'#130'~velopper tout');
+        CtxIt(cmCollapse, 'R'#130'~duire tout');
+        CtxIt(cmRefresh, 'A~ctualiser' + #9 + 'F5');
+      End;
+    nkSite :
+      Begin
+        If Sites[SelSite].Started Then
+        Begin
+          Fst := cmSiteOff;
+          CtxIt(cmSiteOff, '~Arr'#136'ter le site');
+        End
+        Else
+        Begin
+          Fst := cmSiteOn;
+          CtxIt(cmSiteOn, '~D'#130'marrer le site');
+        End;
+        CtxIt(cmBrowse, '~Parcourir');
+        CtxSep;
+        CtxIt(cmSiteProps, 'Param'#138'tres de ~base...');
+        CtxIt(cmGoBind, '~Liaisons...');
+        CtxIt(cmOpenRoot, '~Explorer le dossier');
+        CtxSep;
+        CtxIt(cmAddSite, 'Ajouter un ~site Web...');
+        CtxIt(cmDelSite, 'S~upprimer le site' + #9 + 'Suppr');
+        CtxSep;
+        CtxIt(cmRefresh, 'A~ctualiser' + #9 + 'F5');
+      End;
+    nkLogs :
+      Begin
+        CtxIt(cmRefresh, 'A~ctualiser' + #9 + 'F5');
+        CtxIt(cmClearLog, '~Effacer le journal');
+      End;
+  Else
+    Begin
+      If SelSite >= 0 Then
+      Begin
+        Fst := cmBrowse;
+        CtxIt(cmBrowse, '~Parcourir le site');
+        CtxIt(cmEditSite, '~Accueil du site');
+        CtxSep;
+      End;
+      CtxIt(cmRefresh, 'A~ctualiser' + #9 + 'F5');
+    End;
+  End;
+  CtxSep;
+  CtxIt(cmHelp, 'Ai~de' + #9 + 'F1');
+  MenuClose(0, CtxN);
+  If CtxMenu <> 0 Then Dummy := WinDestroyWindow(CtxMenu);
+  CtxMenu := WinCreateMenu(HWND_DESKTOP, LongInt(@MenuT));
+  If CtxMenu <> 0 Then Dummy := WinPopupMenu(Client, Client, CtxMenu, X, Y, Fst, 0);
+End;
+
+{ bouton 2 : choisir le noeud sous le pointeur, puis son menu }
+Procedure RightClick(X, Y : LongInt);
+Var R : LongInt;
+Begin
+  If (X >= TreeW) Or (Y < TbH) Or (Y >= CH - SbH) Then Exit;
+  Dummy := WinSetFocus(HWND_DESKTOP, Client);
+  R := NTop + (Y - TbH - 4) Div RowH;
+  If (R < 0) Or (R >= NNode) Then Exit;
+  If R <> NSel Then Select(R);
+  TreePopup(X, CH - 1 - Y);
+End;
 
 Procedure Click(X, Y : LongInt; Dbl : Boolean);
 Var I, R, Xn, Cols : LongInt;
@@ -15554,6 +17479,11 @@ Begin
     WM_BUTTON1DBLCLK :
       Begin
         Click(S16(Mp1), CH - 1 - S16(Mp1 Shr 16), True);
+        ClientProc := 1;
+      End;
+    WM_BUTTON2DOWN :
+      Begin
+        RightClick(S16(Mp1), CH - 1 - S16(Mp1 Shr 16));
         ClientProc := 1;
       End;
     WM_CHAR :
@@ -15807,7 +17737,11 @@ Begin
   Asp := UpStr(Copy(Path, Length(Path) - 3, 4)) = '.ASP';
   ScriptPath[0] := Path; ScriptAsp[0] := Asp;
   VmStart(0);
-  While VmOn Do VmRun(100000);
+  While VmOn Do
+  Begin
+    VmRun(100000);
+    If VmWait Then PSleep(1);
+  End;
   If VmErr <> '' Then WriteLn('*** erreur ligne ', VmErrLine, ' : ', VmErr)
   Else If Conns[0].State <> csVm Then WriteLn('*** compilation : ', CErr, ' (ligne ', CErrLine, ')');
   For K := 0 To VmOut.Len - 1 Do Write(Chr(VmOut.P^[K]));
@@ -15824,6 +17758,7 @@ BEGIN
     VmInit;
     If ParamCount >= 3 Then RunPageCli(ParamStr(2), ParamStr(3)) Else RunPageCli(ParamStr(2), '');
   End
+  Else If Arg1 = '/DBTEST' Then DbSelfTest
   Else If (Arg1 = '/SERVICE') Or (Arg1 = '-SERVICE') Then
   Begin
     VmInit;

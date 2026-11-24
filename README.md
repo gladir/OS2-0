@@ -1334,7 +1334,41 @@ Le dossier <b>Outils réseau</b> contient le <b>Serveur Web</b> d'OS/2-0 (WEBSRV
 	<li><b>Hôtes virtuels</b> comme IIS : chaque site a ses liaisons (http ou https, adresse IP, port, nom d'hôte) ; une requête va au site qui répond à l'adresse IP et au port où elle est arrivée et au nom de domaine de son en-tête Host. Les pages .htm et .html partent telles quelles.</li>
 	<li><b>PSP</b> : le langage des compilateurs PSP de DEV-COOLS (bloc <code>&lt;% ... %&gt;</code>, <code>&lt;%= ... %&gt;</code>, var, const, type, procédures et fonctions, tableaux, chaînes, boucles, case, unités de la bibliothèque) ; <b>ASP</b> : VBScript (Dim, ReDim, If, For, For Each, Do, While, Select Case, Function, Sub, With, On Error Resume Next). Les deux langages ont les objets d'ASP : Request (QueryString, Form, Cookies, ServerVariables, BinaryRead), Response, Server, Session, Application, Scripting.Dictionary, Scripting.FileSystemObject. Une page est compilée une fois en code intermédiaire (gardée tant que le fichier ne change pas).</li>
 	<li><b>Fort trafic sans ralentir OS/2</b> : une seule tâche, sockets non bloquants et select (48 connexions en même temps par serveur), classe de priorité « temps libre » (<code>DosSetPriority</code> : tranches de 10 ms, le reste du système passe devant), pages PSP et ASP exécutées par tranches de 20 000 instructions entre lesquelles les autres connexions avancent, fichiers envoyés par blocs, journal écrit par paquets. Dans QEMU : 760 requêtes par seconde (pages statiques), 230 (pages PSP), un programme de calcul garde les deux tiers du processeur pendant la charge.</li>
+	<li><b>Menu contextuel</b> : le bouton 2 de la souris sur un nœud de l'arbre ouvre son menu, comme dans IIS. Sur le serveur et sur <i>Sites</i> : Ajouter un site Web, Démarrer, Arrêter ou Redémarrer le serveur, Créer un certificat, Démarrer avec OS/2, Développer et Réduire tout, Actualiser. Sur un site : Démarrer ou Arrêter le site, Parcourir, Paramètres de base, Liaisons, Explorer le dossier, Ajouter un site, Supprimer le site. Sur une fonctionnalité : Parcourir le site, Accueil du site.</li>
+	<li><b>Bases de données externes</b> : les pages PSP et ASP parlent directement à <b>PostgreSQL</b> (protocole v3 ; authentification SCRAM-SHA-256, md5 ou mot de passe en clair) et à <b>MariaDB</b> ou <b>MySQL</b> (protocole 4.1 ; mysql_native_password, et le chemin rapide de caching_sha2_password), sans pilote ni bibliothèque externe : MD5, SHA-1, PBKDF2, HMAC-SHA-256 et les deux protocoles sont dans WEBSRV.PAS. Une page qui attend sa base ne bloque pas le serveur : la machine des pages reprend l'instruction quand la réponse arrive, et les autres connexions sont servies entre-temps (le socket de la base est dans le <code>select</code> du service). Les connexions authentifiées restent en réserve d'une requête à l'autre (même chaîne de connexion ; huit au plus, fermées après une minute sans usage) : une page qui se reconnecte ne refait pas l'authentification.</li>
 	<li><b>Machines externes</b> : le serveur écoute sur toutes les adresses de la carte réseau ; les autres ordinateurs du réseau l'atteignent par l'adresse d'OS/2-0 (IPCONFIG). Dans QEMU en réseau « user », il faut une redirection de port (<code>hostfwd=tcp::8080-:80</code>) ; dans VirtualBox ou VMware en accès par pont, l'adresse suffit.</li>
+</ul>
+
+Bases de données dans une page PSP (types <code>DatabaseConnection</code> et <code>RecordSet</code>, objet <code>Database</code>) :
+
+<pre>
+&lt;%
+Var
+  Connexion : DatabaseConnection;
+  Resultats : RecordSet;
+BEGIN
+  Connexion := Database.Connect('Provider=PostgreSQL;Server=MONSERVEUR;Database=MaBase;User Id=nom;Password=mdp;');
+  Resultats := Connexion.Query('SELECT * FROM ClientsDemo');
+  While Not Resultats.Eof Do
+  Begin
+    WriteLn('Nom      : ' + Resultats['Nom']);
+    WriteLn('Prenom   : ' + Resultats['Prenom']);
+    Resultats.Next;
+  End;
+  Resultats.Close;
+  Connexion.Close;
+END.
+%&gt;
+</pre>
+
+<ul>
+	<li><b>Chaîne de connexion</b> : <code>Provider=PostgreSQL</code> ou <code>Provider=MariaDB</code> (ou <code>MySQL</code> ; sans Provider, le port 5432 ou 3306 décide), <code>Server</code> (ou <code>Host</code>, <code>Data Source</code> ; <code>hôte,port</code> ou <code>hôte:port</code>), <code>Port</code>, <code>Database</code> (ou <code>Initial Catalog</code>), <code>User Id</code> (ou <code>UID</code>), <code>Password</code> (ou <code>PWD</code>) ; ou la forme URL <code>postgresql://nom:mdp@hôte:port/base</code>, <code>mariadb://…</code>, <code>mysql://…</code>.</li>
+	<li><b>Connexion</b> : <code>Query(sql)</code> rend un RecordSet ; <code>Execute(sql)</code> rend le nombre de lignes touchées (ou un RecordSet si la requête rend des colonnes) ; <code>Quote(texte)</code> rend un littéral SQL entre apostrophes (pour éviter l'injection SQL) ; <code>Connected</code> ; <code>Close</code> (la connexion retourne à la réserve).</li>
+	<li><b>RecordSet</b> : <code>Resultats['Nom']</code> ou <code>Resultats[0]</code> (nom de colonne sans égard à la casse), <code>Eof</code>, <code>Bof</code>, <code>Next</code> (ou <code>MoveNext</code>), <code>MoveFirst</code>, <code>RecordCount</code>, <code>FieldCount</code>, <code>FieldName(i)</code>, <code>Fields('Nom').Name</code> et <code>.Value</code>, <code>RowsAffected</code>, <code>Close</code>. Les entiers, réels et booléens de la base deviennent des nombres et des booléens ; <code>NUMERIC</code> et <code>DECIMAL</code> restent du texte exact (1250.50) ; NULL est vide.</li>
+	<li><b>ASP</b> : <code>Set Cn = Server.CreateObject("ADODB.Connection")</code>, <code>Cn.Open "Provider=MariaDB;…"</code>, <code>Set Rs = Cn.Execute("SELECT …")</code>, <code>Rs("Nom")</code>, <code>Rs.Fields("Nom").Value</code>, <code>Rs.Fields.Count</code>, <code>Rs.EOF</code>, <code>Rs.MoveNext</code>, et <code>ADODB.Recordset</code> avec <code>Rs.Open sql, Cn</code>.</li>
+	<li><b>Erreurs</b> : une erreur de la base (mot de passe refusé, table inconnue…) arrête la page avec son message et son code SQLSTATE, comme les autres erreurs d'exécution (<code>On Error Resume Next</code> en ASP).</li>
+	<li><b>Limites</b> : pas de chiffrement TLS vers la base (le serveur de bases doit accepter les connexions non chiffrées : <code>host</code> dans pg_hba.conf) ; pas de SQL Server pour l'instant ; caching_sha2_password de MySQL 8 n'accepte que le chemin rapide sans TLS : créez l'utilisateur avec mysql_native_password.</li>
+	<li><code>WEBSRV /DBTEST</code> vérifie MD5, SHA-1, PBKDF2 et SCRAM-SHA-256 (vecteur de la RFC 7677).</li>
 </ul>
 
 <img width="1024" height="768" alt="OS/2-0 : Serveur Web, accueil du Site Web par défaut, volet Actions" src="IMAGE/SERVEUR_WEB.png" />
@@ -1348,6 +1382,8 @@ Pour le Serveur Web, le système a reçu :
 	<li><b>Pilotes réseau</b> : anneaux de réception plus grands (E1000 48 descripteurs, PCNET 64) pour les rafales de nombreux clients.</li>
 	<li><b>Noyau</b> : ligne <code>RUN=</code> de CONFIG.SYS (jusqu'à 8 programmes détachés lancés avant le bureau) ; classe de priorité « temps libre » (<code>DosSetPriority</code>, KrnTaskCtl 36 : tranche de 10 ms, puis deux tours passés) ; recherche dans les répertoires du CD-ROM (ISO 9660) en une passe avec reprise à la dernière position : ouvrir ou interroger un fichier passe de 100 ms à 0,1 ms.</li>
 </ul>
+
+En écrivant les clients des bases de données, deux autres pièges d'OS2PC ont été contournés dans WEBSRV.PAS : un littéral chaîne contenant <code>#0</code> (<code>Salt + #0#0#0#1</code>) est coupé au premier octet nul (les littéraux sont rangés en chaînes ASCIIZ) ; et, dans un <code>With</code>, un champ nommé <code>Port</code> est pris pour le tableau <code>Port[]</code> de Turbo Pascal (le champ s'appelle <code>DbPort</code>).
 
 Ce travail a corrigé deux défauts d'<b>OS2PC</b>, valables pour tous les programmes :
 <ul>
