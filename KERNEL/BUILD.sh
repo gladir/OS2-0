@@ -266,9 +266,9 @@ echo "== Outils reseau (OS2PC : APPS/FTPCLI.PAS, Client FTP et SFTP, APPS/SSHCLI
 "$W/os2pc" -Q "$ROOT/APPS/SVNCLI.PAS" "$W/cd/SVNCLI.EXE"
 # Serveur Web (dossier Outils reseau) : un seul source, APPS/WEBSRV.PAS, pour
 # le serveur (WEBSRV /SERVICE : HTTP/1.1, HTTPS TLS 1.3, hotes virtuels,
-# moteurs PSP et ASP integres) et sa console de Presentation Manager dans le
+# moteurs PSP, ASP et PHP integres) et sa console de Presentation Manager dans le
 # style d'IIS (WEBSRV sans parametre) ; aucune dependance externe
-echo "== Serveur Web (OS2PC : APPS/WEBSRV.PAS, HTTP/HTTPS, PSP, ASP, console dans le style d'IIS)"
+echo "== Serveur Web (OS2PC : APPS/WEBSRV.PAS, HTTP/HTTPS, PSP, ASP, PHP, console dans le style d'IIS)"
 "$W/os2pc" -Q "$ROOT/APPS/WEBSRV.PAS" "$W/cd/WEBSRV.EXE"
 # Web Developer (dossier Developer Kit) : editeur de pages Web dans le genre de
 # HomeSite (arbre des dossiers, liste des fichiers, coloration HTML, ASP, PSP,

@@ -1333,8 +1333,8 @@ Serveur Web (WEBSRV.EXE, dossier Outils reseau)
 Serveur HTTP et HTTPS d'OS/2-0 et sa console dans le style d'IIS, en un
 seul fichier source (APPS\WEBSRV.PAS), sans dependance externe : le
 serveur, TLS 1.3 (AES-GCM, X25519, ECDSA P-256), les moteurs PSP (Pascal
-Server Pages, le langage des compilateurs PSP de DEV-COOLS) et ASP
-(VBScript), et la console de Presentation Manager.
+Server Pages, le langage des compilateurs PSP de DEV-COOLS), ASP
+(VBScript) et PHP, et la console de Presentation Manager.
 Console (WEBSRV sans parametre) : menus Fichier, Action, Affichage,
 Outils et ? ; barre d'outils ; a gauche l'arbre (le serveur, ses Sites et
 leurs fonctionnalites : Liaisons, Parametres de base, Document par defaut,
@@ -1378,6 +1378,20 @@ ASP : Server.CreateObject("ADODB.Connection"), .Open, .Execute, Rs("Nom"),
 Rs.EOF, Rs.MoveNext. Une page qui attend sa base ne bloque pas le serveur ;
 les connexions restent en reserve d'une requete a l'autre. Pas de TLS vers
 la base ni de SQL Server pour l'instant. WEBSRV /DBTEST : MD5, SHA-1, SCRAM.
+PHP compile : les pages .php (lexique et fonctions du compilateur PHPCW32
+de DEV-COOLS, recrits dans WEBSRV.PAS) sont compilees une fois vers la
+machine des pages PSP et ASP. <?php ?>, <?= ?>, interpolation, heredoc,
+syntaxe alternative (endif, endforeach...), fonctions (defauts, &refs,
+global, static), include/require, tableaux associatifs ordonnes, list(),
+??, ??=, <=>, ** ; environ 280 fonctions (chaines, tableaux, maths,
+dates, JSON, sprintf, fichiers, en-tetes, sessions, ob_start) ;
+$_GET, $_POST, $_REQUEST, $_COOKIE, $_SERVER, $_FILES, $_SESSION ;
+mysqli (procedural et objet, prepare/bind_param/get_result), pg_*
+(pg_query_params) et PDO (mysql: et pgsql:, ? et :nom). Les pages
+d'essai donnent une sortie identique a PHP 8. Limites : pas de classes
+(throw arrete la page), ni de fonctions anonymes, ni de preg_*.
+Console : Mappages de gestionnaires -> *.php : PHP ; index.php est un
+document par defaut ; le Site Web par defaut contient demo.php.
   OS2PC APPS\WEBSRV.PAS                     -> WEBSRV.EXE
 OS2PC corrige au passage (tous les programmes) : un parametre chaine
 (litteral, concatenation, resultat de fonction) n'est plus ecrase par un
@@ -1958,8 +1972,8 @@ Serveur Web (C:\WWW\ROOT ou D:\WWW\ROOT).
     UTF-8 est affiche en CP850 et reenregistre en UTF-8 ;
   - F12 Parcourir : la page dans le Navigateur Web, par
     http://localhost/ si elle est dans un site du Serveur Web en marche
-    (le code PSP ou ASP est alors execute), sinon par file:/// ;
-  - Ctrl+F9 Executer la page (PSP, ASP) : WEBSRV /PSPOUT, le resultat
+    (le code PSP, ASP ou PHP est alors execute), sinon par file:/// ;
+  - Ctrl+F9 Executer la page (PSP, ASP, PHP) : WEBSRV /PSPOUT, le resultat
     dans un nouvel onglet.
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
