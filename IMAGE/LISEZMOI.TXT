@@ -32,7 +32,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               WORDIUM.EXE, MONSTER.GAT, LETTRE.PDF, EXCELSIO.EXE, BUDGET.XLC,
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE, IPCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, CURL.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
-              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, GITCLI.EXE, SVNCLI.EXE, VIRTUAL.EXE, DEMARRE.WAV,
+              GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, GITCLI.EXE, SVNCLI.EXE, VIRTUAL.EXE,
+              SQLDEV.EXE, SQLCMD.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -164,6 +165,8 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC DEVMGR.PAS                          -> DEVMGR.EXE (Gestionnaire de peripheriques)
   OS2PC IFCONFIG.PAS, PING.PAS, HOST.PAS, WGET.PAS -> commandes du reseau
   OS2PC IPCONFIG.PAS, CURL.PAS               -> IPCONFIG et CURL (Pasdows 95)
+  OS2PC APPS\SQLDEV.PAS                     -> SQLDEV.EXE (SQL Developer)
+  OS2PC SQLCMD.PAS                          -> SQLCMD.EXE (bases SQL Server .MDF)
   OS2PC -Q DLL\SMB.PAS                     -> SMB.IFS (lecteurs reseau SMB2)
   OS2PC NET.PAS                             -> NET.EXE (NET USE)
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
@@ -1975,6 +1978,46 @@ Serveur Web (C:\WWW\ROOT ou D:\WWW\ROOT).
     (le code PSP, ASP ou PHP est alors execute), sinon par file:/// ;
   - Ctrl+F9 Executer la page (PSP, ASP, PHP) : WEBSRV /PSPOUT, le resultat
     dans un nouvel onglet.
+
+SQL Developer (SQLDEV.EXE, dossier Developer Kit)
+------------------------------------------------
+Outil des bases de donnees dans l'esprit de SQL Server Management Studio,
+avec l'apparence et les menus d'OS/2 (source APPS\SQLDEV.PAS, un seul
+fichier compile par OS2PC). Bureau - Developer Kit - SQL Developer, ou
+SQLDEV fichier... Il reprend l'idee du prototype de DEVENV (DEV-COOLS) :
+  - a gauche : l'Explorateur d'objets (F8 le cache), un arbre deplie a la
+    demande : serveur, Bases de donnees, schemas, Tables, Vues, Colonnes
+    (avec leur type), Index, Declencheurs, procedures, fonctions,
+    sequences, Securite ; double clic sur une table : ses 1000 premieres
+    lignes ; bouton 2 : Nouvelle requete, Generer le script de la table
+    (CREATE TABLE, SELECT, INSERT, UPDATE, DELETE), Actualiser, Copier le
+    nom, Deconnecter, Proprietes, Supprimer la connexion ;
+  - en haut a droite : l'editeur SQL a coloration syntaxique (mots-cles,
+    types, fonctions, chaines, nombres, commentaires), une requete par
+    onglet, liste Base : de la barre d'outils ;
+  - en bas a droite : une grille par jeu de resultats (numeros de ligne,
+    colonnes redimensionnables, NULL en gris) et l'onglet Messages
+    (lignes touchees, erreurs du serveur, heure d'achevement) ;
+  - F5 executer (le texte ou la selection ; instructions separees par ;
+    ou GO), Echap arreter, Ctrl+N nouvelle requete, Ctrl+O ouvrir,
+    Ctrl+S enregistrer, Ctrl+R volet des resultats, Ctrl+Tab requete
+    suivante, Ctrl+Maj+C commentaire --, Ctrl+F rechercher, Ctrl+H
+    remplacer, Ctrl+G aller a la ligne ;
+  - Outils - Se connecter : PostgreSQL (protocole v3, SCRAM-SHA-256,
+    md5), MariaDB ou MySQL (protocole 4.1), base SQL Server en fichier
+    .MDF, dossier de tables ; connexions memorisees dans SQLDEV.INI ;
+  - les bases .MDF sont lues et ecrites par SQLCMD.EXE (SQLCMD.PAS, le
+    clone de SQL Server en ligne de commande), un programme separe que
+    SQL Developer lance pour chaque instruction ;
+  - tables en fichiers : dBASE III (.DBF, memos .DBT), CSV, Clarion et
+    Btrieve (.DAT), MyISAM (.MYD, lecture seule) ; le moteur SQL local
+    execute SELECT (DISTINCT, TOP, WHERE, GROUP BY, HAVING, ORDER BY,
+    LIMIT, OFFSET, agregats, CASE, LIKE, IN, BETWEEN), UPDATE, INSERT et
+    DELETE ; apres SELECT * d'une table, F2 ou double clic modifie une
+    cellule (Entree : enregistre dans le fichier, Echap : annule) ;
+  - SQLDEV /DIR dossier, /PG ou /MY hote:port:utilisateur:mot de
+    passe:base, fichier.SQL /RUN (executer) /OUT fichier (resultats et
+    messages ecrits, puis fin du programme).
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------
