@@ -182,7 +182,7 @@ Const
   IC_BLACKJAK = 87; IC_BLOX = 88; IC_GOLF = 89; IC_FROGGER = 90; IC_HANGMAN = 91; IC_LIGHTS = 92;
   IC_VIRTUAL = 93; IC_LUNAR = 94; IC_BOSTON = 95; IC_CANNONBA = 96; IC_BINGO = 97; IC_CRAPS = 98;
   IC_ROULETTE = 99; IC_XIANGQI = 100; IC_TTT3D = 101; IC_PATIENCE = 102; IC_PLOMBIER = 103;
-  IC_SVNCLI = 104; IC_GITCLI = 105; IC_WEBSRV = 106;
+  IC_SVNCLI = 104; IC_GITCLI = 105; IC_WEBSRV = 106; IC_WEBDEV = 107;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1801,6 +1801,9 @@ Begin
         { Developer Kit : l'EDI Pascal Developer (compilateur OS2PC.EXE) }
         If PasDevPath <> '' Then
           Dummy := NewItem(V, IC_PASDEV, OB_GAME, 'Pascal Developer', PasDevPath);
+        { Web Developer : pages HTML, ASP, PSP, PHP, CSS, JavaScript (genre HomeSite) }
+        If FileExists('C:\WEBDEV.EXE') Then
+          Dummy := NewItem(V, IC_WEBDEV, OB_GAME, 'Web Developer', 'C:\WEBDEV.EXE');
         { debogueur des programmes d'OS/2-0 (dans l'esprit de Turbo Debugger) }
         If FileExists('C:\OS2DBG.EXE') Then
           Dummy := NewItem(V, IC_DEBUGGER, OB_GAME, 'OS2-Zero Debugger', 'C:\OS2DBG.EXE');
@@ -3499,6 +3502,22 @@ Begin
         GDisc(Hps, X + 12, Y + 16, 3, CLR_RED);
         GDisc(Hps, X + 12, Y + 25, 3, CLR_RED);
         GDisc(Hps, X + 22, Y + 23, 3, CLR_GREEN);
+      End;
+    IC_WEBDEV :
+      Begin
+        { page de code (balises colorees) et petit globe du Web }
+        FBox(Hps, X + 2, Y + 6, X + 22, Y + 29, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 5, Y + 25, X + 13, Y + 25, CLR_DARKBLUE);
+        GLn(Hps, X + 7, Y + 22, X + 18, Y + 22, CLR_DARKRED);
+        GLn(Hps, X + 7, Y + 19, X + 16, Y + 19, CLR_DARKGREEN);
+        GLn(Hps, X + 7, Y + 16, X + 13, Y + 16, CLR_DARKPINK);
+        GLn(Hps, X + 5, Y + 13, X + 12, Y + 13, CLR_DARKBLUE);
+        GDisc(Hps, X + 22, Y + 9, 8, CLR_BLACK);
+        GDisc(Hps, X + 22, Y + 9, 7, CLR_BLUE);
+        GDisc(Hps, X + 20, Y + 11, 2, CLR_DARKGREEN);
+        GDisc(Hps, X + 25, Y + 6, 2, CLR_DARKGREEN);
+        GLn(Hps, X + 15, Y + 9, X + 29, Y + 9, CLR_CYAN);
+        GLn(Hps, X + 22, Y + 2, X + 22, Y + 16, CLR_CYAN);
       End;
     IC_WEBSRV :
       Begin
