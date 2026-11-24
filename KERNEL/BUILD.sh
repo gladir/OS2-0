@@ -264,6 +264,12 @@ echo "== Outils reseau (OS2PC : APPS/FTPCLI.PAS, Client FTP et SFTP, APPS/SSHCLI
 "$W/os2pc" -Q "$ROOT/APPS/MSTSC.PAS" "$W/cd/MSTSC.EXE"
 "$W/os2pc" -Q "$ROOT/APPS/GITCLI.PAS" "$W/cd/GITCLI.EXE"
 "$W/os2pc" -Q "$ROOT/APPS/SVNCLI.PAS" "$W/cd/SVNCLI.EXE"
+# Serveur Web (dossier Outils reseau) : un seul source, APPS/WEBSRV.PAS, pour
+# le serveur (WEBSRV /SERVICE : HTTP/1.1, HTTPS TLS 1.3, hotes virtuels,
+# moteurs PSP et ASP integres) et sa console de Presentation Manager dans le
+# style d'IIS (WEBSRV sans parametre) ; aucune dependance externe
+echo "== Serveur Web (OS2PC : APPS/WEBSRV.PAS, HTTP/HTTPS, PSP, ASP, console dans le style d'IIS)"
+"$W/os2pc" -Q "$ROOT/APPS/WEBSRV.PAS" "$W/cd/WEBSRV.EXE"
 echo "== Virtualisation (OS2PC : APPS/VIRTUAL.PAS, machines de VirtualBox par AMD-V, Intel VT-x ou mode V86, KrnVirt du noyau)"
 "$W/os2pc" -Q "$ROOT/APPS/VIRTUAL.PAS" "$W/cd/VIRTUAL.EXE"
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"

@@ -257,6 +257,8 @@ Type
     MemLive   : Boolean;     { memoire physique pas encore rendue }
     HandleOpen : Boolean;    { handle du processus ouvert (code de sortie) }
     NoPreempt : Boolean;     { pas de preemption (programme de PM) }
+    PrioCls   : LongInt;     { classe de priorite (DosSetPriority) : 1 temps
+                               libre (tranche de 10 ms au lieu de 30) }
     NextTid   : LongInt;     { prochain identificateur de fil }
     Sess      : LongInt;     { session (ecran et clavier) }
     ConSess   : LongInt;     { session de la console (sortie standard) }
@@ -364,6 +366,7 @@ Var
   { Taches (multitache) : la tache 0 est le noyau ; chaque processus a son
     fil 1 et ses fils crees par KrnTaskCtl }
   TkUsed           : Array[0..MaxTasks - 1] Of LongInt;   { 0 libre, 1 active, 2 morte }
+  TkSkip : Array[0..MaxTasks - 1] Of LongInt;   { tours a laisser passer (classe temps libre) }
   TkProc, TkEsp, TkStack, TkLastErr, TkTid, TkFn, TkArg : Array[0..MaxTasks - 1] Of LongInt;
   CurTask, NTasks, IdleStreak, SliceStart, SwSave, SwNew, TmpIntEbp : LongInt;
   SwPde            : LongInt;       { entree 0 du repertoire de la tache reprise }
@@ -982,7 +985,10 @@ Begin
     If (NTasks > 1) And (Ticks - SliceStart >= 3) Then Preempt;
     Exit;
   End;
-  If (NTasks > 1) And (CurTask > 0) And (Ticks - SliceStart >= 3) Then
+  { tranche de temps : 30 ms, 10 ms pour un programme de la classe
+    "temps libre" (serveur Web : il ne ralentit pas les autres) }
+  If (NTasks > 1) And (CurTask > 0) And ((Ticks - SliceStart >= 3) Or
+     ((Ticks - SliceStart >= 1) And (CurProc >= 0) And (Procs[CurProc].PrioCls = 1))) Then
   Begin
     If ((MemL[0:TmpIntEbp + 44] >= ProcWinBase) And (MemL[0:TmpIntEbp + 44] < ProcWinBase + ProcWinSize)) Or
        ((MemL[0:TmpIntEbp + 48] And 3) = 3) Then
@@ -2831,6 +2837,7 @@ Type
 
 Const
   MaxIfs = 4;
+  MaxRun = 8;
 
 Var
   Blks   : Array[0..MaxBlk - 1] Of TBlk;
@@ -2842,6 +2849,8 @@ Var
   IfsLines : Array[0..MaxIfs - 1] Of String;   { lignes IFS= de CONFIG.SYS }
   RamDiskKb : LongInt;                           { /RAMDISK:n de la ligne IFS= }
   NIfsLines : LongInt;
+  RunLines : Array[0..MaxRun - 1] Of String;   { lignes RUN= de CONFIG.SYS }
+  NRunLines : LongInt;
   Disks  : Array[0..3] Of TDisk;
   NDisk  : LongInt;
   { amorcage depuis un disque dur (MBR d'OS/2-0, zone d'amorcage) : C:
@@ -3190,18 +3199,28 @@ End;
 
 { Entree numero Index (0 = premiere) d'un repertoire ISO 9660.
   Les entrees "." et ".." ne sont rendues que hors de la racine. }
+Var
+  IsoCLba, IsoCIdx, IsoCSect, IsoCOfs : LongInt;   { position du dernier IsoDirEntry }
+
 Function IsoDirEntry(DirLba, DirSize, Index : LongInt; Var Name : String;
                      Var Lba, Size, Attr, Time : LongInt) : Boolean;
-Var Sect, NSect, A, Ofs, Len, N, I, Cnt, NL : LongInt; C : Char;
+Var Sect, NSect, A, Ofs, Len, N, I, Cnt, NL, S0, O0 : LongInt; C : Char;
 Begin
   IsoDirEntry := False;
   Cnt := 0;
   NSect := (DirSize + 2047) Div 2048;
-  For Sect := 0 To NSect - 1 Do
+  { reprise de la position de l'appel precedent (parcours d'un repertoire :
+    sans elle, lire l'entree n relisait les n - 1 precedentes) }
+  S0 := 0; O0 := 0;
+  If (IsoCLba = DirLba) And (IsoCIdx <= Index) And (IsoCIdx > 0) Then
+  Begin
+    S0 := IsoCSect; O0 := IsoCOfs; Cnt := IsoCIdx;
+  End;
+  For Sect := S0 To NSect - 1 Do
   Begin
     A := CdSector(DirLba + Sect);
     If A = 0 Then Exit;
-    Ofs := 0;
+    If Sect = S0 Then Ofs := O0 Else Ofs := 0;
     While Ofs < 2048 Do
     Begin
       Len := Mem[0:A + Ofs];
@@ -3225,6 +3244,7 @@ Begin
         Begin
           If Cnt = Index Then
           Begin
+            IsoCLba := DirLba; IsoCIdx := Index + 1; IsoCSect := Sect; IsoCOfs := Ofs + Len;
             Lba := GetD(A + Ofs + 2);
             Size := GetD(A + Ofs + 10);
             If (Mem[0:A + Ofs + 25] And 2) <> 0 Then Attr := FileAttrDirectory Or FileAttrReadOnly
@@ -3238,6 +3258,52 @@ Begin
         End;
         Ofs := Ofs + Len;
       End;
+    End;
+  End;
+End;
+
+{ Chercher le nom Comp (majuscules) dans un repertoire : une seule passe,
+  comparaison des octets (sans fabriquer de chaines) }
+Function IsoFind(DirLba, DirSize : LongInt; Var Comp : String; Var Lba, Size, Attr, Time : LongInt) : Boolean;
+Var Sect, NSect, A, Ofs, Len, NL, K, I : LongInt; Ok : Boolean;
+Begin
+  IsoFind := False;
+  NSect := (DirSize + 2047) Div 2048;
+  For Sect := 0 To NSect - 1 Do
+  Begin
+    A := CdSector(DirLba + Sect);
+    If A = 0 Then Exit;
+    Ofs := 0;
+    While Ofs < 2048 Do
+    Begin
+      Len := Mem[0:A + Ofs];
+      If Len = 0 Then Break;
+      NL := Mem[0:A + Ofs + 32];
+      K := 0;
+      While (K < NL) And (Mem[0:A + Ofs + 33 + K] <> 59) Do Inc(K);
+      If (K > 1) And (Mem[0:A + Ofs + 33 + K - 1] = 46) Then Dec(K);
+      If (K = Length(Comp)) And Not ((NL = 1) And (Mem[0:A + Ofs + 33] <= 1)) Then
+      Begin
+        Ok := True;
+        For I := 1 To K Do
+          If UpCase(Chr(Mem[0:A + Ofs + 32 + I])) <> Comp[I] Then
+          Begin
+            Ok := False;
+            Break;
+          End;
+        If Ok Then
+        Begin
+          Lba := GetD(A + Ofs + 2);
+          Size := GetD(A + Ofs + 10);
+          If (Mem[0:A + Ofs + 25] And 2) <> 0 Then Attr := FileAttrDirectory Or FileAttrReadOnly
+          Else Attr := FileAttrReadOnly Or FileAttrArchive;
+          If (Mem[0:A + Ofs + 25] And 1) <> 0 Then Attr := Attr Or FileAttrHidden;
+          Time := IsoTime(A + Ofs + 18);
+          IsoFind := True;
+          Exit;
+        End;
+      End;
+      Ofs := Ofs + Len;
     End;
   End;
 End;
@@ -3264,19 +3330,9 @@ Begin
     End;
     If Comp = '' Then Continue;
     If (Attr And FileAttrDirectory) = 0 Then Exit;
-    Found := False;
-    I := 0;
-    While IsoDirEntry(Lba, Size, I, Nm, ELba, ESize, EAttr, ETime) Do
-    Begin
-      If Nm = Comp Then
-      Begin
-        Lba := ELba; Size := ESize; Attr := EAttr; Time := ETime;
-        Found := True;
-        Break;
-      End;
-      Inc(I);
-    End;
-    If Not Found Then Exit;
+    If (Comp = '.') Or (Comp = '..') Then Continue;
+    If Not IsoFind(Lba, Size, Comp, ELba, ESize, EAttr, ETime) Then Exit;
+    Lba := ELba; Size := ESize; Attr := EAttr; Time := ETime;
   End;
   IsoLookup := True;
 End;
@@ -6864,6 +6920,7 @@ Begin
   Procs[Pid].MemLive := True;
   Procs[Pid].HandleOpen := False;
   Procs[Pid].NoPreempt := False;
+  Procs[Pid].PrioCls := 2;
   Procs[Pid].NextTid := 2;
   Procs[Pid].Sess := 0;
   If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
@@ -7383,18 +7440,28 @@ Begin
 End;
 
 Function NextTask : LongInt;
-Var I, T : LongInt;
+Var I, T, Skipped : LongInt;
 Begin
   NextTask := CurTask;
+  Skipped := -1;
   For I := 1 To MaxTasks Do
   Begin
     T := (CurTask + I) Mod MaxTasks;
     If TkUsed[T] = 1 Then
     Begin
+      { tache "temps libre" interrompue par la minuterie : elle laisse
+        passer deux tours (serveur Web charge : le reste ne ralentit pas) }
+      If (TkSkip[T] > 0) And (T <> CurTask) Then
+      Begin
+        Dec(TkSkip[T]);
+        If Skipped < 0 Then Skipped := T;
+        Continue;
+      End;
       NextTask := T;
       Exit;
     End;
   End;
+  If Skipped >= 0 Then NextTask := Skipped;
 End;
 
 { Passer a la tache N (interruptions masquees par l'appelant) }
@@ -7521,6 +7588,7 @@ End;
 Procedure Preempt;
 Begin
   If (CurProc >= 0) And Procs[CurProc].NoPreempt Then Exit;
+  If (CurProc >= 0) And (Procs[CurProc].PrioCls = 1) Then TkSkip[CurTask] := 2;
   SwitchTo(NextTask);
 End;
 
@@ -7596,6 +7664,7 @@ Begin
   asm
     cli
   end;
+  TkSkip[T] := 0;
   TkUsed[T] := 1;
   Inc(NTasks);
   asm
@@ -7842,7 +7911,9 @@ End;
    12 nombre de taches qui peuvent encore agir pour l'appelant (autres
       fils du processus, autres processus qui ne sont pas ses ancetres)
    13 arreter le fil p1 du processus (pas le fil courant)
-   14 identificateur du prochain fil cree (p1) }
+   14 identificateur du prochain fil cree (p1)
+   36 classe de priorite du processus courant (p1 : 1 temps libre, 2
+      normale, 3 critique, 4 serveur ; 0 : inchangee) ; rend la classe }
 Function ProcBySerial(S : LongInt) : LongInt;
 Var I, R : LongInt;
 Begin
@@ -8214,6 +8285,12 @@ Begin
           Else If P2 <> 0 Then MemL[0:P2] := Procs[P].ExitCode;
         End;
     4 : If CurProc >= 0 Then Procs[CurProc].NoPreempt := P1 <> 0;
+   36 : If CurProc >= 0 Then
+        Begin
+          { classe de priorite du processus (DosSetPriority) }
+          If (P1 >= 1) And (P1 <= 4) Then Procs[CurProc].PrioCls := P1;
+          KrnTaskCtl := Procs[CurProc].PrioCls;
+        End;
     5 : Begin
           P := ProcBySerial(P1);
           If (P < 0) Or Not Procs[P].Running Then KrnTaskCtl := -1
@@ -9043,8 +9120,8 @@ End;
 { Partie 14 - Demarrage du systeme                                     }
 { ==================================================================== }
 
-{ CONFIG.SYS : PROTSHELL=, LIBPATH=, IFS=, COUNTRY=, SET NOM=VALEUR ; les autres
-  lignes (DEVICE=, BUFFERS=...) sont acceptees sans effet }
+{ CONFIG.SYS : PROTSHELL=, LIBPATH=, IFS=, COUNTRY=, RUN=, SET NOM=VALEUR ; les
+  autres lignes (DEVICE=, BUFFERS=...) sont acceptees sans effet }
 Procedure ReadConfigSys;
 Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
 
@@ -9061,6 +9138,16 @@ Var Buf, Size, I, P : LongInt; Line, U : String; C : Char;
     End
     Else If Copy(U, 1, 8) = 'LIBPATH=' Then
       LibPath := Trim(Copy(Line, 9, 255))
+    Else If Copy(U, 1, 4) = 'RUN=' Then
+    Begin
+      { RUN=programme [arguments] : programme detache lance au demarrage
+        (serveur Web : RUN=C:\WEBSRV.EXE /SERVICE) }
+      If NRunLines < MaxRun Then
+      Begin
+        RunLines[NRunLines] := Trim(Copy(Line, 5, 255));
+        Inc(NRunLines);
+      End;
+    End
     Else If Copy(U, 1, 4) = 'IFS=' Then
     Begin
       If NIfsLines < MaxIfs Then
@@ -17600,6 +17687,7 @@ Begin
   Procs[Pid].MemLive := True;
   Procs[Pid].HandleOpen := False;
   Procs[Pid].NoPreempt := False;
+  Procs[Pid].PrioCls := 2;
   Procs[Pid].NextTid := 2;
   Procs[Pid].Sess := 0;
   If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
@@ -18691,6 +18779,7 @@ Begin
   Procs[Pid].CurDir := CurDir;
   Procs[Pid].HandleOpen := False;
   Procs[Pid].NoPreempt := False;
+  Procs[Pid].PrioCls := 2;
   Procs[Pid].NextTid := 2;
   Procs[Pid].Sess := 0;
   If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
@@ -19548,6 +19637,7 @@ Begin
   Procs[Pid].CurDir := CurDir;
   Procs[Pid].HandleOpen := False;
   Procs[Pid].NoPreempt := False;
+  Procs[Pid].PrioCls := 2;
   Procs[Pid].NextTid := 2;
   Procs[Pid].Sess := 0;
   If CurProc >= 0 Then Procs[Pid].Sess := Procs[CurProc].Sess;
@@ -21909,6 +21999,7 @@ BEGIN
   EnvSet('PATH', 'C:\');
   EnvSet('PROMPT', '$i[$p]');
   EnvSet('OS2_SHELL', 'C:\CMD.EXE');
+  NRunLines := 0;
   If HdBoot Then
   Begin
     { C: : partition HPFS du disque dur, montee avant la lecture de
@@ -21958,6 +22049,31 @@ BEGIN
   End;
   If HdBoot And AtaFound And (CdLetter < 0) Then CdMount;
   PutPStr(LongInt(@KCmdLine), 'OS2KRNL', 256);
+  { RUN= : programmes detaches, lances avant le processeur de commandes
+    et jamais attendus }
+  For I := 0 To NRunLines - 1 Do
+  Begin
+    P2 := RunLines[I];
+    ShellCmd := '';
+    If Pos(' ', P2) > 0 Then
+    Begin
+      ShellCmd := Trim(Copy(P2, Pos(' ', P2) + 1, 255));
+      P2 := Copy(P2, 1, Pos(' ', P2) - 1);
+    End;
+    P2 := FindProgram(P2);
+    If P2 = '' Then KLog('SYS1041: RUN=' + RunLines[I] + ' : programme introuvable.')
+    Else
+    Begin
+      Pid := LoadProgram(P2, '"' + P2 + '" ' + ShellCmd);
+      If Pid < 0 Then KLog('SYS1041: Impossible de charger ' + P2 + ' (erreur ' + IntStr(LastError) + ').')
+      Else
+      Begin
+        Procs[Pid].Parent := -1;
+        If StartProcess(Pid) Then KLog('RUN=' + RunLines[I] + ' : lance (PID ' + IntStr(Procs[Pid].Serial) + ').')
+        Else KLog('SYS1041: Impossible de demarrer ' + P2 + '.');
+      End;
+    End;
+  End;
   { processeur de commandes (PROTSHELL) : relance a sa fin }
   Runs := 0;
   Repeat

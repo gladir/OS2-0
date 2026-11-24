@@ -5610,7 +5610,7 @@ End;
   inchangee, 1 inactive, 2 normale, 3 temps critique, 4 serveur ;
   delta -31..31 }
 Function DosSetPriority(Scope, PClass, Delta, Id : LongInt) : LongInt;
-Var P, T, V : LongInt;
+Var P, T, V, A : LongInt;
 Begin
   If (Scope < 0) Or (Scope > 2) Then
   Begin
@@ -5659,6 +5659,10 @@ Begin
   End
   Else
     PRecs[P].Prio := V;
+  { classe du processus : le noyau donne une tranche de temps plus courte
+    a la classe "temps libre" (1) }
+  If (Scope <> 2) And (PClass <> 0) Then A := KTaskCtl(36, PClass, 0, 0)
+  Else If (Scope = 2) And ((Id = 0) Or (Id = 1)) And (PClass <> 0) Then A := KTaskCtl(36, PClass, 0, 0);
   DosSetPriority := NO_ERROR;
 End;
 

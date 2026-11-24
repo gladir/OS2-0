@@ -20,12 +20,12 @@ Library PCNET;
   NETREQUEST, ordinal 1, paquet de requete).
   La carte passe en mode 32 bits (ecriture d'un mot double dans RDP),
   structures du style 2 (BCR20 = 2 : descripteurs de 16 octets) ; bloc
-  d'initialisation (adresse MAC lue dans l'APROM, anneaux de 16
-  descripteurs en reception et 8 en emission, tampons de 1,5 Ko) ; CSR0 :
+  d'initialisation (adresse MAC lue dans l'APROM, anneaux de 64
+  descripteurs en reception et 16 en emission, tampons de 1,5 Ko) ; CSR0 :
   INIT puis STRT, TDMD pour envoyer. Sans interruption (IENA a 0). }
 
 Const
-  NRX = 16; NTX = 8; BUFSZ = 1544;
+  NRX = 64; NTX = 16; BUFSZ = 1544;
   RDP = $10; RAP = $14; RST = $18; BDP = $1C;
 
 Var
@@ -283,8 +283,8 @@ Begin
     WrL(TxRing + K * 16 + 4, $F000);
     WrL(TxRing + K * 16 + 8, 0); WrL(TxRing + K * 16 + 12, 0);
   End;
-  { bloc d'initialisation : MODE 0, RLEN = log2(16) = 4, TLEN = log2(8) = 3 }
-  WrL(Init, 0 Or ((4 Shl 4) Shl 16) Or ((3 Shl 4) Shl 24));
+  { bloc d'initialisation : MODE 0, RLEN = log2(64) = 6, TLEN = log2(16) = 4 }
+  WrL(Init, 0 Or ((6 Shl 4) Shl 16) Or ((4 Shl 4) Shl 24));
   For K := 0 To 5 Do WrB(Init + 4 + K, Mac[K]);
   WrB(Init + 10, 0); WrB(Init + 11, 0);
   WrL(Init + 12, 0); WrL(Init + 16, 0);              { pas de multidiffusion }

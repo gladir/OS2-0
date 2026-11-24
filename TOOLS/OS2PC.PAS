@@ -6012,6 +6012,8 @@ Begin
   EmitRaw('STR_PASBUF  DB 256 DUP(0)');  { buffer pour StrPas (PChar->Pascal)     }
   EmitRaw('STRRING     DB 65536 DUP(0)'); { anneau : resultats de fonctions String (256 x 256) }
   EmitRaw('STRRINGIDX  DD 0');
+  EmitRaw('STRPINN     DD 0');               { tampons de l anneau epingles (parametres) }
+  EmitRaw('STRPIN      DD 16 DUP(0)');
   EmitComment('--- Variables Printer (unite Printer emulation) ---');
   EmitRaw('PRN_HANDLE  DD -1');          { handle fichier imprimante (NUL)        }
   EmitRaw('PRN_FNAME   DB ''NUL'',0');   { nom fichier imprimante par defaut      }
@@ -11910,6 +11912,7 @@ Procedure ParseExpr(PI : LongInt); Forward;
 Procedure ParseExprPrec(PI : LongInt; MinPrec : LongInt); Forward;
 Procedure ParseBody(PI : LongInt); Forward;
 Function ParseLValueAddrW32(PI : LongInt; Var T : LongInt) : Boolean; Forward;
+Function FuncDerefAt(PI, J : LongInt) : LongInt; Forward;
 Function WithFieldIndex(Const Up : TString; Var FOfs : LongInt) : LongInt; Forward;
 
 { ParseVarArgAddr : argument "var" sans type (Move, FillChar, BlockRead...) : EAX = adresse }
@@ -11979,6 +11982,8 @@ Begin
       If (SI >= 0) And (SymTab^[SI]^.Kind = SK_VAR) Then IsVarName := True
       Else If (SI < 0) And (WithDepth > 0) And (WithFieldIndex(Up, FOfs) >= 0) Then IsVarName := True;
     End;
+    { F(...)^... (Move(F^[0], ...)) : adresse dans ce que rend la fonction }
+    If (Not IsVarName) And (FuncDerefAt(PI, EP) >= 0) Then IsVarName := True;
     If IsVarName Then
     Begin
       ParseLValueAddrW32(PI, T);
@@ -12333,13 +12338,14 @@ End;
   dans CallArgSz. EP est sur '(' (ou non : pas d arguments). }
 Function W32PushArgs(PI, CalledPI : LongInt; Var ArgBytes : LongInt) : LongInt;
 Var
-  ArgCount, J, PT, FP : LongInt;
+  ArgCount, J, PT, FP, Pins : LongInt;
   IsVarArg, AggVal : Boolean;
   Sz : LongInt;
   TmpLbl : TString;
 Begin
   ArgCount := 0;
   ArgBytes := 0;
+  Pins := 0;
   If EPMatch('(') Then
   Begin
     If Not EPMatch(')') Then
@@ -12398,6 +12404,18 @@ Begin
             GenStrSourceESI;
             EmitInstr('CALL ' + TP_RT_PFX + 'STRRET');
           End;
+          { parametre chaine suivi d autres parametres : son tampon de
+            l anneau est epingle jusqu a ce qu ils soient tous evalues }
+          If (PT >= 0) And TypeIsString(PT) And
+             (TypeTab^[TypeResolve(PT)]^.Kind <> TYK_PCHAR) And
+             (Not TypeIsAnsi(PT)) And (Not Is68kTarget) And
+             (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) And
+             (EP < EPEnd) And (TokenPool^[EP]^.Kind <> TK_STRING) And
+             (TokenPool^[EP]^.Kind <> TK_CHAR) And (TokenPool^[EP]^.Val = ',') Then
+          Begin
+            EmitInstr('CALL ' + TP_RT_PFX + 'STRPIN');
+            Inc(Pins);
+          End;
           { chaine Pascal vers un parametre PChar : adresse des caracteres }
           If (PT >= 0) And (TypeTab^[TypeResolve(PT)]^.Kind = TYK_PCHAR) And
              LastExprIsPascalStr Then
@@ -12452,6 +12470,7 @@ Begin
         Inc(EP);
     End;
   End;
+  If Pins > 0 Then EmitInstr('SUB DWORD PTR [STRPINN],' + IntToStr_(Pins));
   W32PushArgs := ArgCount;
 End;
 
@@ -21030,6 +21049,32 @@ End;
 { Retourne False si le jeton n est pas un identificateur.        }
 { ------------------------------------------------------------ }
 
+{ FuncDerefAt : le jeton J est-il l appel d une fonction (avec ou sans
+  parametres) dont le resultat est dereference (F^..., F(...)^...) ?
+  Rend la fonction (ou -1). Une variable ou un parametre de ce nom, et le
+  nom de la fonction en cours (son resultat), ne comptent pas. }
+Function FuncDerefAt(PI, J : LongInt) : LongInt;
+Var Up : TString; FP, Depth : LongInt;
+Begin
+  FuncDerefAt := -1;
+  If (J >= EPEnd) Or (TokenPool^[J]^.Kind <> TK_IDENT) Then Exit;
+  Up := StrUpperCase(TokenPool^[J]^.Val);
+  If (PI >= 0) And ((FindLocal(PI, Up) >= 0) Or (FindParam(PI, Up) >= 0) Or IsOuterVarName(PI, Up)) Then Exit;
+  FP := W32FindProc(PI, Up);
+  If (FP < 0) Or (FP = PI) Or (Not ProcTab^[FP]^.IsFunction) Then Exit;
+  Inc(J);
+  If (J < EPEnd) And TokIsPunct(J, '(') Then
+  Begin
+    Depth := 0;
+    Repeat
+      If TokIsPunct(J, '(') Then Inc(Depth)
+      Else If TokIsPunct(J, ')') Then Dec(Depth);
+      Inc(J);
+    Until (J >= EPEnd) Or (Depth = 0);
+  End;
+  If (J < EPEnd) And (TokIsOp(J, '^') Or TokIsPunct(J, '^')) Then FuncDerefAt := FP;
+End;
+
 Function ParseLValueAddrW32(PI : LongInt; Var T : LongInt) : Boolean;
 Var
   Up : TString;
@@ -21044,6 +21089,17 @@ Begin
   Up := StrUpperCase(TokenPool^[EP]^.Val);
   ParseLValueAddrW32 := True;
   LastIndexIsStrLen := False;
+  { F(...)^... : resultat d une fonction (pointeur) dereference ; EAX
+    recoit la valeur du pointeur, les suffixes donnent l adresse }
+  K := FuncDerefAt(PI, EP);
+  If K >= 0 Then
+  Begin
+    ParsePrimary(PI);
+    T := ProcTab^[K]^.RetTypeIdx;
+    LvPtrValue := True;
+    ParseLValueSuffixW32(PI, T);
+    Exit;
+  End;
   { transtypage : PRec(expr)^... (valeur du pointeur) ou TRec(var)... }
   If (TypeFindByName(Up) >= 0) And TokIsPunct(EP + 1, '(') And W32CastOk(Up) And
      (FindLocal(PI, Up) < 0) And (FindParam(PI, Up) < 0) Then
@@ -21275,6 +21331,10 @@ Begin
       If (Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) And
          (PI >= 0) And ((FindLocal(PI, Up) >= 0) Or (FindParam(PI, Up) >= 0) Or
                         IsOuterVarName(PI, Up)) Then
+        ParseLValueAddrW32(PI, ATIdx)
+      Else If (Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) And
+         (FuncDerefAt(PI, EP) >= 0) Then
+        { @F(...)^[I] : adresse dans ce que rend la fonction }
         ParseLValueAddrW32(PI, ATIdx)
       Else If (Not Is68kTarget) And (Opts.DestTarget <> DEST_CRAY1) And (Not Opts.Dos16Mode) And
          (W32FindProc(PI, Up) >= 0) And
@@ -34346,15 +34406,80 @@ Begin
   EmitInstr('POPAD');
   EmitInstr('RET');
 
+  { ------ _TPRT_RINGNEXT : EAX = numero du prochain tampon de l anneau STRRING ------- }
+  { (STRRINGIDX avance) ; les tampons epingles (STRPIN, STRPINN : parametres chaine     }
+  { deja evalues d un appel dont les parametres suivants ne le sont pas encore) sont    }
+  { sautes : sinon un parametre suivant qui use plus de 256 chaines temporaires (boucle }
+  { de concatenations dans une fonction appelee) recouvrait le premier avant l appel.  }
+  { Les autres registres sont gardes.                                                   }
+  EmitBlankLine;
+  EmitLabel(TP_RT_PFX + 'RINGNEXT');
+  EmitInstr('PUSH ECX');
+  EmitInstr('PUSH EDX');
+  EmitInstr('MOV EAX,[STRRINGIDX]');
+  EmitLabel(TP_RT_PFX + 'RNX_A');
+  EmitInstr('INC EAX');
+  EmitInstr('AND EAX,255');
+  EmitInstr('MOV ECX,[STRPINN]');
+  EmitInstr('CMP ECX,16');
+  EmitInstr('JBE ' + TP_RT_PFX + 'RNX_C');
+  EmitInstr('MOV ECX,16');
+  EmitLabel(TP_RT_PFX + 'RNX_C');
+  EmitInstr('MOV EDX,OFFSET STRPIN');
+  EmitLabel(TP_RT_PFX + 'RNX_L');
+  EmitInstr('CMP ECX,0');
+  EmitInstr('JE ' + TP_RT_PFX + 'RNX_OK');
+  EmitInstr('CMP EAX,[EDX]');
+  EmitInstr('JE ' + TP_RT_PFX + 'RNX_A');
+  EmitInstr('ADD EDX,4');
+  EmitInstr('DEC ECX');
+  EmitInstr('JMP ' + TP_RT_PFX + 'RNX_L');
+  EmitLabel(TP_RT_PFX + 'RNX_OK');
+  EmitInstr('MOV [STRRINGIDX],EAX');
+  EmitInstr('POP EDX');
+  EmitInstr('POP ECX');
+  EmitInstr('RET');
+
+  { ------ _TPRT_STRPIN : EAX = chaine (parametre evalue) -> epingler son tampon ----- }
+  { s il est dans l anneau STRRING (sinon une entree vide) ; tous les registres gardes. }
+  { L appelant retire ses epingles (SUB [STRPINN],n) quand tous les parametres sont     }
+  { evalues : l appele recopie ses parametres chaine des son entree.                    }
+  EmitBlankLine;
+  EmitLabel(TP_RT_PFX + 'STRPIN');
+  EmitInstr('PUSH EAX');
+  EmitInstr('PUSH ECX');
+  EmitInstr('PUSH EDX');
+  EmitInstr('MOV ECX,[STRPINN]');
+  EmitInstr('INC ECX');
+  EmitInstr('MOV [STRPINN],ECX');
+  EmitInstr('DEC ECX');
+  EmitInstr('CMP ECX,16');
+  EmitInstr('JAE ' + TP_RT_PFX + 'SPN_D');
+  EmitInstr('MOV EDX,OFFSET STRRING');
+  EmitInstr('SUB EAX,EDX');
+  EmitInstr('CMP EAX,65536');
+  EmitInstr('JB ' + TP_RT_PFX + 'SPN_I');
+  EmitInstr('MOV EAX,-1');
+  EmitInstr('JMP ' + TP_RT_PFX + 'SPN_S');
+  EmitLabel(TP_RT_PFX + 'SPN_I');
+  EmitInstr('SHR EAX,8');
+  EmitLabel(TP_RT_PFX + 'SPN_S');
+  EmitInstr('MOV EDX,OFFSET STRPIN');
+  EmitInstr('SHL ECX,2');
+  EmitInstr('ADD EDX,ECX');
+  EmitInstr('MOV [EDX],EAX');
+  EmitLabel(TP_RT_PFX + 'SPN_D');
+  EmitInstr('POP EDX');
+  EmitInstr('POP ECX');
+  EmitInstr('POP EAX');
+  EmitInstr('RET');
+
   { ------ _TPRT_STRRET : ESI = chaine ASCIIZ -> EAX = copie au format Pascal dans ---- }
   { le prochain tampon de l anneau STRRING (16 x 256) : resultats de fonctions String      }
   EmitBlankLine;
   EmitLabel(TP_RT_PFX + 'STRRET');
   EmitInstr('PUSH EDI');
-  EmitInstr('MOV EAX,[STRRINGIDX]');
-  EmitInstr('INC EAX');
-  EmitInstr('AND EAX,255');   { anneau de 256 tampons (OS2PC) }
-  EmitInstr('MOV [STRRINGIDX],EAX');
+  EmitInstr('CALL ' + TP_RT_PFX + 'RINGNEXT');   { anneau de 256 tampons (OS2PC) }
   EmitInstr('SHL EAX,8');
   EmitInstr('MOV EDI,OFFSET STRRING');
   EmitInstr('ADD EAX,EDI');
@@ -34370,10 +34495,7 @@ Begin
   EmitInstr('PUSH EDI');
   EmitInstr('PUSH ECX');
   EmitInstr('PUSH ESI');
-  EmitInstr('MOV EAX,[STRRINGIDX]');
-  EmitInstr('INC EAX');
-  EmitInstr('AND EAX,255');   { anneau de 256 tampons (OS2PC) }
-  EmitInstr('MOV [STRRINGIDX],EAX');
+  EmitInstr('CALL ' + TP_RT_PFX + 'RINGNEXT');   { anneau de 256 tampons (OS2PC) }
   EmitInstr('SHL EAX,8');
   EmitInstr('MOV EDI,OFFSET STRRING');
   EmitInstr('ADD EDI,EAX');
@@ -45440,6 +45562,8 @@ Begin
   BcDefineDataLabel('STR_PASBUF'); BcDataZeros(256);
   BcDefineDataLabel('STRRING'); BcDataZeros(65536);
   BcDefineDataLabel('STRRINGIDX'); BcDataD(0);
+  BcDefineDataLabel('STRPINN'); BcDataD(0);
+  BcDefineDataLabel('STRPIN'); BcDataZeros(64);
   BcDefineDataLabel('PRN_HANDLE'); BcDataD(-1);
   BcDefineDataLabel('PRN_FNAME');  BcDataStr('NUL');
   BcDefineDataLabel('OVR_RESULT'); BcDataD(0);
