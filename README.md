@@ -1401,6 +1401,8 @@ foreach ($st-&gt;fetchAll(PDO::FETCH_ASSOC) as $c)
 ?&gt;
 </pre>
 
+<img width="1024" height="768" alt="OS/2-0 : page demo.php du Site Web par défaut, compilée par le Serveur Web et affichée dans le Navigateur Web" src="IMAGE/SERVEUR_WEB_PHP.png" />
+
 Pour loger PHP dans le serveur, l'image de WEBSRV.EXE a dû rester sous la fenêtre de 4 Mo d'un processus d'OS/2-0 (le chargeur refuse une image plus grande : <i>erreur 8</i>) : les 32 768 entrées des dictionnaires et des tableaux PHP sont allouées sur le tas au démarrage au lieu d'être des variables globales. Un autre piège d'OS2PC a été contourné : <code>S + Chr(0)</code> n'ajoute rien à une chaîne (l'octet nul est pris pour la fin d'une chaîne ASCIIZ temporaire) ; le caractère nul est placé directement par <code>S[Length(S)] := Chr(0)</code>.
 
 <img width="1024" height="768" alt="OS/2-0 : Serveur Web, accueil du Site Web par défaut, volet Actions" src="IMAGE/SERVEUR_WEB.png" />
