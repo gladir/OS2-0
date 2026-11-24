@@ -270,6 +270,11 @@ echo "== Outils reseau (OS2PC : APPS/FTPCLI.PAS, Client FTP et SFTP, APPS/SSHCLI
 # style d'IIS (WEBSRV sans parametre) ; aucune dependance externe
 echo "== Serveur Web (OS2PC : APPS/WEBSRV.PAS, HTTP/HTTPS, PSP, ASP, console dans le style d'IIS)"
 "$W/os2pc" -Q "$ROOT/APPS/WEBSRV.PAS" "$W/cd/WEBSRV.EXE"
+# Web Developer (dossier Developer Kit) : editeur de pages Web dans le genre de
+# HomeSite (arbre des dossiers, liste des fichiers, coloration HTML, ASP, PSP,
+# PHP, CSS et JavaScript) ; Executer la page appelle WEBSRV /PSPOUT
+echo "== Web Developer (OS2PC : APPS/WEBDEV.PAS, editeur de pages Web dans le genre de HomeSite)"
+"$W/os2pc" -Q "$ROOT/APPS/WEBDEV.PAS" "$W/cd/WEBDEV.EXE"
 echo "== Virtualisation (OS2PC : APPS/VIRTUAL.PAS, machines de VirtualBox par AMD-V, Intel VT-x ou mode V86, KrnVirt du noyau)"
 "$W/os2pc" -Q "$ROOT/APPS/VIRTUAL.PAS" "$W/cd/VIRTUAL.EXE"
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"

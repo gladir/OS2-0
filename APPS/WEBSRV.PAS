@@ -28,6 +28,9 @@ Program WebSrv;
     WEBSRV /STOP      arrete le serveur en marche ;
     WEBSRV /STATUS    etat du serveur (texte) ;
     WEBSRV /PSP page  execute une page PSP ou ASP et ecrit le resultat (essais) ;
+    WEBSRV /PSPOUT fichier page [requete]
+                      la meme chose, le resultat dans un fichier (Executer la
+                      page de Web Developer) ;
     WEBSRV /DBTEST    verifie MD5, SHA-1 et SCRAM-SHA-256 (RFC 7677).
 
   Le serveur :
@@ -17710,8 +17713,8 @@ End;
 
 { WEBSRV /PSP page [requete] : executer une page PSP ou ASP sans le reseau
   (essais) ; le resultat va sur la sortie standard }
-Procedure RunPageCli(Path, Q : String);
-Var K, N : LongInt; L : String; Asp : Boolean;
+Procedure RunPageCli(Path, Q, OutF : String);
+Var K, N : LongInt; L : String; Asp : Boolean; Ob : TBuf;
 Begin
   ServiceMode := False; Quiet := True;
   PickDirs;
@@ -17742,6 +17745,17 @@ Begin
     VmRun(100000);
     If VmWait Then PSleep(1);
   End;
+  If OutF <> '' Then
+  Begin
+    { /PSPOUT : resultat dans un fichier (Web Developer) }
+    BufInit(Ob);
+    If VmErr <> '' Then BufAdd(Ob, '*** erreur ligne ' + IStr(VmErrLine) + ' : ' + VmErr + Crlf)
+    Else If Conns[0].State <> csVm Then BufAdd(Ob, '*** compilation : ' + CErr + ' (ligne ' + IStr(CErrLine) + ')' + Crlf);
+    If VmOut.Len > 0 Then BufAddB(Ob, VmOut.P, VmOut.Len);
+    Dummy := Ord(WriteFileBuf(OutF, Ob.P, Ob.Len));
+    BufFree(Ob);
+    Exit;
+  End;
   If VmErr <> '' Then WriteLn('*** erreur ligne ', VmErrLine, ' : ', VmErr)
   Else If Conns[0].State <> csVm Then WriteLn('*** compilation : ', CErr, ' (ligne ', CErrLine, ')');
   For K := 0 To VmOut.Len - 1 Do Write(Chr(VmOut.P^[K]));
@@ -17756,7 +17770,13 @@ BEGIN
   If (Arg1 = '/PSP') And (ParamCount >= 2) Then
   Begin
     VmInit;
-    If ParamCount >= 3 Then RunPageCli(ParamStr(2), ParamStr(3)) Else RunPageCli(ParamStr(2), '');
+    If ParamCount >= 3 Then RunPageCli(ParamStr(2), ParamStr(3), '') Else RunPageCli(ParamStr(2), '', '');
+  End
+  Else If (Arg1 = '/PSPOUT') And (ParamCount >= 3) Then
+  Begin
+    VmInit;
+    If ParamCount >= 4 Then RunPageCli(ParamStr(3), ParamStr(4), ParamStr(2))
+    Else RunPageCli(ParamStr(3), '', ParamStr(2));
   End
   Else If Arg1 = '/DBTEST' Then DbSelfTest
   Else If (Arg1 = '/SERVICE') Or (Arg1 = '-SERVICE') Then

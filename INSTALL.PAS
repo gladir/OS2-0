@@ -1105,9 +1105,9 @@ Begin
           (U = 'CHEMDRAW.EXE') Or (U = 'HUMAN.C3D') Or (U = 'PHYSIO.CFG') Or
           { dossier Productivite : Maximilien CRM, Sample Accounting,
             Acrodoc, News Master et PresentPoint (depot OFFICE-0), Bloc-notes ;
-            dossier Developer Kit : OS2-Zero Debugger }
+            dossier Developer Kit : OS2-Zero Debugger, Web Developer }
           (U = 'MAXIMIZE.EXE') Or (U = 'SIMPLY.EXE') Or (U = 'ACROBAT.EXE') Or (U = 'NEWS.EXE') Or
-          (U = 'POWERPNT.EXE') Or (U = 'NOTEPAD.EXE') Or (U = 'OS2DBG.EXE') Then Wanted := True
+          (U = 'POWERPNT.EXE') Or (U = 'NOTEPAD.EXE') Or (U = 'OS2DBG.EXE') Or (U = 'WEBDEV.EXE') Then Wanted := True
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 

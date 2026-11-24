@@ -1347,7 +1347,8 @@ WEBSRV.CFG ; le serveur en marche relit sa configuration.
 Demarrage : la case "Demarrer le serveur Web avec OS/2" ajoute ou retire
 RUN=C:\WEBSRV.EXE /SERVICE dans CONFIG.SYS ; par defaut elle n'est pas
 cochee et rien n'est charge au demarrage. A l'invite : WEBSRV /START,
-/STOP, /STATUS ; WEBSRV /PSP page [requete] execute une page sans reseau.
+/STOP, /STATUS ; WEBSRV /PSP page [requete] execute une page sans reseau
+(WEBSRV /PSPOUT fichier page [requete] : resultat dans un fichier).
 Serveur : HTTP/1.1 (connexions persistantes, 304, 206, documents par
 defaut, exploration, pages d'erreurs, en-tetes, repertoires virtuels,
 authentification de base, journal W3C), HTTPS, hotes virtuels (adresse
@@ -1925,6 +1926,41 @@ Le programme est lance par DosExecPgm (EXEC_TRACE) et s'arrete a son
 point d'entree ; le noyau (KrnTaskCtl 60 a 70) donne ses registres et
 sa memoire. Un arret temporaire dans une DLL partagee utilise un point
 d'arret materiel (DR0) pour ne pas toucher les autres programmes.
+
+Web Developer (WEBDEV.EXE, dossier Developer Kit)
+------------------------------------------------
+Editeur des pages Web dans le genre de HomeSite, avec l'apparence d'OS/2
+(source APPS\WEBDEV.PAS). Bureau - Developer Kit - Web Developer, ou
+WEBDEV fichier... Il s'ouvre sur la racine du Site Web par defaut du
+Serveur Web (C:\WWW\ROOT ou D:\WWW\ROOT).
+  - a gauche : l'arbre des dossiers (lecteurs et sous-dossiers, + ou
+    double clic pour deplier) et la liste des fichiers du dossier choisi
+    (double clic ou Entree : ouvrir) ; F9 cache ce panneau ; les bords
+    se deplacent a la souris ;
+  - a droite : l'editeur (numeros de ligne, lignes de longueur
+    quelconque, molette), les onglets des documents en bas (Ctrl+Tab),
+    la barre d'etat (ligne, colonne, INS/RFP, langage, encodage) ;
+  - coloration selon l'extension : .htm/.html (balises, attributs,
+    entites, commentaires, <script> en JavaScript, <style> en CSS),
+    .asp (VBScript entre <% %>), .psp (Pascal Server Pages), .php
+    (<?php ?>), .css, .js ; le code serveur a un fond gris pale ;
+    Affichage - Coloration pour choisir un autre langage ;
+  - barre de balises (Commun, Polices, Tableaux, Formulaires, Listes,
+    Script) : un bouton entoure la selection de la balise ; squelettes
+    d'acces aux bases de donnees en PSP et en ASP ;
+  - Ctrl+Z annuler, Ctrl+Y retablir, Ctrl+X/C/V presse-papiers de PM,
+    Ctrl+A tout, Ctrl+F rechercher, F3 suivant, Ctrl+H remplacer tout,
+    Ctrl+G aller a la ligne, Ctrl+M balise associee, Tab et Maj+Tab sur
+    la selection, Ctrl+U et Ctrl+Maj+U minuscules et majuscules,
+    Ctrl+Maj+C commentaire, Ins insertion ou refrappe ;
+  - Ctrl+N nouvelle page (gabarits HTML, ASP, PSP, PHP, CSS, JS),
+    Ctrl+O ouvrir, Ctrl+S enregistrer, Ctrl+F4 fermer ; un fichier
+    UTF-8 est affiche en CP850 et reenregistre en UTF-8 ;
+  - F12 Parcourir : la page dans le Navigateur Web, par
+    http://localhost/ si elle est dans un site du Serveur Web en marche
+    (le code PSP ou ASP est alors execute), sinon par file:/// ;
+  - Ctrl+F9 Executer la page (PSP, ASP) : WEBSRV /PSPOUT, le resultat
+    dans un nouvel onglet.
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------
