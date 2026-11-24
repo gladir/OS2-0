@@ -42,13 +42,24 @@ Library TCPIP32;
   code BSD. }
 
 Const
-  MAXS = 16;
-  RXCAP = 65536;
+  MAXS = 96;
+  RXCAP = 65536;      { socket ordinaire : reception }
+  TXCAP = 32768;      { socket ordinaire : emission }
+  CRX = 8192;         { connexion d'un socket d'ecoute : reception }
+  CTX = 24576;        { connexion d'un socket d'ecoute : emission }
+  SYSRX = 32768;      { socket du systeme (sosystem) : reception }
+  SYSTX = 16384;      { socket du systeme : emission }
+  MAXPOOL = 48;       { connexions simultanees d'un socket d'ecoute }
   MSS = 1400;
+  CWND = 16 * 1400;   { octets en vol au plus }
+  RTO0 = 700;         { delai de reemission initial (ms) }
   SOCK_STREAM = 1; SOCK_DGRAM = 2; SOCK_RAW = 3;
-  T_TCP = 1; T_UDP = 2; T_RAW = 3;
+  T_TCP = 1; T_UDP = 2; T_RAW = 3; T_DEAD = 4;
   { etats TCP }
   TS_CLOSED = 0; TS_SYNSENT = 1; TS_ESTAB = 2; TS_FINWAIT = 3; TS_CLOSEWAIT = 4; TS_RESET = 5;
+  TS_LISTEN = 6; TS_SYNRCVD = 7; TS_LASTACK = 8; TS_TIMEWAIT = 9;
+  SOCEWOULDBLOCK = 10035;
+  LBCAP = 131072;            { file de la boucle locale }
   SOCEINVAL = 10022; SOCEMFILE = 10024; SOCENOTSOCK = 10038; SOCENETDOWN = 10050; SOCENOBUFS = 10055;
   SOCENOTCONN = 10057; SOCETIMEDOUT = 10060; SOCECONNREFUSED = 10061; SOCECONNRESET = 10054;
   SOCEHOSTUNREACH = 10065; SOCEADDRINUSE = 10048;
@@ -68,12 +79,25 @@ Var
   TxF, RxF : Array[0..1599] Of Byte;
   Seg : Array[0..1599] Of Byte;
   { cache ARP }
-  ArpIp : Array[0..15] Of LongInt;
-  ArpMac : Array[0..95] Of Byte;
+  ArpIp : Array[0..63] Of LongInt;
+  ArpMac : Array[0..383] Of Byte;
   ArpNext : LongInt;
   { sockets }
   SType, SState, SLPort, SRIp, SRPort, SSeq, SUna, SAck, SBuf, SHead, SLen, SPWin, SBound : Array[0..MAXS - 1] Of LongInt;
   SSys : Array[0..MAXS - 1] Of Boolean;   { tampon du tas partage (sosystem) }
+  { emission (anneau STx de STxCap octets : STxLen octets depuis SUna),
+    FIN (0, 1 demande, 2 envoye), reemission, non bloquant, ecoute }
+  SRxCap, STx, STxCap, STxHead, STxLen, SFin, SRtxT, SRto, SRetry, SNb, SMss, SDup : Array[0..MAXS - 1] Of LongInt;
+  SOwner, SParent, SPSlot, SAccQ, SBack, SPool, SOrphT : Array[0..MAXS - 1] Of LongInt;
+  SFinAck, SOrphan : Array[0..MAXS - 1] Of Boolean;
+  PoolUse : Array[0..MAXS * MAXPOOL - 1] Of Byte;
+  IsnGen, AccGen, LastGc, LastTmr : LongInt;
+  InPoll : Boolean;
+  { boucle locale (127.x.x.x et notre propre adresse) : paquets IP en file,
+    relus par NetPoll comme s'ils arrivaient de la carte }
+  LbBuf : Array[0..LBCAP - 1] Of Byte;
+  LbHead, LbTail, LbUsed : LongInt;
+  LbPkt : Array[0..1599] Of Byte;
   { gethostbyname }
   HostEnt : Array[0..7] Of LongInt;
   HostAddr : Array[0..1] Of LongInt;
@@ -93,6 +117,8 @@ Function DosFreeMem(Pb : LongInt) : LongInt; External 'DOSCALLS';
 Function KHeapAlloc(Heap, Flags, Size : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapAlloc';
 Function KHeapFree(Heap, Flags, P : LongInt) : LongInt; External 'DOSCALLS' Name 'HeapFree';
 Function KTicks : LongInt; External 'DOSCALLS' Name 'GetTickCount';
+Function KTaskCtl(Op, P1, P2, P3 : LongInt) : LongInt; External 'DOSCALLS' Name 'KrnTaskCtl';
+Function KPid : LongInt; External 'DOSCALLS' Name 'GetCurrentProcessId';
 
 { ==================================================================== }
 { Utilitaires                                                           }
@@ -389,12 +415,12 @@ Var K, I : LongInt;
 Begin
   If Ip = 0 Then Exit;
   I := -1;
-  For K := 0 To 15 Do
+  For K := 0 To 63 Do
     If ArpIp[K] = Ip Then I := K;
   If I < 0 Then
   Begin
     I := ArpNext;
-    ArpNext := (ArpNext + 1) And 15;
+    ArpNext := (ArpNext + 1) And 63;
   End;
   ArpIp[I] := Ip;
   For K := 0 To 5 Do ArpMac[I * 6 + K] := RdB(PMac + K);
@@ -404,7 +430,7 @@ Function ArpFind(Ip : LongInt) : LongInt;
 Var K : LongInt;
 Begin
   ArpFind := -1;
-  For K := 0 To 15 Do
+  For K := 0 To 63 Do
     If ArpIp[K] = Ip Then ArpFind := K;
 End;
 
@@ -429,6 +455,13 @@ End;
 
 Procedure TcpIn(Ip, Th, N, Src : LongInt); Forward;
 Procedure DhcpIn(A, N : LongInt); Forward;
+Procedure TcpTimers; Forward;
+Function Alive(S : LongInt) : Boolean; Forward;
+
+Function MyPid : LongInt;
+Begin
+  MyPid := KPid;
+End;
 
 { file d'un socket : enregistrement [longueur 2][adresse 4][port 2][donnees] }
 Procedure QueueDgram(S, Src, SPort, A, N : LongInt);
@@ -458,7 +491,8 @@ Begin
   If (Tot > N) Or (Tot < Ihl) Then Exit;
   Proto := RdB(A + 9);
   Src := Get32(A + 12); Dst := Get32(A + 16);
-  If (Dst <> MyIp) And (Dst <> -1) And (MyIp <> 0) And (Dst <> (MyIp Or Not Mask)) Then Exit;
+  If (Dst <> MyIp) And (Dst <> -1) And (MyIp <> 0) And (Dst <> (MyIp Or Not Mask)) And
+     (((Dst Shr 24) And 255) <> 127) Then Exit;
   P := A + Ihl; L := Tot - Ihl;
   Case Proto Of
     1 :
@@ -485,7 +519,7 @@ Begin
         End;
         { sockets bruts ICMP : le paquet IP entier }
         For S := 0 To MAXS - 1 Do
-          If SType[S] = T_RAW Then QueueDgram(S, Src, 0, A, Tot);
+          If (SType[S] = T_RAW) And Alive(S) Then QueueDgram(S, Src, 0, A, Tot);
       End;
     17 :
       Begin
@@ -493,7 +527,8 @@ Begin
         If DPort = 68 Then DhcpIn(P + 8, L - 8)
         Else
           For S := 0 To MAXS - 1 Do
-            If (SType[S] = T_UDP) And (SLPort[S] = DPort) Then QueueDgram(S, Src, SPort, P + 8, Get16(P + 4) - 8);
+            If (SType[S] = T_UDP) And (SLPort[S] = DPort) And Alive(S) Then
+              QueueDgram(S, Src, SPort, P + 8, Get16(P + 4) - 8);
       End;
     6 : TcpIn(A, P, L, Src);
   End;
@@ -516,20 +551,81 @@ Begin
     End
     Else If (Op = 2) Then ArpLearn(SIp, LongInt(@RxF) + 22);
   End
-  Else If Typ = $0800 Then IpIn(LongInt(@RxF) + 14, N - 14);
+  Else If Typ = $0800 Then
+  Begin
+    { adresse MAC d'un hote du reseau local (clients d'un serveur) }
+    SIp := Get32(LongInt(@RxF) + 26);
+    If (MyIp <> 0) And (Mask <> 0) And ((SIp And Mask) = (MyIp And Mask)) And (SIp <> MyIp) And
+       (ArpFind(SIp) < 0) Then ArpLearn(SIp, LongInt(@RxF) + 6);
+    IpIn(LongInt(@RxF) + 14, N - 14);
+  End;
+End;
+
+{ --- boucle locale --- }
+
+Function IsLocal(Ip : LongInt) : Boolean;
+Begin
+  IsLocal := (((Ip Shr 24) And 255) = 127) Or ((Ip = MyIp) And (MyIp <> 0));
+End;
+
+{ mettre un paquet IP (deja forme) dans la file ; faux : file pleine }
+Function LbPut(A, N : LongInt) : Boolean;
+Var K : LongInt;
+Begin
+  LbPut := False;
+  If (N <= 0) Or (N > 1600) Or (LbUsed + N + 2 > LBCAP) Then Exit;
+  LbBuf[LbTail] := N And 255; LbTail := (LbTail + 1) Mod LBCAP;
+  LbBuf[LbTail] := (N Shr 8) And 255; LbTail := (LbTail + 1) Mod LBCAP;
+  For K := 0 To N - 1 Do
+  Begin
+    LbBuf[LbTail] := RdB(A + K);
+    LbTail := (LbTail + 1) Mod LBCAP;
+  End;
+  LbUsed := LbUsed + N + 2;
+  LbPut := True;
+End;
+
+{ relire les paquets de la boucle locale }
+Procedure LbPoll;
+Var N, K, C : LongInt;
+Begin
+  C := 0;
+  While (LbUsed > 0) And (C < 64) Do
+  Begin
+    N := LbBuf[LbHead]; LbHead := (LbHead + 1) Mod LBCAP;
+    N := N + LbBuf[LbHead] * 256; LbHead := (LbHead + 1) Mod LBCAP;
+    For K := 0 To N - 1 Do
+    Begin
+      LbPkt[K] := LbBuf[LbHead];
+      LbHead := (LbHead + 1) Mod LBCAP;
+    End;
+    LbUsed := LbUsed - N - 2;
+    Inc(RxPkts);
+    IpIn(LongInt(@LbPkt), N);
+    Inc(C);
+  End;
 End;
 
 { lire les trames recues }
 Procedure NetPoll;
 Var K, N : LongInt;
 Begin
-  If DrvFn = 0 Then Exit;
+  If InPoll Then Exit;
+  InPoll := True;
   K := 0;
-  Repeat
-    N := RawRecv;
-    If N > 0 Then EthIn(N);
-    Inc(K);
-  Until (N = 0) Or (K > 64);
+  If DrvFn <> 0 Then
+    Repeat
+      N := RawRecv;
+      If N > 0 Then EthIn(N);
+      Inc(K);
+    Until (N = 0) Or (K > 64);
+  If LbUsed > 0 Then LbPoll;
+  If KTicks - LastTmr >= 20 Then
+  Begin
+    LastTmr := KTicks;
+    TcpTimers;
+  End;
+  InPoll := False;
 End;
 
 Procedure Idle;
@@ -548,6 +644,12 @@ Function Resolve(Ip : LongInt; Var M : LongInt) : Boolean;
 Var Hop, K, T, Try_ : LongInt;
 Begin
   Resolve := False;
+  If IsLocal(Ip) Then
+  Begin
+    M := -2;
+    Resolve := True;
+    Exit;
+  End;
   If (Ip = -1) Or ((Mask <> 0) And ((Ip Or Mask) = -1) And ((Ip And Not Mask) = Not Mask)) Then
   Begin
     M := -1;
@@ -565,6 +667,9 @@ Begin
       Exit;
     End;
     ArpSend(1, Hop, 0);
+    { pendant la lecture des trames : pas d'attente (le segment sera
+      reemis) }
+    If InPoll Then Exit;
     T := KTicks;
     While (KTicks - T < 500) And (ArpFind(Hop) < 0) Do Idle;
   End;
@@ -576,12 +681,36 @@ Begin
   End;
 End;
 
+Function ResolveNow(Ip : LongInt) : Boolean;
+Var M : LongInt;
+Begin
+  ResolveNow := Resolve(Ip, M);
+End;
+
 { envoyer un paquet IP (Proto) de N octets de donnees en Data }
 Function IpSend(Dst, Proto, Data, N : LongInt) : Boolean;
 Var M, K : LongInt; Bc : Array[0..5] Of Byte;
 Begin
   IpSend := False;
   If Not Resolve(Dst, M) Then Exit;
+  If M = -2 Then
+  Begin
+    { boucle locale : l'en-tete IP seul (source 127.0.0.1 pour 127.x) }
+    TxF[14] := $45; TxF[15] := 0;
+    Put16(LongInt(@TxF) + 16, 20 + N);
+    Inc(IpId);
+    Put16(LongInt(@TxF) + 18, IpId And $FFFF);
+    Put16(LongInt(@TxF) + 20, $4000);
+    TxF[22] := 64; TxF[23] := Proto;
+    Put16(LongInt(@TxF) + 24, 0);
+    If ((Dst Shr 24) And 255) = 127 Then Put32(LongInt(@TxF) + 26, Dst) Else Put32(LongInt(@TxF) + 26, MyIp);
+    Put32(LongInt(@TxF) + 30, Dst);
+    Put16(LongInt(@TxF) + 24, Fold(Sum16(LongInt(@TxF) + 14, 20, 0)));
+    MoveMem(Data, LongInt(@TxF) + 34, N);
+    IpSend := LbPut(LongInt(@TxF) + 14, 20 + N);
+    Inc(TxPkts);
+    Exit;
+  End;
   If M < 0 Then
   Begin
     For K := 0 To 5 Do Bc[K] := 255;
@@ -712,14 +841,22 @@ End;
 
 { configuration de l'interface (au premier usage) }
 Function NetReady : Boolean;
-Var S : String; K : LongInt;
+Var S : String; K, T : LongInt;
 Begin
+  { configuration en cours dans un autre processus (DHCP du serveur Web
+    lance au demarrage, par exemple) : l'attendre au lieu d'echouer }
+  If Ready = 2 Then
+  Begin
+    T := KTicks;
+    While (Ready = 2) And (KTicks - T < 20000) Do Idle;
+    If Ready = 2 Then Ready := 0;
+  End;
   If Ready = 0 Then
   Begin
-    Ready := -1;
+    Ready := 2;
     If DriverReady Then
     Begin
-      For K := 0 To 15 Do ArpIp[K] := 0;
+      For K := 0 To 63 Do ArpIp[K] := 0;
       S := Env('IP_ADDRESS');
       If (S <> '') And (UpStr(S) <> 'DHCP') And (ParseIp(S) <> 0) Then
       Begin
@@ -734,10 +871,11 @@ Begin
       Else
       Begin
         Dhcp := 1;
-        If DhcpRun Then Ready := 1;
+        If DhcpRun Then Ready := 1 Else Ready := -1;
       End;
       If (Ready = 1) And (Env('IP_DNS') <> '') And (ParseIp(Env('IP_DNS')) <> 0) Then Dns := ParseIp(Env('IP_DNS'));
-    End;
+    End
+    Else Ready := -1;
   End;
   NetReady := Ready = 1;
 End;
@@ -751,28 +889,50 @@ Begin
   SeqLess := (A - B) < 0;
 End;
 
+{ le processus proprietaire du socket existe encore (sinon ses tampons
+  ont ete rendus : ne plus y ecrire) }
+Function Alive(S : LongInt) : Boolean;
+Begin
+  If SSys[S] Or (SOwner[S] <= 1) Then Alive := True
+  Else Alive := KTaskCtl(3, SOwner[S], 0, 0) = 1;
+End;
+
 { espace libre du tampon de reception }
 Function RxFree(S : LongInt) : LongInt;
 Begin
-  RxFree := RXCAP - SLen[S];
+  RxFree := SRxCap[S] - SLen[S];
 End;
 
-Procedure TcpSend(S, Flags, Data, N : LongInt);
-Var Hl, Sum, Win : LongInt; Ph : Array[0..11] Of Byte;
+{ en-tete TCP + donnees prises dans un anneau (Base, Cap, Off) ou a
+  l'adresse Data (Cap = 0) ; numero de sequence SSeq }
+Procedure TcpSendX(S, Flags, Base, Cap, Off, N : LongInt);
+Var Hl, Sum, Win, Part : LongInt; Ph : Array[0..11] Of Byte;
 Begin
+  If Not ResolveNow(SRIp[S]) Then Exit;
   If (Flags And 2) <> 0 Then Hl := 24 Else Hl := 20;
   Put16(LongInt(@Seg), SLPort[S]); Put16(LongInt(@Seg) + 2, SRPort[S]);
   Put32(LongInt(@Seg) + 4, SSeq[S]); Put32(LongInt(@Seg) + 8, SAck[S]);
   Seg[12] := (Hl Div 4) Shl 4; Seg[13] := Flags;
   Win := RxFree(S);
   If Win > 65535 Then Win := 65535;
+  If Win < 0 Then Win := 0;
   Put16(LongInt(@Seg) + 14, Win);
   Put16(LongInt(@Seg) + 16, 0); Put16(LongInt(@Seg) + 18, 0);
   If Hl = 24 Then
   Begin
     Seg[20] := 2; Seg[21] := 4; Put16(LongInt(@Seg) + 22, 1460);
   End;
-  MoveMem(Data, LongInt(@Seg) + Hl, N);
+  If N > 0 Then
+  Begin
+    If Cap = 0 Then MoveMem(Base + Off, LongInt(@Seg) + Hl, N)
+    Else
+    Begin
+      Part := N;
+      If Off + Part > Cap Then Part := Cap - Off;
+      MoveMem(Base + Off, LongInt(@Seg) + Hl, Part);
+      MoveMem(Base, LongInt(@Seg) + Hl + Part, N - Part);
+    End;
+  End;
   { pseudo-en-tete }
   Put32(LongInt(@Ph), MyIp); Put32(LongInt(@Ph) + 4, SRIp[S]);
   Ph[8] := 0; Ph[9] := 6; Put16(LongInt(@Ph) + 10, Hl + N);
@@ -781,22 +941,212 @@ Begin
   Dummy := Ord(IpSend(SRIp[S], 6, LongInt(@Seg), Hl + N));
 End;
 
+Procedure TcpSend(S, Flags, Data, N : LongInt);
+Begin
+  TcpSendX(S, Flags, Data, 0, 0, N);
+End;
+
+{ RST pour un segment qui n'appartient a aucun socket (port ferme) }
+Procedure TcpRst(Dst, SPort, DPort, Sq, Ak, Fl : LongInt);
+Var Sum : LongInt; Ph : Array[0..11] Of Byte;
+Begin
+  If Not ResolveNow(Dst) Then Exit;
+  Put16(LongInt(@Seg), SPort); Put16(LongInt(@Seg) + 2, DPort);
+  Put32(LongInt(@Seg) + 4, Sq); Put32(LongInt(@Seg) + 8, Ak);
+  Seg[12] := $50; Seg[13] := Fl;
+  Put16(LongInt(@Seg) + 14, 0); Put16(LongInt(@Seg) + 16, 0); Put16(LongInt(@Seg) + 18, 0);
+  Put32(LongInt(@Ph), MyIp); Put32(LongInt(@Ph) + 4, Dst);
+  Ph[8] := 0; Ph[9] := 6; Put16(LongInt(@Ph) + 10, 20);
+  Sum := Sum16(LongInt(@Ph), 12, 0);
+  Put16(LongInt(@Seg) + 16, Fold(Sum16(LongInt(@Seg), 20, Sum)));
+  Dummy := Ord(IpSend(Dst, 6, LongInt(@Seg), 20));
+End;
+
+{ MSS annonce par l'autre bout (option 2 d'un SYN) }
+Function PeerMss(Th, Off : LongInt) : LongInt;
+Var P, K, L, V : LongInt;
+Begin
+  PeerMss := 536;
+  P := Th + 20;
+  While P < Th + Off Do
+  Begin
+    K := RdB(P);
+    If K = 0 Then Exit;
+    If K = 1 Then Inc(P)
+    Else
+    Begin
+      L := RdB(P + 1);
+      If L < 2 Then Exit;
+      If (K = 2) And (L = 4) Then
+      Begin
+        V := Get16(P + 2);
+        If V > 0 Then PeerMss := V;
+      End;
+      P := P + L;
+    End;
+  End;
+End;
+
+{ emettre ce que la fenetre permet : donnees du tampon d'emission pas
+  encore envoyees, puis le FIN demande quand tout est parti }
+Procedure TcpOutput(S : LongInt);
+Var Inf, Avail, Win, N, Fl, Lim, Mss_ : LongInt;
+Begin
+  If (SState[S] <> TS_ESTAB) And (SState[S] <> TS_CLOSEWAIT) And (SState[S] <> TS_FINWAIT) And
+     (SState[S] <> TS_LASTACK) Then Exit;
+  If (SFin[S] = 2) Or (STxCap[S] = 0) Then Exit;
+  Lim := SPWin[S];
+  If Lim > CWND Then Lim := CWND;
+  Mss_ := SMss[S];
+  If (Mss_ <= 0) Or (Mss_ > MSS) Then Mss_ := MSS;
+  Repeat
+    Inf := SSeq[S] - SUna[S];
+    Avail := STxLen[S] - Inf;
+    If Avail <= 0 Then Break;
+    Win := Lim - Inf;
+    If Win <= 0 Then Break;
+    N := Avail;
+    If N > Win Then N := Win;
+    If N > Mss_ Then N := Mss_;
+    If Inf = 0 Then SRtxT[S] := KTicks;
+    If N = Avail Then Fl := $18 Else Fl := $10;
+    TcpSendX(S, Fl, STx[S], STxCap[S], (STxHead[S] + Inf) Mod STxCap[S], N);
+    SSeq[S] := SSeq[S] + N;
+  Until False;
+  If (SFin[S] = 1) And (STxLen[S] = SSeq[S] - SUna[S]) Then
+  Begin
+    If SSeq[S] = SUna[S] Then SRtxT[S] := KTicks;
+    TcpSend(S, $11, 0, 0);
+    SSeq[S] := SSeq[S] + 1;
+    SFin[S] := 2;
+    If SState[S] = TS_ESTAB Then SState[S] := TS_FINWAIT
+    Else If SState[S] = TS_CLOSEWAIT Then SState[S] := TS_LASTACK;
+  End;
+End;
+
+{ liberer l'emplacement d'un socket (sans toucher a sa memoire) }
+Procedure ReleaseSlot(S : LongInt);
+Var P, K : LongInt; Left : Boolean;
+Begin
+  P := SParent[S];
+  SType[S] := 0; SState[S] := TS_CLOSED; SOrphan[S] := False; SAccQ[S] := 0;
+  SParent[S] := -1; SBuf[S] := 0; STx[S] := 0;
+  If (P >= 0) And (SPSlot[S] >= 0) Then
+  Begin
+    PoolUse[P * MAXPOOL + SPSlot[S]] := 0;
+    SPSlot[S] := -1;
+    { socket d'ecoute ferme dont c'etait la derniere connexion }
+    If SType[P] = T_DEAD Then
+    Begin
+      Left := False;
+      For K := 0 To MAXS - 1 Do
+        If (SType[K] <> 0) And (SParent[K] = P) Then Left := True;
+      If Not Left Then
+      Begin
+        If (SPool[P] <> 0) And (SOwner[P] = MyPid) Then Dummy := DosFreeMem(SPool[P]);
+        SPool[P] := 0; SType[P] := 0;
+      End;
+    End;
+  End;
+End;
+
+{ processus disparu : ses sockets sont oublies }
+Procedure SockGc;
+Var S, K : LongInt;
+Begin
+  For S := 0 To MAXS - 1 Do
+    If (SType[S] <> 0) And Not Alive(S) Then
+    Begin
+      If (SType[S] = T_TCP) Or (SType[S] = T_DEAD) Then
+        For K := 0 To MAXPOOL - 1 Do PoolUse[S * MAXPOOL + K] := 0;
+      SParent[S] := -1; SPSlot[S] := -1;
+      SType[S] := 0; SState[S] := TS_CLOSED; SBuf[S] := 0; STx[S] := 0; SPool[S] := 0;
+      SOrphan[S] := False; SAccQ[S] := 0;
+    End;
+End;
+
+{ nouvelle connexion sur un socket d'ecoute L (SYN recu) }
+Procedure TcpAcceptSyn(L, Th, Off, SPort, DPort, Sq, Src : LongInt);
+Var S, K, P, B : LongInt;
+Begin
+  P := -1;
+  For K := SBack[L] - 1 DownTo 0 Do
+    If PoolUse[L * MAXPOOL + K] = 0 Then P := K;
+  S := -1;
+  For K := MAXS - 1 DownTo 0 Do
+    If SType[K] = 0 Then S := K;
+  { complet : le client renverra son SYN }
+  If (P < 0) Or (S < 0) Then Exit;
+  PoolUse[L * MAXPOOL + P] := 1;
+  B := SPool[L] + P * (CRX + CTX);
+  SType[S] := T_TCP; SState[S] := TS_SYNRCVD;
+  SLPort[S] := DPort; SRIp[S] := Src; SRPort[S] := SPort; SBound[S] := 1;
+  SBuf[S] := B; SRxCap[S] := CRX; SHead[S] := 0; SLen[S] := 0;
+  STx[S] := B + CRX; STxCap[S] := CTX; STxHead[S] := 0; STxLen[S] := 0;
+  SFin[S] := 0; SFinAck[S] := False; SSys[S] := False; SNb[S] := 0;
+  SOwner[S] := SOwner[L]; SParent[S] := L; SPSlot[S] := P; SOrphan[S] := False; SAccQ[S] := 0;
+  SBack[S] := 0; SPool[S] := 0;
+  SMss[S] := PeerMss(Th, Off);
+  SPWin[S] := Get16(Th + 14);
+  SAck[S] := Sq + 1;
+  Inc(IsnGen);
+  SUna[S] := KTicks * 64000 + IsnGen * 7919 + SPort;
+  SSeq[S] := SUna[S];
+  SRetry[S] := 0; SRto[S] := RTO0; SDup[S] := 0;
+  TcpSend(S, $12, 0, 0);
+  SSeq[S] := SUna[S] + 1;
+  SRtxT[S] := KTicks;
+End;
+
 Procedure TcpIn(Ip, Th, N, Src : LongInt);
-Var S, K, SPort, DPort, Sq, Ak, Fl, Off, DLen, D, Take, P, Part : LongInt;
+Var S, K, SPort, DPort, Sq, Ak, Fl, Off, DLen, D, Take, P, Part, Acked : LongInt;
 Begin
   If N < 20 Then Exit;
   SPort := Get16(Th); DPort := Get16(Th + 2);
   Sq := Get32(Th + 4); Ak := Get32(Th + 8);
   Off := (RdB(Th + 12) Shr 4) * 4; Fl := RdB(Th + 13);
+  If (Off < 20) Or (Off > N) Then Exit;
   DLen := N - Off;
   S := -1;
   For K := 0 To MAXS - 1 Do
     If (SType[K] = T_TCP) And (SLPort[K] = DPort) And (SRPort[K] = SPort) And (SRIp[K] = Src) And
-       (SState[K] <> TS_CLOSED) Then S := K;
-  If S < 0 Then Exit;
+       (SState[K] <> TS_CLOSED) And (SState[K] <> TS_LISTEN) Then S := K;
+  If (S >= 0) And Not Alive(S) Then
+  Begin
+    SockGc;
+    S := -1;
+  End;
+  If S < 0 Then
+  Begin
+    { SYN vers un socket d'ecoute }
+    If ((Fl And $02) <> 0) And ((Fl And $14) = 0) Then
+    Begin
+      For K := 0 To MAXS - 1 Do
+        If (SType[K] = T_TCP) And (SState[K] = TS_LISTEN) And (SLPort[K] = DPort) Then S := K;
+      If (S >= 0) And Alive(S) Then
+      Begin
+        TcpAcceptSyn(S, Th, Off, SPort, DPort, Sq, Src);
+        Exit;
+      End;
+    End;
+    { port ferme : RST }
+    If (Fl And 4) = 0 Then
+    Begin
+      If (Fl And $10) <> 0 Then TcpRst(Src, DPort, SPort, Ak, 0, 4)
+      Else
+      Begin
+        K := Sq + DLen;
+        If (Fl And 2) <> 0 Then Inc(K);
+        If (Fl And 1) <> 0 Then Inc(K);
+        TcpRst(Src, DPort, SPort, 0, K, $14);
+      End;
+    End;
+    Exit;
+  End;
   If (Fl And 4) <> 0 Then
   Begin
-    SState[S] := TS_RESET;
+    If (SState[S] = TS_SYNRCVD) Or SOrphan[S] Then ReleaseSlot(S)
+    Else SState[S] := TS_RESET;
     Exit;
   End;
   If SState[S] = TS_SYNSENT Then
@@ -805,30 +1155,81 @@ Begin
     Begin
       SAck[S] := Sq + 1; SUna[S] := Ak;
       SPWin[S] := Get16(Th + 14);
+      SMss[S] := PeerMss(Th, Off);
       SState[S] := TS_ESTAB;
       TcpSend(S, $10, 0, 0);
     End;
     Exit;
   End;
+  If SState[S] = TS_SYNRCVD Then
+  Begin
+    { SYN repete : renvoyer SYN+ACK }
+    If ((Fl And 2) <> 0) And ((Fl And $10) = 0) Then
+    Begin
+      SSeq[S] := SUna[S];
+      TcpSend(S, $12, 0, 0);
+      SSeq[S] := SUna[S] + 1;
+      Exit;
+    End;
+    If ((Fl And $10) = 0) Or (Ak <> SSeq[S]) Then Exit;
+    SUna[S] := Ak;
+    SState[S] := TS_ESTAB;
+    SRtxT[S] := 0; SRetry[S] := 0; SRto[S] := RTO0;
+    Inc(AccGen);
+    SAccQ[S] := AccGen;
+  End;
   If (Fl And $10) <> 0 Then
   Begin
-    If SeqLess(SUna[S], Ak) And Not SeqLess(SSeq[S], Ak) Then SUna[S] := Ak;
+    If SeqLess(SUna[S], Ak) And Not SeqLess(SSeq[S], Ak) Then
+    Begin
+      Acked := Ak - SUna[S];
+      D := Acked;
+      If D > STxLen[S] Then D := STxLen[S];
+      If (STxCap[S] > 0) And (D > 0) Then
+      Begin
+        STxHead[S] := (STxHead[S] + D) Mod STxCap[S];
+        STxLen[S] := STxLen[S] - D;
+      End;
+      SUna[S] := Ak;
+      If (SFin[S] = 2) And (Ak = SSeq[S]) Then
+      Begin
+        SFinAck[S] := True;
+        If SState[S] = TS_LASTACK Then SState[S] := TS_CLOSED;
+      End;
+      SRetry[S] := 0; SRto[S] := RTO0; SDup[S] := 0;
+      If SSeq[S] <> SUna[S] Then SRtxT[S] := KTicks Else SRtxT[S] := 0;
+    End
+    Else If (Ak = SUna[S]) And (DLen = 0) And (SSeq[S] <> SUna[S]) And ((Fl And 3) = 0) Then
+    Begin
+      { trois accuses en double : segment perdu, reemission immediate }
+      Inc(SDup[S]);
+      If SDup[S] = 3 Then
+      Begin
+        SSeq[S] := SUna[S];
+        If SFin[S] = 2 Then SFin[S] := 1;
+        SRtxT[S] := KTicks;
+      End;
+    End;
     SPWin[S] := Get16(Th + 14);
   End;
   { donnees en ordre seulement (les autres seront reemises) }
   If DLen > 0 Then
   Begin
-    If Sq = SAck[S] Then
+    If (Sq = SAck[S]) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_FINWAIT)) Then
     Begin
       Take := DLen;
       If Take > RxFree(S) Then Take := RxFree(S);
-      D := Th + Off;
-      P := (SHead[S] + SLen[S]) Mod RXCAP;
-      Part := Take;
-      If P + Part > RXCAP Then Part := RXCAP - P;
-      MoveMem(D, SBuf[S] + P, Part);
-      MoveMem(D + Part, SBuf[S], Take - Part);
-      SLen[S] := SLen[S] + Take;
+      If SOrphan[S] Then Take := DLen
+      Else If Take > 0 Then
+      Begin
+        D := Th + Off;
+        P := (SHead[S] + SLen[S]) Mod SRxCap[S];
+        Part := Take;
+        If P + Part > SRxCap[S] Then Part := SRxCap[S] - P;
+        MoveMem(D, SBuf[S] + P, Part);
+        MoveMem(D + Part, SBuf[S], Take - Part);
+        SLen[S] := SLen[S] + Take;
+      End;
       SAck[S] := SAck[S] + Take;
       If Take < DLen Then Fl := Fl And Not 1;
     End;
@@ -837,9 +1238,87 @@ Begin
   If ((Fl And 1) <> 0) And (Sq + DLen = SAck[S]) Then
   Begin
     SAck[S] := SAck[S] + 1;
-    If SState[S] = TS_FINWAIT Then SState[S] := TS_CLOSED Else SState[S] := TS_CLOSEWAIT;
+    If SState[S] = TS_FINWAIT Then SState[S] := TS_TIMEWAIT
+    Else If SState[S] = TS_ESTAB Then SState[S] := TS_CLOSEWAIT;
     TcpSend(S, $10, 0, 0);
+  End
+  Else If ((Fl And 1) <> 0) And (Sq + DLen = SAck[S] - 1) Then
+    TcpSend(S, $10, 0, 0);       { FIN reemis : le reconfirmer }
+  If SState[S] <> TS_CLOSED Then TcpOutput(S);
+  If SOrphan[S] And ((SState[S] = TS_CLOSED) Or (SState[S] = TS_TIMEWAIT)) Then ReleaseSlot(S);
+End;
+
+{ minuteries : reemission, SYN+ACK, sonde de fenetre nulle, fin des
+  connexions abandonnees par leur programme }
+Procedure TcpTimers;
+Var S, Now_, Inf : LongInt;
+Begin
+  Now_ := KTicks;
+  If Now_ - LastGc >= 1000 Then
+  Begin
+    LastGc := Now_;
+    SockGc;
   End;
+  For S := 0 To MAXS - 1 Do
+    If SType[S] = T_TCP Then
+    Begin
+      If SState[S] = TS_SYNRCVD Then
+      Begin
+        If Now_ - SRtxT[S] > SRto[S] Then
+        Begin
+          Inc(SRetry[S]);
+          If SRetry[S] > 5 Then ReleaseSlot(S)
+          Else
+          Begin
+            SSeq[S] := SUna[S];
+            TcpSend(S, $12, 0, 0);
+            SSeq[S] := SUna[S] + 1;
+            SRtxT[S] := Now_;
+            SRto[S] := SRto[S] * 2;
+          End;
+        End;
+      End
+      Else If (SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT) Or (SState[S] = TS_FINWAIT) Or
+              (SState[S] = TS_LASTACK) Then
+      Begin
+        Inf := SSeq[S] - SUna[S];
+        If (Inf <> 0) And (SRtxT[S] <> 0) And (Now_ - SRtxT[S] > SRto[S]) Then
+        Begin
+          Inc(SRetry[S]);
+          If SRetry[S] > 10 Then
+          Begin
+            If SOrphan[S] Then ReleaseSlot(S) Else SState[S] := TS_RESET;
+          End
+          Else
+          Begin
+            { tout reprendre depuis le dernier octet confirme }
+            SSeq[S] := SUna[S];
+            If SFin[S] = 2 Then SFin[S] := 1;
+            SRto[S] := SRto[S] * 2;
+            If SRto[S] > 8000 Then SRto[S] := 8000;
+            SRtxT[S] := Now_;
+            TcpOutput(S);
+          End;
+        End
+        Else If (Inf = 0) And (STxLen[S] > 0) And (SPWin[S] = 0) Then
+        Begin
+          { fenetre nulle : sonde d'un octet }
+          If SRtxT[S] = 0 Then SRtxT[S] := Now_
+          Else If Now_ - SRtxT[S] > SRto[S] Then
+          Begin
+            TcpSendX(S, $10, STx[S], STxCap[S], STxHead[S], 1);
+            SSeq[S] := SSeq[S] + 1;
+            SRtxT[S] := Now_;
+          End;
+        End;
+      End;
+      If (SType[S] = T_TCP) And SOrphan[S] Then
+      Begin
+        If (SState[S] = TS_CLOSED) Or (SState[S] = TS_TIMEWAIT) Or (SState[S] = TS_RESET) Or
+           ((SState[S] = TS_FINWAIT) And SFinAck[S] And (Now_ - SOrphT[S] > 5000)) Or
+           (Now_ - SOrphT[S] > 60000) Then ReleaseSlot(S);
+      End;
+    End;
 End;
 
 { ==================================================================== }
@@ -848,7 +1327,12 @@ End;
 
 Function SockOf(D : LongInt) : LongInt;
 Begin
-  If (D < 3) Or (D >= 3 + MAXS) Or (SType[D - 3] = 0) Then
+  If (D < 3) Or (D >= 3 + MAXS) Then
+  Begin
+    Errno := SOCENOTSOCK;
+    SockOf := -1;
+  End
+  Else If (SType[D - 3] = 0) Or (SType[D - 3] = T_DEAD) Or SOrphan[D - 3] Then
   Begin
     Errno := SOCENOTSOCK;
     SockOf := -1;
@@ -908,40 +1392,149 @@ Begin
     If SType[K] = 0 Then S := K;
   If S < 0 Then
   Begin
+    SockGc;
+    For K := MAXS - 1 DownTo 0 Do
+      If SType[K] = 0 Then S := K;
+  End;
+  If S < 0 Then
+  Begin
     Errno := SOCEMFILE;
     Exit;
   End;
+  If (Typ <> SOCK_STREAM) And (Typ <> SOCK_DGRAM) And Not ((Typ = SOCK_RAW) And (Proto = 1)) Then
+  Begin
+    Errno := SOCEINVAL;
+    Exit;
+  End;
   B := 0;
-  If DosAllocMem(LongInt(@B), RXCAP, $13) <> 0 Then
+  If Typ = SOCK_STREAM Then K := RXCAP + TXCAP Else K := RXCAP;
+  If DosAllocMem(LongInt(@B), K, $13) <> 0 Then
   Begin
     Errno := SOCENOBUFS;
     Exit;
   End;
-  SBuf[S] := B; SHead[S] := 0; SLen[S] := 0; SSys[S] := False;
-  SState[S] := TS_CLOSED; SRIp[S] := 0; SRPort[S] := 0; SBound[S] := 0;
-  If Typ = SOCK_STREAM Then SType[S] := T_TCP
-  Else If Typ = SOCK_DGRAM Then SType[S] := T_UDP
-  Else If (Typ = SOCK_RAW) And (Proto = 1) Then SType[S] := T_RAW
+  SBuf[S] := B; SRxCap[S] := RXCAP; SHead[S] := 0; SLen[S] := 0; SSys[S] := False;
+  If Typ = SOCK_STREAM Then
+  Begin
+    STx[S] := B + RXCAP; STxCap[S] := TXCAP;
+  End
   Else
   Begin
-    Dummy := DosFreeMem(B);
-    Errno := SOCEINVAL;
-    Exit;
+    STx[S] := 0; STxCap[S] := 0;
   End;
+  STxHead[S] := 0; STxLen[S] := 0; SFin[S] := 0; SFinAck[S] := False;
+  SState[S] := TS_CLOSED; SRIp[S] := 0; SRPort[S] := 0; SBound[S] := 0;
+  SOwner[S] := MyPid; SParent[S] := -1; SPSlot[S] := -1; SNb[S] := 0; SOrphan[S] := False;
+  SAccQ[S] := 0; SBack[S] := 0; SPool[S] := 0; SMss[S] := MSS; SRto[S] := RTO0; SRetry[S] := 0;
+  SRtxT[S] := 0; SPWin[S] := 0;
+  If Typ = SOCK_STREAM Then SType[S] := T_TCP
+  Else If Typ = SOCK_DGRAM Then SType[S] := T_UDP
+  Else SType[S] := T_RAW;
   SLPort[S] := NewPort;
   Socket := S + 3;
 End;
 
 Function Bind(D, PAddr, Len : LongInt) : LongInt;
-Var S, Ip, Port : LongInt;
+Var S, Ip, Port, K : LongInt;
 Begin
   Bind := -1;
   S := SockOf(D);
   If S < 0 Then Exit;
   SockAddr(PAddr, Ip, Port);
-  If Port <> 0 Then SLPort[S] := Port;
+  If Port <> 0 Then
+  Begin
+    For K := 0 To MAXS - 1 Do
+      If (K <> S) And (SType[K] = SType[S]) And (SLPort[K] = Port) And
+         ((SType[K] <> T_TCP) Or (SState[K] = TS_LISTEN)) And Alive(K) Then
+      Begin
+        Errno := SOCEADDRINUSE;
+        Exit;
+      End;
+    SLPort[S] := Port;
+  End;
   SBound[S] := 1;
   Bind := 0;
+End;
+
+{ listen : le socket attend les connexions ; Backlog * 4 connexions
+  simultanees au plus (16 a 48), chacune avec ses tampons pris dans une
+  reserve du programme (8 Ko en reception, 24 Ko en emission) }
+Function Listen(D, Backlog : LongInt) : LongInt;
+Var S, N, B, K : LongInt;
+Begin
+  Listen := -1;
+  S := SockOf(D);
+  If S < 0 Then Exit;
+  If (SType[S] <> T_TCP) Or ((SState[S] <> TS_CLOSED) And (SState[S] <> TS_LISTEN)) Then
+  Begin
+    Errno := SOCEINVAL;
+    Exit;
+  End;
+  If SState[S] = TS_LISTEN Then
+  Begin
+    Listen := 0;
+    Exit;
+  End;
+  For K := 0 To MAXS - 1 Do
+    If (K <> S) And (SType[K] = T_TCP) And (SState[K] = TS_LISTEN) And (SLPort[K] = SLPort[S]) And Alive(K) Then
+    Begin
+      Errno := SOCEADDRINUSE;
+      Exit;
+    End;
+  N := Backlog * 4;
+  If N < 16 Then N := 16;
+  If N > MAXPOOL Then N := MAXPOOL;
+  B := 0;
+  If DosAllocMem(LongInt(@B), N * (CRX + CTX), $13) <> 0 Then
+  Begin
+    Errno := SOCENOBUFS;
+    Exit;
+  End;
+  If (SBuf[S] <> 0) And Not SSys[S] Then Dummy := DosFreeMem(SBuf[S]);
+  SBuf[S] := 0; STx[S] := 0; STxCap[S] := 0; SRxCap[S] := 0;
+  SPool[S] := B; SBack[S] := N;
+  For K := 0 To MAXPOOL - 1 Do PoolUse[S * MAXPOOL + K] := 0;
+  SState[S] := TS_LISTEN;
+  Listen := 0;
+End;
+
+{ accept : prochaine connexion etablie du socket d'ecoute }
+Function Accept(D, PAddr, PLen : LongInt) : LongInt;
+Var S, K, C, Best : LongInt;
+Begin
+  Accept := -1;
+  S := SockOf(D);
+  If S < 0 Then Exit;
+  If SState[S] <> TS_LISTEN Then
+  Begin
+    Errno := SOCEINVAL;
+    Exit;
+  End;
+  Repeat
+    NetPoll;
+    C := -1; Best := 0;
+    For K := 0 To MAXS - 1 Do
+      If (SType[K] = T_TCP) And (SParent[K] = S) And (SAccQ[K] > 0) And Not SOrphan[K] Then
+        If (C < 0) Or (SAccQ[K] < Best) Then
+        Begin
+          C := K; Best := SAccQ[K];
+        End;
+    If C >= 0 Then
+    Begin
+      SAccQ[C] := 0;
+      PutSockAddr(PAddr, SRIp[C], SRPort[C]);
+      If PLen <> 0 Then WrL(PLen, 16);
+      Accept := C + 3;
+      Exit;
+    End;
+    If SNb[S] <> 0 Then
+    Begin
+      Errno := SOCEWOULDBLOCK;
+      Exit;
+    End;
+    Idle;
+  Until SState[S] <> TS_LISTEN;
+  Errno := SOCEINVAL;
 End;
 
 Function Connect(D, PAddr, Len : LongInt) : LongInt;
@@ -957,7 +1550,10 @@ Begin
     Connect := 0;
     Exit;
   End;
-  SSeq[S] := KTicks * 64000 + Port; SUna[S] := SSeq[S]; SAck[S] := 0;
+  Inc(IsnGen);
+  SSeq[S] := KTicks * 64000 + IsnGen * 7919 + Port; SUna[S] := SSeq[S]; SAck[S] := 0;
+  STxHead[S] := 0; STxLen[S] := 0; SFin[S] := 0; SFinAck[S] := False; SRto[S] := RTO0; SRetry[S] := 0;
+  SDup[S] := 0;
   SState[S] := TS_SYNSENT;
   For Try_ := 1 To 4 Do
   Begin
@@ -968,6 +1564,7 @@ Begin
     While (SState[S] = TS_SYNSENT) And (KTicks - T < 1500) Do Idle;
     If SState[S] = TS_ESTAB Then
     Begin
+      SRtxT[S] := 0;
       Connect := 0;
       Exit;
     End;
@@ -982,42 +1579,51 @@ Begin
   Errno := SOCETIMEDOUT;
 End;
 
-{ envoyer : segment par segment, chacun accuse avant le suivant }
+{ envoyer : les donnees passent dans le tampon d'emission (fenetre
+  glissante : plusieurs segments en vol, reemis par la minuterie) ; non
+  bloquant : ce qui tient, sinon SOCEWOULDBLOCK }
 Function TcpWrite(S, Buf, Len : LongInt) : LongInt;
-Var Done_, N, Try_, T : LongInt;
+Var Done_, N, P, Part, T : LongInt;
 Begin
   TcpWrite := -1;
   Done_ := 0;
+  T := KTicks;
   While Done_ < Len Do
   Begin
-    If (SState[S] <> TS_ESTAB) And (SState[S] <> TS_CLOSEWAIT) Then
+    If ((SState[S] <> TS_ESTAB) And (SState[S] <> TS_CLOSEWAIT)) Or (SFin[S] <> 0) Then
     Begin
       If SState[S] = TS_RESET Then Errno := SOCECONNRESET Else Errno := SOCENOTCONN;
       If Done_ > 0 Then TcpWrite := Done_;
       Exit;
     End;
-    N := Len - Done_;
-    If N > MSS Then N := MSS;
-    If (SPWin[S] > 0) And (N > SPWin[S]) Then N := SPWin[S];
-    For Try_ := 1 To 8 Do
+    N := STxCap[S] - STxLen[S];
+    If N > Len - Done_ Then N := Len - Done_;
+    If N > 0 Then
     Begin
-      SSeq[S] := SUna[S];
-      TcpSend(S, $18, Buf + Done_, N);
-      SSeq[S] := SUna[S] + N;
+      P := (STxHead[S] + STxLen[S]) Mod STxCap[S];
+      Part := N;
+      If P + Part > STxCap[S] Then Part := STxCap[S] - P;
+      MoveMem(Buf + Done_, STx[S] + P, Part);
+      MoveMem(Buf + Done_ + Part, STx[S], N - Part);
+      STxLen[S] := STxLen[S] + N;
+      Done_ := Done_ + N;
+      TcpOutput(S);
       T := KTicks;
-      While SeqLess(SUna[S], SSeq[S]) And (SState[S] <> TS_RESET) And (KTicks - T < 1000) Do Idle;
-      If Not SeqLess(SUna[S], SSeq[S]) Then Break;
-    End;
-    If SeqLess(SUna[S], SSeq[S]) Then
+    End
+    Else
     Begin
-      SSeq[S] := SUna[S];
-      Errno := SOCETIMEDOUT;
-      If Done_ > 0 Then TcpWrite := Done_;
-      Exit;
+      If SNb[S] <> 0 Then Break;
+      If KTicks - T > 60000 Then
+      Begin
+        Errno := SOCETIMEDOUT;
+        If Done_ > 0 Then TcpWrite := Done_;
+        Exit;
+      End;
+      Idle;
     End;
-    Done_ := Done_ + N;
   End;
-  TcpWrite := Done_;
+  If (Done_ = 0) And (Len > 0) Then Errno := SOCEWOULDBLOCK
+  Else TcpWrite := Done_;
 End;
 
 Function Send(D, Buf, Len, Flags : LongInt) : LongInt;
@@ -1055,13 +1661,20 @@ Begin
   Else Errno := SOCEHOSTUNREACH;
 End;
 
-{ recevoir (TCP) : attend des donnees ou la fermeture (60 s au plus) }
+{ recevoir (TCP) : attend des donnees ou la fermeture (60 s au plus) ;
+  non bloquant : SOCEWOULDBLOCK s'il n'y a rien }
 Function TcpRead(S, Buf, Len : LongInt) : LongInt;
-Var T, N, Part, Before : LongInt;
+Var T, N, Part, Before, Half : LongInt;
 Begin
   T := KTicks;
   NetPoll;
-  While (SLen[S] = 0) And (SState[S] = TS_ESTAB) And (KTicks - T < 60000) Do Idle;
+  If (SLen[S] = 0) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_FINWAIT)) And (SNb[S] <> 0) Then
+  Begin
+    Errno := SOCEWOULDBLOCK;
+    TcpRead := -1;
+    Exit;
+  End;
+  While (SLen[S] = 0) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_FINWAIT)) And (KTicks - T < 60000) Do Idle;
   If SLen[S] = 0 Then
   Begin
     If SState[S] = TS_RESET Then
@@ -1069,7 +1682,7 @@ Begin
       Errno := SOCECONNRESET;
       TcpRead := -1;
     End
-    Else If SState[S] = TS_ESTAB Then
+    Else If (SState[S] = TS_ESTAB) Or (SState[S] = TS_FINWAIT) Then
     Begin
       Errno := SOCETIMEDOUT;
       TcpRead := -1;
@@ -1081,13 +1694,16 @@ Begin
   N := Len;
   If N > SLen[S] Then N := SLen[S];
   Part := N;
-  If SHead[S] + Part > RXCAP Then Part := RXCAP - SHead[S];
+  If SHead[S] + Part > SRxCap[S] Then Part := SRxCap[S] - SHead[S];
   MoveMem(SBuf[S] + SHead[S], Buf, Part);
   MoveMem(SBuf[S], Buf + Part, N - Part);
-  SHead[S] := (SHead[S] + N) Mod RXCAP;
+  SHead[S] := (SHead[S] + N) Mod SRxCap[S];
   SLen[S] := SLen[S] - N;
   { fenetre rouverte : la dire a l'autre bout }
-  If (Before < 8192) And (RxFree(S) >= 8192) And (SState[S] = TS_ESTAB) Then TcpSend(S, $10, 0, 0);
+  Half := SRxCap[S] Div 2;
+  If Half > 8192 Then Half := 8192;
+  If (Before < Half) And (RxFree(S) >= Half) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_FINWAIT)) Then
+    TcpSend(S, $10, 0, 0);
   TcpRead := N;
 End;
 
@@ -1098,6 +1714,11 @@ Begin
   DgramRead := -1;
   T := KTicks;
   NetPoll;
+  If (SLen[S] = 0) And (SNb[S] <> 0) Then
+  Begin
+    Errno := SOCEWOULDBLOCK;
+    Exit;
+  End;
   While (SLen[S] = 0) And (KTicks - T < Wait) Do Idle;
   If SLen[S] = 0 Then
   Begin
@@ -1139,44 +1760,97 @@ Begin
   Else RecvFrom := DgramRead(S, Buf, Len, PAddr, PALen, 10000);
 End;
 
+{ fin de l'emission : le FIN part quand tout le tampon est envoye ;
+  bloquant : attendre qu'il soit confirme (10 s au plus) }
 Function Shutdown(D, How : LongInt) : LongInt;
 Var S, T : LongInt;
 Begin
   Shutdown := -1;
   S := SockOf(D);
   If S < 0 Then Exit;
-  If (SType[S] = T_TCP) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT)) And (How >= 1) Then
+  If (SType[S] = T_TCP) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT)) And (How >= 1) And
+     (SFin[S] = 0) Then
   Begin
-    SSeq[S] := SUna[S];
-    TcpSend(S, $11, 0, 0);
-    SSeq[S] := SUna[S] + 1;
-    If SState[S] = TS_ESTAB Then SState[S] := TS_FINWAIT Else SState[S] := TS_CLOSED;
-    T := KTicks;
-    While SeqLess(SUna[S], SSeq[S]) And (KTicks - T < 1500) Do Idle;
+    SFin[S] := 1;
+    TcpOutput(S);
+    If SNb[S] = 0 Then
+    Begin
+      T := KTicks;
+      While Not SFinAck[S] And (SState[S] <> TS_RESET) And (SState[S] <> TS_CLOSED) And
+            (KTicks - T < 10000) Do Idle;
+    End;
   End;
   Shutdown := 0;
 End;
 
 Function SoClose(D : LongInt) : LongInt;
-Var S : LongInt;
+Var S, K : LongInt; Left : Boolean;
 Begin
   SoClose := -1;
   S := SockOf(D);
   If S < 0 Then Exit;
-  If (SType[S] = T_TCP) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT)) Then Dummy := Shutdown(D, 2);
+  If (SType[S] = T_TCP) And (SState[S] = TS_LISTEN) Then
+  Begin
+    { connexions pas encore acceptees : refusees }
+    Left := False;
+    For K := 0 To MAXS - 1 Do
+      If (SType[K] = T_TCP) And (SParent[K] = S) Then
+      Begin
+        If (SState[K] = TS_SYNRCVD) Or (SAccQ[K] > 0) Then
+        Begin
+          TcpSend(K, $14, 0, 0);
+          ReleaseSlot(K);
+        End
+        Else Left := True;
+      End;
+    If Left Then
+    Begin
+      SType[S] := T_DEAD;
+      SState[S] := TS_CLOSED;
+    End
+    Else
+    Begin
+      If SPool[S] <> 0 Then Dummy := DosFreeMem(SPool[S]);
+      SPool[S] := 0;
+      SType[S] := 0; SState[S] := TS_CLOSED;
+    End;
+    SoClose := 0;
+    Exit;
+  End;
+  { connexion d'un socket d'ecoute : la pile finit d'envoyer, puis
+    l'emplacement est libere (le programme n'attend pas) }
+  If (SType[S] = T_TCP) And (SParent[S] >= 0) Then
+  Begin
+    If (SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT) Or (SState[S] = TS_FINWAIT) Or
+       (SState[S] = TS_LASTACK) Then
+    Begin
+      If SFin[S] = 0 Then SFin[S] := 1;
+      SOrphan[S] := True;
+      SOrphT[S] := KTicks;
+      TcpOutput(S);
+    End
+    Else ReleaseSlot(S);
+    SoClose := 0;
+    Exit;
+  End;
+  If (SType[S] = T_TCP) And ((SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT)) Then
+  Begin
+    SNb[S] := 0;
+    Dummy := Shutdown(D, 2);
+  End;
   If SBuf[S] <> 0 Then
   Begin
     If SSys[S] Then Dummy := KHeapFree(2, 0, SBuf[S]) Else Dummy := DosFreeMem(SBuf[S]);
   End;
-  SBuf[S] := 0; SType[S] := 0; SState[S] := TS_CLOSED; SSys[S] := False;
+  SBuf[S] := 0; STx[S] := 0; SType[S] := 0; SState[S] := TS_CLOSED; SSys[S] := False;
   SoClose := 0;
 End;
 
-{ sosystem(s) : socket du systeme (lecteurs reseau de SMB.IFS) ; son tampon
-  de reception passe dans le tas partage et survit au processus qui l'a
+{ sosystem(s) : socket du systeme (lecteurs reseau de SMB.IFS) ; ses
+  tampons passent dans le tas partage et survivent au processus qui l'a
   cree (les objets de DosAllocMem sont liberes a la fin du processus) }
 Function SoSystem(D : LongInt) : LongInt;
-Var S, B : LongInt;
+Var S, B, N, Part : LongInt;
 Begin
   SoSystem := -1;
   S := SockOf(D);
@@ -1186,34 +1860,156 @@ Begin
     SoSystem := 0;
     Exit;
   End;
-  B := KHeapAlloc(2, 8, RXCAP);
+  If (SLen[S] > SYSRX) Or (STxLen[S] > SYSTX) Then
+  Begin
+    Errno := SOCENOBUFS;
+    Exit;
+  End;
+  B := KHeapAlloc(2, 8, SYSRX + SYSTX);
   If B = 0 Then
   Begin
     Errno := SOCENOBUFS;
     Exit;
   End;
-  If SLen[S] > 0 Then MoveMem(SBuf[S], B, RXCAP);
+  { recopie dans l'ordre (les anneaux recommencent a 0) }
+  N := SLen[S];
+  If N > 0 Then
+  Begin
+    Part := N;
+    If SHead[S] + Part > SRxCap[S] Then Part := SRxCap[S] - SHead[S];
+    MoveMem(SBuf[S] + SHead[S], B, Part);
+    MoveMem(SBuf[S], B + Part, N - Part);
+  End;
+  N := STxLen[S];
+  If (N > 0) And (STxCap[S] > 0) Then
+  Begin
+    Part := N;
+    If STxHead[S] + Part > STxCap[S] Then Part := STxCap[S] - STxHead[S];
+    MoveMem(STx[S] + STxHead[S], B + SYSRX, Part);
+    MoveMem(STx[S], B + SYSRX + Part, N - Part);
+  End;
   If SBuf[S] <> 0 Then Dummy := DosFreeMem(SBuf[S]);
-  SBuf[S] := B;
+  SBuf[S] := B; SRxCap[S] := SYSRX; SHead[S] := 0;
+  If SType[S] = T_TCP Then
+  Begin
+    STx[S] := B + SYSRX; STxCap[S] := SYSTX;
+  End;
+  STxHead[S] := 0;
   SSys[S] := True;
   SoSystem := 0;
+End;
+
+{ ioctl (ordinal 8) : FIONBIO (non bloquant), FIONREAD (octets a lire) }
+Function Ioctl(D, Cmd, PArg, Len : LongInt) : LongInt;
+Var S : LongInt;
+Begin
+  Ioctl := -1;
+  S := SockOf(D);
+  If S < 0 Then Exit;
+  If (Cmd And $FFFF) = $667E Then
+  Begin
+    If (PArg <> 0) And (RdL(PArg) <> 0) Then SNb[S] := 1 Else SNb[S] := 0;
+    Ioctl := 0;
+  End
+  Else If (Cmd And $FFFF) = $667F Then
+  Begin
+    NetPoll;
+    If PArg <> 0 Then
+    Begin
+      If SType[S] = T_TCP Then WrL(PArg, SLen[S])
+      Else If SLen[S] > 0 Then WrL(PArg, Get16(SBuf[S] + SHead[S]))
+      Else WrL(PArg, 0);
+    End;
+    Ioctl := 0;
+  End
+  Else Errno := SOCEINVAL;
+End;
+
+{ setsockopt / getsockopt (ordinaux 15 et 7) : acceptes (SO_REUSEADDR,
+  TCP_NODELAY... sont sans effet) ; SO_ERROR rend 0 }
+Function SetSockOpt(D, Level, Opt, PVal, Len : LongInt) : LongInt;
+Begin
+  SetSockOpt := -1;
+  If SockOf(D) < 0 Then Exit;
+  SetSockOpt := 0;
+End;
+
+Function GetSockOpt(D, Level, Opt, PVal, PLen : LongInt) : LongInt;
+Var S : LongInt;
+Begin
+  GetSockOpt := -1;
+  S := SockOf(D);
+  If S < 0 Then Exit;
+  If PVal <> 0 Then
+  Begin
+    If Opt = $1008 Then
+    Begin
+      If SType[S] = T_TCP Then WrL(PVal, 1) Else If SType[S] = T_UDP Then WrL(PVal, 2) Else WrL(PVal, 3);
+    End
+    Else WrL(PVal, 0);
+  End;
+  If PLen <> 0 Then WrL(PLen, 4);
+  GetSockOpt := 0;
+End;
+
+Function GetSockName(D, PAddr, PLen : LongInt) : LongInt;
+Var S : LongInt;
+Begin
+  GetSockName := -1;
+  S := SockOf(D);
+  If S < 0 Then Exit;
+  PutSockAddr(PAddr, MyIp, SLPort[S]);
+  If PLen <> 0 Then WrL(PLen, 16);
+  GetSockName := 0;
+End;
+
+Function GetPeerName(D, PAddr, PLen : LongInt) : LongInt;
+Var S : LongInt;
+Begin
+  GetPeerName := -1;
+  S := SockOf(D);
+  If S < 0 Then Exit;
+  If (SType[S] = T_TCP) And (SState[S] <> TS_ESTAB) And (SState[S] <> TS_CLOSEWAIT) And
+     (SState[S] <> TS_FINWAIT) Then
+  Begin
+    Errno := SOCENOTCONN;
+    Exit;
+  End;
+  PutSockAddr(PAddr, SRIp[S], SRPort[S]);
+  If PLen <> 0 Then WrL(PLen, 16);
+  GetPeerName := 0;
 End;
 
 { ==================================================================== }
 { select : attente de plusieurs sockets                                 }
 { ==================================================================== }
 
-{ donnees a lire (ou fin de la connexion : recv rend 0 ou une erreur) }
+{ donnees a lire (ou fin de la connexion : recv rend 0 ou une erreur) ;
+  socket d'ecoute : une connexion a accepter }
 Function SockReadable(S : LongInt) : Boolean;
+Var K : LongInt;
 Begin
   If SType[S] = T_TCP Then
-    SockReadable := (SLen[S] > 0) Or ((SState[S] <> TS_ESTAB) And (SState[S] <> TS_SYNSENT))
+  Begin
+    If SState[S] = TS_LISTEN Then
+    Begin
+      SockReadable := False;
+      For K := 0 To MAXS - 1 Do
+        If (SType[K] = T_TCP) And (SParent[K] = S) And (SAccQ[K] > 0) And Not SOrphan[K] Then
+          SockReadable := True;
+    End
+    Else
+      SockReadable := (SLen[S] > 0) Or ((SState[S] <> TS_ESTAB) And (SState[S] <> TS_SYNSENT) And
+                      (SState[S] <> TS_FINWAIT));
+  End
   Else SockReadable := SLen[S] > 0;
 End;
 
 Function SockWritable(S : LongInt) : Boolean;
 Begin
-  If SType[S] = T_TCP Then SockWritable := (SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT)
+  If SType[S] = T_TCP Then
+    SockWritable := (((SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT)) And (STxLen[S] < STxCap[S])) Or
+                    (SState[S] = TS_RESET)
   Else SockWritable := True;
 End;
 
@@ -1242,7 +2038,8 @@ Begin
     For I := 0 To Tot - 1 Do
     Begin
       S := SockOf(RdL(PS + I * 4));
-      If I < NR Then Rd := SockReadable(S)
+      If S < 0 Then Rd := True
+      Else If I < NR Then Rd := SockReadable(S)
       Else If I < NR + NW Then Rd := SockWritable(S)
       Else Rd := SState[S] = TS_RESET;
       If Rd Then Inc(N);
@@ -1255,7 +2052,8 @@ Begin
   Begin
     D := RdL(PS + I * 4);
     S := SockOf(D);
-    If I < NR Then Rd := SockReadable(S)
+    If S < 0 Then Rd := True
+    Else If I < NR Then Rd := SockReadable(S)
     Else If I < NR + NW Then Rd := SockWritable(S)
     Else Rd := SState[S] = TS_RESET;
     If Not Rd Then WrL(PS + I * 4, -1);
@@ -1270,17 +2068,17 @@ End;
   ne gardent que les descripteurs prets ; rend leur nombre }
 Function BsdSelect(Nfds, PR, PW, PE, PTv : LongInt) : LongInt;
 Var T, Ms, D, S, N, K, W : LongInt; Sets : Array[0..2] Of LongInt;
-    Want, Got : Array[0..2, 0..1] Of LongInt; Rd : Boolean;
+    Want, Got : Array[0..2, 0..3] Of LongInt; Rd : Boolean;
 Begin
   BsdSelect := -1;
-  If (Nfds < 0) Or (Nfds > 64) Then
+  If (Nfds < 0) Or (Nfds > 128) Then
   Begin
     Errno := SOCEINVAL;
     Exit;
   End;
   Sets[0] := PR; Sets[1] := PW; Sets[2] := PE;
   For K := 0 To 2 Do
-    For W := 0 To 1 Do
+    For W := 0 To 3 Do
     Begin
       If (Sets[K] <> 0) And (W * 32 < Nfds) Then Want[K, W] := RdL(Sets[K] + W * 4) Else Want[K, W] := 0;
       Got[K, W] := 0;
@@ -1299,12 +2097,14 @@ Begin
         If ((Want[K, D Shr 5] Shr (D And 31)) And 1) <> 0 Then
         Begin
           S := SockOf(D);
-          Case K Of
-            0 : Rd := SockReadable(S);
-            1 : Rd := SockWritable(S);
+          If S < 0 Then Rd := True
           Else
-            Rd := SState[S] = TS_RESET;
-          End;
+            Case K Of
+              0 : Rd := SockReadable(S);
+              1 : Rd := SockWritable(S);
+            Else
+              Rd := SState[S] = TS_RESET;
+            End;
           If Rd Then
           Begin
             Got[K, D Shr 5] := Got[K, D Shr 5] Or (1 Shl (D And 31));
@@ -1316,7 +2116,7 @@ Begin
   Until False;
   For K := 0 To 2 Do
     If Sets[K] <> 0 Then
-      For W := 0 To 1 Do
+      For W := 0 To 3 Do
         If W * 32 < Nfds Then WrL(Sets[K] + W * 4, Got[K, W]);
   BsdSelect := N;
 End;
@@ -1495,7 +2295,14 @@ Exports
   TcpipRenew Index 901 Name 'TCPIPRENEW',
   SoSystem Index 902 Name 'sosystem',
   Os2Select Index 12 Name 'select',
-  BsdSelect Index 32 Name 'bsdselect';
+  BsdSelect Index 32 Name 'bsdselect',
+  Accept Index 1 Name 'accept',
+  GetPeerName Index 5 Name 'getpeername',
+  GetSockName Index 6 Name 'getsockname',
+  GetSockOpt Index 7 Name 'getsockopt',
+  Ioctl Index 8 Name 'ioctl',
+  Listen Index 9 Name 'listen',
+  SetSockOpt Index 15 Name 'setsockopt';
 
 Var
   InitK : LongInt;
@@ -1504,8 +2311,12 @@ BEGIN
   DrvTried := 0; DrvFn := 0; Ready := 0; Dhcp := 0;
   MyIp := 0; Mask := 0; Gw := 0; Dns := 0; Lease := 0;
   IpId := 1; NextPort := 1100; Errno := 0; ArpNext := 0; RxPkts := 0; TxPkts := 0;
+  IsnGen := 0; AccGen := 0; LastGc := 0; LastTmr := 0; InPoll := False;
   For InitK := 0 To MAXS - 1 Do
   Begin
-    SType[InitK] := 0; SBuf[InitK] := 0; SSys[InitK] := False;
+    SType[InitK] := 0; SBuf[InitK] := 0; SSys[InitK] := False; STx[InitK] := 0; STxCap[InitK] := 0;
+    SParent[InitK] := -1; SPSlot[InitK] := -1; SOrphan[InitK] := False; SAccQ[InitK] := 0; SPool[InitK] := 0;
+    SOwner[InitK] := 0; SNb[InitK] := 0;
   End;
+  For InitK := 0 To MAXS * MAXPOOL - 1 Do PoolUse[InitK] := 0;
 END.

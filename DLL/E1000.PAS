@@ -27,14 +27,14 @@ Library E1000;
     4 LIEN      : rend +8 (1 actif)
     5 DESCRIPTION : +8 tampon, +12 taille (gestionnaire de peripheriques)
     6 ARRETER
-  Registres en memoire (BAR0) ; anneaux de descripteurs (16 en reception,
-  8 en emission, tampons de 2 Ko) dans le tas du noyau, lus et ecrits par
+  Registres en memoire (BAR0) ; anneaux de descripteurs (48 en reception,
+  16 en emission, tampons de 2 Ko) dans le tas du noyau, lus et ecrits par
   la carte (bus maitre) ; l'adresse MAC est celle que la carte a lue dans
   son EEPROM (registres RAL/RAH). Sans interruption : la pile interroge
   l'anneau de reception. }
 
 Const
-  NRX = 16; NTX = 8; BUFSZ = 2048;
+  NRX = 48; NTX = 16; BUFSZ = 2048;
   CTRL = $0000; STATUS = $0008; IMC = $00D8; RCTL = $0100; TCTL = $0400; TIPG = $0410;
   RDBAL = $2800; RDBAH = $2804; RDLEN = $2808; RDH = $2810; RDT = $2818;
   TDBAL = $3800; TDBAH = $3804; TDLEN = $3808; TDH = $3810; TDT = $3818;

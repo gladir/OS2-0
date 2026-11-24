@@ -1328,6 +1328,47 @@ Parametres : SVNCLI dossier ; SVNCLI url dossier ; /CHECKOUT url dossier
 (sans fenetre) ; /USER: /PASS: ; /TEST [urls] (essais sur COM1).
   OS2PC APPS\SVNCLI.PAS                     -> SVNCLI.EXE
 
+Serveur Web (WEBSRV.EXE, dossier Outils reseau)
+-----------------------------------------------
+Serveur HTTP et HTTPS d'OS/2-0 et sa console dans le style d'IIS, en un
+seul fichier source (APPS\WEBSRV.PAS), sans dependance externe : le
+serveur, TLS 1.3 (AES-GCM, X25519, ECDSA P-256), les moteurs PSP (Pascal
+Server Pages, le langage des compilateurs PSP de DEV-COOLS) et ASP
+(VBScript), et la console de Presentation Manager.
+Console (WEBSRV sans parametre) : menus Fichier, Action, Affichage,
+Outils et ? ; barre d'outils ; a gauche l'arbre (le serveur, ses Sites et
+leurs fonctionnalites : Liaisons, Parametres de base, Document par defaut,
+Exploration de repertoire, Pages d'erreurs, En-tetes de reponse HTTP,
+Repertoires virtuels, Authentification, Mappages de gestionnaires,
+Certificat SSL, Journalisation ; Types MIME, Parametres du serveur,
+Surveillance, Journal du serveur) ; au centre le panneau qui suit l'arbre ;
+a droite le volet Actions (fenetre large). Appliquer enregistre
+WEBSRV.CFG ; le serveur en marche relit sa configuration.
+Demarrage : la case "Demarrer le serveur Web avec OS/2" ajoute ou retire
+RUN=C:\WEBSRV.EXE /SERVICE dans CONFIG.SYS ; par defaut elle n'est pas
+cochee et rien n'est charge au demarrage. A l'invite : WEBSRV /START,
+/STOP, /STATUS ; WEBSRV /PSP page [requete] execute une page sans reseau.
+Serveur : HTTP/1.1 (connexions persistantes, 304, 206, documents par
+defaut, exploration, pages d'erreurs, en-tetes, repertoires virtuels,
+authentification de base, journal W3C), HTTPS, hotes virtuels (adresse
+IP, port et nom de l'en-tete Host), pages .psp et .asp compilees une
+fois et executees par tranches ; classe de priorite "temps libre" : un
+fort trafic ne ralentit pas OS/2. Les autres ordinateurs du reseau
+l'atteignent par l'adresse d'OS/2-0 (IPCONFIG) ; dans QEMU en reseau
+"user", rediriger un port (hostfwd=tcp::8080-:80). Fichiers : C:\WWW
+(WEBSRV.CFG, ROOT, LOGS, CERTS ; D:\WWW si C: est en lecture seule).
+Systeme : TCPIP32.DLL serveur (listen, accept, ioctl, setsockopt,
+getsockname, getpeername ; fenetre glissante, retransmission rapide ;
+boucle locale 127.0.0.1 et localhost), anneaux plus grands pour E1000 et
+PCNET, ligne RUN= de CONFIG.SYS et classe de priorite "temps libre" du
+noyau, recherche ISO 9660 du CD-ROM 1000 fois plus rapide.
+  OS2PC APPS\WEBSRV.PAS                     -> WEBSRV.EXE
+OS2PC corrige au passage (tous les programmes) : un parametre chaine
+(litteral, concatenation, resultat de fonction) n'est plus ecrase par un
+parametre suivant qui use plus de 256 chaines temporaires (son tampon de
+l'anneau STRRING est epingle jusqu'a l'appel) ; @F^[I], @F(X)^.Champ et
+Move(F^[0], ...) donnent l'adresse dans ce que rend la fonction F.
+
 Virtualisation (VIRTUAL.EXE, dossier Systeme OS/2)
 ---------------------------------------------------
 Gestionnaire de machines virtuelles a la facon de VirtualBox (source
