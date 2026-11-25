@@ -1106,10 +1106,12 @@ Begin
           { dossier Productivite : Maximilien CRM, Sample Accounting,
             Acrodoc, News Master et PresentPoint (depot OFFICE-0), Bloc-notes ;
             dossier Developer Kit : OS2-Zero Debugger, Web Developer,
-            SQL Developer et sa commande SQLCMD (bases .MDF), PascalFlow }
+            SQL Developer et sa commande SQLCMD (bases .MDF), PascalFlow,
+            Visual Pascal (qui compile avec OS2PC.EXE) }
           (U = 'MAXIMIZE.EXE') Or (U = 'SIMPLY.EXE') Or (U = 'ACROBAT.EXE') Or (U = 'NEWS.EXE') Or
           (U = 'POWERPNT.EXE') Or (U = 'NOTEPAD.EXE') Or (U = 'OS2DBG.EXE') Or (U = 'WEBDEV.EXE') Or
-          (U = 'SQLDEV.EXE') Or (U = 'SQLCMD.EXE') Or (U = 'PF.EXE') Then Wanted := True
+          (U = 'SQLDEV.EXE') Or (U = 'SQLCMD.EXE') Or (U = 'PF.EXE') Or
+          (U = 'VP.EXE') Then Wanted := True
   Else If (Pos('.EXE', U) > 0) And (U <> 'CMD.EXE') Then Wanted := OptUtil <> 0;
 End;
 

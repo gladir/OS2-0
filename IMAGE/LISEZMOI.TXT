@@ -33,7 +33,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE, IPCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, CURL.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
               GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, GITCLI.EXE, SVNCLI.EXE, VIRTUAL.EXE,
-              SQLDEV.EXE, SQLCMD.EXE, PF.EXE, DEMARRE.WAV,
+              SQLDEV.EXE, SQLCMD.EXE, PF.EXE, VP.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -168,6 +168,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC APPS\SQLDEV.PAS                     -> SQLDEV.EXE (SQL Developer)
   OS2PC SQLCMD.PAS                          -> SQLCMD.EXE (bases SQL Server .MDF)
   OS2PC PF.PAS                              -> PF.EXE (PascalFlow)
+  OS2PC VP.PAS                              -> VP.EXE (Visual Pascal)
   OS2PC -Q DLL\SMB.PAS                     -> SMB.IFS (lecteurs reseau SMB2)
   OS2PC NET.PAS                             -> NET.EXE (NET USE)
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
@@ -2052,6 +2053,42 @@ Bureau - Developer Kit - PascalFlow, ou PF fichier.pf.
   - PF fichier.pf /RUN /OUT journal : execution sans intervention ;
   - pas de service : un flux ne s'execute qu'a la main, tant que
     PascalFlow est ouvert.
+
+Visual Pascal (VP.EXE, dossier Developer Kit)
+---------------------------------------------
+Environnement visuel dans l'esprit de Visual Basic 6, avec l'apparence et
+les menus d'OS/2 (source VP.PAS, un seul fichier compile par OS2PC) ; le
+code est du Pascal et le compilateur est OS2PC.EXE d'OS/2-0.
+Bureau - Developer Kit - Visual Pascal, ou VP fichier.VPP.
+  - en haut, la barre d'icones : nouveau projet, ajouter une feuille,
+    ouvrir, enregistrer, couper, copier, coller, annuler, retablir,
+    executer, arreter, code, objet, creer l'EXE, aide ;
+  - a gauche, la boite a outils des controles : pointeur, Label, TextBox,
+    CommandButton, Frame, CheckBox, OptionButton, ListBox, ComboBox,
+    Timer ; choisir un outil et tracer le controle sur la feuille (ou
+    double-cliquer l'outil) ;
+  - au centre, la feuille en conception (grille de 8 pixels, poignees,
+    fleches : deplacer, Maj+fleches : redimensionner, Suppr) ou sa
+    fenetre de code (listes Objet et Procedure, coloration du Pascal) ;
+  - a droite, l'explorateur de projet et la fenetre des proprietes
+    (Name, Caption, Text, Left, Top, Width, Height, Enabled, Visible,
+    Alignment, Locked, Value, List, Interval) : clic sur la valeur pour
+    l'editer, Entree pour valider, double clic sur une valeur a choix ;
+  - double clic sur un controle : la procedure de son evenement
+    (Command1_Click, Text1_Change, Form1_Load, Timer1_Timer...) ;
+  - le code utilise les proprietes et methodes des controles comme en
+    Visual Basic : Text1.Text := Text1.Text + '7'; List1.AddItem('x');
+    Check1.Value, Me.Caption, Form2.Show ; fonctions MsgBox,
+    MsgBoxOuiNon, Quitter, IntToStr, StrToInt, StrToFloat, FloatToStr,
+    Heure, DateDuJour ;
+  - F5 : Visual Pascal reecrit ces acces en appels de sa bibliotheque,
+    genere le programme Pascal complet (Affichage - Programme genere),
+    le compile avec OS2PC.EXE et l'execute ; les erreurs vont dans la
+    fenetre Messages, ramenees a la ligne du code de la feuille ;
+    Fichier - Creer l'EXE ;
+  - Fichier - Exemples : Calculatrice, Demonstration ; projets .VPP ;
+  - VP /EXEMPLE CALCULATRICE /MAKE D:\CALC.EXE /LOG D:\VP.LOG : generer et
+    compiler sans intervention (essais automatiques) ; /RUN : executer.
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------

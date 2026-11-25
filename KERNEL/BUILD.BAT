@@ -41,6 +41,7 @@ REM comme EXCELSIO.PAS, Excelsior (tableur porte d'EXCEL.PAS d'OFFICE-0 : XLC, X
 REM (APPS\PAINT.PAS, Paint porte de Pasdows 95, utilise les AnsiString, Int64, PByte,
 REM tableaux dynamiques et Try/Except de Free Pascal, qu'OS2PC accepte)
 REM Programmes de la racine, dont SQLCMD.PAS (bases .MDF) et PF.PAS (PascalFlow)
+REM et VP.PAS (Visual Pascal, qui compile ses programmes avec OS2PC.EXE dans OS/2-0)
 FOR %%F IN (..\*.PAS) DO ..\BUILD\OS2PC -Q %%F ..\BUILD\CD\%%~nF.EXE
 ECHO == Paint (OS2PC : APPS\PAINT.PAS, porte de Pasdows 95)
 ..\BUILD\OS2PC -Q ..\APPS\PAINT.PAS ..\BUILD\CD\PAINT.EXE
