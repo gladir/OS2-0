@@ -23,7 +23,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               LIGHTS.EXE, LUNAR.EXE, BOSTON.EXE, CANNONBA.EXE, BINGO.EXE,
               CRAPS.EXE, ROULETTE.EXE, XIANGQI.EXE, TTT3D.EXE, PATIENCE.EXE,
               PLOMBIER.EXE,
-              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), CROSSGEN.EXE, GSODOKU.EXE, ASTRO.EXE,
+              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), CROSSGEN.EXE, GSODOKU.EXE, MAKEMAZE.EXE,
+              ASTRO.EXE,
               SIMUPLAN.EXE,
               CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
               DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
@@ -144,6 +145,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
   OS2PC APPS\CROSSGEN.PAS                   -> CROSSGEN.EXE (Generateur de mots croises)
   OS2PC APPS\GSODOKU.PAS                    -> GSODOKU.EXE (Generateur de Sodoku)
+  OS2PC APPS\MAKEMAZE.PAS                   -> MAKEMAZE.EXE (Generateur de labyrinthe)
   OS2PC APPS\ASTRO.PAS                      -> ASTRO.EXE (Astronomie)
   OS2PC APPS\SIMUPLAN.PAS                   -> SIMUPLAN.EXE (Simulateur de planete)
   OS2PC APPS\CS3DA.PAS                      -> CS3DA.EXE (Anatomie 3D du systeme circulatoire)
@@ -972,6 +974,33 @@ menus et l'apparence d'OS/2 ; dossier Loisirs du bureau.
     [/CLASSIC] [/TRY:n] [/SOLVE] [/SSODOKU] [/PUZZLE] /OUT:fichier :
     ecrire la grille (ou la solution, ou la grille a jouer) sans
     fenetre, comme les commandes d'origine.
+
+Generateur de labyrinthe (MAKEMAZE.EXE ; source APPS\MAKEMAZE.PAS)
+------------------------------------------------------------------
+Interface graphique de MAKEMAZE.PAS (depot VIE), avec les menus et
+l'apparence d'OS/2 ; dossier Loisirs du bureau.
+  - au centre, l'apercu du labyrinthe (entree a gauche, sortie a
+    droite), le chemin parcouru, les cases visitees, la solution (F9) ;
+    F7 : resolution animee de MAKEMAZE (on longe les murs) ;
+  - jouer : fleches, WASD, ZQSD ou IJKM, pave de direction, clic sur une
+    case du meme couloir ; Maj+fleche : jusqu'au carrefour ; Retour
+    arriere : un pas en arriere ; H : indice ; X : abandonner ; Ctrl+R :
+    recommencer ;
+  - a droite, le labyrinthe (dimensions, branche, graine, solution,
+    culs-de-sac) et la partie (deplacements, temps, distance) ;
+  - barre d'outils : nouveau, ouvrir, enregistrer, exporter, Generer
+    (F5, Maj+F5 : meme graine), Solution, resoudre, indice, retour,
+    recommencer, parametres (F6), aide ;
+  - toutes les options de MAKEMAZE : Difficulte (/WIDTH, 640 / n x
+    350 / n cases, ou dimensions personnalisees), Branche maximale
+    (/MAXBRANCH), Afficher immediatement la solution (/SOLVE), Animer la
+    construction (/SHOWGRAPH), Enregistrer sous (/FILE) et Enregistrer en
+    CSV (/SAVECSV), relus par Ouvrir ; export en texte compact, page Web
+    ou image BMP ; styles papier, d'origine (vert sur noir), plan ;
+  - MAKEMAZE [fichier] [/SHOWGRAPH] [/WIDTH=n] [/MAXBRANCH=n] [/SOLVE]
+    [/FILE:f] [/SAVECSV:f] [/S:graine] [/SIZE:LxH] [/TEXT:f] [/HTML:f]
+    [/BMP:f] : ecrire le labyrinthe sans fenetre, comme la commande
+    d'origine ; la meme graine redonne le meme labyrinthe.
 
 Science (dossier Science du bureau)
 -----------------------------------
