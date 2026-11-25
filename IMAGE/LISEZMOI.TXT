@@ -23,7 +23,8 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               LIGHTS.EXE, LUNAR.EXE, BOSTON.EXE, CANNONBA.EXE, BINGO.EXE,
               CRAPS.EXE, ROULETTE.EXE, XIANGQI.EXE, TTT3D.EXE, PATIENCE.EXE,
               PLOMBIER.EXE,
-              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), CROSSGEN.EXE, ASTRO.EXE, SIMUPLAN.EXE,
+              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), CROSSGEN.EXE, GSODOKU.EXE, ASTRO.EXE,
+              SIMUPLAN.EXE,
               CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
               DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
               (et ses exemples .SON, .MID et
@@ -142,6 +143,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC APPS\ASTROMAN.PAS                   -> ASTROMAN.EXE (Astromancie)
   OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
   OS2PC APPS\CROSSGEN.PAS                   -> CROSSGEN.EXE (Generateur de mots croises)
+  OS2PC APPS\GSODOKU.PAS                    -> GSODOKU.EXE (Generateur de Sodoku)
   OS2PC APPS\ASTRO.PAS                      -> ASTRO.EXE (Astronomie)
   OS2PC APPS\SIMUPLAN.PAS                   -> SIMUPLAN.EXE (Simulateur de planete)
   OS2PC APPS\CS3DA.PAS                      -> CS3DA.EXE (Anatomie 3D du systeme circulatoire)
@@ -946,6 +948,30 @@ l'apparence d'OS/2 ; dossier Loisirs du bureau.
   - CROSSGEN [fichier] [options] /OUT:fichier : generer et ecrire la
     grille sans fenetre, comme la commande d'origine ; la meme graine
     (/S:n) redonne la meme grille.
+
+Generateur de Sodoku (GSODOKU.EXE ; source APPS\GSODOKU.PAS)
+------------------------------------------------------------
+Interface graphique de GSODOKU.PAS et SSODOKU (depot VIE), avec les
+menus et l'apparence d'OS/2 ; dossier Loisirs du bureau.
+  - au centre, l'apercu de la grille 9 x 9 (donnes en noir, saisis en
+    bleu, faux en rouge apres F8, solution en vert avec F9) ; clic ou
+    fleches, chiffres au clavier ou sur le pave, N : notes au crayon,
+    H : indice, Ctrl+Z : annuler ;
+  - a droite, le panneau Partie (niveau, cases, erreurs, indices, temps,
+    graine, essais), le pave des chiffres et les regles ;
+  - barre d'outils : nouvelle grille, ouvrir, enregistrer, exporter,
+    Generer (F5, Maj+F5 : meme graine), Resoudre (F7), Solution (F9),
+    verifier, indice, notes, annuler, parametres (F6), aide ;
+  - Niveau (Facile, Moyen, Difficile, Expert, Personnalise), solution
+    unique, symetrie, Regle des carres 3 x 3 (decochee : methode
+    d'origine de GSODOKU), Afficher le nombre d'essais (/SHOWTRY),
+    Resoudre comme SSODOKU (essais aleatoires) ou exactement ;
+  - fichiers .SDK (9 lignes, chiffre ou point) ; Grille - Saisir une
+    grille pour entrer une grille a la main ;
+  - GSODOKU [fichier.SDK] [/SHOWTRY] [/S:n] [/LEVEL:F|M|D|E|n]
+    [/CLASSIC] [/TRY:n] [/SOLVE] [/SSODOKU] [/PUZZLE] /OUT:fichier :
+    ecrire la grille (ou la solution, ou la grille a jouer) sans
+    fenetre, comme les commandes d'origine.
 
 Science (dossier Science du bureau)
 -----------------------------------

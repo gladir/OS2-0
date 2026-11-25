@@ -174,7 +174,7 @@ Const
   IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62; IC_INVADERS = 63;
   IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
   IC_MP3PLAY = 68; OB_MP3 = 36;
-  OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70; IC_CROSS = 111;
+  OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70; IC_CROSS = 111; IC_GSODOKU = 112;
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
@@ -1762,6 +1762,9 @@ Begin
         { Generateur de mots croises (CROSSGEN.PAS du depot VIE) }
         If FileExists('C:\CROSSGEN.EXE') Then
           Dummy := NewItem(V, IC_CROSS, OB_GAME, 'G'#130'n'#130'rateur de mots crois'#130's', 'C:\CROSSGEN.EXE');
+        { Generateur de Sodoku (GSODOKU.PAS du depot VIE) }
+        If FileExists('C:\GSODOKU.EXE') Then
+          Dummy := NewItem(V, IC_GSODOKU, OB_GAME, 'G'#130'n'#130'rateur de Sodoku', 'C:\GSODOKU.EXE');
       End;
     VK_NETTOOLS :
       Begin
@@ -2963,6 +2966,25 @@ Begin
           GLn(Hps, X + 5 + K * 7, Y + 17, X + 5 + K * 7, Y + 20, CLR_DARKBLUE);
         End;
         GLn(Hps, X + 4, Y + 28, X + 5, Y + 28, CLR_BLACK);
+      End;
+    IC_GSODOKU :
+      Begin
+        { grille de Sodoku : 3 x 3 carres separes par des traits noirs,
+          quelques chiffres en noir (donnes) et en bleu (saisis) }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_WHITE, CLR_BLACK);
+        For K := 1 To 8 Do
+        Begin
+          If K Mod 3 = 0 Then R := CLR_BLACK Else R := CLR_PALEGRAY;
+          GLn(Hps, X + 2 + K * 3, Y + 3, X + 2 + K * 3, Y + 28, R);
+          GLn(Hps, X + 3, Y + 2 + K * 3, X + 28, Y + 2 + K * 3, R);
+        End;
+        FBox(Hps, X + 3, Y + 24, X + 4, Y + 25, CLR_BLACK, CLR_BLACK);
+        FBox(Hps, X + 9, Y + 18, X + 10, Y + 19, CLR_BLACK, CLR_BLACK);
+        FBox(Hps, X + 15, Y + 27, X + 16, Y + 28, CLR_BLUE, CLR_BLUE);
+        FBox(Hps, X + 21, Y + 15, X + 22, Y + 16, CLR_BLACK, CLR_BLACK);
+        FBox(Hps, X + 6, Y + 6, X + 7, Y + 7, CLR_BLUE, CLR_BLUE);
+        FBox(Hps, X + 24, Y + 9, X + 25, Y + 10, CLR_BLACK, CLR_BLACK);
+        FBox(Hps, X + 18, Y + 3, X + 19, Y + 4, CLR_RED, CLR_RED);
       End;
     IC_DREAMS :
       Begin
