@@ -183,7 +183,7 @@ Const
   IC_VIRTUAL = 93; IC_LUNAR = 94; IC_BOSTON = 95; IC_CANNONBA = 96; IC_BINGO = 97; IC_CRAPS = 98;
   IC_ROULETTE = 99; IC_XIANGQI = 100; IC_TTT3D = 101; IC_PATIENCE = 102; IC_PLOMBIER = 103;
   IC_SVNCLI = 104; IC_GITCLI = 105; IC_WEBSRV = 106; IC_WEBDEV = 107;
-  IC_SQLDEV = 108;
+  IC_SQLDEV = 108; IC_PFLOW = 109;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1809,6 +1809,10 @@ Begin
           tables dBASE, CSV, Clarion, Btrieve, MyISAM (genre SSMS) }
         If FileExists('C:\SQLDEV.EXE') Then
           Dummy := NewItem(V, IC_SQLDEV, OB_GAME, 'SQL Developer', 'C:\SQLDEV.EXE');
+        { PascalFlow : flux d'automatisation dans l'esprit de Power Automate,
+          enregistres en Pascal (.pf) }
+        If FileExists('C:\PF.EXE') Then
+          Dummy := NewItem(V, IC_PFLOW, OB_GAME, 'PascalFlow', 'C:\PF.EXE');
         { debogueur des programmes d'OS/2-0 (dans l'esprit de Turbo Debugger) }
         If FileExists('C:\OS2DBG.EXE') Then
           Dummy := NewItem(V, IC_DEBUGGER, OB_GAME, 'OS2-Zero Debugger', 'C:\OS2DBG.EXE');
@@ -3523,6 +3527,26 @@ Begin
         GDisc(Hps, X + 25, Y + 6, 2, CLR_DARKGREEN);
         GLn(Hps, X + 15, Y + 9, X + 29, Y + 9, CLR_CYAN);
         GLn(Hps, X + 22, Y + 2, X + 22, Y + 16, CLR_CYAN);
+      End;
+    IC_PFLOW :
+      Begin
+        { flux : deux cartes reliees, une condition (losange) et un crochet vert }
+        FBox(Hps, X + 4, Y + 22, X + 20, Y + 29, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 6, Y + 26, X + 6, Y + 25, CLR_DARKCYAN);
+        GLn(Hps, X + 12, Y + 22, X + 12, Y + 18, CLR_DARKGRAY);
+        GLn(Hps, X + 12, Y + 18, X + 6, Y + 14, CLR_DARKGRAY);
+        GLn(Hps, X + 12, Y + 18, X + 18, Y + 14, CLR_DARKGRAY);
+        GLn(Hps, X + 9, Y + 18, X + 12, Y + 21, CLR_DARKGRAY);
+        GLn(Hps, X + 12, Y + 21, X + 15, Y + 18, CLR_DARKGRAY);
+        GLn(Hps, X + 15, Y + 18, X + 12, Y + 15, CLR_DARKGRAY);
+        GLn(Hps, X + 12, Y + 15, X + 9, Y + 18, CLR_DARKGRAY);
+        FBox(Hps, X + 1, Y + 6, X + 12, Y + 13, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 3, Y + 10, X + 9, Y + 10, CLR_DARKPINK);
+        FBox(Hps, X + 14, Y + 6, X + 25, Y + 13, CLR_WHITE, CLR_BLACK);
+        GLn(Hps, X + 16, Y + 10, X + 22, Y + 10, CLR_BLUE);
+        GDisc(Hps, X + 25, Y + 4, 5, CLR_DARKGREEN);
+        GLn(Hps, X + 22, Y + 4, X + 24, Y + 2, CLR_WHITE);
+        GLn(Hps, X + 24, Y + 2, X + 28, Y + 7, CLR_WHITE);
       End;
     IC_SQLDEV :
       Begin

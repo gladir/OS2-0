@@ -33,7 +33,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               BONJOUR.PAS, HELLO.PAS, IFCONFIG.EXE, IPCONFIG.EXE,
               PING.EXE, HOST.EXE, WGET.EXE, CURL.EXE, NET.EXE, SMB.IFS, OPENGL.DLL,
               GLTEST.EXE, FTPCLI.EXE, SSHCLI.EXE, MSTSC.EXE, GITCLI.EXE, SVNCLI.EXE, VIRTUAL.EXE,
-              SQLDEV.EXE, SQLCMD.EXE, DEMARRE.WAV,
+              SQLDEV.EXE, SQLCMD.EXE, PF.EXE, DEMARRE.WAV,
               CLOCHE.WAV,
               TESTDOS.EXE, TESTFKA.EXE, TESTHPFS.EXE, TESTVIO.EXE (et
               TESTVIOR.DLL), TESTMOU.EXE, TESTNLS.EXE, TESTKBD.EXE,
@@ -167,6 +167,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC IPCONFIG.PAS, CURL.PAS               -> IPCONFIG et CURL (Pasdows 95)
   OS2PC APPS\SQLDEV.PAS                     -> SQLDEV.EXE (SQL Developer)
   OS2PC SQLCMD.PAS                          -> SQLCMD.EXE (bases SQL Server .MDF)
+  OS2PC PF.PAS                              -> PF.EXE (PascalFlow)
   OS2PC -Q DLL\SMB.PAS                     -> SMB.IFS (lecteurs reseau SMB2)
   OS2PC NET.PAS                             -> NET.EXE (NET USE)
   OS2PC OUTLINK.PAS                         -> OUTLINK.EXE (Outlink, messagerie)
@@ -2018,6 +2019,39 @@ SQLDEV fichier... Il reprend l'idee du prototype de DEVENV (DEV-COOLS) :
   - SQLDEV /DIR dossier, /PG ou /MY hote:port:utilisateur:mot de
     passe:base, fichier.SQL /RUN (executer) /OUT fichier (resultats et
     messages ecrits, puis fin du programme).
+
+PascalFlow (PF.EXE, dossier Developer Kit)
+-----------------------------------------
+Flux d'automatisation dans l'esprit de Power Automate, avec l'apparence
+et les menus d'OS/2 (source PF.PAS, un seul fichier compile par OS2PC).
+Bureau - Developer Kit - PascalFlow, ou PF fichier.pf.
+  - au centre, le flux : le declencheur (Declencher manuellement un flux)
+    puis des actions reliees par des fleches ; une Condition a deux
+    branches, Vrai et Faux ; Appliquer a chacun et Faire jusqu'a
+    repetent leurs actions ; le bouton + d'une fleche insere une action
+    a cet endroit (ou Coller ici) ;
+  - a gauche, la barre verticale des actions (Variables, Controle,
+    Fichiers, Interaction, Systeme) : un clic ajoute l'action apres celle
+    qui est choisie, ou la glisser sur un + ;
+  - a droite, les proprietes de l'action courante (titre, parametres,
+    listes de choix) et le resultat de sa derniere execution ;
+  - bouton 2 ou ... sur une carte : Copier, Couper, Coller apres,
+    Dupliquer, Supprimer, Monter, Descendre, Desactiver, Renommer ;
+    une carte se glisse sur un + pour la deplacer ; Ctrl+Z, Ctrl+Y ;
+  - valeurs : @{Variable} ou @{expression} (+ - * / mod &, comparaisons,
+    and or not, concat, length, toUpper, substring, replace, if,
+    utcNow, count, item...) ;
+  - F5 Tester (pas a pas), Ctrl+F5 Executer manuellement, Echap
+    Arreter : un crochet vert marque chaque action reussie, un X rouge
+    l'action qui a echoue ou arrete le flux en faute, et ses conteneurs ;
+    Executer - Journal de la derniere execution ;
+  - le fichier .pf est un programme Pascal (une instruction par action,
+    If ... Then ... Else, For ... In Liste(...) Do, Repeat ... Until ;
+    titre de la carte dans le commentaire @) ; F12 : Code Pascal ;
+  - Fichier - Exemples : Bonjour, Compter jusqu'a 10, Inventaire ;
+  - PF fichier.pf /RUN /OUT journal : execution sans intervention ;
+  - pas de service : un flux ne s'execute qu'a la main, tant que
+    PascalFlow est ouvert.
 
 Pascal Developer (PASDEV.EXE, dossier Developer Kit)
 ---------------------------------------------------
