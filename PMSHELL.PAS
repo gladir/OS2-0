@@ -183,7 +183,7 @@ Const
   IC_VIRTUAL = 93; IC_LUNAR = 94; IC_BOSTON = 95; IC_CANNONBA = 96; IC_BINGO = 97; IC_CRAPS = 98;
   IC_ROULETTE = 99; IC_XIANGQI = 100; IC_TTT3D = 101; IC_PATIENCE = 102; IC_PLOMBIER = 103;
   IC_SVNCLI = 104; IC_GITCLI = 105; IC_WEBSRV = 106; IC_WEBDEV = 107;
-  IC_SQLDEV = 108; IC_PFLOW = 109;
+  IC_SQLDEV = 108; IC_PFLOW = 109; IC_VP = 110;
   WC_COMBOBOX = $FFFF0002; CBS_DROPDOWNLIST = 4;
   VK_TEMPL = 6; VK_SETUP = 7; VK_NOTE = 8; VK_GAMES = 9; VK_MM = 10; VK_DEVKIT = 11; VK_PRODUCT = 12;
   VK_LEISURE = 13; VK_SCIENCE = 14; VK_NETTOOLS = 15;
@@ -1813,6 +1813,10 @@ Begin
           enregistres en Pascal (.pf) }
         If FileExists('C:\PF.EXE') Then
           Dummy := NewItem(V, IC_PFLOW, OB_GAME, 'PascalFlow', 'C:\PF.EXE');
+        { Visual Pascal : feuilles, controles et evenements dans l'esprit de
+          Visual Basic 6, programmes en Pascal compiles par OS2PC.EXE }
+        If FileExists('C:\VP.EXE') Then
+          Dummy := NewItem(V, IC_VP, OB_GAME, 'Visual Pascal', 'C:\VP.EXE');
         { debogueur des programmes d'OS/2-0 (dans l'esprit de Turbo Debugger) }
         If FileExists('C:\OS2DBG.EXE') Then
           Dummy := NewItem(V, IC_DEBUGGER, OB_GAME, 'OS2-Zero Debugger', 'C:\OS2DBG.EXE');
@@ -3547,6 +3551,24 @@ Begin
         GDisc(Hps, X + 25, Y + 4, 5, CLR_DARKGREEN);
         GLn(Hps, X + 22, Y + 4, X + 24, Y + 2, CLR_WHITE);
         GLn(Hps, X + 24, Y + 2, X + 28, Y + 7, CLR_WHITE);
+      End;
+    IC_VP :
+      Begin
+        { feuille en conception (barre de titre, zone de texte, bouton) et
+          boite a outils verticale, comme Visual Basic }
+        FBox(Hps, X + 1, Y + 4, X + 8, Y + 28, CLR_PALEGRAY, CLR_BLACK);
+        GLn(Hps, X + 3, Y + 24, X + 6, Y + 24, CLR_BLACK);
+        GLn(Hps, X + 3, Y + 19, X + 6, Y + 19, CLR_DARKBLUE);
+        GLn(Hps, X + 3, Y + 14, X + 6, Y + 14, CLR_DARKGREEN);
+        GLn(Hps, X + 3, Y + 9, X + 6, Y + 9, CLR_DARKRED);
+        FBox(Hps, X + 10, Y + 2, X + 30, Y + 28, CLR_PALEGRAY, CLR_BLACK);
+        FBox(Hps, X + 10, Y + 23, X + 30, Y + 28, CLR_DARKBLUE, CLR_BLACK);
+        FBox(Hps, X + 13, Y + 15, X + 27, Y + 19, CLR_WHITE, CLR_DARKGRAY);
+        FBox(Hps, X + 13, Y + 5, X + 22, Y + 11, CLR_PALEGRAY, CLR_BLACK);
+        GLn(Hps, X + 14, Y + 10, X + 21, Y + 10, CLR_WHITE);
+        GLn(Hps, X + 16, Y + 8, X + 19, Y + 8, CLR_BLACK);
+        GLn(Hps, X + 25, Y + 5, X + 25, Y + 11, CLR_DARKBLUE);
+        GLn(Hps, X + 26, Y + 5, X + 28, Y + 5, CLR_DARKBLUE);
       End;
     IC_SQLDEV :
       Begin

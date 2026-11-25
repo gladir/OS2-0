@@ -153,7 +153,9 @@ echo "== Noyau (OS2PC)"
 
 # Les programmes de la racine, dont SQLCMD.PAS (clone de SQL Server pour les .MDF,
 # lance par SQL Developer) et PF.PAS (PascalFlow, flux d'automatisation enregistres
-# en Pascal, dossier Developer Kit), sont compiles par cette boucle
+# en Pascal, dossier Developer Kit), sont compiles par cette boucle ; VP.PAS (Visual
+# Pascal, feuilles et evenements dans l'esprit de Visual Basic 6) aussi : il genere
+# des programmes Pascal et les compile avec OS2PC.EXE dans OS/2-0
 echo "== Commandes (OS2PC -COS2)"
 for F in "$ROOT"/*.PAS; do
   B=$(basename "$F" .PAS)
