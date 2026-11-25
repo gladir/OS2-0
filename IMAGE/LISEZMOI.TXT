@@ -24,6 +24,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               CRAPS.EXE, ROULETTE.EXE, XIANGQI.EXE, TTT3D.EXE, PATIENCE.EXE,
               PLOMBIER.EXE,
               ASTROMAN.EXE, REVES.EXE (et REVE.TXT), CROSSGEN.EXE, GSODOKU.EXE, MAKEMAZE.EXE,
+              FRACTAL.EXE,
               ASTRO.EXE,
               SIMUPLAN.EXE,
               CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
@@ -146,6 +147,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC APPS\CROSSGEN.PAS                   -> CROSSGEN.EXE (Generateur de mots croises)
   OS2PC APPS\GSODOKU.PAS                    -> GSODOKU.EXE (Generateur de Sodoku)
   OS2PC APPS\MAKEMAZE.PAS                   -> MAKEMAZE.EXE (Generateur de labyrinthe)
+  OS2PC APPS\FRACTAL.PAS                    -> FRACTAL.EXE (Generateur de Fractal)
   OS2PC APPS\ASTRO.PAS                      -> ASTRO.EXE (Astronomie)
   OS2PC APPS\SIMUPLAN.PAS                   -> SIMUPLAN.EXE (Simulateur de planete)
   OS2PC APPS\CS3DA.PAS                      -> CS3DA.EXE (Anatomie 3D du systeme circulatoire)
@@ -1001,6 +1003,30 @@ l'apparence d'OS/2 ; dossier Loisirs du bureau.
     [/FILE:f] [/SAVECSV:f] [/S:graine] [/SIZE:LxH] [/TEXT:f] [/HTML:f]
     [/BMP:f] : ecrire le labyrinthe sans fenetre, comme la commande
     d'origine ; la meme graine redonne le meme labyrinthe.
+
+Generateur de Fractal (FRACTAL.EXE ; source APPS\FRACTAL.PAS)
+-------------------------------------------------------------
+Fractales avec les menus et l'apparence d'OS/2 ; dossier Loisirs du
+bureau.
+  - a gauche, les fractales predefinies (avec une miniature) :
+    Mandelbrot, Julia, Burning Ship, Tricorne, Multibrot, Newton,
+    Phoenix, fougere de Barnsley, triangle et tapis de Sierpinski,
+    courbe du dragon, courbe de Levy, flocon de Koch, courbe de Hilbert,
+    arbre fractal, arbre de Pythagore, attracteurs de Lorenz et Clifford ;
+  - au centre, l'apercu, calcule par etapes (Echap : arreter) ; clic :
+    zoom avant, Maj+clic : zoom arriere, glisser : rectangle de zoom,
+    bouton 2 : centrer, vue initiale, ensemble de Julia du point ;
+  - a droite, les proprietes de la fractale (vue, iterations, rayon,
+    puissance, c, p, points, profondeur, angle, rapport, epaisseur,
+    parametres des attracteurs, palette, decalage, fond) : double clic
+    ou Entree pour en modifier une, F6 pour toutes ;
+  - barre d'outils : nouveau, ouvrir, enregistrer (.FRC), exporter
+    (BMP), Generer (F5), arreter, zoom, vue initiale, axes, couleurs
+    animees (C), proprietes, aide ;
+  - image en 256 couleurs : la palette change sans refaire le calcul ;
+  - FRACTAL [fichier.FRC] [/F:fractale] [/BMP:image] [/W:n] [/H:n]
+    [/ITER:n] [/PAL:n] [/SUM:fichier] : calculer et ecrire l'image sans
+    fenetre.
 
 Science (dossier Science du bureau)
 -----------------------------------
