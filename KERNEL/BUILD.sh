@@ -275,6 +275,14 @@ echo "== Serveur Web (OS2PC : APPS/WEBSRV.PAS, HTTP/HTTPS, PSP, ASP, PHP, consol
 # PHP, CSS et JavaScript) ; Executer la page appelle WEBSRV /PSPOUT
 echo "== Web Developer (OS2PC : APPS/WEBDEV.PAS, editeur de pages Web dans le genre de HomeSite)"
 "$W/os2pc" -Q "$ROOT/APPS/WEBDEV.PAS" "$W/cd/WEBDEV.EXE"
+# SQL Developer (dossier Developer Kit) : Explorateur d'objets en arbre a gauche,
+# editeur SQL colore et grille des resultats a droite, menus d'OS/2 inspires de
+# SSMS ; PostgreSQL et MariaDB/MySQL (protocoles integres, TCPIP32), bases SQL
+# Server en fichier .MDF par la commande separee SQLCMD.EXE (SQLCMD.PAS, compile
+# avec les commandes de la racine ci-dessus), tables en fichiers dBASE, CSV,
+# Clarion, Btrieve et MyISAM par son moteur SQL local ; aucune dependance externe
+echo "== SQL Developer (OS2PC : APPS/SQLDEV.PAS, PostgreSQL, MariaDB/MySQL, .MDF par SQLCMD, dBASE, CSV, Clarion, Btrieve, MyISAM)"
+"$W/os2pc" -Q "$ROOT/APPS/SQLDEV.PAS" "$W/cd/SQLDEV.EXE"
 echo "== Virtualisation (OS2PC : APPS/VIRTUAL.PAS, machines de VirtualBox par AMD-V, Intel VT-x ou mode V86, KrnVirt du noyau)"
 "$W/os2pc" -Q "$ROOT/APPS/VIRTUAL.PAS" "$W/cd/VIRTUAL.EXE"
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"
