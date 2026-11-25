@@ -174,7 +174,7 @@ Const
   IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62; IC_INVADERS = 63;
   IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
   IC_MP3PLAY = 68; OB_MP3 = 36;
-  OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70;
+  OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70; IC_CROSS = 111;
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
@@ -1759,6 +1759,9 @@ Begin
           Dummy := NewItem(V, IC_ASTRO, OB_GAME, 'Astromancie', 'C:\ASTROMAN.EXE');
         If FileExists('C:\REVES.EXE') Then
           Dummy := NewItem(V, IC_DREAMS, OB_GAME, 'Onirologie', 'C:\REVES.EXE');
+        { Generateur de mots croises (CROSSGEN.PAS du depot VIE) }
+        If FileExists('C:\CROSSGEN.EXE') Then
+          Dummy := NewItem(V, IC_CROSS, OB_GAME, 'G'#130'n'#130'rateur de mots crois'#130's', 'C:\CROSSGEN.EXE');
       End;
     VK_NETTOOLS :
       Begin
@@ -2944,6 +2947,22 @@ Begin
         GLn(Hps, X + 15, Y + 9, X + 8, Y + 1, CLR_DARKGRAY);
         GLn(Hps, X + 15, Y + 9, X + 22, Y + 1, CLR_DARKGRAY);
         GLn(Hps, X + 15, Y + 9, X + 15, Y + 3, CLR_DARKGRAY);
+      End;
+    IC_CROSS :
+      Begin
+        { grille de mots croises : cases blanches et noires, un mot en bleu,
+          un numero dans le coin }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_BLACK, CLR_BLACK);
+        For K := 0 To 3 Do
+          For R := 0 To 3 Do
+            If Not (((K = 0) And (R = 3)) Or ((K = 2) And (R = 1)) Or ((K = 3) And (R = 3)) Or ((K = 1) And (R = 0))) Then
+              FBox(Hps, X + 3 + K * 7, Y + 3 + R * 7, X + 8 + K * 7, Y + 8 + R * 7, CLR_WHITE, CLR_WHITE);
+        For K := 0 To 3 Do
+        Begin
+          GLn(Hps, X + 4 + K * 7, Y + 18, X + 7 + K * 7, Y + 18, CLR_DARKBLUE);
+          GLn(Hps, X + 5 + K * 7, Y + 17, X + 5 + K * 7, Y + 20, CLR_DARKBLUE);
+        End;
+        GLn(Hps, X + 4, Y + 28, X + 5, Y + 28, CLR_BLACK);
       End;
     IC_DREAMS :
       Begin
