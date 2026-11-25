@@ -7996,7 +7996,7 @@ Begin
           Ask('Sites export'#233's dans ' + S + '.', 'Exporter les sites', MB_OK Or MB_ICONINFO)
         Else Ask('Impossible d''enregistrer ' + S + '.', 'Exporter les sites', MB_OK Or MB_ICONERROR);
     End;
-    CmExit : Dummy := WinPostMsg(MainWnd, WM_CLOSE, 0, 0);
+    CmExit : Dummy := WinPostMsg(MainWnd, PM_WM_CLOSE, 0, 0);
     CmClearLog :
     Begin
       LogN := 0; LogTop := 0; LogSync(True);
