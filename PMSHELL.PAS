@@ -174,7 +174,7 @@ Const
   IC_BARBU = 60; IC_BREAKOUT = 61; IC_BATAILLE = 62; IC_INVADERS = 63;
   IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
   IC_MP3PLAY = 68; OB_MP3 = 36;
-  OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70; IC_CROSS = 111; IC_GSODOKU = 112; IC_MAZE = 113;
+  OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70; IC_CROSS = 111; IC_GSODOKU = 112; IC_MAZE = 113; IC_FRACTAL = 114;
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
@@ -1768,6 +1768,9 @@ Begin
         { Generateur de labyrinthe (MAKEMAZE.PAS du depot VIE) }
         If FileExists('C:\MAKEMAZE.EXE') Then
           Dummy := NewItem(V, IC_MAZE, OB_GAME, 'G'#130'n'#130'rateur de labyrinthe', 'C:\MAKEMAZE.EXE');
+        { Generateur de Fractal (FRACTAL.PAS) }
+        If FileExists('C:\FRACTAL.EXE') Then
+          Dummy := NewItem(V, IC_FRACTAL, OB_GAME, 'G'#130'n'#130'rateur de Fractal', 'C:\FRACTAL.EXE');
       End;
     VK_NETTOOLS :
       Begin
@@ -2988,6 +2991,39 @@ Begin
         FBox(Hps, X + 6, Y + 6, X + 7, Y + 7, CLR_BLUE, CLR_BLUE);
         FBox(Hps, X + 24, Y + 9, X + 25, Y + 10, CLR_BLACK, CLR_BLACK);
         FBox(Hps, X + 18, Y + 3, X + 19, Y + 4, CLR_RED, CLR_RED);
+      End;
+    IC_FRACTAL :
+      Begin
+        { ensemble de Mandelbrot : cardioide et bourgeon noirs, halo jaune
+          et bleu clair sur fond bleu nuit }
+        FBox(Hps, X + 2, Y + 2, X + 29, Y + 29, CLR_DARKBLUE, CLR_BLACK);
+        For K := -9 To 9 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 81 Do Inc(R);
+          If R > 0 Then GLn(Hps, X + 18 - R, Y + 15 + K, X + 18 + R, Y + 15 + K, CLR_CYAN);
+        End;
+        For K := -7 To 7 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 49 Do Inc(R);
+          If R > 0 Then GLn(Hps, X + 18 - R, Y + 15 + K, X + 18 + R, Y + 15 + K, CLR_YELLOW);
+        End;
+        For K := -6 To 6 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 36 Do Inc(R);
+          If R > 0 Then GLn(Hps, X + 19 - R, Y + 15 + K, X + 19 + R, Y + 15 + K, CLR_BLACK);
+        End;
+        For K := -3 To 3 Do
+        Begin
+          R := 0;
+          While (R + 1) * (R + 1) + K * K <= 9 Do Inc(R);
+          If R > 0 Then GLn(Hps, X + 10 - R, Y + 15 + K, X + 10 + R, Y + 15 + K, CLR_BLACK);
+        End;
+        GLn(Hps, X + 3, Y + 15, X + 7, Y + 15, CLR_WHITE);
+        GLn(Hps, X + 19, Y + 22, X + 19, Y + 25, CLR_YELLOW);
+        GLn(Hps, X + 19, Y + 8, X + 19, Y + 5, CLR_YELLOW);
       End;
     IC_MAZE :
       Begin

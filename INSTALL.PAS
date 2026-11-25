@@ -1086,7 +1086,7 @@ Begin
           (U = 'LIGHTS.EXE') Or
           (U = 'LUNAR.EXE') Or (U = 'BOSTON.EXE') Or (U = 'CANNONBA.EXE') Or (U = 'BINGO.EXE') Or (U = 'CRAPS.EXE') Or
           (U = 'ROULETTE.EXE') Or (U = 'XIANGQI.EXE') Or (U = 'TTT3D.EXE') Or (U = 'PATIENCE.EXE') Or (U = 'PLOMBIER.EXE') Or
-          (U = 'ASTROMAN.EXE') Or (U = 'REVES.EXE') Or (U = 'CROSSGEN.EXE') Or (U = 'GSODOKU.EXE') Or (U = 'MAKEMAZE.EXE') Then
+          (U = 'ASTROMAN.EXE') Or (U = 'REVES.EXE') Or (U = 'CROSSGEN.EXE') Or (U = 'GSODOKU.EXE') Or (U = 'MAKEMAZE.EXE') Or (U = 'FRACTAL.EXE') Then
     Wanted := OptGames <> 0
   Else If (U = 'DIGAUDIO.EXE') Or (U = 'GLTEST.EXE') Or (U = 'MDM.DLL') Or (U = 'SBAUDIO.DLL') Or (U = 'ICHAUDIO.DLL') Or
           (U = 'ESAUDIO.DLL') Or (Pos('.WAV', U) > 0) Or (U = 'NOTATOR.EXE') Or (U = 'NOTATOR.TXT') Or

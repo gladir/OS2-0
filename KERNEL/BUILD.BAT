@@ -62,6 +62,9 @@ IF ERRORLEVEL 1 GOTO ERREUR
 REM Generateur de labyrinthe (d'apres MAKEMAZE.PAS du depot VIE), dossier Loisirs
 ..\BUILD\OS2PC -Q ..\APPS\MAKEMAZE.PAS ..\BUILD\CD\MAKEMAZE.EXE
 IF ERRORLEVEL 1 GOTO ERREUR
+REM Generateur de Fractal, dossier Loisirs
+..\BUILD\OS2PC -Q ..\APPS\FRACTAL.PAS ..\BUILD\CD\FRACTAL.EXE
+IF ERRORLEVEL 1 GOTO ERREUR
 ECHO == Science (OS2PC : APPS\ASTRO.PAS, SIMUPLAN.PAS, CS3DA.PAS, ELEMENTS.PAS et CHEMDRAW.PAS)
 REM Astronomie et Simulateur de planete (depot Axtro), Anatomie 3D du systeme
 REM circulatoire (depot BIOLOGIE-0), Table des elements et Dessin de chimie
