@@ -23,7 +23,7 @@ OS2CD.ISO     CD-ROM ISO 9660 amorcable (El Torito, sans emulation) :
               LIGHTS.EXE, LUNAR.EXE, BOSTON.EXE, CANNONBA.EXE, BINGO.EXE,
               CRAPS.EXE, ROULETTE.EXE, XIANGQI.EXE, TTT3D.EXE, PATIENCE.EXE,
               PLOMBIER.EXE,
-              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), ASTRO.EXE, SIMUPLAN.EXE,
+              ASTROMAN.EXE, REVES.EXE (et REVE.TXT), CROSSGEN.EXE, ASTRO.EXE, SIMUPLAN.EXE,
               CS3DA.EXE (et HUMAN.C3D, PHYSIO.CFG), ELEMENTS.EXE, CHEMDRAW.EXE,
               DIGAUDIO.EXE, MP3PLAY.EXE (et AURORE.MP3), NOTATOR.EXE
               (et ses exemples .SON, .MID et
@@ -141,6 +141,7 @@ KERNEL\BUILD.sh (Linux) ou KERNEL\BUILD.BAT (Windows/DOS) :
   OS2PC GETSRC.PAS                          -> GETSRC.EXE (Telecharger le code source)
   OS2PC APPS\ASTROMAN.PAS                   -> ASTROMAN.EXE (Astromancie)
   OS2PC APPS\REVES.PAS                      -> REVES.EXE (Onirologie)
+  OS2PC APPS\CROSSGEN.PAS                   -> CROSSGEN.EXE (Generateur de mots croises)
   OS2PC APPS\ASTRO.PAS                      -> ASTRO.EXE (Astronomie)
   OS2PC APPS\SIMUPLAN.PAS                   -> SIMUPLAN.EXE (Simulateur de planete)
   OS2PC APPS\CS3DA.PAS                      -> CS3DA.EXE (Anatomie 3D du systeme circulatoire)
@@ -921,6 +922,30 @@ fenetre tient dans un ecran de 640 x 480.
   REVES recit.txt ouvre un recit (exemple : REVE.TXT) ;
   REVES /TEST recit.txt et REVES /RAPPORT recit.txt : analyse en mode
   texte (memes resultats que l'original compile par Free Pascal).
+
+Generateur de mots croises (CROSSGEN.EXE ; source APPS\CROSSGEN.PAS)
+--------------------------------------------------------------------
+Interface graphique de CROSSGEN.PAS (depot VIE), avec les menus et
+l'apparence d'OS/2 ; dossier Loisirs du bureau.
+  - au centre, l'apercu de la grille (a remplir ou solution, F9) ; clic
+    sur une case et lettres au clavier pour la remplir (Espace : sens,
+    Tab : mot suivant), F8 : verifier (lettres fausses en rouge) ;
+  - a droite, les definitions (horizontalement, verticalement) ou la
+    liste des mots (place, non place, ecarte) avec Ajouter, Modifier,
+    Supprimer ;
+  - barre d'outils : nouvelle liste, ouvrir, enregistrer la liste,
+    exporter, Generer (F5), meme graine (Maj+F5), Solution, verifier,
+    effacer, ajouter des mots, parametres (F6), aide ;
+  - fichier de mots : MOT;indice par ligne, UTF-8, Latin-1, CP437 ou
+    CP850 ; mots mis en majuscules sans accents ;
+  - toutes les options de CROSSGEN : Ouvrir (/F), Ajouter des mots (/E),
+    Taille (/W /HEIGHT /SIZE), Parametres (/N /MIN /MAX /T /S /I /ORDER
+    /FULL /ALL /V), Exporter (/A /SOLONLY /NOGRID /NOCLUE /FMT /OUT /G
+    /BLOCK /EMPTY /LC ; texte, HTML, CSV), Encodage (/CP437), Langue des
+    grilles (/LANG : FR, EN, GR, SP, IT), Resume (/Q) ;
+  - CROSSGEN [fichier] [options] /OUT:fichier : generer et ecrire la
+    grille sans fenetre, comme la commande d'origine ; la meme graine
+    (/S:n) redonne la meme grille.
 
 Science (dossier Science du bureau)
 -----------------------------------

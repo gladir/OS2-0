@@ -61,7 +61,9 @@
 #     Pascal qu'utilise PAINT ;
 #  3c. compile APPS/ASTROMAN.PAS (Astromancie, interpretation de
 #     l'astrologie) et APPS/REVES.PAS (Onirologie, interpretation des
-#     reves), portes du depot Mystix (dossier Loisirs du bureau) ;
+#     reves), portes du depot Mystix, et APPS/CROSSGEN.PAS (Generateur
+#     de mots croises, d'apres CROSSGEN.PAS du depot VIE) (dossier
+#     Loisirs du bureau) ;
 #  3d. compile APPS/ASTRO.PAS (Astronomie) et APPS/SIMUPLAN.PAS
 #     (Simulateur de planete) du depot Axtro, APPS/CS3DA.PAS (Anatomie 3D
 #     du systeme circulatoire, donnees APPS/HUMAN.C3D et APPS/PHYSIO.CFG)
@@ -172,8 +174,8 @@ done
 echo "== Paint (OS2PC : APPS/PAINT.PAS, porte de Pasdows 95)"
 "$W/os2pc" -Q "$ROOT/APPS/PAINT.PAS" "$W/cd/PAINT.EXE" > "$W/PAINT.log" 2>&1 || { cat "$W/PAINT.log"; exit 1; }
 echo "   PAINT.EXE"
-echo "== Loisirs (OS2PC : APPS/ASTROMAN.PAS et APPS/REVES.PAS, portes du depot Mystix)"
-for B in ASTROMAN REVES; do
+echo "== Loisirs (OS2PC : APPS/ASTROMAN.PAS et APPS/REVES.PAS du depot Mystix, APPS/CROSSGEN.PAS du depot VIE)"
+for B in ASTROMAN REVES CROSSGEN; do
   "$W/os2pc" -Q "$ROOT/APPS/$B.PAS" "$W/cd/$B.EXE" > "$W/$B.log" 2>&1 || { cat "$W/$B.log"; exit 1; }
   echo "   $B.EXE"
 done
