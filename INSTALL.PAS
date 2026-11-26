@@ -1097,7 +1097,7 @@ Begin
           (U = 'FTPCLI.EXE') Or (U = 'SSHCLI.EXE') Or (U = 'MSTSC.EXE') Or (U = 'SVNCLI.EXE') Or
           (U = 'GITCLI.EXE') Or (U = 'WEBSRV.EXE') Then
     Wanted := OptNet <> 0
-  Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or (U = 'VIRTUAL.EXE') Or
+  Else If (U = 'DEVMGR.EXE') Or (U = 'TASKMGR.EXE') Or (U = 'BROWSER.EXE') Or (U = 'VIRTUAL.EXE') Or (U = 'NC.EXE') Or
           (U = 'PASDEV.EXE') Or (U = 'OS2PC.EXE') Or (U = 'GETSRC.EXE') Or (U = 'CALC.EXE') Or (U = 'EXPLORER.EXE') Or
           (U = 'PAINT.EXE') Or (U = 'WORDIUM.EXE') Or (U = 'EXCELSIO.EXE') Or
           { dossier Science du bureau, et donnees de l'Anatomie 3D }

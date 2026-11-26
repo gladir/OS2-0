@@ -175,6 +175,7 @@ Const
   IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
   IC_MP3PLAY = 68; OB_MP3 = 36;
   OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70; IC_CROSS = 111; IC_GSODOKU = 112; IC_MAZE = 113; IC_FRACTAL = 114;
+  IC_NC = 115;
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
@@ -1622,6 +1623,10 @@ Begin
           Dummy := NewItem(V, IC_WEB, OB_GAME, 'Navigateur Web', BrowserPath);
         If FileExists('C:\VIRTUAL.EXE') Then
           Dummy := NewItem(V, IC_VIRTUAL, OB_GAME, 'Virtualisation', 'C:\VIRTUAL.EXE');
+        { North Commander : gestionnaire de fichiers a deux panneaux (NC.PAS
+          du depot NORTONCOMMANDER-0), touches de fonction en bas }
+        If FileExists('C:\NC.EXE') Then
+          Dummy := NewItem(V, IC_NC, OB_GAME, 'North Commander', 'C:\NC.EXE');
         Dummy := NewItem(V, IC_HELP, OB_HELP, 'Aide du bureau', '');
         Dummy := NewItem(V, IC_SHUTDOWN, OB_SHUTDOWN, 'Arret', '');
         Dummy := NewItem(V, IC_CMD, OB_CMDWIN, 'Fenetre OS/2', '');
@@ -3292,6 +3297,29 @@ Begin
         GLn(Hps, X + 20, Y + 19, X + 20, Y + 20, CLR_BLACK);
         GLn(Hps, X + 22, Y + 19, X + 22, Y + 20, CLR_BLACK);
         GLn(Hps, X + 20, Y + 16, X + 22, Y + 16, CLR_DARKRED);
+      End;
+    IC_NC :
+      Begin
+        { North Commander : fenetre a deux panneaux bleus, barre de titre
+          et barre des touches de fonction en bas }
+        FBox(Hps, X + 1, Y + 2, X + 30, Y + 29, CLR_PALEGRAY, CLR_BLACK);
+        GBox(Hps, X + 2, Y + 25, X + 29, Y + 28, CLR_DARKBLUE, DRO_FILL);
+        GLn(Hps, X + 12, Y + 27, X + 19, Y + 27, CLR_WHITE);
+        FBox(Hps, X + 3, Y + 8, X + 15, Y + 23, CLR_DARKBLUE, CLR_CYAN);
+        FBox(Hps, X + 16, Y + 8, X + 28, Y + 23, CLR_DARKBLUE, CLR_CYAN);
+        GLn(Hps, X + 5, Y + 20, X + 12, Y + 20, CLR_WHITE);
+        GLn(Hps, X + 5, Y + 17, X + 11, Y + 17, CLR_CYAN);
+        GBox(Hps, X + 4, Y + 14, X + 14, Y + 15, CLR_DARKCYAN, DRO_FILL);
+        GLn(Hps, X + 5, Y + 11, X + 10, Y + 11, CLR_CYAN);
+        GLn(Hps, X + 18, Y + 20, X + 25, Y + 20, CLR_CYAN);
+        GLn(Hps, X + 18, Y + 17, X + 24, Y + 17, CLR_YELLOW);
+        GLn(Hps, X + 18, Y + 14, X + 26, Y + 14, CLR_CYAN);
+        GLn(Hps, X + 18, Y + 11, X + 23, Y + 11, CLR_CYAN);
+        GBox(Hps, X + 3, Y + 4, X + 7, Y + 6, CLR_DARKCYAN, DRO_FILL);
+        GBox(Hps, X + 9, Y + 4, X + 13, Y + 6, CLR_DARKCYAN, DRO_FILL);
+        GBox(Hps, X + 15, Y + 4, X + 19, Y + 6, CLR_DARKCYAN, DRO_FILL);
+        GBox(Hps, X + 21, Y + 4, X + 25, Y + 6, CLR_DARKCYAN, DRO_FILL);
+        GBox(Hps, X + 27, Y + 4, X + 28, Y + 6, CLR_DARKCYAN, DRO_FILL);
       End;
     IC_VIRTUAL :
       Begin

@@ -79,6 +79,9 @@
 #     et APPS/NOTEPAD.PAS (Bloc-notes de Pasdows 95) (dossier Productivite
 #     du bureau), APPS/OS2DBG.PAS (OS2-Zero Debugger, dossier Developer
 #     Kit) ;
+#  3f. compile APPS/NC.PAS (North Commander, gestionnaire de fichiers a
+#     deux panneaux d'apres NC.PAS du depot NORTONCOMMANDER-0, dossier
+#     Systeme OS/2 du bureau) ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS, PAYSAGE.BMP pour Paint,
@@ -295,6 +298,11 @@ echo "== SQL Developer (OS2PC : APPS/SQLDEV.PAS, PostgreSQL, MariaDB/MySQL, .MDF
 "$W/os2pc" -Q "$ROOT/APPS/SQLDEV.PAS" "$W/cd/SQLDEV.EXE"
 echo "== Virtualisation (OS2PC : APPS/VIRTUAL.PAS, machines de VirtualBox par AMD-V, Intel VT-x ou mode V86, KrnVirt du noyau)"
 "$W/os2pc" -Q "$ROOT/APPS/VIRTUAL.PAS" "$W/cd/VIRTUAL.EXE"
+# North Commander (dossier Systeme OS/2) : gestionnaire de fichiers a deux
+# panneaux d'apres NC.PAS du depot NORTONCOMMANDER-0 ; touches de fonction en
+# bas, visualiseur ASCII et hexadecimal, editeur, menu utilisateur, NCD
+echo "== North Commander (OS2PC : APPS/NC.PAS, d'apres NC.PAS du depot NORTONCOMMANDER-0)"
+"$W/os2pc" -Q "$ROOT/APPS/NC.PAS" "$W/cd/NC.EXE"
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"
 "$W/os2pc" -Q -CD "$ROOT/DLL/TESTVDM.PAS" "$W/cd/TESTVDM.EXE"
 cp "$ROOT"/IMAGE/SONS/*.WAV "$W/cd/"
