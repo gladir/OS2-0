@@ -1552,6 +1552,34 @@ informations sur les disques. INT 15h APM 1.2 : POWER ADV:OFF de MSDOS-0
 eteint la machine et ferme sa fenetre.
   OS2PC APPS\VIRTUAL.PAS                    -> VIRTUAL.EXE
 
+North Commander (NC.EXE, dossier Systeme OS/2)
+----------------------------------------------
+Gestionnaire de fichiers a deux panneaux (source APPS\NC.PAS) d'apres
+NC.PAS du depot NORTONCOMMANDER-0, menus et apparence d'OS/2 (Gauche,
+Fichiers, Disque, Commandes, Options, Droite, ?). Barre des touches de
+fonction en bas : F1 Aide, F2 Menu utilisateur, F3 Voir, F4 Editer,
+F5 Copier, F6 Renommer/deplacer, F7 Creer un repertoire, F8 Supprimer,
+F9 Menu deroulant, F10 Quitter ; avec Maj (Maj+F4 nouveau fichier,
+Maj+F5/F6 copier ou renommer ici, Maj+F9 enregistrer), Ctrl (Ctrl+F1/F2
+panneaux, Ctrl+F3 a F7 tris) et Alt (Alt+F1/F2 lecteur, Alt+F7
+recherche, Alt+F8 historique, Alt+F9 agrandir, Alt+F10 arbre NCD) ; un
+clic sur la barre appuie la touche. Panneaux bref, complet, Info,
+Arbre, Vue rapide ; filtre ; Ins, Gris+, Gris-, Gris* (selection) ;
+Ctrl+L Info, Ctrl+Q vue rapide, Ctrl+O ecran de sortie, Ctrl+U
+permuter, Ctrl+R relire, Ctrl+B barre des touches, Ctrl+S ou
+Alt+lettre recherche rapide, Ctrl+Pg prec parent, Ctrl+\ racine.
+Visualiseur (F3) : ASCII ou hexadecimal (F4), coupure (F2), atteindre
+(F5 : ligne, $hexa, nn%), recherche de texte ou d'octets (F7, Maj+F7).
+Editeur interne (F4) ; editeur et visualiseur externes au choix.
+Ligne de commande : CD, lecteur:, CLS, EXIT internes ; commandes de
+CMD.EXE (DIR, TYPE, COPY...) avec la sortie dans l'ecran de sortie
+(Ctrl+O) ; programmes de PM lances directement, programmes en mode
+texte dans une fenetre OS/2 (Maj+Entree pour toute commande).
+NC.MNU (menu utilisateur), NC.EXT (extensions), NC.INI (configuration)
+dans C:\ (ou D:\). Substitutions : !.! fichier, ! sans extension,
+!: lecteur, !\ repertoire. Parametres : NC [gauche] [droite].
+  OS2PC APPS\NC.PAS                         -> NC.EXE
+
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
 ---------------------------------------------------------------------
 OpenGL 1.1 en rendu logiciel (source DLL\OPENGL.PAS, porte de
