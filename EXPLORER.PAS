@@ -37,6 +37,9 @@
   reconnecter a l'ouverture de session" : OS2.INI, PM_NetworkDrives) et
   Deconnecter un lecteur reseau... ; DosFSAttach et SMB.IFS (SMB2,
   NTLMv2), voir la section "Lecteurs reseau" plus bas.
+  Apres OK : boite de progression (DosFSAttach dans un fil, etapes
+  cochees, paquets, graphique, Annuler), voir "Connexion d'un lecteur
+  reseau : boite de progression".
 
   API d'OS/2 : DosFindFirst/DosFindNext (FILEFINDBUF3), DosQueryCurrentDisk,
   DosQueryFSInfo (etiquette, espace libre), DosSetFSInfo (nom du volume),
@@ -2897,6 +2900,698 @@ Begin
   Dummy := WinMessageBox(HWND_DESKTOP, NdFr, Z(S), Z2(NetTitle(NdMode)), 0, Fl Or MB_MOVEABLE);
 End;
 
+{ ==================================================================== }
+{ Connexion d'un lecteur reseau : boite de progression                  }
+{ ==================================================================== }
+{ DosFSAttach (SMB.IFS) attend le serveur : la carte reseau, le DNS, la
+  connexion TCP au port 445 (jusqu'a 6 s), puis chaque reponse SMB
+  (jusqu'a 60 s si le serveur se tait). Appele directement, il bloquait
+  la file de messages de l'Explorateur : la souris et le bureau
+  semblaient geles. L'unite est maintenant attachee par un fil
+  (DosCreateThread) ; la boite suit la connexion : etapes cochees
+  (SMBSTATUS de SMB.IFS : etape, duree de chacune, requetes SMB),
+  paquets et octets de la carte (TCPIPSTATS de TCPIP32), barre de
+  progression, graphique de l'activite reseau, temps ecoule ; Annuler
+  appelle SMBCANCEL (soabort de TCPIP32 : connect, recv, DNS et ARP
+  s'arretent aussitot). Le fil n'utilise aucune chaine (les chaines
+  temporaires du runtime ne sont pas partagees entre fils). }
+
+Const
+  PgSteps = 8;
+  PgHistMax = 42;
+  PgDotMax = 16;
+  WM_TIMER = $0024;
+
+Var
+  PgFr, PgCl, PgBtn, PgRetry, PgW, PgH : LongInt;
+  PgEnd : LongInt;                     { 0 en cours ; 1 fermer ; 2 reessayer }
+  PgState : LongInt;                   { 0 connexion ; 1 annulation ; 2 echec ; 3 reussite }
+  PgDrive : Char;
+  PgRemote, PgUser, PgErr, PgErr2 : String;
+  PgT0, PgTEnd, PgCancelT, PgFail, PgAnim, PgTick, PgPct : LongInt;
+  PgSt : Array[0..23] Of LongInt;      { SMBSTATUS }
+  PgNet0, PgNet : Array[0..3] Of LongInt;   { TCPIPSTATS : debut, maintenant }
+  PgLastRx, PgLastTx : LongInt;
+  PgHTx, PgHRx : Array[0..PgHistMax - 1] Of LongInt;
+  PgHN : LongInt;
+  PgDotX, PgDotD : Array[0..PgDotMax - 1] Of LongInt;   { paquets animes sur le cable }
+  PgRegDone, PgShown : Boolean;
+  SmbStatF, SmbCancF, TcpStatF : LongInt;
+  { fil de travail : DosFSAttach }
+  WkDev, WkFsd : Array[0..7] Of Byte;
+  WkLen, WkRes, WkDone, WkBusy, WkCancel, WkDummy : LongInt;
+
+Function KTicks : LongInt; External 'DOSCALLS' Name 'GetTickCount';
+Function DosCreateThread(PTid, PFn, Param, Flags, CbStack : LongInt) : LongInt; External 'DOSCALLS';
+Function WinStartTimer(Hab, H, Id, Ms : LongInt) : LongInt; External 'PMWIN';
+Function WinStopTimer(Hab, H, Id : LongInt) : LongInt; External 'PMWIN';
+
+{ fil : attacher l'unite ; Annuler pendant l'attente : detachee aussitot }
+Function NetWorker(P : LongInt) : LongInt;
+Var R, K : LongInt;
+Begin
+  R := 95;                                      { ERROR_INTERRUPT }
+  If WkCancel = 0 Then R := DosFSAttach(LongInt(@WkDev), LongInt(@WkFsd), LongInt(@NdData), WkLen, 0);
+  If (R = 0) And (WkCancel <> 0) Then
+  Begin
+    WkDummy := DosFSAttach(LongInt(@WkDev), LongInt(@WkFsd), 0, 0, 1);
+    R := 95;
+  End;
+  For K := 0 To 767 Do NdData[K] := 0;         { pas de mot de passe en memoire }
+  WkRes := R;
+  WkDone := 1;
+  WkBusy := 0;
+  NetWorker := 0;
+End;
+
+{ appel d'un point d'entree (convention _System, deux arguments) }
+Function CallF2(F, A, B : LongInt) : LongInt;
+Var R : LongInt;
+Begin
+  R := -1;
+  If F <> 0 Then
+  Begin
+    asm
+      mov eax,B
+      push eax
+      mov eax,A
+      push eax
+      mov eax,F
+      call eax
+      add esp,8
+      mov R,eax
+    end;
+  End;
+  CallF2 := R;
+End;
+
+Procedure PgLoad;
+Var H : LongInt;
+Begin
+  If SmbStatF = 0 Then
+  Begin
+    H := 0;
+    If DosLoadModule(LongInt(@FailBuf), 64, Z('C:\SMB.IFS'), LongInt(@H)) = 0 Then
+    Begin
+      Dummy := DosQueryProcAddr(H, 0, Z('SMBSTATUS'), LongInt(@SmbStatF));
+      Dummy := DosQueryProcAddr(H, 0, Z('SMBCANCEL'), LongInt(@SmbCancF));
+    End;
+  End;
+  If TcpStatF = 0 Then
+  Begin
+    H := 0;
+    If DosLoadModule(LongInt(@FailBuf), 64, Z('TCPIP32'), LongInt(@H)) = 0 Then
+      Dummy := DosQueryProcAddr(H, 904, 0, LongInt(@TcpStatF));
+  End;
+End;
+
+Procedure PgPoll;
+Var K : LongInt;
+Begin
+  If SmbStatF <> 0 Then Dummy := CallF2(SmbStatF, LongInt(@PgSt), 96);
+  If TcpStatF <> 0 Then
+  Begin
+    For K := 0 To 3 Do PgNet[K] := PgNet0[K];
+    Dummy := CallF2(TcpStatF, LongInt(@PgNet), 0);
+  End;
+End;
+
+{ nombre avec separateur des milliers }
+Function PgNum(V : LongInt) : String;
+Var S : String; N : LongInt;
+Begin
+  S := IStr(V);
+  N := Length(S) - 3;
+  While N > 0 Do
+  Begin
+    If Lang = 1 Then Insert(',', S, N + 1) Else Insert(' ', S, N + 1);
+    N := N - 3;
+  End;
+  PgNum := S;
+End;
+
+{ duree en secondes, une decimale }
+Function PgSec(Ms : LongInt) : String;
+Var S : String;
+Begin
+  If Ms < 0 Then Ms := 0;
+  If Ms < 1000 Then
+  Begin
+    PgSec := IStr(Ms) + ' ms';
+    Exit;
+  End;
+  S := IStr(Ms Div 1000);
+  If Lang = 1 Then S := S + '.' Else S := S + ',';
+  PgSec := S + IStr((Ms Mod 1000) Div 100) + ' s';
+End;
+
+Function PgBytes(V : LongInt) : String;
+Begin
+  If V < 10240 Then PgBytes := PgNum(V) + L(' octets', ' bytes', ' Byte', ' byte', ' bytes')
+  Else PgBytes := PgNum((V + 512) Div 1024) + L(' Ko', ' KB', ' KB', ' KB', ' KB');
+End;
+
+Function PgIp(Ip : LongInt) : String;
+Begin
+  PgIp := IStr(Ip And 255) + '.' + IStr((Ip Shr 8) And 255) + '.' + IStr((Ip Shr 16) And 255) + '.' +
+          IStr((Ip Shr 24) And 255);
+End;
+
+Function PgServer : String;
+Var S : String; K : LongInt;
+Begin
+  S := Copy(PgRemote, 3, 255);
+  K := Pos('\', S);
+  If K > 0 Then S := Copy(S, 1, K - 1);
+  PgServer := S;
+End;
+
+Function PgShare : String;
+Var S : String; K : LongInt;
+Begin
+  S := Copy(PgRemote, 3, 255);
+  K := Pos('\', S);
+  If K > 0 Then S := Copy(S, K + 1, 255) Else S := '';
+  PgShare := S;
+End;
+
+Function PgStepName(K : LongInt) : String;
+Var U : String;
+Begin
+  Case K Of
+    1 : PgStepName := L('V'#130'rification de la carte r'#130'seau (TCP/IP)', 'Checking the network adapter (TCP/IP)',
+                        'Netzwerkkarte pr'#129'fen (TCP/IP)', 'Verifica della scheda di rete (TCP/IP)',
+                        'Comprobando el adaptador de red (TCP/IP)');
+    2 : PgStepName := L('Recherche du serveur ', 'Locating server ', 'Server suchen: ', 'Ricerca del server ',
+                        'Buscando el servidor ') + PgServer;
+    3 : PgStepName := L('Connexion TCP au port 445', 'TCP connection to port 445', 'TCP-Verbindung zu Port 445',
+                        'Connessione TCP alla porta 445', 'Conexi'#162'n TCP al puerto 445');
+    4 : PgStepName := L('N'#130'gociation du protocole SMB 2', 'Negotiating the SMB 2 protocol',
+                        'SMB-2-Protokoll aushandeln', 'Negoziazione del protocollo SMB 2',
+                        'Negociando el protocolo SMB 2');
+    5 : PgStepName := L('Ouverture de session (NTLMSSP)', 'Session setup (NTLMSSP)', 'Sitzungsaufbau (NTLMSSP)',
+                        'Apertura della sessione (NTLMSSP)', 'Inicio de sesi'#162'n (NTLMSSP)');
+    6 :
+    Begin
+      U := PgUser;
+      If U = '' Then U := L('invit'#130, 'guest', 'Gast', 'ospite', 'invitado');
+      PgStepName := L('Authentification NTLMv2 : ', 'NTLMv2 authentication: ', 'NTLMv2-Anmeldung: ',
+                      'Autenticazione NTLMv2: ', 'Autenticaci'#162'n NTLMv2: ') + U;
+    End;
+    7 : PgStepName := L('Connexion au partage ', 'Connecting to share ', 'Verbindung zur Freigabe ',
+                        'Connessione alla condivisione ', 'Conectando al recurso ') + PgShare;
+  Else
+    PgStepName := L('Lecteur ', 'Drive ', 'Laufwerk ', 'Unit'#133' ', 'Unidad ') + PgDrive + ': ' +
+                  L('pr'#136't', 'ready', 'bereit', 'pronta', 'lista');
+  End;
+End;
+
+{ etape en cours (1 a 8) d'apres SMB.IFS }
+Function PgCur : LongInt;
+Var K : LongInt;
+Begin
+  K := PgSt[0];
+  If K < 1 Then K := 1;
+  If K > PgSteps Then K := PgSteps;
+  If PgState = 3 Then K := PgSteps + 1;
+  PgCur := K;
+End;
+
+{ duree attendue d'une etape (ms) : la barre avance sans jamais s'arreter }
+Function PgExpect(K : LongInt) : LongInt;
+Begin
+  Case K Of
+    1 : PgExpect := 150;
+    2 : PgExpect := 600;
+    3 : PgExpect := 1500;
+    4 : PgExpect := 900;
+    5 : PgExpect := 900;
+    6 : PgExpect := 1200;
+    7 : PgExpect := 900;
+  Else
+    PgExpect := 300;
+  End;
+End;
+
+Procedure PgCircle(CX, CY, R, C : LongInt);
+Var Dy, W : LongInt;
+Begin
+  For Dy := -R To R Do
+  Begin
+    W := ISqrt(R * R - Dy * Dy);
+    HLine(CX - W, CX + W, CY + Dy, C);
+  End;
+End;
+
+Procedure PgRing(CX, CY, R, C : LongInt);
+Var Dy, W, Pw : LongInt;
+Begin
+  Pw := 0;
+  For Dy := 0 To R Do
+  Begin
+    W := ISqrt(R * R - Dy * Dy);
+    If Dy = 0 Then Pw := W;
+    HLine(CX + W, CX + MaxI(W, Pw - 1), CY + Dy, C); HLine(CX - MaxI(W, Pw - 1), CX - W, CY + Dy, C);
+    HLine(CX + W, CX + MaxI(W, Pw - 1), CY - Dy, C); HLine(CX - MaxI(W, Pw - 1), CX - W, CY - Dy, C);
+    Pw := W;
+  End;
+End;
+
+Procedure PgCheck(CX, CY : LongInt);
+Begin
+  PgCircle(CX, CY, 7, cGreen);
+  DLine(CX - 4, CY, CX - 1, CY + 3, cWhite); DLine(CX - 4, CY - 1, CX - 1, CY + 2, cWhite);
+  DLine(CX - 1, CY + 3, CX + 4, CY - 3, cWhite); DLine(CX - 1, CY + 2, CX + 4, CY - 4, cWhite);
+End;
+
+Procedure PgCross(CX, CY, C : LongInt);
+Begin
+  PgCircle(CX, CY, 7, C);
+  DLine(CX - 3, CY - 3, CX + 3, CY + 3, cWhite); DLine(CX - 2, CY - 3, CX + 3, CY + 2, cWhite);
+  DLine(CX - 3, CY + 3, CX + 3, CY - 3, cWhite); DLine(CX - 2, CY + 3, CX + 3, CY - 2, cWhite);
+End;
+
+{ indicateur d'activite : huit points en cercle, la tete tourne }
+Procedure PgSpin(CX, CY : LongInt);
+Const
+  SX : Array[0..7] Of LongInt = (0, 4, 6, 4, 0, -4, -6, -4);
+  SY : Array[0..7] Of LongInt = (-6, -4, 0, 4, 6, 4, 0, -4);
+Var K, H, C : LongInt;
+Begin
+  H := PgAnim Mod 8;
+  For K := 0 To 7 Do
+  Begin
+    If K = H Then C := cNavy
+    Else If K = (H + 7) Mod 8 Then C := cBlue
+    Else If K = (H + 6) Mod 8 Then C := cAqua
+    Else C := cWhite;
+    FBar(CX + SX[K] - 1, CY + SY[K] - 1, CX + SX[K] + 1, CY + SY[K] + 1, C);
+  End;
+End;
+
+Procedure PgPending(CX, CY : LongInt);
+Begin
+  PgRing(CX, CY, 6, cGray);
+End;
+
+{ bandeau : ce poste, le cable et ses paquets, le serveur }
+Procedure PgBanner;
+Var X1, X2, Y, K, X, C, Mx : LongInt; S : String;
+Begin
+  FBar(0, 0, PgW - 1, 69, cWhite);
+  HLine(0, PgW - 1, 70, cGray);
+  HLine(0, PgW - 1, 71, cWhite);
+  PaintIcon(icComputer, 18, 12, 48);
+  PaintIcon(icNetDrive, PgW - 66, 12, 48);
+  X1 := 76; X2 := PgW - 76; Y := 38;
+  If PgState = 3 Then C := cGreen Else If PgState = 2 Then C := cRed Else C := cGray;
+  HLine(X1, X2, Y, C); HLine(X1, X2, Y + 1, C);
+  VLine(X1, Y - 3, Y + 4, C); VLine(X2, Y - 3, Y + 4, C);
+  If PgState = 2 Then
+  Begin
+    Mx := (X1 + X2) Div 2;
+    PgCross(Mx, Y, cRed);
+  End
+  Else If PgState <> 3 Then
+    For K := 0 To PgDotMax - 1 Do
+      If PgDotD[K] <> 0 Then
+      Begin
+        X := X1 + 4 + (X2 - X1 - 16) * PgDotX[K] Div 100;
+        If PgDotD[K] > 0 Then FBar(X, Y - 3, X + 7, Y + 4, cBlue)
+        Else FBar(X, Y - 3, X + 7, Y + 4, cGreen);
+      End;
+  { au-dessus du cable : l'etat ; dessous : l'adresse du serveur }
+  If PgState = 0 Then S := L('Connexion en cours...', 'Connecting...', 'Verbindung wird hergestellt...',
+                             'Connessione in corso...', 'Conectando...')
+  Else If PgState = 1 Then S := L('Annulation...', 'Cancelling...', 'Abbrechen...', 'Annullamento...', 'Cancelando...')
+  Else If PgState = 2 Then S := L(''#144'chec de la connexion', 'Connection failed', 'Verbindung fehlgeschlagen',
+                                  'Connessione non riuscita', 'Error de conexi'#162'n')
+  Else S := L('Connect'#130, 'Connected', 'Verbunden', 'Connesso', 'Conectado');
+  S := Fit(S, X2 - X1 - 8);
+  OutTxt((X1 + X2 - TextW(S)) Div 2, 12, S, cBlack, cWhite);
+  If PgSt[8] <> 0 Then S := PgIp(PgSt[8]) Else S := PgServer;
+  If PgIp(PgSt[8]) <> PgServer Then
+    If (PgSt[8] <> 0) Then S := PgServer + ' (' + PgIp(PgSt[8]) + ')';
+  S := Fit(S, X2 - X1 - 8);
+  OutTxt((X1 + X2 - TextW(S)) Div 2, 46, S, cGray, cWhite);
+End;
+
+Procedure PgPaint;
+Var K, Y, Cur, CX, CY, X1, X2, Ms, N, Gx1, Gy1, Gx2, Gy2, Mx, Px, Py, Qx, Qy, Bw : LongInt; S : String;
+Begin
+  FBar(0, 72, PgW - 1, PgH - 1, cSilver);
+  PgBanner;
+  { titre }
+  S := PgDrive + ':  ' + #26 + '  ' + PgRemote;
+  OutTxt(16, 78, Fit(S, PgW - 32), cNavy, cSilver);
+  { etapes }
+  Cur := PgCur;
+  For K := 1 To PgSteps Do
+  Begin
+    Y := 98 + (K - 1) * 18;
+    CX := 26; CY := Y + 8;
+    If K < Cur Then PgCheck(CX, CY)
+    Else If (K = Cur) And (PgState = 2) Then PgCross(CX, CY, cRed)
+    Else If (K = Cur) And (PgState = 1) Then PgCross(CX, CY, cGray)
+    Else If K = Cur Then PgSpin(CX, CY)
+    Else PgPending(CX, CY);
+    S := Fit(PgStepName(K), PgW - 140);
+    If K < Cur Then OutTxt(42, Y, S, cBlack, cSilver)
+    Else If K = Cur Then
+    Begin
+      If PgState = 2 Then OutTxt(42, Y, S, cRed, cSilver) Else OutTxt(42, Y, S, cNavy, cSilver);
+    End
+    Else OutTxt(42, Y, S, cGray, cSilver);
+    { duree de l'etape }
+    If (K < Cur) And (K < PgSteps) Then OutRight(PgW - 16, Y, PgSec(PgSt[10 + K]), cGray, cSilver)
+    Else If (K = Cur) And (PgState = 2) Then OutRight(PgW - 16, Y, PgSec(PgSt[10 + K]), cRed, cSilver)
+    Else If (K = Cur) And (PgState = 0) Then OutRight(PgW - 16, Y, PgSec(PgSt[3]), cNavy, cSilver);
+  End;
+  { barre de progression (blocs, comme OS/2) }
+  Y := 250;
+  X1 := 16; X2 := PgW - 72;
+  Sunken(X1, Y, X2, Y + 19, cWhite);
+  Bw := (X2 - X1 - 6) * PgPct Div 1000;
+  K := 0;
+  While K + 9 <= Bw Do
+  Begin
+    If PgState = 2 Then FBar(X1 + 4 + K, Y + 4, X1 + 4 + K + 7, Y + 15, cRed)
+    Else If PgState = 3 Then FBar(X1 + 4 + K, Y + 4, X1 + 4 + K + 7, Y + 15, cGreen)
+    Else FBar(X1 + 4 + K, Y + 4, X1 + 4 + K + 7, Y + 15, cNavy);
+    K := K + 10;
+  End;
+  OutRight(PgW - 16, Y + 2, IStr(PgPct Div 10) + ' %', cBlack, cSilver);
+  { activite reseau : chiffres a gauche, graphique a droite }
+  Y := 276;
+  Edge(12, Y + 8, PgW - 13, Y + 85, cGray, cWhite);
+  Edge(13, Y + 9, PgW - 14, Y + 84, cWhite, cGray);
+  S := ' ' + L('Activit'#130' r'#130'seau', 'Network activity', 'Netzwerkaktivit'#132't', 'Attivit'#133' di rete',
+               'Actividad de red') + ' ';
+  OutTxt(24, Y, S, cNavy, cSilver);
+  N := PgNet[1] - PgNet0[1];
+  OutTxt(24, Y + 18, L('Envoy'#130's : ', 'Sent: ', 'Gesendet: ', 'Inviati: ', 'Enviados: ') + PgNum(N) + ' ' +
+         L('paquets', 'packets', 'Pakete', 'pacchetti', 'paquetes'), cBlue, cSilver);
+  OutTxt(24, Y + 34, '  ' + PgBytes(PgNet[3] - PgNet0[3]) + ' (' + IStr(PgSt[4]) + ' SMB)', cBlack, cSilver);
+  N := PgNet[0] - PgNet0[0];
+  OutTxt(24, Y + 50, L('Re'#135'us : ', 'Received: ', 'Empfangen: ', 'Ricevuti: ', 'Recibidos: ') + PgNum(N) + ' ' +
+         L('paquets', 'packets', 'Pakete', 'pacchetti', 'paquetes'), cGreen, cSilver);
+  OutTxt(24, Y + 66, '  ' + PgBytes(PgNet[2] - PgNet0[2]) + ' (' + IStr(PgSt[5]) + ' SMB)', cBlack, cSilver);
+  { graphique : paquets par 300 ms (envoyes en bleu, recus en vert) }
+  Gx2 := PgW - 24; Gx1 := Gx2 - PgHistMax * 4 - 2; Gy1 := Y + 20; Gy2 := Y + 76;
+  FBar(Gx1, Gy1, Gx2, Gy2, cBlack);
+  For K := 1 To 3 Do HLine(Gx1 + 1, Gx2 - 1, Gy1 + (Gy2 - Gy1) * K Div 4, cGreen);
+  { quadrillage qui defile avec les echantillons }
+  X1 := Gx2 - 1 - (PgTick Div 3 Mod 4) * 4;
+  While X1 > Gx1 Do
+  Begin
+    VLine(X1, Gy1 + 1, Gy2 - 1, cGreen);
+    X1 := X1 - 16;
+  End;
+  Mx := 4;
+  For K := 0 To PgHN - 1 Do
+  Begin
+    If PgHTx[K] > Mx Then Mx := PgHTx[K];
+    If PgHRx[K] > Mx Then Mx := PgHRx[K];
+  End;
+  Edge(Gx1 - 1, Gy1 - 1, Gx2 + 1, Gy2 + 1, cGray, cWhite);
+  For K := 1 To PgHN - 1 Do
+  Begin
+    Px := Gx2 - 2 - (PgHN - K) * 4; Qx := Px + 4;
+    Py := Gy2 - 2 - PgHRx[K - 1] * (Gy2 - Gy1 - 6) Div Mx; Qy := Gy2 - 2 - PgHRx[K] * (Gy2 - Gy1 - 6) Div Mx;
+    DLine(Px, Py, Qx, Qy, cLime);
+    Py := Gy2 - 2 - PgHTx[K - 1] * (Gy2 - Gy1 - 6) Div Mx; Qy := Gy2 - 2 - PgHTx[K] * (Gy2 - Gy1 - 6) Div Mx;
+    DLine(Px, Py, Qx, Qy, cAqua);
+  End;
+  { ligne d'etat : temps ecoule, attente, erreur }
+  Y := 368;
+  If PgState = 2 Then
+  Begin
+    OutTxt(16, Y, Fit(PgErr, PgW - 32), cRed, cSilver);
+    If PgErr2 <> '' Then OutTxt(16, Y + 16, Fit(PgErr2, PgW - 32), cMaroon, cSilver);
+  End
+  Else
+  Begin
+    If PgTEnd <> 0 Then Ms := PgTEnd - PgT0 Else Ms := KTicks - PgT0;
+    S := L('Temps '#130'coul'#130' : ', 'Elapsed time: ', 'Verstrichene Zeit: ', 'Tempo trascorso: ',
+           'Tiempo transcurrido: ') + PgSec(MaxI(Ms, 1000));
+    OutTxt(16, Y, S, cBlack, cSilver);
+    If PgState = 3 Then
+      OutTxt(16, Y + 16, L('Le lecteur ', 'Drive ', 'Laufwerk ', 'L''unit'#133' ', 'La unidad ') + PgDrive + ': ' +
+             L('est connect'#130'.', 'is connected.', 'ist verbunden.', #138' connessa.', 'est'#160' conectada.'),
+             cGreen, cSilver)
+    Else If PgState = 1 Then
+      OutTxt(16, Y + 16, L('Arr'#136't des '#130'changes avec le serveur...', 'Stopping the exchange with the server...',
+             'Datenaustausch wird beendet...', 'Interruzione degli scambi con il server...',
+             'Deteniendo el intercambio con el servidor...'), cMaroon, cSilver)
+    Else If (PgSt[1] <> 0) And (PgSt[3] >= 3000) Then
+      OutTxt(16, Y + 16, Fit(L('Le serveur ne r'#130'pond pas encore : ', 'The server has not answered yet: ',
+             'Der Server antwortet noch nicht: ', 'Il server non risponde ancora: ', 'El servidor a'#163'n no responde: ') +
+             PgSec(PgSt[3]), PgW - 32), cMaroon, cSilver);
+  End;
+End;
+
+{ pas de l'animation (100 ms) : etat de la connexion, barre, graphique,
+  paquets du cable }
+Procedure PgStep;
+Var K, Cur, Frac, E, Dtx, Drx, Want, Ms, Nw : LongInt;
+Begin
+  Inc(PgAnim);
+  PgPoll;
+  { paquets animes : avancent, nouveaux d'apres les compteurs }
+  For K := 0 To PgDotMax - 1 Do
+    If PgDotD[K] <> 0 Then
+    Begin
+      PgDotX[K] := PgDotX[K] + 9;
+      If PgDotX[K] > 100 Then PgDotD[K] := 0;
+    End;
+  Dtx := PgNet[1] - PgLastTx; Drx := PgNet[0] - PgLastRx;
+  K := 0; Nw := 0;
+  While (Dtx > 0) Or (Drx > 0) Do
+  Begin
+    While (K < PgDotMax) And (PgDotD[K] <> 0) Do Inc(K);
+    If K >= PgDotMax Then Break;
+    PgDotX[K] := 0;
+    If Dtx > 0 Then
+    Begin
+      PgDotD[K] := 1; Dec(Dtx);
+    End
+    Else
+    Begin
+      PgDotD[K] := -1; Dec(Drx);
+    End;
+    Inc(K); Inc(Nw);
+    { au plus deux nouveaux par pas : les paquets restent lisibles }
+    If Nw >= 2 Then Break;
+  End;
+  { graphique : un echantillon toutes les 300 ms }
+  Inc(PgTick);
+  If PgTick Mod 3 = 0 Then
+  Begin
+    If PgHN = PgHistMax Then
+    Begin
+      For K := 0 To PgHistMax - 2 Do
+      Begin
+        PgHTx[K] := PgHTx[K + 1]; PgHRx[K] := PgHRx[K + 1];
+      End;
+      Dec(PgHN);
+    End;
+    PgHTx[PgHN] := PgNet[1] - PgLastTx; PgHRx[PgHN] := PgNet[0] - PgLastRx;
+    Inc(PgHN);
+    PgLastTx := PgNet[1]; PgLastRx := PgNet[0];
+  End;
+  { barre : etapes faites, plus la part de l'etape en cours (approche) }
+  Cur := PgCur;
+  If PgState = 3 Then Want := 1000
+  Else
+  Begin
+    E := PgExpect(Cur);
+    Ms := PgSt[3];
+    Frac := 900 * Ms Div (Ms + E);
+    Want := ((Cur - 1) * 1000 + Frac) Div PgSteps;
+  End;
+  If PgState = 0 Then
+  Begin
+    If Want > PgPct Then PgPct := PgPct + MaxI(1, (Want - PgPct + 2) Div 3);
+  End
+  Else If PgState = 3 Then PgPct := 1000;
+  If PgPct > 1000 Then PgPct := 1000;
+  { fin du fil }
+  If (WkDone <> 0) And ((PgState = 0) Or (PgState = 1)) Then
+  Begin
+    PgTEnd := KTicks;
+    PgPoll;
+    If PgState = 1 Then PgEnd := 1
+    Else If WkRes = 0 Then
+    Begin
+      PgState := 3;
+      PgPct := 1000;
+      Dummy := WinSetWindowText(PgBtn, Z(L('Fermer', 'Close', 'Schlie'#225'en', 'Chiudi', 'Cerrar')));
+    End
+    Else
+    Begin
+      PgState := 2;
+      PgShown := True;
+      PgErr := NetErrText(WkRes);
+      PgErr2 := SmbText;
+      If (PgErr2 <> '') And (Pos(Copy(PgErr, 1, Length(PgErr) - 1), PgErr2) = 1) Then PgErr2 := '';
+      If Lang <> 0 Then PgErr2 := '';
+      Dummy := WinSetWindowText(PgBtn, Z(L('Fermer', 'Close', 'Schlie'#225'en', 'Chiudi', 'Cerrar')));
+      PgRetry := WinCreateWindow(PgCl, WC_BUTTON, Z(L('R'#130'essayer', 'Retry', 'Wiederholen', 'Riprova', 'Reintentar')),
+                                 WS_VISIBLE Or WS_TABSTOP Or BS_PUSHBUTTON, PgW - 216, 8, 100, 26, PgCl, HWND_TOP, 3, 0, 0);
+      Dummy := WinSetFocus(HWND_DESKTOP, PgRetry);
+      Dummy := WinAlarm(HWND_DESKTOP, 2);
+    End;
+  End;
+  { reussite : la boite se ferme seule apres un instant }
+  If (PgState = 3) And (KTicks - PgTEnd >= 900) Then PgEnd := 1;
+  { annulation sans reponse du fil (DNS d'un autre programme...) : fermer }
+  If (PgState = 1) And (KTicks - PgCancelT >= 8000) Then PgEnd := 1;
+End;
+
+Procedure PgCancel;
+Begin
+  If PgState = 0 Then
+  Begin
+    PgState := 1;
+    PgCancelT := KTicks;
+    WkCancel := 1;
+    If SmbCancF <> 0 Then
+    Begin
+      asm
+        mov eax,SmbCancF
+        call eax
+      end;
+    End;
+    Dummy := WinEnableWindow(PgBtn, 0);
+    Dummy := WinInvalidateRect(PgCl, 0, 0);
+  End
+  Else If PgState <> 1 Then PgEnd := 1;
+End;
+
+Function PgProc(H, Msg, Mp1, Mp2 : LongInt) : LongInt;
+Var Ps, SvH, SvC, Fl, Vk : LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  PgProc := 0;
+  Case Msg Of
+    WM_PAINT :
+    Begin
+      Ps := WinBeginPaint(H, 0, 0);
+      Dummy := WinQueryWindowRect(H, LongInt(@Rc));
+      SvH := Hps; SvC := CH;
+      Hps := Ps; CH := Rc[3];
+      PgW := Rc[2]; PgH := Rc[3];
+      PgPaint;
+      Hps := SvH; CH := SvC;
+      Dummy := WinEndPaint(Ps);
+    End;
+    WM_TIMER :
+    Begin
+      PgStep;
+      Dummy := WinInvalidateRect(H, 0, 0);
+    End;
+    WM_COMMAND :
+      If Lo16(Mp1) = 3 Then PgEnd := 2
+      Else PgCancel;
+    WM_CHAR :
+    Begin
+      Fl := Lo16(Mp1); Vk := Hi16(Mp2);
+      PgProc := 1;
+      If ((Fl And KC_KEYUP) = 0) And ((Fl And KC_VIRTUALKEY) <> 0) And (Vk = VK_ESC) Then PgCancel
+      Else If ((Fl And KC_KEYUP) = 0) And ((Fl And KC_VIRTUALKEY) <> 0) And ((Vk = VK_ENTER) Or (Vk = VK_NEWLINE)) And
+              (PgState >= 2) Then PgEnd := 1
+      Else PgProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+    End;
+    WM_CLOSE : PgCancel;
+  Else
+    PgProc := WinDefWindowProc(H, Msg, Mp1, Mp2);
+  End;
+End;
+
+{ Connecter avec la boite de progression : 0, code d'erreur (PgShown : deja
+  affiche dans la boite), -1 annule, -2 reessayer }
+Function NetMapProgress(C : Char; Remote, User, Pass : String) : LongInt;
+Var P, Tid, K, Fl, X, Y, W, H : LongInt; Qm : Array[0..7] Of LongInt; Rc : Array[0..3] Of LongInt;
+Begin
+  PgShown := False;
+  P := 0;
+  NdPut(P, Remote); NdPut(P, User); NdPut(P, Pass);
+  WkLen := P;
+  WkDev[0] := Ord(C); WkDev[1] := Ord(':'); WkDev[2] := 0;
+  WkFsd[0] := Ord('S'); WkFsd[1] := Ord('M'); WkFsd[2] := Ord('B'); WkFsd[3] := 0;
+  WkDone := 0; WkCancel := 0; WkRes := 0;
+  PgLoad;
+  PgState := 0; PgEnd := 0; PgDrive := C; PgRemote := Remote; PgUser := User; PgErr := ''; PgErr2 := '';
+  PgAnim := 0; PgTick := 0; PgPct := 0; PgHN := 0; PgTEnd := 0; PgRetry := 0;
+  For K := 0 To 23 Do PgSt[K] := 0;
+  For K := 0 To PgDotMax - 1 Do PgDotD[K] := 0;
+  For K := 0 To 3 Do PgNet0[K] := 0;
+  If TcpStatF <> 0 Then Dummy := CallF2(TcpStatF, LongInt(@PgNet0), 0);
+  For K := 0 To 3 Do PgNet[K] := PgNet0[K];
+  PgLastRx := PgNet0[0]; PgLastTx := PgNet0[1];
+  PgT0 := KTicks;
+  WkBusy := 1;
+  Tid := 0;
+  If DosCreateThread(LongInt(@Tid), LongInt(@NetWorker), 0, 0, 262144) <> 0 Then
+  Begin
+    { pas de fil : attente directe, comme avant }
+    WkBusy := 0;
+    NetMapProgress := NetMap(C, Remote, User, Pass);
+    Exit;
+  End;
+  If Not PgRegDone Then
+  Begin
+    Dummy := WinRegisterClass(Hab, Z('EXPNETPRG'), LongInt(@PgProc), 0, 0);
+    PgRegDone := True;
+  End;
+  Fl := FCF_TITLEBAR Or FCF_SYSMENU Or FCF_DLGBORDER;
+  PgCl := 0;
+  PgFr := WinCreateStdWindow(HWND_DESKTOP, 0, LongInt(@Fl), Z('EXPNETPRG'),
+                             Z2(L('Connexion du lecteur r'#130'seau ', 'Connecting network drive ', 'Netzlaufwerk verbinden: ',
+                                  'Connessione dell''unit'#133' di rete ', 'Conectando la unidad de red ') + C + ':'),
+                             0, 0, 0, LongInt(@PgCl));
+  W := 480; H := 438;
+  PgW := W; PgH := H;
+  If PgFr <> 0 Then
+  Begin
+    PgBtn := WinCreateWindow(PgCl, WC_BUTTON, Z(L('Annuler', 'Cancel', 'Abbrechen', 'Annulla', 'Cancelar')),
+                             WS_VISIBLE Or WS_TABSTOP Or BS_PUSHBUTTON Or BS_DEFAULT, W - 108, 8, 96, 26, PgCl,
+                             HWND_TOP, ID_CANCEL, 0, 0);
+    Rc[0] := 0; Rc[1] := 0; Rc[2] := W; Rc[3] := H;
+    Dummy := WinCalcFrameRect(PgFr, LongInt(@Rc), 0);
+    W := Rc[2] - Rc[0]; H := Rc[3] - Rc[1];
+    X := MaxI(0, (WinQuerySysValue(HWND_DESKTOP, 20) - W) Div 2);
+    Y := MaxI(0, (WinQuerySysValue(HWND_DESKTOP, 21) - H) Div 2);
+    Dummy := WinSetWindowPos(PgFr, HWND_TOP, X, Y, W, H, SWP_SIZE Or SWP_MOVE Or SWP_ZORDER Or SWP_SHOW Or SWP_ACTIVATE);
+    Dummy := WinEnableWindow(NdFr, 0);
+    Dummy := WinSetActiveWindow(HWND_DESKTOP, PgFr);
+    Dummy := WinSetFocus(HWND_DESKTOP, PgBtn);
+    Dummy := WinStartTimer(Hab, PgCl, 7, 100);
+  End;
+  While PgEnd = 0 Do
+  Begin
+    If PgFr = 0 Then
+    Begin
+      { pas de fenetre : attendre le fil en traitant les messages }
+      If WkDone <> 0 Then PgEnd := 1;
+    End;
+    If PgEnd = 0 Then
+      If WinGetMsg(Hab, LongInt(@Qm), 0, 0, 0) = 0 Then PgCancel
+      Else Dummy := WinDispatchMsg(Hab, LongInt(@Qm));
+  End;
+  If PgFr <> 0 Then
+  Begin
+    Dummy := WinStopTimer(Hab, PgCl, 7);
+    Dummy := WinEnableWindow(NdFr, 1);
+    Dummy := WinSetActiveWindow(HWND_DESKTOP, NdFr);
+    Dummy := WinDestroyWindow(PgFr);
+    PgFr := 0;
+  End;
+  If PgEnd = 2 Then NetMapProgress := -2
+  Else If PgState = 3 Then NetMapProgress := 0
+  Else If (PgState = 1) Or (WkDone = 0) Then NetMapProgress := -1
+  Else NetMapProgress := WkRes;
+End;
+
 { OK de la boite Connecter }
 Procedure MapOk;
 Var C : Char; T, Remote, User, Pass, D : String; R, Ptr : LongInt;
@@ -2922,12 +3617,38 @@ Begin
   End;
   User := NdText(NdUser);
   Pass := NdText(NdPass);
-  Ptr := WinQuerySysPointer(HWND_DESKTOP, 3, 0);        { SPTR_WAIT }
-  If Ptr <> 0 Then Dummy := WinSetPointer(HWND_DESKTOP, Ptr);
-  R := NetMap(C, Remote, User, Pass);
+  { une connexion annulee se termine encore (fil de travail) }
+  If WkBusy <> 0 Then
+  Begin
+    NdMsg(L('La connexion pr'#130'c'#130'dente se termine ; r'#130'essayez dans un instant.',
+            'The previous connection is still ending; try again in a moment.',
+            'Die vorherige Verbindung wird noch beendet; versuchen Sie es gleich erneut.',
+            'La connessione precedente '#138' ancora in chiusura; riprovare tra poco.',
+            'La conexi'#162'n anterior a'#163'n est'#160' terminando; int'#130'ntelo de nuevo en un momento.'),
+          MB_OK Or MB_INFORMATION);
+    Exit;
+  End;
+  { boite de progression : le fil attache l'unite, Annuler l'abandonne }
+  Repeat
+    R := NetMapProgress(C, Remote, User, Pass);
+  Until R <> -2;
   Pass := '';
-  Ptr := WinQuerySysPointer(HWND_DESKTOP, 1, 0);        { SPTR_ARROW }
-  If Ptr <> 0 Then Dummy := WinSetPointer(HWND_DESKTOP, Ptr);
+  Ptr := 0;
+  If R = -1 Then
+  Begin
+    Dummy := WinSetFocus(HWND_DESKTOP, NdPath);
+    Exit;
+  End;
+  If (R <> 0) And PgShown Then
+  Begin
+    If (R = 86) Or (R = 5) Then
+    Begin
+      Dummy := WinSetFocus(HWND_DESKTOP, NdPass);
+      Dummy := WinSendMsg(NdPass, EM_SETSEL, 255 Shl 16, 0);
+    End
+    Else Dummy := WinSetFocus(HWND_DESKTOP, NdPath);
+    Exit;
+  End;
   If R <> 0 Then
   Begin
     D := SmbText;

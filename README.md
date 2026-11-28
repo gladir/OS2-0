@@ -1403,6 +1403,22 @@ L'Explorateur OS2-Zero monte maintenant un dossier partagé d'un serveur Windows
 
 En cas d'échec, une boîte explique pourquoi : serveur injoignable sur le port 445, partage introuvable, nom d'utilisateur ou mot de passe incorrect (le champ du mot de passe est alors sélectionné pour le retaper), accès refusé, lettre déjà utilisée. Une fois connecté, l'Explorateur ouvre le lecteur : <code>partage sur 'serveur' (Z:)</code>, avec l'icône d'un disque branché au réseau. On y lit, copie, renomme, crée et supprime fichiers et dossiers depuis l'Explorateur, les dossiers du bureau (le dossier <b>Lecteurs</b> montre `Lecteur Z (\\serveur\partage)`), CMD.EXE et tous les programmes, comme sur un disque local. <b>Outils → Déconnecter un lecteur réseau…</b> (liste des lecteurs réseau) ou <b>Déconnecter</b> du menu contextuel d'un lecteur réseau le détache et l'oublie dans OS2.INI.
 
+<b>Boîte de progression de la connexion.</b> Après <b>OK</b>, l'Explorateur n'attend plus le serveur dans sa propre file de messages : <code>DosFSAttach</code> tourne dans un fil (<code>DosCreateThread</code>), et une boîte <b>Connexion du lecteur réseau</b> suit la connexion pendant que le reste du système (souris, bureau, autres programmes) continue de répondre. Avant, un serveur qui accepte la connexion TCP mais ne répond pas en SMB laissait l'Explorateur attendre jusqu'à une minute, et la souris semblait gelée. La boîte montre :
+
+<table>
+	<tr><th>Partie</th><th>Contenu</th></tr>
+	<tr><td>Bandeau</td><td>Ce poste et le serveur reliés par un câble où passent les paquets envoyés (bleu) et reçus (vert) ; l'état (Connexion en cours, Annulation, Échec de la connexion, Connecté) et l'adresse IP du serveur.</td></tr>
+	<tr><td>Étapes cochées</td><td>Vérification de la carte réseau (TCP/IP), recherche du serveur (DNS), connexion TCP au port 445, négociation SMB 2, ouverture de session (NTLMSSP), authentification NTLMv2, connexion au partage, lecteur prêt : coche verte et durée pour une étape faite, indicateur qui tourne pour l'étape en cours, croix rouge pour celle qui a échoué.</td></tr>
+	<tr><td>Barre de progression</td><td>En blocs, comme celles d'OS/2 ; elle avance pendant l'étape en cours sans jamais s'arrêter, devient verte quand le lecteur est connecté, rouge en cas d'échec.</td></tr>
+	<tr><td>Activité réseau</td><td>Paquets et octets envoyés et reçus par la carte depuis le début (<code>TCPIPSTATS</code> de TCPIP32.DLL), nombre de requêtes et de réponses SMB (<code>SMBSTATUS</code> de SMB.IFS), et un petit graphique des paquets par 300 ms (envoyés en cyan, reçus en vert).</td></tr>
+	<tr><td>Ligne d'état</td><td>Temps écoulé ; « Le serveur ne répond pas encore : 7,0 s » quand une étape dure plus de 3 s ; le message d'erreur (en rouge) et le détail de SMB.IFS en cas d'échec.</td></tr>
+	<tr><td>Boutons</td><td><b>Annuler</b> (ou Échap) abandonne aussitôt : <code>SMBCANCEL</code> fait passer le socket à l'état RESET et arrête les attentes du DNS et de l'ARP (<code>soabort</code> de TCPIP32.DLL), et la boîte Connecter un lecteur réseau revient pour corriger le chemin ou le mot de passe. Après un échec : <b>Réessayer</b> et <b>Fermer</b>. Après la connexion, la boîte se ferme seule et l'Explorateur ouvre le lecteur.</td></tr>
+</table>
+
+<img width="800" height="600" alt="OS/2-0 : la boîte Connexion du lecteur réseau de l'Explorateur OS2-Zero pendant l'attente d'un serveur muet (étapes cochées, indicateur sur Négociation du protocole SMB 2, barre de progression, paquets envoyés et reçus, graphique, Le serveur ne répond pas encore : 7,0 s, bouton Annuler)" src="IMAGE/RESEAU_PROGRESSION.png" />
+<img width="800" height="600" alt="OS/2-0 : la boîte Connexion du lecteur réseau après un mauvais mot de passe (Authentification NTLMv2 en rouge, Nom d'utilisateur ou mot de passe incorrect, boutons Réessayer et Fermer)" src="IMAGE/RESEAU_PROGRESSION_ECHEC.png" />
+<img width="800" height="600" alt="OS/2-0 : la boîte Connexion du lecteur réseau une fois le partage Samba connecté (huit étapes cochées, barre verte à 100 %, Le lecteur E: est connecté)" src="IMAGE/RESEAU_PROGRESSION_OK.png" />
+
 <img width="640" height="480" alt="OS/2-0 : un partage Samba monté en E: et ouvert dans l'Explorateur OS2-Zero (dossiers, fichiers, 18,29 Go libres)" src="IMAGE/EXPLORATEUR_RESEAU_LECTEUR.png" />
 <img width="640" height="480" alt="OS/2-0 : le Poste de travail de l'Explorateur OS2-Zero avec le lecteur réseau et son menu contextuel Ouvrir, Déconnecter, Propriétés" src="IMAGE/EXPLORATEUR_RESEAU_POSTE.png" />
 

@@ -1698,6 +1698,15 @@ Un dossier partage d'un serveur Windows (Windows Server 2019, 2016,
     passe ; le bureau rattache le lecteur au demarrage, la connexion se
     fait au premier acces). Outils - Deconnecter un lecteur reseau...,
     ou Deconnecter dans le menu contextuel d'un lecteur reseau.
+    Apres OK, une boite "Connexion du lecteur reseau" suit la connexion
+    (DosFSAttach tourne dans un fil : la souris et le bureau restent
+    libres) : etapes cochees (carte reseau, recherche du serveur, TCP
+    445, negociation SMB 2, session NTLMSSP, authentification NTLMv2,
+    partage, lecteur pret) avec leur duree, barre de progression,
+    paquets et octets envoyes et recus, graphique de l'activite reseau,
+    temps ecoule, "Le serveur ne repond pas encore" apres 3 s. Annuler
+    (ou Echap) abandonne aussitot (SMBCANCEL de SMB.IFS, soabort de
+    TCPIP32.DLL) ; apres un echec : Reessayer ou Fermer.
   - a l'invite :
       NET USE                               liste des lecteurs reseau
       NET USE Z: \\serveur\partage [motdepasse | *] [/USER:[dom\]nom]

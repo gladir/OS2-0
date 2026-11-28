@@ -126,6 +126,8 @@
 #     pile TCP/IP), DLL/TLS32.PAS (TLS32.DLL, TLS 1.3/1.2 pour https://), DLL/SMB.PAS
 #     (SMB.IFS, lecteurs reseau Windows et Samba : SMB2, NTLMv2, signature ;
 #     DosFSAttach, NET USE, Explorateur OS2-Zero) et les pilotes reseau DLL/E1000.PAS (Intel PRO/1000)
+#     (SMB.IFS exporte SMBSTATUS et SMBCANCEL, TCPIP32.DLL soabort et TCPIPSTATS : boite de
+#     progression non bloquante de Connecter un lecteur reseau dans l'Explorateur OS2-Zero)
 #     et DLL/PCNET.PAS (AMD PCnet), et leurs programmes d'essai TESTDOS, TESTFKA,
 #     TESTHPFS, TESTVIO, TESTMOU, TESTNLS, TESTKBD, TESTMON, TESTMSG,
 #     TESTNMP, TESTSES, TESTQUE, TESTPFS, TESTRM, TESTSM, TESTHLP,
