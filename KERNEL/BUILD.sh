@@ -82,6 +82,9 @@
 #  3f. compile APPS/NC.PAS (North Commander, gestionnaire de fichiers a
 #     deux panneaux d'apres NC.PAS du depot NORTONCOMMANDER-0, dossier
 #     Systeme OS/2 du bureau) ;
+#  3g. compile APPS/TRANSLAT.PAS (Traducteur de langue, interface PM
+#     d'ARGOS-TRANSLATE.PAS du depot VIE, 22 langues d'origine, dossier
+#     Productivite du bureau) ;
 #  3b. compile OS2PC.PAS avec OS2PC lui-meme : OS2PC.EXE, le compilateur
 #     natif d'OS/2-0 qu'utilise Pascal Developer ; les exemples de
 #     IMAGE/EXEMPLES (BONJOUR.PAS, HELLO.PAS, PAYSAGE.BMP pour Paint,
@@ -303,6 +306,12 @@ echo "== Virtualisation (OS2PC : APPS/VIRTUAL.PAS, machines de VirtualBox par AM
 # bas, visualiseur ASCII et hexadecimal, editeur, menu utilisateur, NCD
 echo "== North Commander (OS2PC : APPS/NC.PAS, d'apres NC.PAS du depot NORTONCOMMANDER-0)"
 "$W/os2pc" -Q "$ROOT/APPS/NC.PAS" "$W/cd/NC.EXE"
+# Traducteur de langue (dossier Productivite) : ARGOS-TRANSLATE.PAS du depot
+# VIE (regles et lexiques de 22 langues) avec un editeur Unicode, la langue
+# d'origine et la langue cible, une barre d'outils et la correspondance des
+# phrases ; /O:fichier traduit sans fenetre comme la commande d'origine
+echo "== Traducteur de langue (OS2PC : APPS/TRANSLAT.PAS, d'apres ARGOS-TRANSLATE.PAS du depot VIE)"
+"$W/os2pc" -Q "$ROOT/APPS/TRANSLAT.PAS" "$W/cd/TRANSLAT.EXE"
 echo "== Session DOS : TESTVDM.EXE (programme MS-DOS 16 bits, OS2PC -CD)"
 "$W/os2pc" -Q -CD "$ROOT/DLL/TESTVDM.PAS" "$W/cd/TESTVDM.EXE"
 cp "$ROOT"/IMAGE/SONS/*.WAV "$W/cd/"

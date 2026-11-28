@@ -175,7 +175,7 @@ Const
   IC_FREECELL = 64; IC_MISSILE = 65; IC_L25 = 66; IC_GETSRC = 67;
   IC_MP3PLAY = 68; OB_MP3 = 36;
   OB_LEISURE = 37; IC_ASTRO = 69; IC_DREAMS = 70; IC_CROSS = 111; IC_GSODOKU = 112; IC_MAZE = 113; IC_FRACTAL = 114;
-  IC_NC = 115;
+  IC_NC = 115; IC_TRANSLAT = 116;
   OB_SCIENCE = 38; IC_TELESCOPE = 71; IC_PLANETSIM = 72; IC_HEART = 73; IC_ELEMENTS = 74; IC_CHEMDRAW = 75;
   IC_CRM = 76; IC_ACCOUNT = 77; IC_ACRODOC = 78; IC_NEWS = 79; IC_PRESENT = 80;
   OB_HTML = 39; OB_TEXT = 40; IC_NOTEPAD = 81; IC_DEBUGGER = 82;
@@ -1588,7 +1588,7 @@ Begin
         If (CalcPath <> '') Or (ExplorerPath <> '') Or (OutlinkPath <> '') Or (PaintPath <> '') Or
            (WordiumPath <> '') Or (ExcelsiorPath <> '') Or FileExists('C:\MAXIMIZE.EXE') Or
            FileExists('C:\SIMPLY.EXE') Or FileExists('C:\ACROBAT.EXE') Or FileExists('C:\NEWS.EXE') Or
-           FileExists('C:\POWERPNT.EXE') Or FileExists('C:\NOTEPAD.EXE') Then
+           FileExists('C:\POWERPNT.EXE') Or FileExists('C:\NOTEPAD.EXE') Or FileExists('C:\TRANSLAT.EXE') Then
           Dummy := NewItem(V, IC_FOLDER, OB_PRODUCT, 'Productivite', '');
         Dummy := NewItem(V, IC_FOLDER, OB_GAMES, 'Jeux', '');
         Dummy := NewItem(V, IC_FOLDER, OB_MMFOLDER, 'Multimedia', '');
@@ -1754,6 +1754,10 @@ Begin
         { Bloc-notes en dernier : les objets precedents gardent leur place }
         If FileExists('C:\NOTEPAD.EXE') Then
           Dummy := NewItem(V, IC_NOTEPAD, OB_GAME, 'Bloc-notes', 'C:\NOTEPAD.EXE');
+        { Traducteur de langue (ARGOS-TRANSLATE.PAS du depot VIE) : apres le
+          Bloc-notes, les objets precedents gardent leur place }
+        If FileExists('C:\TRANSLAT.EXE') Then
+          Dummy := NewItem(V, IC_TRANSLAT, OB_GAME, 'Traducteur de langue', 'C:\TRANSLAT.EXE');
       End;
     VK_LEISURE :
       Begin
@@ -3297,6 +3301,30 @@ Begin
         GLn(Hps, X + 20, Y + 19, X + 20, Y + 20, CLR_BLACK);
         GLn(Hps, X + 22, Y + 19, X + 22, Y + 20, CLR_BLACK);
         GLn(Hps, X + 20, Y + 16, X + 22, Y + 16, CLR_DARKRED);
+      End;
+    IC_TRANSLAT :
+      Begin
+        { Traducteur de langue : deux bulles (un A et un e accent aigu) et
+          une fleche de l'une a l'autre }
+        FBox(Hps, X + 1, Y + 13, X + 18, Y + 29, CLR_BLUE, CLR_BLACK);
+        GLn(Hps, X + 5, Y + 13, X + 3, Y + 9, CLR_BLACK);
+        GLn(Hps, X + 3, Y + 9, X + 10, Y + 13, CLR_BLACK);
+        GLn(Hps, X + 5, Y + 16, X + 9, Y + 26, CLR_WHITE);
+        GLn(Hps, X + 9, Y + 26, X + 13, Y + 16, CLR_WHITE);
+        GLn(Hps, X + 7, Y + 20, X + 11, Y + 20, CLR_WHITE);
+        FBox(Hps, X + 13, Y + 2, X + 30, Y + 18, CLR_YELLOW, CLR_BLACK);
+        GLn(Hps, X + 26, Y + 18, X + 28, Y + 22, CLR_BLACK);
+        GLn(Hps, X + 28, Y + 22, X + 21, Y + 18, CLR_BLACK);
+        GLn(Hps, X + 18, Y + 9, X + 25, Y + 9, CLR_DARKBLUE);
+        GLn(Hps, X + 18, Y + 9, X + 18, Y + 6, CLR_DARKBLUE);
+        GLn(Hps, X + 18, Y + 6, X + 25, Y + 6, CLR_DARKBLUE);
+        GLn(Hps, X + 18, Y + 12, X + 25, Y + 12, CLR_DARKBLUE);
+        GLn(Hps, X + 25, Y + 12, X + 25, Y + 9, CLR_DARKBLUE);
+        GLn(Hps, X + 18, Y + 12, X + 18, Y + 10, CLR_DARKBLUE);
+        GLn(Hps, X + 21, Y + 14, X + 24, Y + 16, CLR_DARKBLUE);
+        GLn(Hps, X + 20, Y + 22, X + 24, Y + 26, CLR_RED);
+        GLn(Hps, X + 24, Y + 26, X + 24, Y + 23, CLR_RED);
+        GLn(Hps, X + 24, Y + 26, X + 21, Y + 26, CLR_RED);
       End;
     IC_NC :
       Begin
