@@ -1580,6 +1580,26 @@ dans C:\ (ou D:\). Substitutions : !.! fichier, ! sans extension,
 !: lecteur, !\ repertoire. Parametres : NC [gauche] [droite].
   OS2PC APPS\NC.PAS                         -> NC.EXE
 
+Traducteur de langue (TRANSLAT.EXE, dossier Productivite)
+---------------------------------------------------------
+Interface du Presentation Manager (source APPS\TRANSLAT.PAS)
+d'ARGOS-TRANSLATE.PAS du depot VIE : traducteur a regles de 22 langues
+d'origine (en, fr, de, ja en romaji, es, sq, pt, sv, da, it, la, cy,
+af, mt, is, nl, no, pl, ro, ca, fro, moe) vers le francais, l'anglais
+ou l'allemand (41 paires). A gauche le texte a traduire (Unicode : les
+lettres absentes de la police de l'ecran sont dessinees), a droite la
+traduction ; en haut la langue d'origine et la langue cible, le bouton
+Inverser entre les deux ; barre des caracteres speciaux de la langue.
+F5 traduire (regenerer), Maj+F5 traduire la selection, F6 langues,
+F7 paires (-l), F9 correspondance des phrases (solution), Ctrl+I
+inverser, Ctrl+Tab autre volet, Ctrl+K inserer un caractere, Ctrl+T
+enregistrer la traduction, Ctrl+E page Web, F1 aide, F3 quitter.
+Fichiers UTF-8, UTF-16 ou page 850 ; reglages dans TRANSLAT.INI.
+Parametres d'ARGOS-TRANSLATE : -f/--from-lang, -t/--to-lang, -l/--list,
+-V/--version, -h/--help, /? ; [texte] ; /I:fichier /O:fichier traduit
+sans fenetre (/E:UTF8, /E:BOM, /E:850).
+  OS2PC APPS\TRANSLAT.PAS                   -> TRANSLAT.EXE
+
 OpenGL (OPENGL.DLL) et Essai OpenGL (GLTEST.EXE, dossier Multimedia)
 ---------------------------------------------------------------------
 OpenGL 1.1 en rendu logiciel (source DLL\OPENGL.PAS, porte de
