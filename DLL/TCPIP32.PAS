@@ -75,6 +75,8 @@ Var
   MyIp, Mask, Gw, Dns, DhcpSrv, Lease : LongInt;
   IpId, NextPort, Errno, HErr : LongInt;
   RxPkts, TxPkts : LongInt;
+  RxBytes, TxBytes : LongInt;      { octets des trames (TCPIPSTATS) }
+  AbortGen : LongInt;              { soabort(-1) : attentes en cours abandonnees }
   { trames }
   TxF, RxF : Array[0..1599] Of Byte;
   Seg : Array[0..1599] Of Byte;
@@ -379,7 +381,11 @@ End;
 Procedure RawSend(A, N : LongInt);
 Begin
   NPk[0] := 2; NPk[2] := A; NPk[3] := N;
-  If CallPtr1(DrvFn, LongInt(@NPk)) = 0 Then Inc(TxPkts);
+  If CallPtr1(DrvFn, LongInt(@NPk)) = 0 Then
+  Begin
+    Inc(TxPkts);
+    TxBytes := TxBytes + N;
+  End;
 End;
 
 Function RawRecv : LongInt;
@@ -539,6 +545,7 @@ Var Typ, Op, SIp, TIp : LongInt;
 Begin
   If N < 14 Then Exit;
   Inc(RxPkts);
+  RxBytes := RxBytes + N;
   Typ := Get16(LongInt(@RxF) + 12);
   If Typ = $0806 Then
   Begin
@@ -601,6 +608,7 @@ Begin
     End;
     LbUsed := LbUsed - N - 2;
     Inc(RxPkts);
+    RxBytes := RxBytes + N;
     IpIn(LongInt(@LbPkt), N);
     Inc(C);
   End;
@@ -641,9 +649,10 @@ End;
 
 { adresse MAC du prochain saut (ARP) ; faux : injoignable }
 Function Resolve(Ip : LongInt; Var M : LongInt) : Boolean;
-Var Hop, K, T, Try_ : LongInt;
+Var Hop, K, T, Try_, G0 : LongInt;
 Begin
   Resolve := False;
+  G0 := AbortGen;
   If IsLocal(Ip) Then
   Begin
     M := -2;
@@ -671,7 +680,8 @@ Begin
       reemis) }
     If InPoll Then Exit;
     T := KTicks;
-    While (KTicks - T < 500) And (ArpFind(Hop) < 0) Do Idle;
+    While (KTicks - T < 500) And (ArpFind(Hop) < 0) And (AbortGen = G0) Do Idle;
+    If AbortGen <> G0 Then Exit;
   End;
   K := ArpFind(Hop);
   If K >= 0 Then
@@ -709,6 +719,7 @@ Begin
     MoveMem(Data, LongInt(@TxF) + 34, N);
     IpSend := LbPut(LongInt(@TxF) + 14, 20 + N);
     Inc(TxPkts);
+    TxBytes := TxBytes + 20 + N;
     Exit;
   End;
   If M < 0 Then
@@ -1538,9 +1549,10 @@ Begin
 End;
 
 Function Connect(D, PAddr, Len : LongInt) : LongInt;
-Var S, Ip, Port, Try_, T : LongInt;
+Var S, Ip, Port, Try_, T, G0 : LongInt;
 Begin
   Connect := -1;
+  G0 := AbortGen;
   S := SockOf(D);
   If S < 0 Then Exit;
   SockAddr(PAddr, Ip, Port);
@@ -1561,7 +1573,8 @@ Begin
     TcpSend(S, 2, 0, 0);
     SSeq[S] := SUna[S] + 1;
     T := KTicks;
-    While (SState[S] = TS_SYNSENT) And (KTicks - T < 1500) Do Idle;
+    While (SState[S] = TS_SYNSENT) And (KTicks - T < 1500) And (AbortGen = G0) Do Idle;
+    If AbortGen <> G0 Then SState[S] := TS_RESET;
     If SState[S] = TS_ESTAB Then
     Begin
       SRtxT[S] := 0;
@@ -1709,20 +1722,21 @@ End;
 
 { datagramme suivant (UDP, ICMP brut), attendu 10 s au plus }
 Function DgramRead(S, Buf, Len, PAddr, PALen : LongInt; Wait : LongInt) : LongInt;
-Var T, N, Src, Port, P : LongInt;
+Var T, N, Src, Port, P, G0 : LongInt;
 Begin
   DgramRead := -1;
   T := KTicks;
+  G0 := AbortGen;
   NetPoll;
   If (SLen[S] = 0) And (SNb[S] <> 0) Then
   Begin
     Errno := SOCEWOULDBLOCK;
     Exit;
   End;
-  While (SLen[S] = 0) And (KTicks - T < Wait) Do Idle;
+  While (SLen[S] = 0) And (KTicks - T < Wait) And (AbortGen = G0) Do Idle;
   If SLen[S] = 0 Then
   Begin
-    Errno := SOCETIMEDOUT;
+    If AbortGen <> G0 Then Errno := 10004 Else Errno := SOCETIMEDOUT;    { SOCEINTR : soabort(-1) }
     Exit;
   End;
   P := SBuf[S] + SHead[S];
@@ -2176,6 +2190,7 @@ Begin
   Begin
     Dummy := Ord(UdpSend(Dns, SLPort[S], 53, LongInt(@Q), O));
     N := DgramRead(S, LongInt(@R), 1024, 0, 0, 2500);
+    If (N <= 0) And (Errno <> SOCETIMEDOUT) Then Break;
     If (N > 12) And (Get16(LongInt(@R)) = Id) Then
     Begin
       Qd := Get16(LongInt(@R) + 4); An := Get16(LongInt(@R) + 6);
@@ -2236,6 +2251,38 @@ End;
 { Points d'entree internes                                              }
 { ==================================================================== }
 
+{ compteurs de la carte : P[0] trames recues, P[1] envoyees, P[2] octets
+  recus, P[3] octets envoyes (boite de progression de l'Explorateur) }
+Function TcpipStats(P : LongInt) : LongInt;
+Begin
+  WrL(P, RxPkts); WrL(P + 4, TxPkts); WrL(P + 8, RxBytes); WrL(P + 12, TxBytes);
+  TcpipStats := 0;
+End;
+
+{ abandonner les attentes (Annuler d'une boite de progression, depuis un
+  autre fil) : D >= 0 : le socket TCP D passe a l'etat RESET (connect,
+  recv et send rendent aussitot une erreur ; rien n'est emis ici : les
+  tampons de trame sont peut-etre en cours d'usage par le fil qui attend) ;
+  D = -1 : les attentes en cours (DNS, ARP, connect) s'arretent }
+Function SoAbort(D : LongInt) : LongInt;
+Var S : LongInt;
+Begin
+  SoAbort := 0;
+  If D < 0 Then
+  Begin
+    Inc(AbortGen);
+    Exit;
+  End;
+  S := SockOf(D);
+  If S < 0 Then
+  Begin
+    SoAbort := -1;
+    Exit;
+  End;
+  If (SType[S] = T_TCP) And ((SState[S] = TS_SYNSENT) Or (SState[S] = TS_ESTAB) Or (SState[S] = TS_CLOSEWAIT) Or
+     (SState[S] = TS_FINWAIT)) Then SState[S] := TS_RESET;
+End;
+
 { etat de l'interface lan0 : P[0] etat (0 pas de carte, 1 carte sans
   adresse, 2 configuree), P[1] adresse, P[2] masque, P[3] passerelle,
   P[4] DNS, P[5] DHCP (1) ou fixe, P[6] lien, P[7] trames recues,
@@ -2294,6 +2341,8 @@ Exports
   TcpipInfo Index 900 Name 'TCPIPINFO',
   TcpipRenew Index 901 Name 'TCPIPRENEW',
   SoSystem Index 902 Name 'sosystem',
+  SoAbort Index 903 Name 'soabort',
+  TcpipStats Index 904 Name 'TCPIPSTATS',
   Os2Select Index 12 Name 'select',
   BsdSelect Index 32 Name 'bsdselect',
   Accept Index 1 Name 'accept',
@@ -2310,7 +2359,7 @@ Var
 BEGIN
   DrvTried := 0; DrvFn := 0; Ready := 0; Dhcp := 0;
   MyIp := 0; Mask := 0; Gw := 0; Dns := 0; Lease := 0;
-  IpId := 1; NextPort := 1100; Errno := 0; ArpNext := 0; RxPkts := 0; TxPkts := 0;
+  IpId := 1; NextPort := 1100; Errno := 0; ArpNext := 0; RxPkts := 0; TxPkts := 0; RxBytes := 0; TxBytes := 0; AbortGen := 0;
   IsnGen := 0; AccGen := 0; LastGc := 0; LastTmr := 0; InPoll := False;
   For InitK := 0 To MAXS - 1 Do
   Begin

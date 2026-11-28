@@ -36,7 +36,10 @@ Library SMB;
   Les points d'entree FS_* sont ceux d'un FSD d'OS/2 (convention _System) ;
   le noyau les appelle avec le numero d'unite comme hVPB (3 = D:, 25 = Z:).
   Les sockets viennent de TCPIP32.DLL. SMBLASTERROR rend le texte de la
-  derniere erreur (boites de l'Explorateur). }
+  derniere erreur (boites de l'Explorateur). SMBSTATUS decrit la connexion
+  en cours (etape, durees, requetes et octets SMB) et SMBCANCEL l'abandonne
+  (soabort de TCPIP32 : connect, recv, DNS et ARP s'arretent aussitot) :
+  boite de progression de l'Explorateur, qui attache l'unite dans un fil. }
 
 Const
   FS_NAME      = 'SMB';
@@ -49,6 +52,7 @@ Const
   ERROR_BAD_NETPATH = 53; ERROR_NETWORK_BUSY = 54; ERROR_UNEXP_NET_ERR = 59;
   ERROR_NETNAME_DELETED = 64; ERROR_NETWORK_ACCESS_DENIED = 65; ERROR_BAD_NET_NAME = 67;
   ERROR_FILE_EXISTS = 80; ERROR_INVALID_PASSWORD = 86; ERROR_INVALID_PARAMETER = 87;
+  ERROR_INTERRUPT = 95;
   ERROR_DISK_FULL = 112; ERROR_BUFFER_OVERFLOW = 111; ERROR_INVALID_NAME = 123;
   ERROR_INVALID_LEVEL = 124; ERROR_DIR_NOT_EMPTY = 145; ERROR_ALREADY_EXISTS = 183;
   ERROR_OPEN_FAILED = 110; ERROR_NOT_SUPPORTED = 50; ERROR_ALREADY_ASSIGNED = 85;
@@ -176,6 +180,7 @@ Function SkRecv(S, B, L, F : LongInt) : LongInt; External 'TCPIP32' Name 'recv';
 Function SkClose(S : LongInt) : LongInt; External 'TCPIP32' Name 'soclose';
 Function SkSystem(S : LongInt) : LongInt; External 'TCPIP32' Name 'sosystem';
 Function SkHost(PName : LongInt) : LongInt; External 'TCPIP32' Name 'gethostbyname';
+Function SkAbort(S : LongInt) : LongInt; External 'TCPIP32' Name 'soabort';
 Function KTicks : LongInt; External 'DOSCALLS' Name 'GetTickCount';
 Function DosSleep(Ms : LongInt) : LongInt; External 'DOSCALLS';
 Function DosAllocMem(PPb, Cb, Flag : LongInt) : LongInt; External 'DOSCALLS';
@@ -194,6 +199,13 @@ Var
   SmbBusy, SmbInConn, InitDone : Boolean;
   SmbSt : LongInt;                     { dernier statut NT }
   LastMsg : String;                    { texte de la derniere erreur }
+  { connexion en cours (SMBSTATUS) : etape 1 carte reseau, 2 nom du
+    serveur, 3 TCP 445, 4 NEGOTIATE, 5 SESSION_SETUP (NTLMSSP NEGOTIATE),
+    6 authentification NTLMv2, 7 TREE_CONNECT, 8 terminee }
+  CnStep, CnBusy, CnT0, CnStepT, CnRes, CnIp, CnSock : LongInt;
+  CnTxN, CnRxN, CnTxB, CnRxB : LongInt;
+  CnMs : Array[0..9] Of LongInt;
+  CnAbort : Boolean;
   ScFid : Array[0..3] Of LongInt;      { reponse de CREATE }
   ScAttr, ScSize, ScTime, ScAct, ScCLo, ScCHi : LongInt;
   ShH : Array[0..7] Of LongInt;        { SHA-256 }
@@ -621,6 +633,21 @@ Begin
   SmbBusy := False;
 End;
 
+{ etape suivante de la connexion (duree de la precedente) }
+Procedure CnSet(K : LongInt);
+Begin
+  If (CnStep >= 0) And (CnStep <= 9) Then CnMs[CnStep] := KTicks - CnStepT;
+  CnStep := K;
+  CnStepT := KTicks;
+End;
+
+{ Annuler (boite de progression) : vrai, LastMsg en dit la raison }
+Function CnCancelled : Boolean;
+Begin
+  CnCancelled := CnAbort;
+  If CnAbort Then LastMsg := 'Connexion annulee par l''utilisateur.';
+End;
+
 Procedure NdDrop(N : LongInt);
 Begin
   If Nd[N].Sock >= 0 Then SkClose(Nd[N].Sock);
@@ -696,7 +723,13 @@ Begin
     WB(SmbTx + 1, (L Shr 16) And 255);
     WB(SmbTx + 2, (L Shr 8) And 255);
     WB(SmbTx + 3, L And 255);
+    If CnAbort And SmbInConn Then Exit;
     Ok := SkSend(S, SmbTx, L + 4, 0) = L + 4;
+    If Ok Then
+    Begin
+      Inc(CnTxN);
+      CnTxB := CnTxB + L + 4;
+    End;
     While Ok Do
     Begin
       Ok := SmbRecvAll(S, SmbRx, 4);
@@ -709,6 +742,8 @@ Begin
       End;
       Ok := SmbRecvAll(S, SmbRx, L);
       If Not Ok Then Break;
+      Inc(CnRxN);
+      CnRxB := CnRxB + L + 4;
       SmbSt := RL(SmbRx + 8);
       { reponse provisoire (STATUS_PENDING) ou message d'un autre numero
         (rupture d'oplock) : attendre la suivante }
@@ -942,16 +977,26 @@ Var IP, S, B, K, R, St, C, CL, E : LongInt; A : Array[0..15] Of Byte; Path : Str
 Begin
   NdConnect := ERROR_BAD_NETPATH;
   NdDrop(N);
+  CnSet(1);
   If SkInit <> 0 Then
   Begin
     LastMsg := 'Le reseau TCP/IP n''est pas pret (carte reseau, DHCP).';
     Exit;
   End;
+  CnSet(2);
   If Not Resolve(Nd[N].Server, IP) Then
   Begin
     LastMsg := 'Serveur introuvable : ' + Nd[N].Server + ' (DNS).';
+    If CnCancelled Then NdConnect := ERROR_INTERRUPT;
     Exit;
   End;
+  CnIp := IP;
+  If CnCancelled Then
+  Begin
+    NdConnect := ERROR_INTERRUPT;
+    Exit;
+  End;
+  CnSet(3);
   S := SkSocket(2, 1, 6);
   If S < 0 Then
   Begin
@@ -968,10 +1013,14 @@ Begin
   FillMem(LongInt(@A[0]), 16, 0);
   A[0] := 16; A[1] := 2; A[2] := 445 Shr 8; A[3] := 445 And 255;
   WL(LongInt(@A[4]), IP);
+  CnSock := S;
+  If CnAbort Then SkAbort(S);
   If SkConnect(S, LongInt(@A[0]), 16) <> 0 Then
   Begin
+    CnSock := -1;
     SkClose(S);
     LastMsg := 'Connexion impossible a ' + Nd[N].Server + ' (' + IpStr(IP) + ', port TCP 445).';
+    If CnCancelled Then NdConnect := ERROR_INTERRUPT;
     Exit;
   End;
   Nd[N].Sock := S; Nd[N].Conn := True; Nd[N].Sign := False;
@@ -979,6 +1028,7 @@ Begin
   SmbInConn := True;
   NdConnect := ERROR_UNEXP_NET_ERR;
   { NEGOTIATE : dialectes 2.0.2 et 2.1, signature possible }
+  CnSet(4);
   SmbHdr(N, 0);
   B := SmbTx + 68;
   WW(B, 36); WW(B + 2, 2); WW(B + 4, 1);
@@ -987,7 +1037,9 @@ Begin
   St := SmbCall(N, 40);
   If St <> 0 Then
   Begin
-    LastMsg := 'Le serveur refuse SMB 2 (NEGOTIATE ' + HexStat(St) + ').';
+    If St = -1 Then LastMsg := 'Le serveur ne repond pas en SMB 2 (port TCP 445).'
+    Else LastMsg := 'Le serveur refuse SMB 2 (NEGOTIATE ' + HexStat(St) + ').';
+    If CnCancelled Then NdConnect := ERROR_INTERRUPT;
     SmbInConn := False; NdDrop(N); Exit;
   End;
   R := SmbRx + 64;
@@ -1000,6 +1052,7 @@ Begin
   { heure du serveur (horodatage NTLMv2 s'il n'en donne pas) }
   MoveMem(R + 40, NdKeys + N * 32 + 16, 8);
   { SESSION_SETUP 1 : NTLMSSP NEGOTIATE }
+  CnSet(5);
   SmbHdr(N, 1);
   B := SmbTx + 68;
   WW(B, 25); WB(B + 3, 1);
@@ -1016,6 +1069,7 @@ Begin
     If St = 0 Then E := ERROR_INVALID_PASSWORD;
     LastMsg := 'Ouverture de session refusee (' + HexStat(St) + ').';
     NdConnect := E;
+    If CnCancelled Then NdConnect := ERROR_INTERRUPT;
     SmbInConn := False; NdDrop(N); Exit;
   End;
   Nd[N].SessLo := RL(SmbRx + 40); Nd[N].SessHi := RL(SmbRx + 44);
@@ -1031,6 +1085,7 @@ Begin
   If CL > 4096 Then CL := 4096;
   MoveMem(C, SmbWk + 12288, CL);
   { SESSION_SETUP 2 : NTLMSSP AUTHENTICATE }
+  CnSet(6);
   K := NtlmAuth(N, SmbWk + 12288, CL, SmbWk + 8192);
   SmbHdr(N, 1);
   B := SmbTx + 68;
@@ -1046,12 +1101,14 @@ Begin
       LastMsg := 'Nom d''utilisateur ou mot de passe incorrect (' + HexStat(St) + ').'
     Else LastMsg := 'Authentification refusee (' + HexStat(St) + ').';
     NdConnect := E;
+    If CnCancelled Then NdConnect := ERROR_INTERRUPT;
     SmbInConn := False; NdDrop(N); Exit;
   End;
   { invite ou session anonyme : pas de signature }
   Nd[N].Sign := SignReq And ((RW(SmbRx + 66) And 3) = 0) And (Nd[N].User <> '');
   { TREE_CONNECT \\serveur\partage }
   Path := '\\' + Nd[N].Server + '\' + Nd[N].Share;
+  CnSet(7);
   SmbHdr(N, 3);
   B := SmbTx + 68;
   WW(B, 9); WW(B + 4, 72);
@@ -1066,10 +1123,12 @@ Begin
     If E = ERROR_BAD_NET_NAME Then LastMsg := 'Partage introuvable : ' + Path + '.'
     Else LastMsg := 'Acces au partage ' + Path + ' refuse (' + HexStat(St) + ').';
     NdConnect := E;
+    If CnCancelled Then NdConnect := ERROR_INTERRUPT;
     NdDrop(N); Exit;
   End;
   Nd[N].Tree := RL(SmbRx + 36);
   LastMsg := '';
+  CnSet(8);
   NdConnect := NO_ERROR;
 End;
 
@@ -1285,6 +1344,7 @@ Begin
     SmbWk := LongInt(@WkBuf);
     NdKeys := LongInt(@Keys);
     SmbBusy := False; SmbInConn := False;
+    CnStep := 0; CnBusy := 0; CnSock := -1; CnAbort := False; CnRes := 0; CnT0 := KTicks; CnStepT := CnT0;
     LastMsg := '';
     InitDone := True;
   End;
@@ -1362,7 +1422,21 @@ Begin
         FillMem(NdKeys + D * 32, 32, 0);
         If (Length(Pass) = 33) And (Pass[1] = '#') Then HexTo(Copy(Pass, 2, 32), NdKeys + D * 32, 16)
         Else NtHash(Pass, NdKeys + D * 32);
-        If Pos('L', Opt) > 0 Then R := NO_ERROR Else R := NdConnect(D);
+        If Pos('L', Opt) > 0 Then R := NO_ERROR
+        Else
+        Begin
+          { connexion suivie par SMBSTATUS }
+          CnBusy := 1; CnRes := 0; CnIp := 0; CnSock := -1;
+          CnTxN := 0; CnRxN := 0; CnTxB := 0; CnRxB := 0;
+          For I := 0 To 9 Do CnMs[I] := 0;
+          CnStep := 0; CnT0 := KTicks; CnStepT := CnT0;
+          R := NdConnect(D);
+          CnSock := -1;
+          If CnStep <= 9 Then CnMs[CnStep] := KTicks - CnStepT;
+          CnRes := R;
+          CnBusy := 0;
+          CnAbort := False;
+        End;
         If R <> NO_ERROR Then
         Begin
           NdDrop(D);
@@ -2324,12 +2398,52 @@ Begin
   SmbLastError := Length(LastMsg);
 End;
 
+{ connexion en cours ou derniere connexion (FS_ATTACH) : P[0] etape (voir
+  CnStep), P[1] 1 pendant la connexion, P[2] ms depuis le debut, P[3] ms
+  dans l'etape, P[4] requetes SMB envoyees, P[5] reponses recues, P[6]
+  octets envoyes, P[7] octets recus, P[8] adresse IPv4 du serveur (ordre
+  du reseau), P[9] resultat (erreur OS/2), P[10..19] duree de chaque etape
+  (ms) ; Cb : taille du tampon }
+Function SmbStatus(P, Cb : LongInt) : LongInt;
+Var I, T : LongInt;
+Begin
+  SmbStatus := ERROR_INVALID_PARAMETER;
+  If (P = 0) Or (Cb < 80) Then Exit;
+  T := KTicks;
+  WL(P, CnStep); WL(P + 4, CnBusy);
+  If CnBusy <> 0 Then
+  Begin
+    WL(P + 8, T - CnT0); WL(P + 12, T - CnStepT);
+  End
+  Else
+  Begin
+    WL(P + 8, CnStepT - CnT0 + CnMs[CnStep]); WL(P + 12, 0);
+  End;
+  WL(P + 16, CnTxN); WL(P + 20, CnRxN); WL(P + 24, CnTxB); WL(P + 28, CnRxB);
+  WL(P + 32, CnIp); WL(P + 36, CnRes);
+  For I := 0 To 9 Do WL(P + 40 + I * 4, CnMs[I]);
+  SmbStatus := NO_ERROR;
+End;
+
+{ Annuler la connexion en cours (appele par un autre fil que celui de
+  DosFSAttach) }
+Function SmbCancel : LongInt;
+Begin
+  SmbCancel := NO_ERROR;
+  If CnBusy = 0 Then Exit;
+  CnAbort := True;
+  If CnSock >= 0 Then SkAbort(CnSock);
+  SkAbort(-1);
+End;
+
 Exports
   FS_ATTACH, FS_ATTRIBUTE, FS_CHDIR, FS_CHGFILEPTR, FS_CLOSE, FS_COMMIT, FS_COPY, FS_DELETE,
   FS_EXIT, FS_FILEATTRIBUTE, FS_FILEINFO, FS_FINDCLOSE, FS_FINDFIRST, FS_FINDFROMNAME,
   FS_FINDNEXT, FS_FLUSHBUF, FS_FSCTL, FS_FSINFO, FS_INIT, FS_MKDIR, FS_MOUNT, FS_MOVE,
   FS_NAME, FS_NEWSIZE, FS_OPENCREATE, FS_PATHINFO, FS_READ, FS_RMDIR, FS_SHUTDOWN, FS_WRITE,
-  SmbLastError Name 'SMBLASTERROR';
+  SmbLastError Name 'SMBLASTERROR',
+  SmbStatus Name 'SMBSTATUS',
+  SmbCancel Name 'SMBCANCEL';
 
 BEGIN
   InitDone := False;
