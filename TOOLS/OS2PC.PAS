@@ -1210,6 +1210,8 @@ Type
     IsAbsolute  : Boolean;     { variable absolute $Seg:$Ofs (TODO 28)  }
     AbsSeg      : LongInt;     { segment absolute (ex: $0040)           }
     AbsOfs      : LongInt;     { offset absolute (ex: $0013)            }
+    IsNested    : Boolean;     { sous-programme imbrique dans un autre  }
+    NestParent  : LongInt;     { sa routine englobante (index ProcTab)  }
   End;
 
   { Info sur une unite importee (TODO 26, TODO 29) }
@@ -3563,6 +3565,8 @@ Begin
     SymTab^[I]^.ScopeId     := 0;
     SymTab^[I]^.IsGlobal    := False;
     SymTab^[I]^.IsExternal  := False;
+    SymTab^[I]^.IsNested    := False;
+    SymTab^[I]^.NestParent  := -1;
     SymTab^[I]^.UnitName    := '';
     SymTab^[I]^.ImmVal      := 0;
     SymTab^[I]^.ParamCount  := 0;
@@ -3665,6 +3669,11 @@ End;
 { Retourne l index ou -1 si non trouve                         }
 { ------------------------------------------------------------ }
 
+{ SymNestVisible : le sous-programme imbrique dans la routine P (index
+  ProcTab) est-il visible depuis la routine en cours ? (P ou l une des
+  routines qu elle englobe) ; defini apres la table des procedures }
+Function SymNestVisible(P : LongInt) : Boolean; Forward;
+
 Function SymFind(Const Name : TString) : LongInt;
 Var
   I  : LongInt;
@@ -3674,7 +3683,8 @@ Begin
   For I := SymCount - 1 DownTo 0 Do
   Begin
     If (SymTab^[I]^.Name = Up) And
-       (SymTab^[I]^.ScopeLevel <= CurScopeLevel) Then
+       (SymTab^[I]^.ScopeLevel <= CurScopeLevel) And
+       ((Not SymTab^[I]^.IsNested) Or SymNestVisible(SymTab^[I]^.NestParent)) Then
     Begin
       SymFind := I;
       Exit;
@@ -3726,6 +3736,9 @@ End;
 { Retourne l index du symbole ajoute, ou -1 si erreur          }
 { ------------------------------------------------------------ }
 
+Var
+  SymForceNew : Boolean;   { SymAdd : nouveau symbole sans chercher de doublon }
+
 Function SymAdd(Const Name : TString; Kind : TSymKind;
                 TIdx : LongInt) : LongInt;
 Var
@@ -3736,7 +3749,8 @@ Begin
   Up := StrUpperCase(Name);
 
   { Verifier doublon dans le scope courant }
-  Dup := SymFindInScope(Up, CurScopeLevel);
+  If SymForceNew Then Dup := -1
+  Else Dup := SymFindInScope(Up, CurScopeLevel);
   If Dup >= 0 Then
   Begin
     { Permettre la redefinition d une forward declaration }
@@ -3785,6 +3799,13 @@ Begin
             (Dup < PredefSymEnd) Then
     Begin
     End
+    { sous-programme imbrique dans un autre : il n est visible que dans la
+      routine englobante ; un symbole du meme nom declare ailleurs (variable
+      globale, autre routine, autre sous-programme imbrique) en est un
+      nouveau et ne reprend pas son adresse }
+    Else If SymTab^[Dup]^.IsNested Then
+    Begin
+    End
     Else
     Begin
       { les types locaux des routines sont aussi analyses ici : deux
@@ -3815,6 +3836,8 @@ Begin
   SymTab^[SymCount]^.IsAbsolute  := False;
   SymTab^[SymCount]^.AbsSeg      := 0;
   SymTab^[SymCount]^.AbsOfs      := 0;
+  SymTab^[SymCount]^.IsNested    := False;
+  SymTab^[SymCount]^.NestParent  := -1;
 
   SymAdd := SymCount;
   Inc(SymCount);
@@ -9633,15 +9656,21 @@ Var
             Inc(I);
         End;
 
-        { Enregistrer le symbole dans SymTab }
+        { Enregistrer le symbole dans SymTab : un symbole propre, visible
+          seulement dans la routine englobante (une variable globale ou une
+          autre routine du meme nom garde le sien) }
+        SymForceNew := True;
         If NIsFunc Then
           NSIdx := SymAdd(NName, SK_FUNC, NRetTIdx)
         Else
           NSIdx := SymAdd(NName, SK_PROC, -1);
+        SymForceNew := False;
         If NSIdx >= 0 Then
         Begin
           SymTab^[NSIdx]^.ParamCount  := NPC;
           SymTab^[NSIdx]^.IsGlobal    := True;
+          SymTab^[NSIdx]^.IsNested    := True;
+          SymTab^[NSIdx]^.NestParent  := PPI;
           SymTab^[NSIdx]^.MangledName := ProcTab^[NI]^.MangledName;
         End;
         ProcTab^[NI]^.SymIdx := NSIdx;
@@ -12172,6 +12201,23 @@ End;
 { nom(arg1, arg2, ...) -> PUSH args, CALL _TPF_nom             }
 { Convention stdcall : args gauche-a-droite                     }
 { ------------------------------------------------------------ }
+
+Function SymNestVisible(P : LongInt) : Boolean;
+Var Q, Guard : LongInt;
+Begin
+  SymNestVisible := False;
+  Q := CurProcIdx; Guard := 0;
+  While (Q >= 0) And (Q < ProcCount) And (Guard < 64) Do
+  Begin
+    If Q = P Then
+    Begin
+      SymNestVisible := True;
+      Exit;
+    End;
+    Q := ProcTab^[Q]^.ParentIdx;
+    Inc(Guard);
+  End;
+End;
 
 { W32FindProc : sous-programme Up visible depuis PI (portee lexicale :
   procedures imbriquees de PI, puis de ses parents, puis globales) }
@@ -20648,7 +20694,8 @@ Begin
       LI := 0;
       While LI < ProcCount Do
       Begin
-        If ProcTab^[LI]^.Name = Up Then
+        If (ProcTab^[LI]^.Name = Up) And
+           ((ProcTab^[LI]^.ParentIdx < 0) Or SymNestVisible(ProcTab^[LI]^.ParentIdx)) Then
         Begin
           Inc(EP);
           If (Not ProcTab^[LI]^.IsFunction) And
@@ -30540,7 +30587,9 @@ Begin
     LI := 0;
     While LI < ProcCount Do
     Begin
-      If ProcTab^[LI]^.Name = Up Then Break;
+      { une procedure imbriquee n est visible que dans sa routine englobante }
+      If (ProcTab^[LI]^.Name = Up) And
+         ((ProcTab^[LI]^.ParentIdx < 0) Or SymNestVisible(ProcTab^[LI]^.ParentIdx)) Then Break;
       Inc(LI);
     End;
     If (LI < ProcCount) And (Not ProcTab^[LI]^.IsFunction) Then
